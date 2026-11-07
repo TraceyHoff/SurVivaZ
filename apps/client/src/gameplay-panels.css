@@ -1334,3 +1334,7 @@ html[data-slot-dragging] .gm-modal .gm-panel [data-role=inv-layout] button[data-
 
 /* ADR-265: dedicated original ladder icon (no furniture/fence stand-in). */
 [data-icon="build_ladder"]{--cz-icon:image-set(url("../../../packages/assets/pack/building/atlases/ladder_icon.png") 1x,url("../../../packages/assets/pack/building/atlases/ladder_icon@2x.png") 2x);--cz-isize:100% 100%;--cz-ipos:0% 0%}
+/* ADR-290: liquid container fill bar along the bottom of inventory / hotbar-row / storage tiles. Tiles have a 10px frame (padding box
+   shrinks to inv-t - 20px on phones), so the bar runs over the bottom frame edge, full tile width minus the ADR-128 use badge on the left. */
+.gm-modal .gm-panel :is([data-role=inv-layout],[data-role=container-grid]) button .lfill{left:-6px;right:-6px;bottom:-6px;height:5px}
+.gm-modal .gm-panel [data-role=inv-layout] button[data-role=slot][data-use] .lfill{left:8px}

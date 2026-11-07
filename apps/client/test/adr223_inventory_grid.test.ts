@@ -97,3 +97,18 @@ describe("ADR-223 slot-grid inventory", () => {
     menus.destroy();
   });
 });
+
+describe("ADR-290 liquid fill bar in the inventory", () => {
+  test("pack + hotbar-row tiles of liquid containers get a fill bar (full / near-empty / empty); other items do not", () => {
+    const { w, me, menus } = setup(); G.addItem(w, me, id("canteen"), 1); G.addItem(w, me, id("waterskin"), 1); G.addItem(w, me, id("water_bottle"), 1); G.addItem(w, me, id("wood"), 5);
+    const v = G.readSlots(w, me as never); const at = (k: string): number => { for (let i = 0; i < v.slotCount; i++) if (v.item(i) === id(k)) return i; return -1; };
+    const c = at("canteen"), s = at("waterskin"), b = at("water_bottle");
+    v.put(c, id("canteen"), 1, v.created(c), 6); v.put(s, id("waterskin"), 1, v.created(s), 1); v.put(b, id("water_bottle"), 1, v.created(b), 0); G.writeSlots(w, me as never, v, d);
+    expect(G.moveSlot(w, me as never, 0, s, G.HOTBAR_OFFSET + 2)).toBeFalsy(); menus.open("inventory");
+    const bar = (slot: number): HTMLElement | null => document.querySelector(`[data-role=inv-layout] button[data-slot="${slot}"] .lfill`);
+    expect(bar(c)!.dataset["level"]).toBe("full"); expect(bar(G.HOTBAR_OFFSET + 2)!.dataset["level"]).toBe("low"); expect(bar(b)!.dataset["level"]).toBe("empty");
+    expect(bar(at("wood"))).toBeNull();
+    expect(q(`[data-role=inv-layout] button[data-slot="${c}"]`).getAttribute("aria-label")).toContain("6/6 sips left");
+  });
+});
+

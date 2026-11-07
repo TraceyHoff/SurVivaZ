@@ -11,12 +11,13 @@ export const HOTBAR_SLOTS = 8;
 /** First hotbar slot in the player's Inventory array (pack = 0..15, hotbar = 16..23). Mirrors @engine/gameplay HOTBAR_OFFSET. */
 export const HOTBAR_OFFSET = 16;
 import { installSlotDrag } from "./slot-drag.js";
-export interface HotbarSource { slot: number; item?: number; icon: string; name: string; count: number; equipped?: boolean }
-export interface HotbarCell { selected?: boolean; slot: number; item: number; icon: string; name: string; count: number; equipped: boolean }
+import { fillBar, fillKey, fillLabel, type FillLike } from "./fill-bar.js";
+export interface HotbarSource { slot: number; item?: number; icon: string; name: string; count: number; equipped?: boolean; /** ADR-290 */ fill?: FillLike }
+export interface HotbarCell { selected?: boolean; slot: number; item: number; icon: string; name: string; count: number; equipped: boolean; fill?: FillLike }
 /** Pure model: one cell per hotbar slot (bar index 0..n-1 maps to inventory slot offset + index; empty cells have icon ""). */
 export function hotbarCells(view: readonly HotbarSource[], n = HOTBAR_SLOTS, offset = HOTBAR_OFFSET): HotbarCell[] {
   return Array.from({ length: n }, (_, i) => { const slot = offset + i; const v = view.find((s) => s.slot === slot && s.count > 0);
-    return v ? { slot, item: v.item ?? 0, icon: v.icon, name: v.name, count: v.count, equipped: !!v.equipped } : { slot, item: 0, icon: "", name: "", count: 0, equipped: false }; });
+    return v ? { slot, item: v.item ?? 0, icon: v.icon, name: v.name, count: v.count, equipped: !!v.equipped, ...(v.fill ? { fill: v.fill } : {}) } : { slot, item: 0, icon: "", name: "", count: 0, equipped: false }; });
 }
 /** Next/previous filled hotbar slot from `cur` (-1 / none = start of the bar); -1 when the bar is empty. */
 export function hotbarCycle(cells: readonly HotbarCell[], cur: number, dir: 1 | -1): number {
@@ -29,7 +30,7 @@ export function pressedHotbarSlot(pressed: (action: string) => boolean, n = HOTB
   for (let i = 0; i < n; i++) if (pressed(`Hotbar${i + 1}`)) return i;
   return -1;
 }
-export const hotbarKey = (cells: readonly HotbarCell[], device: string): string => device + "|" + cells.map((c) => `${c.icon}:${c.count}:${c.equipped ? 1 : 0}:${c.selected ? 1 : 0}`).join(",");
+export const hotbarKey = (cells: readonly HotbarCell[], device: string): string => device + "|" + cells.map((c) => `${c.icon}:${c.count}:${c.equipped ? 1 : 0}:${c.selected ? 1 : 0}:${fillKey(c.fill)}`).join(",");
 
 const CSS = `#hotbar{position:absolute;left:50%;bottom:calc(8px + var(--sab,0px));transform:translateX(-50%);z-index:5;display:flex;gap:4px;padding:4px;border-radius:10px;background:rgba(59,36,51,.55);pointer-events:none;font:700 10px/1 Fredoka,system-ui,sans-serif;color:#FFFAF0;max-width:calc(100vw - 16px - var(--sal,0px) - var(--sar,0px))}
 #hotbar[hidden]{display:none}
@@ -38,8 +39,9 @@ const CSS = `#hotbar{position:absolute;left:50%;bottom:calc(8px + var(--sab,0px)
 #hotbar button[data-equipped=true],#hotbar button[data-selected=true]{border-color:#FFDF00;box-shadow:inset 0 0 0 2px #FFDF00}
 #hotbar button .ic{position:absolute;inset:5px;background:var(--cz-icon,none) var(--cz-ipos,center) / var(--cz-isize,contain) no-repeat;image-rendering:pixelated}
 #hotbar button .n{position:absolute;left:3px;top:2px;opacity:.75}#hotbar button .c{position:absolute;right:3px;bottom:2px;text-shadow:0 1px 1px #000}
+#hotbar button .lfill{left:5px;right:5px;bottom:3px;height:4px}
 #hotbar[data-device=gamepad] button .n,#hotbar[data-device=touch] button .n{display:none}
-@media (max-width:480px),(max-height:440px){#hotbar{gap:3px;padding:3px}#hotbar button{width:36px;height:36px}#hotbar button .ic{inset:4px}}`;
+@media (max-width:480px),(max-height:440px){#hotbar{gap:3px;padding:3px}#hotbar button{width:36px;height:36px}#hotbar button .ic{inset:4px}#hotbar button .lfill{left:4px;right:4px;bottom:3px;height:3px}}`;
 
 export const HOTBAR_DOUBLE_TAP_MS = 320;
 export interface HotbarOptions { selectedSlot?: () => number | undefined; activate?: (slot: number) => void; now?: () => number; view: () => readonly HotbarSource[] | undefined; equip: (slot: number) => void; device: () => string; icon?: (icon: string, item: number) => string; /** ADR-231: drag one HUD slot onto another (mouse / touch) = move / swap / merge */ move?: (from: number, to: number) => void }
@@ -60,9 +62,10 @@ export function mountHotbar(o: HotbarOptions, doc: Document = document): { el: H
     el.dataset["device"] = dev;
     el.replaceChildren(...cells.map((c, i) => { const b = doc.createElement("button"); b.type = "button"; b.tabIndex = -1; b.dataset["slot"] = String(c.slot); b.dataset["equipped"] = String(c.equipped); b.dataset["selected"] = String(!!c.selected); b.setAttribute("aria-pressed", String(c.equipped || !!c.selected));
       if (o.move) { b.dataset["drop"] = `h:${c.slot}`; if (c.count) b.dataset["drag"] = `h:${c.slot}`; }
-      b.title = c.count ? `${c.name}${c.count > 1 ? ` ×${c.count}` : ""} (${i + 1})` : `Slot ${i + 1}`; b.setAttribute("aria-label", b.title);
+      b.title = c.count ? `${c.name}${c.count > 1 ? ` ×${c.count}` : ""}${c.fill ? ` — ${fillLabel(c.fill)}` : ""} (${i + 1})` : `Slot ${i + 1}`; b.setAttribute("aria-label", b.title);
       const n = doc.createElement("span"); n.className = "n"; n.textContent = String(i + 1); b.append(n);
       if (c.count) { const ic = doc.createElement("span"); ic.className = "ic"; ic.dataset["icon"] = o.icon ? o.icon(c.icon, c.item) : c.icon; b.append(ic);
+        if (c.fill) b.append(fillBar(doc, c.fill)); // ADR-290
         if (c.count > 1) { const ct = doc.createElement("span"); ct.className = "c"; ct.textContent = String(c.count); b.append(ct); } }
       return b; }));
   };

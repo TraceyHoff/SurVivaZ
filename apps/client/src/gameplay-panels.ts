@@ -31,6 +31,7 @@ import { hasDisease, iconForItem, ROADS, clanTintIndex,
 import { formatBodyTemp, formatTemp, formatTempDelta, loadTempUnit } from "./hud-temp.js";
 import { colorChoices, requestCharacterEdit } from "./character-creator.js";
 import { GroupRole, Membership, PlayerId, SLOT_PALETTE, swatchColor, Transform, type Entity, type WearableSlot } from "@engine/core";
+import { fillBar, fillLabel } from "./fill-bar.js";
 
 export const GAMEPLAY_PANELS = ["inventory", "crafting", "build", "character", /* Task 31 */ "wardrobe", "party", "clan", "trade", "camper", "skills", "station", /* ADR-145 */ "pet", /* Task 22 */ "worker"] as const;
 export type GameplayPanel = (typeof GAMEPLAY_PANELS)[number];
@@ -339,9 +340,10 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
           invUi.lastTap = { slot: s.slot, t: now }; if (invUi.sel !== s.slot) { invUi.sel = s.slot; invUi.csel = -1; kit.rerender(); }
         }, { role: "slot", data: { item: String(s.item), icon: s.icon, slot: String(s.slot), drag: ref, drop: ref, ...(s.equip && { equip: s.equip }), ...(s.equipped && { equipped: "" }), ...(s.consume && { use: s.consume }), ...(invUi.sel === s.slot && { sel: "" }), ...(isPicked("p", s.slot) && { picked: "" }) } });
         b.append(el("span", { class: "nm" }, `${s.equipped ? "◆ " : ""}${s.name} ×${s.count}`));
+        if (s.fill) b.append(fillBar(document, s.fill)); // ADR-290
         if (s.count > 1) b.append(el("span", { class: "ct", "aria-hidden": "true" }, String(s.count)));
         if (hot) b.append(el("span", { class: "hk", "aria-hidden": "true" }, String(slot - HOTBAR_OFFSET + 1)));
-        const pl = invUi.pick ? "Put here" : primaryLabel(s); b.setAttribute("aria-label", `${s.name} ×${s.count}${pl ? `. ${pl}` : ""}`); if (pl) { b.dataset["padLabel"] = pl; }
+        const pl = invUi.pick ? "Put here" : primaryLabel(s); b.setAttribute("aria-label", `${s.name} ×${s.count}${s.fill ? ` (${fillLabel(s.fill)})` : ""}${pl ? `. ${pl}` : ""}`); if (pl) { b.dataset["padLabel"] = pl; }
         b.onfocus = () => { if (invUi.sel !== s.slot && !invUi.pick) { invUi.sel = s.slot; invUi.csel = -1; kit.rerender(); } };
         // ADR-204/205: pad X = split, Y = to hotbar on the focused slot (UINav contextual shortcuts + footer hints)
         if (s.count >= 2) { b.dataset["padX"] = `split-${s.slot}`; b.dataset["padXLabel"] = "Split"; }
@@ -359,7 +361,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
           invUi.lastTap = { slot: 1000 + s.slot, t: now }; if (invUi.csel !== s.slot) { invUi.csel = s.slot; invUi.sel = -1; kit.rerender(); }
         }, { role: "cslot", data: { item: String(s.item), icon: s.icon, slot: String(s.slot), drag: ref, drop: ref, ...(invUi.csel === s.slot && { sel: "" }), ...(isPicked("c", s.slot) && { picked: "" }),
           ...(s.count >= 2 && { "pad-x": `csplit-${s.slot}`, "pad-x-label": "Split" }), "pad-y": `ctohb-${s.slot}`, "pad-y-label": "To hotbar" } }); // ADR-205
-        b.append(el("span", { class: "nm" }, `${s.name} ×${s.count}`)); if (s.count > 1) b.append(el("span", { class: "ct", "aria-hidden": "true" }, String(s.count)));
+        if (s.fill) b.append(fillBar(document, s.fill)); b.append(el("span", { class: "nm" }, `${s.name} ×${s.count}`)); if (s.count > 1) b.append(el("span", { class: "ct", "aria-hidden": "true" }, String(s.count)));
         b.setAttribute("aria-label", `${s.name} ×${s.count}. ${invUi.pick ? "Put here" : "Take"}`); b.dataset["padLabel"] = invUi.pick ? "Put here" : "Take";
         b.onfocus = () => { if (invUi.csel !== s.slot && !invUi.pick) { invUi.csel = s.slot; invUi.sel = -1; kit.rerender(); } };
         return b;

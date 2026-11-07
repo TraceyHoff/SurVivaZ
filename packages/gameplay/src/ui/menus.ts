@@ -62,7 +62,15 @@ const withNames = (w: World, l: readonly ItemCount[], who?: Entity) => l.map((i)
 
 // ---- inventory --------------------------------------------------------------------------------------
 export interface InventorySlotView { slot: number; item: number; /** manifest icon key (ItemDef.spriteKey: `sprite` override, else item key) */ icon: string; name: string; count: number; durability: number; crafterId: number; crafterName: string; tooltip: string; /** ADR-128: context action for consumables ("eat" | "drink" | "apply"), else undefined */ consume?: "eat" | "drink" | "apply";
-  /** ADR-135: how the slot equips ("hand" = main hand via EquipCmd, "wear" = gear slot via WearCmd) and whether it is equipped now */ equip?: "hand" | "wear"; equipped?: boolean }
+  /** ADR-135: how the slot equips ("hand" = main hand via EquipCmd, "wear" = gear slot via WearCmd) and whether it is equipped now */ equip?: "hand" | "wear"; equipped?: boolean; /** ADR-290: remaining liquid in a fillable container (sips > 0), else undefined */ fill?: LiquidFill }
+/** ADR-290: remaining fill of a liquid container: `sips` left of `max` (ItemDef.sips), `frac` 0..1, and the liquid kind. */
+export interface LiquidFill { sips: number; max: number; frac: number; liquid: "water" | "boiled_water" }
+/** ADR-290: the authoritative fill (slot durability = sips left, ItemDef.sips = capacity) for any liquid container; undefined
+ *  for every other item. Display only — the same numbers drinking / watering / refilling already use. */
+export function liquidFill(w: World, item: number, durability: number): LiquidFill | undefined {
+  const d = gameplayDefs(w).items.get(item); const max = d?.sips ?? 0; if (!d || max <= 0) return undefined;
+  const sips = Math.max(0, Math.min(max, Math.floor(durability))); return { sips, max, frac: sips / max, liquid: d.boiled ? "boiled_water" : "water" };
+}
 /** ADR-128: "eat" / "drink" for consumables (liquid containers and thirst-only food drink), undefined otherwise. */
 export function consumeKind(w: World, item: number): "eat" | "drink" | "apply" | undefined {
   const d = gameplayDefs(w).items.get(item); if (!d?.food) return undefined;
@@ -140,7 +148,8 @@ export function inventoryView(c: MenuCtx): InventorySlotView[] {
     const tip = [`${name} ×${s.count}`, s.durability && !gameplayDefs(w).items.get(s.item)?.sips && gameplayDefs(w).items.get(s.item)?.maxDurability ? `Durability ${s.durability}/${gameplayDefs(w).items.get(s.item)!.maxDurability}` : "", foodTooltip(w, s.item, s.durability), itemDefKey(w, s.item) === KEY_ITEM ? keyTooltip(w, s.crafterId) : crafterName ? `Crafted by ${crafterName}` : ""].filter(Boolean).join("\n");
     const def = gameplayDefs(w).items.get(s.item); const handy = def?.weapon || def?.tool || def?.ranged || def?.thrown;
     const eqv = equipped ??= equippedSlots(c); const equip = def?.wear && (def.category === ItemCategory.Clothing || def.category === ItemCategory.Armor) ? "wear" as const : handy ? "hand" as const : def?.wear ? "wear" as const : undefined;
-    out.push({ slot: s.slot, item: s.item, icon: def?.spriteKey ?? "", name, count: s.count, durability: s.durability, crafterId: s.crafterId, crafterName, tooltip: tip, ...(ck ? { consume: ck } : {}), ...(equip ? { equip, equipped: eqv.has(s.slot) } : {}) });
+    const fill = liquidFill(w, s.item, s.durability);
+    out.push({ slot: s.slot, item: s.item, icon: def?.spriteKey ?? "", name, count: s.count, durability: s.durability, crafterId: s.crafterId, crafterName, tooltip: tip, ...(ck ? { consume: ck } : {}), ...(equip ? { equip, equipped: eqv.has(s.slot) } : {}), ...(fill ? { fill } : {}) });
   }
   return out;
 }
@@ -156,7 +165,7 @@ export const STATION_NAMES: Readonly<Record<number, string>> = { 0: "By hand", 1
 // ---- container panel (ADR-098: up to 96 slots, paged) ------------------------------------------------
 /** Slots per page in the container panel (one page = the old 24-slot box). */
 export const CONTAINER_PAGE_SIZE = 24;
-export interface ContainerSlotView { slot: number; item: number; icon: string; name: string; count: number; tooltip: string }
+export interface ContainerSlotView { slot: number; item: number; icon: string; name: string; count: number; tooltip: string; /** ADR-290 */ fill?: LiquidFill }
 export interface ContainerView { entity: Entity; slotCount: number; page: number; pages: number; first: number; slots: ContainerSlotView[]; weight: number; maxWeight: number }
 /** The container the player has open on this replica: Container replicates only to viewers (containerViewersScope),
  *  so on a client the nearest non-player Container within reach is the open one. */
@@ -177,7 +186,8 @@ export function containerView(c: MenuCtx, e: Entity, page = 0, pageSize = CONTAI
   const pg = Math.max(0, Math.min(pages - 1, page | 0)); const first = pg * pageSize; const slots: ContainerSlotView[] = [];
   for (let i = first; i < Math.min(n, first + pageSize); i++) {
     const item = v.item(i), count = v.count(i); const name = item ? itemName(w, item) : "";
-    slots.push({ slot: i, item, count, name, icon: item ? gameplayDefs(w).items.get(item)?.spriteKey ?? "" : "", tooltip: item ? `${name} ×${count} · slot ${i + 1}/${n}` : `Empty · slot ${i + 1}/${n}` });
+    const fill = item ? liquidFill(w, item, v.durability(i)) : undefined;
+    slots.push({ slot: i, item, count, name, icon: item ? gameplayDefs(w).items.get(item)?.spriteKey ?? "" : "", tooltip: item ? `${name} ×${count} · slot ${i + 1}/${n}` : `Empty · slot ${i + 1}/${n}`, ...(fill ? { fill } : {}) });
   }
   return { entity: e, slotCount: n, page: pg, pages, first, slots, weight: box.weight, maxWeight: box.maxWeight };
 }
