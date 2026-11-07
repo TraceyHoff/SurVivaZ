@@ -82,8 +82,8 @@ describe("Task 31: rain wetting", () => {
     const near = G.spawnPlayer(w, { x: 0, y: 0 }); const far = G.spawnPlayer(w, { x: 30, y: 0 });
     w.setField(near, G.Exposure, "wetness", 0.5); w.setField(far, G.Exposure, "wetness", 0.5);
     G.spawnStation(w, G.StationKind.Campfire, 1, 0); // lit by default
-    steps(w, 10 * SEC);
-    expect(wetOf(w, near)).toBeLessThan(0.05); // 0.06/s by the fire: dry in ~8s
+    steps(w, 15 * SEC);
+    expect(wetOf(w, near)).toBeLessThan(0.05); // Staged drying: 0.5 dries in ~12s at triple rate
     expect(wetOf(w, far)).toBeGreaterThan(0.25); expect(wetOf(w, far)).toBeLessThan(0.35); // 0.02/s in the open
   });
 });
@@ -178,18 +178,18 @@ describe("Task 31: character sheet timers", () => {
     let s = sheetFor(w, p);
     expect(s.wetness).toBe(0); expect(s.drySeconds).toBeUndefined(); expect(s.careSecondsLeft).toBeUndefined();
     expect(s.careMissing).toEqual([]); expect(s.diseases).toEqual([]);
-    // wet in clear weather: 0.6 / 0.02 per second = ~30s to dry
+    // wet in clear weather: 0.6 crosses Wet and Damp: ~45s to dry
     w.setField(p, G.Exposure, "wetness", 0.6);
     s = sheetFor(w, p);
     expect(s.wetness).toBeCloseTo(0.6, 2);
-    expect(s.drySeconds).toBeGreaterThanOrEqual(29); expect(s.drySeconds).toBeLessThanOrEqual(31);
+    expect(s.drySeconds).toBeGreaterThanOrEqual(45); expect(s.drySeconds).toBeLessThanOrEqual(46);
     expect(s.dryByFire).toBe(false);
     // next to a lit campfire the same wetness dries ~3x faster
     G.spawnStation(w, G.StationKind.Campfire, 1, 0);
     steps(w, 8); // emitter index picks the lit fire up
     s = sheetFor(w, p);
     expect(s.dryByFire).toBe(true);
-    expect(s.drySeconds).toBeGreaterThanOrEqual(9); expect(s.drySeconds).toBeLessThanOrEqual(11);
+    expect(s.drySeconds).toBeGreaterThanOrEqual(15); expect(s.drySeconds).toBeLessThanOrEqual(16);
     // sick with 120s of care banked: 120s left, nothing missing (dry again after the fire dried us)
     expect(G.contractDisease(w, p, "common_cold")).toBe(true);
     w.setField(p, G.Exposure, "wetness", 0);

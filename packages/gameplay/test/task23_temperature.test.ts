@@ -66,12 +66,16 @@ describe("Task 23 heat damage at 90F+", () => {
     Object.assign(w.env(Weather), { kind: G.WeatherKind.Heat, intensity: 1, endsAtTick: 0xffffffff });
     return { w, p };
   };
-  it("pinned heat at summer noon is above 90F and hurts the player", () => {
+  it("ADR-277: heat above 90F warns first and only hurts after Overheating", () => {
     const { w, p } = heatWorld();
     const ambient = ambientTemperature(w, 0, 0);
     expect(ambient).toBeGreaterThan(G.HEAT_DAMAGE_ABOVE_C); // 32.2C = 90F; only meaningful in real heat
     const hp0 = w.get(p, G.Health)!.hp;
     steps(w, 5 * SEC);
+    expect(w.get(p, G.Health)!.hp).toBe(hp0);
+    expect(w.get(p, G.Survival)!.bodyTemp).toBeGreaterThan(37);
+    w.setField(p, G.Survival, "bodyTemp", 39);
+    steps(w, SEC);
     expect(w.get(p, G.Health)!.hp).toBeLessThan(hp0);
   });
   it("a clear summer noon (~85F) does not hurt", () => {

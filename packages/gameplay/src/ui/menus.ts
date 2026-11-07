@@ -1,3 +1,4 @@
+import { wetDrySeconds } from "../exposure-stages.js";
 import { ContainerToSlotCmd, MoveSlotCmd, SplitStackCmd } from "../inventory_ops.js";
 import { DropItemCmd, encodePetName, nearestPet, petName, PetResult, PetCommandCmd, PetGuardCmd, PetOfferCmd, PetRenameCmd } from "../pets.js";
 import { AnimalSkillCmd } from "../animal_skills.js";
@@ -22,7 +23,7 @@ import { holdingTorch } from "../systems/crafting.js";
 import { CancelQueuedCraftCmd, MAX_CRAFT_COUNT, QueueCraftCmd, craftQueueReason, owedOf } from "../systems/craft_queue.js";
 import { pieceCost, pieceGates } from "../building/place.js";
 import { hasSkillUnlock, unlockRequirement, xpToNext } from "../skills/tree.js";
-import { activeDiseases, careStatus, diseaseIcon, CARE_DRY_MAX } from "../diseases.js";
+import { activeDiseases, careStatus, diseasePresentation, CARE_DRY_MAX } from "../diseases.js";
 import { ambientTemperature, effectiveInsulation, heatAt, shelteredAirTemp, weatherDef, worldSeason } from "../systems/environment.js";
 import { BoilCmd, DepositCmd, EquipCmd, PaintCmd, PlaceCmd, ToggleFireCmd, UseCmd, WearCmd, WithdrawCmd } from "../input.js";
 import { Equipment, Worn } from "../components.js";
@@ -350,7 +351,7 @@ export function characterSheetView(c: MenuCtx): CharacterSheetView | undefined {
     name: nameOf(c, pidOf(w, p)),
     bodyTempC: sv.bodyTemp, health: hp.hp, maxHealth: hp.max, hunger: sv.hunger, thirst: sv.thirst, stamina: sv.stamina, maxStamina: sv.maxStamina,
     level: prog?.level ?? 1, xp: prog?.xp ?? 0, xpNext: xpToNext(prog?.level ?? 1),
-    diseases: activeDiseases(w, p).map((d) => ({ key: d.key, name: d.name, short: d.short, color: d.color, icon: diseaseIcon(d.key) })),
+    diseases: activeDiseases(w, p).map((d) => ({ key: d.key, ...diseasePresentation(w, p, d), color: d.color })),
     insulationBase: BASE_INSULATION_C,
     insulationClothing: insClothing,
     insulationWet: effectiveInsulation(insClothing, wet),
@@ -360,7 +361,7 @@ export function characterSheetView(c: MenuCtx): CharacterSheetView | undefined {
     ambientC: ambient, indoorC: air?.temp ?? ambient, sheltered: air?.sheltered ?? false, enclosed: air?.enclosed ?? false,
     season: si.index, seasonName: SEASON_NAMES[si.index] ?? "summer",
     wetness: wet,
-    drySeconds: wet > CARE_DRY_MAX && !gettingWetter ? Math.ceil(wet / dryRate) : undefined,
+    drySeconds: wet > 0 && !gettingWetter ? Math.ceil(wetDrySeconds(wet, dryRate) - 0.0001) : undefined,
     dryByFire: heat > 0,
     careSecondsLeft: care.sick ? Math.ceil(care.secondsLeft) : undefined,
     careMissing: care.sick ? care.missing : [],

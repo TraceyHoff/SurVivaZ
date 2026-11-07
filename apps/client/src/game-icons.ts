@@ -21,8 +21,8 @@ export const isIconFile = (icon: string): boolean => icon.endsWith(".png");
 export function conditionIconImg(icon: string, size: number, alt: string): HTMLImageElement {
   if (isIconFile(icon)) return iconImg(icon, size, alt);
   const img = document.createElement("img");
-  img.alt = alt; img.draggable = false; img.dataset["uiIcon"] = icon;
+  img.alt = alt; img.draggable = false; img.hidden = true; img.dataset["uiIcon"] = icon;
   img.style.cssText = `width:${size}px;height:${size}px;image-rendering:pixelated;vertical-align:middle;flex:none`;
-  void uiSprites(import.meta.env.BASE_URL).then(ui => { const url = ui.url(icon); if (url) img.src = url; });
+  void uiSprites(import.meta.env.BASE_URL).then(ui => { const url = ui.url(icon); if (url) { img.src = url; img.hidden = false; } });
   return img;
 }

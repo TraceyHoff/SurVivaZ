@@ -92,12 +92,19 @@ export class BuildMode {
   get awaitingRelease(): boolean { return this.confirmLatch; }
   private fromMenu = false; private pendingBack = false;
   start(sel: BuildSelection, opts?: { fromMenu?: boolean }): void {
-    const was = this.active; this.sel = { ...sel }; this.fromMenu = !!opts?.fromMenu; this.pendingBack = false;
+    const was = this.active; const previousPiece = this.sel?.piece; this.sel = { ...sel };
+    if (was && previousPiece !== sel.piece) { this.rot = 0; this.fineRot = 0; this.rotLockAt = undefined; this.disarm(); this.toast = ""; }
+    this.fromMenu = !!opts?.fromMenu; this.pendingBack = false;
     // ADR-222: the press that chose the piece (pad A / Enter / click on a menu tile) must never also place it. Placement
     // only confirms after PlaceConfirm has been seen released at least one frame after entering build mode.
     this.confirmLatch = true;
     if (!was) { this.rotLockAt = undefined; this.rot = 0; this.fineRot = 0; this.level = 0; this.padOffset = undefined; this.touchPoint = undefined; this.disarm(); this.o.input.push("Building"); this.o.onActiveChange?.(true); }
     this.refresh();
+  }
+  /** Update an active picker selection without exiting Building or losing its cursor/floor. */
+  select(sel: BuildSelection): void {
+    if (!this.active) return;
+    this.start(sel, { fromMenu: this.fromMenu });
   }
   stop(): void { if (!this.active) return; this.sel = undefined; this.preview = undefined; this.target = undefined; this.touchPoint = undefined; this.padOffset = undefined; this.disarm(); this.o.input.pop("Building"); this.o.onActiveChange?.(false); }
   rotate(dir: 1 | -1): void { const c = this.o.ctx(); if (!this.sel || !c) return; if (this.freePlacing) { this.fineRot = (this.fineRot + dir + FINE_ROT_STEPS) % FINE_ROT_STEPS; this.refresh(); return; } // ADR-211: step from the rotation shown (a corner may have auto-fitted it); RB then overrides auto-fit at this junction
@@ -197,7 +204,7 @@ export class BuildMode {
     // ADR-224: back to the menu only after Cancel is released (the same press must not also close the reopened menu)
     if (this.pendingBack && !this.sel) { if (!(this.o.input.down?.("Build.Cancel") ?? false)) { this.pendingBack = false; this.o.onBack?.(); } return; }
     if (!this.sel) return; const i = this.o.input; const c = this.o.ctx(); const dev = this.device();
-    if (i.pressed("ToggleBuild") && this.o.onPickPiece) { this.stop(); this.o.onPickPiece(); return; }
+    if (i.pressed("ToggleBuild") && this.o.onPickPiece) { this.o.onPickPiece(); return; }
     if (i.pressed("Build.Cancel")) { if (this.demolishArmed) { this.disarm(); this.toast = ""; return; } const back = this.fromMenu && !!this.o.onBack; this.stop(); this.pendingBack = back; return; }
     if (i.pressed("Build.RoadTool")) { this.tool("road"); return; } if (i.pressed("Build.PlaceSign")) { this.tool("sign"); return; }
     if (i.pressed("Build.ToggleSnap")) this.toggleSnap();

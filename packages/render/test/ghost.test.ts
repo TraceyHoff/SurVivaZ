@@ -26,6 +26,14 @@ describe("build-placement ghost (buildPreview)", () => {
     g.sync({ ...p, valid: false, x: 13, rot: 6 }); expect(g.entity).toBe(e);
     expect(w.get(e, BP)).toMatchObject({ ghost: 2, rotation: 2 }); expect(w.get(e, Transform)!.x).toBe(13);
   });
+  it("ADR-279: changing the piece updates the same hologram entity immediately", () => {
+    const other = [...reg.allSprites()].find(s => s.building && s.building.piece !== key)!;
+    const w = mk(), ghost = new BuildGhost(w, BP, reg);
+    ghost.sync({ pieceKey: key, x: 2, y: 1, rot: 0, valid: true }); const entity = ghost.entity!;
+    ghost.sync({ pieceKey: other.building!.piece, x: 2, y: 1, rot: 0, valid: true });
+    expect(ghost.entity).toBe(entity); expect(w.get(entity, BP)!.visualId).toBe(other.id);
+    expect(ghost.last!.visualId).not.toBe(pieceSprite.id);
+  });
   it("null preview removes the ghost entity; unknown pieceKey gives visualId 0", () => {
     const w = mk(); const g = new BuildGhost(w, BP, reg);
     g.sync({ pieceKey: key, x: 0, y: 0, rot: 0, valid: true }); const e = g.entity!;

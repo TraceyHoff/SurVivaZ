@@ -202,7 +202,11 @@ export function applyTerrainFall(world: World, e: Entity, x: number, y: number, 
         applyDamage(world, e, damage, 0 as Entity, DamageCause.Fall);
         const after = world.getField(e, Health, "hp") ?? 0;
         // The shared human input path serves players and AI humans. Lethal falls never injure corpses.
-        if (drop >= 5 && after > 0 && after < before && world.has(e, Survival)) contractDisease(world, e, "broken_leg", dt);
+        if (drop >= 5 && after > 0 && after < before && world.has(e, Survival) && contractDisease(world, e, "broken_leg", dt)) {
+          // ADR-281: only this actual surviving fracture event rolls infection, never a generic Broken Leg cure/source.
+          const chance = gameplayDefs(world).diseaseTuning.causes.woundChance;
+          if (chance > 0 && world.rngFor("disease.fall_wound", e).next() < chance) contractDisease(world, e, "wound_infection", dt);
+        }
       }
     }
     tx = bx; ty = by;

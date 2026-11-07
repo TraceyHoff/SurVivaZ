@@ -25,7 +25,7 @@ import { hasDisease, iconForItem, ROADS, clanTintIndex,
   SKILLS, equipIntent, wearIntent, equipmentView, boilIntent, nearLitCampfire, holdingTorch,
   petView, petsOf, petOfferIntent, petCommandIntent, petGuardIntent, animalSkillIntent, animalSkillView, petStatusLabel, dropItemIntent, splitStackIntent, moveSlotIntent, containerToSlotIntent, slotToContainerIntent, defaultSplit, HOTBAR_SIZE, PACK_SLOTS, HOTBAR_OFFSET, PET_HELP, petName, petSpecies, Pet, Animal, BuildPiece, Tamed,
   workerView, WORKER_JOBS, WORKER_JOB_LABELS, WORKER_JOB_HELP, WORKER_HELP, hireWorkerIntent, dismissWorkerIntent,
-  treeShortName, treeIndex, readSlots, SPRITE_FALLBACKS, characterSheetView, dyeView, dyeIntent, WET_ICON,
+  treeShortName, treeIndex, readSlots, SPRITE_FALLBACKS, characterSheetView, dyeView, dyeIntent, wetnessStage,
   recentBuildsView, recentCraftsView,
 } from "@engine/gameplay";
 import { formatTemp, loadTempUnit } from "./hud-temp.js";
@@ -667,11 +667,12 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
           ? `Base ${sheet.insulationBase.toFixed(1)}°C + clothing ${sheet.insulationClothing.toFixed(1)}°C (${sheet.insulationWet.toFixed(1)}°C while wet)`
           : `Base ${sheet.insulationBase.toFixed(1)}°C + clothing ${sheet.insulationClothing.toFixed(1)}°C`, "sheet-insulation"));
         // Task 31: how long until dry (only while wet), and how long until the care cure (only while sick)
-        if (sheet.wetness > 0.05) {
-          const wetRow = row("Wetness", sheet.drySeconds !== undefined
+        const stage = wetnessStage(sheet.wetness);
+        if (stage) {
+          const wetRow = row(stage[0]!.toUpperCase() + stage.slice(1), sheet.drySeconds !== undefined
             ? `${Math.round(sheet.wetness * 100)}% · dry in ~${fmtDur(sheet.drySeconds)}${sheet.dryByFire ? " by the fire" : ""}`
             : `${Math.round(sheet.wetness * 100)}% · get out of the rain to dry`, "sheet-wetness");
-          wetRow.prepend(iconImg(WET_ICON, 14, "Wet")); out.push(wetRow);
+          wetRow.prepend(conditionIconImg(stage, 14, stage)); out.push(wetRow);
         }
         if (sheet.careSecondsLeft !== undefined) {
           const careRow = row("Cure", `in ~${fmtDur(sheet.careSecondsLeft)}${sheet.careMissing.length ? ` — still needs: ${sheet.careMissing.map((m) => CARE_NEED_LABEL[m] ?? m).join(", ")}` : " — keep it up"}`, "sheet-care");

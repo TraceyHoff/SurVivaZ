@@ -56,7 +56,12 @@ export const LOOTBAG_DESPAWN_MIGRATION: AddedFields = { component: "LootBag", fi
 export const WORLD_RULES_AI_HUMANS_MIGRATION: AddedFields = { component: "WorldRules", fields: ["aiHumans"] };
 /** Task 31: Diseases gained careTicks (0 = legacy: no care-cure progress yet). */
 export const DISEASES_CARE_TICKS_MIGRATION: AddedFields = { component: "Diseases", fields: ["careTicks"] };
-export const DEFAULT_MIGRATIONS: readonly AddedFields[] = [...CRAFTER_ID_MIGRATIONS, APPEARANCE_VERSION_MIGRATION, ...CONTAINER_96_MIGRATIONS, ...INVENTORY_24_MIGRATIONS, ...APPEARANCE_HANDS_MIGRATIONS, APPEARANCE_SKIN_SCHEME_MIGRATION, PROGRESSION_TREES_MIGRATION, LOOTBAG_DESPAWN_MIGRATION, WORLD_RULES_AI_HUMANS_MIGRATION, DISEASES_CARE_TICKS_MIGRATION];
+/** ADR-280: infection clock rate; zero-filled legacy values are interpreted as the standard 20Hz. */
+export const DISEASES_INFECTION_CLOCK_MIGRATIONS: readonly AddedFields[] = [
+  { component: "Diseases", fields: ["infectionHz"] },
+  { component: "Diseases", fields: ["careTicks", "infectionHz"] },
+];
+export const DEFAULT_MIGRATIONS: readonly AddedFields[] = [...CRAFTER_ID_MIGRATIONS, APPEARANCE_VERSION_MIGRATION, ...CONTAINER_96_MIGRATIONS, ...INVENTORY_24_MIGRATIONS, ...APPEARANCE_HANDS_MIGRATIONS, APPEARANCE_SKIN_SCHEME_MIGRATION, PROGRESSION_TREES_MIGRATION, LOOTBAG_DESPAWN_MIGRATION, WORLD_RULES_AI_HUMANS_MIGRATION, DISEASES_CARE_TICKS_MIGRATION, ...DISEASES_INFECTION_CLOCK_MIGRATIONS];
 
 const BYTES: Record<FieldType, number> = { f32: 4, f64: 8, i8: 1, u8: 1, i16: 2, u16: 2, i32: 4, u32: 4 };
 export const oldSchemaOf = (s: Schema, added: readonly string[], grown: Readonly<Record<string, number>> = {}, oldDefaults: Readonly<Record<string, number>> = {}): Schema =>

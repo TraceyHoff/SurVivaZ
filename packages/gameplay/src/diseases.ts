@@ -41,12 +41,16 @@ export function activeDiseases(world: World, e: Entity): DiseaseDef[] {
  */
 export function contractDisease(world: World, e: Entity, key: string, dt = 1 / 20): boolean {
   const defs = gameplayDefs(world); const idx = defs.diseaseIndex(key); if (idx < 0) return false;
+  if (key === "wound_infection" && !world.has(e, Survival)) return false;
   ensureDiseases(world, e);
   const st = world.store(Diseases); const s = st.slot(entityIndex(e)); if (s < 0) return false;
   const until = defs.diseases[idx]!.durationSeconds > 0 ? world.tick + secondsToTicks(defs.diseases[idx]!.durationSeconds, dt) : 0;
   let slot = diseaseSlot(world, e, idx);
+  // Another bite must not reset an already-progressing infection back to its harmless first tier.
+  if (key === "wound_infection" && slot >= 0) return true;
   if (slot < 0) { for (let i = 0; i < MAX_DISEASES; i++) if (st.data.disease[s * MAX_DISEASES + i] === 0) { slot = i; break; } }
   if (slot < 0) return false;
+  if (key === "wound_infection") st.data.infectionHz[s] = Math.max(1, Math.min(0xffff, Math.round(1 / dt)));
   st.data.disease[s * MAX_DISEASES + slot] = idx + 1; st.data.untilTick[s * MAX_DISEASES + slot] = until; st.markChanged(entityIndex(e));
   return true;
 }
@@ -61,7 +65,9 @@ export function cureDisease(world: World, e: Entity, key: string): boolean {
 /** Clears every disease the consumed item cures (consumeSystem calls this after a successful eat/drink). */
 export function cureDiseasesForItem(world: World, e: Entity, item: number): string[] {
   const cured: string[] = [];
-  for (const key of gameplayDefs(world).items.get(item)?.cures ?? []) if (cureDisease(world, e, key)) cured.push(key);
+  const def = gameplayDefs(world).items.get(item);
+  if (def?.key === "bandage") treatWoundInfection(world, e);
+  for (const key of def?.cures ?? []) if (cureDisease(world, e, key)) cured.push(key);
   return cured;
 }
 /**
@@ -76,7 +82,7 @@ export function clearAfflictions(world: World, e: Entity): void {
     if (s >= 0) {
       for (let i = 0; i < MAX_DISEASES; i++) { st.data.disease[s * MAX_DISEASES + i] = 0; st.data.untilTick[s * MAX_DISEASES + i] = 0; }
       st.data.coldTicks[s] = 0; st.data.heatTicks[s] = 0; st.data.sprintTicks[s] = 0; st.data.restTicks[s] = 0;
-      st.data.contactTicks[s] = 0; st.data.careTicks[s] = 0;
+      st.data.contactTicks[s] = 0; st.data.careTicks[s] = 0; st.data.infectionHz[s] = DEFAULT_TICK_HZ;
       st.markChanged(entityIndex(e));
     }
   }
@@ -88,16 +94,48 @@ export function diseaseMoveMul(world: World, e: Entity): number {
   let m = 1; for (const d of activeDiseases(world, e)) m *= d.moveMul; return m;
 }
 
-/**
- * Task 31: HUD / character-sheet icon per condition, reusing the game's own custom pixel-art icons
- * (Task 25) — no new art needed: a water drop for wet, a snowflake for a cold, a thermometer for flu fever.
- */
-export const WET_ICON = "ic_thirst.png";
+/** Legacy disease icons remain; injuries and wound-infection stages use dedicated UI-atlas status art. */
 export function diseaseIcon(key: string): string {
   if (key === "broken_leg") return "broken_leg";
+  if (key === "wound_infection") return "infected";
   if (key === "common_cold") return "ic_snowflake.png";
   if (key === "influenza") return "ic_temp.png";
   return "ic_health.png";
+}
+
+/** ADR-280: one wound-infection track, derived from its existing replicated/persisted expiry clock. */
+export type InfectionTier = "infected" | "festering" | "septic";
+export const INFECTION_FESTERING_SECONDS = 180;
+export const INFECTION_SEPTIC_SECONDS = 360;
+export const BANDAGE_INFECTION_RELIEF_SECONDS = 60;
+export function infectionTier(world: World, e: Entity): InfectionTier | undefined {
+  const defs = gameplayDefs(world), di = defs.diseaseIndex("wound_infection");
+  if (di < 0 || !world.has(e, Survival)) return undefined;
+  const slot = diseaseSlot(world, e, di); if (slot < 0) return undefined;
+  const st = world.store(Diseases), s = st.slot(entityIndex(e));
+  const until = st.data.untilTick[s * MAX_DISEASES + slot]!;
+  const hz = st.data.infectionHz[s] || DEFAULT_TICK_HZ;
+  const started = until - defs.diseases[di]!.durationSeconds * hz;
+  const seconds = until === 0 ? 0 : Math.max(0, (world.tick - started) / hz);
+  return seconds >= INFECTION_SEPTIC_SECONDS ? "septic" : seconds >= INFECTION_FESTERING_SECONDS ? "festering" : "infected";
+}
+/** Plain bandages rewind one minute of infection progress, bounded at the start; medicated bandages cure outright. */
+export function treatWoundInfection(world: World, e: Entity): boolean {
+  const defs = gameplayDefs(world), di = defs.diseaseIndex("wound_infection");
+  if (di < 0) return false;
+  const slot = diseaseSlot(world, e, di); if (slot < 0) return false;
+  const st = world.store(Diseases), idx = entityIndex(e), s = st.slot(idx), offset = s * MAX_DISEASES + slot;
+  const until = st.data.untilTick[offset]!; if (until === 0) return false;
+  const hz = st.data.infectionHz[s] || DEFAULT_TICK_HZ;
+  st.data.untilTick[offset] = Math.min(world.tick + defs.diseases[di]!.durationSeconds * hz, until + BANDAGE_INFECTION_RELIEF_SECONDS * hz);
+  st.markChanged(idx); return true;
+}
+/** Disease identity/cure stays wound_infection; stage labels and dedicated atlas art are presentation, not extra diseases. */
+export function diseasePresentation(world: World, e: Entity, def: DiseaseDef): { short: string; name: string; icon: string; stage: InfectionTier | undefined } {
+  const stage = def.key === "wound_infection" ? infectionTier(world, e) : undefined;
+  if (!stage) return { short: def.short, name: def.name, icon: diseaseIcon(def.key), stage };
+  const short = stage[0]!.toUpperCase() + stage.slice(1);
+  return { short, name: `${short} wound infection`, icon: stage, stage };
 }
 
 /** Task 31: care cure — staying dry, fed, hydrated and warm for this long cures a cold or the flu. */

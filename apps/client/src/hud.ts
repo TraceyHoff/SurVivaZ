@@ -8,8 +8,8 @@ import { uiSprites } from "./ui-atlas.js";
 import { mountUi } from "./ui-root.js";
 import { Weather, Transform, type Entity, type World } from "@engine/core";
 import { dayCount, dayHours } from "./day-clock.js";
-import { activeDiseases, diseaseIcon, Diseases, Exposure, Health, RoomHeat, Survival, WET_ICON } from "@engine/gameplay";
-import { conditionIconImg, iconImg } from "./game-icons.js";
+import { activeDiseases, diseasePresentation, infectionTier, Diseases, Exposure, Health, RoomHeat, Survival, temperatureTier, damagingTemperatureTier, wetnessStage } from "@engine/gameplay";
+import { conditionIconImg } from "./game-icons.js";
 import { seasonAtDays } from "@engine/core";
 import { formatTemp, gaugeFrac, GAUGE_GRADIENT, hudAirTemp, hudShelteredTemp, loadTempUnit, SEASON_LABEL, tempBand, type TempUnit } from "./hud-temp.js";
 
@@ -164,11 +164,18 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
     try {
       const actives = p !== undefined && w.isRegistered(Diseases) ? activeDiseases(w, p) : [];
       const wet = p !== undefined ? (w.getField(p, Exposure, "wetness") ?? 0) : 0;
-      const keys = `${actives.map((d) => d.key).join(",")}|wet:${wet >= 0.05 ? Math.round(wet * 20) : 0}`;
+      const stage = wetnessStage(wet), tier = sv ? temperatureTier(sv.bodyTemp) : undefined;
+      const keys = `${ui ? "atlas" : "loading"}|${actives.map((d) => d.key).join(",")}|${stage}|${tier}|${p !== undefined ? infectionTier(w, p) : ""}`;
       if (chips.dataset["keys"] !== keys) {
         chips.dataset["keys"] = keys; chips.innerHTML = "";
-        for (const d of actives) { const c = document.createElement("span"); c.className = "dchip"; c.dataset["disease"] = d.key; c.append(conditionIconImg(diseaseIcon(d.key), 11, d.name), ` ${d.short}`); c.title = d.name; c.style.background = d.color; chips.append(c); }
-        if (wet >= 0.05) { const c = document.createElement("span"); c.className = "dchip"; c.dataset["disease"] = "wet"; c.append(iconImg(WET_ICON, 11, "Wet"), ` Wet ${Math.round(wet * 100)}%`); c.title = "Wet — dry indoors or by a fire"; c.style.background = "#4A7A9E"; chips.append(c); }
+        for (const d of actives) { const shown = diseasePresentation(w, p!, d); const c = document.createElement("span"); c.className = "dchip"; c.dataset["disease"] = d.key; if (shown.stage) c.dataset["status"] = shown.stage; c.append(conditionIconImg(shown.icon, 11, shown.name), ` ${shown.short}`); c.title = shown.name + (shown.stage === "septic" ? " — losing health! Use a medicated bandage." : shown.stage ? " — treat before it worsens; medicated bandages cure infection." : ""); c.style.background = d.color; chips.append(c); }
+        const status = (key: string, title: string, color: string): void => {
+          const c = document.createElement("span"); c.className = "dchip"; c.dataset["status"] = key;
+          const name = key[0]!.toUpperCase() + key.slice(1);
+          c.append(conditionIconImg(key, 11, name), ` ${name}`); c.title = title; c.style.background = color; chips.append(c);
+        };
+        if (tier) status(tier, `${tier} — body ${sv!.bodyTemp.toFixed(1)}°C. ${damagingTemperatureTier(tier) ? "Losing health!" : "Find comfortable shelter before this worsens."}`, tier === "chilly" || tier === "cold" || tier === "freezing" ? "#386DA6" : "#AC432B");
+        if (stage) status(stage, `${stage} — dry indoors or by a fire; deeper wetness takes longer to dry`, "#4A7A9E");
         if (!ro) publishHudBottom(); // no ResizeObserver: chips are the only content that changes the HUD height
       }
     } catch { /* replica without Diseases yet */ }

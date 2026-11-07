@@ -199,7 +199,7 @@ function maybeStartTutorial(): void {
 function startMenus(): void {
   if (menus) return;
   maybeStartTutorial();
-  menus = new GameMenus({ root, input, tutorial: { active: () => tutorialProgress().active, replay: () => { tutorialProgress().start(true); tutorialUi?.update(); }, next: () => { tutorialProgress().next(); tutorialUi?.update(); }, skip: () => { tutorialProgress().skip(); tutorialUi?.update(); } }, audio: audio.mixer, fx: { get: () => fxLayer.settings(), set: (v) => { saveFx(v); fxLayer.apply(v); }, click: () => audio.ui("ui.click") }, worldRules: () => (world.isRegistered(WorldRules) && world.has(world.environment, WorldRules) ? worldRules(world) : undefined), onQuit: quitToMenu, session: () => sessionInfo?.(), deleteProgress: () => deleteInfo?.(), setQuality: (p) => iso?.renderer.setQualityPreset(p), qualityInfo: () => (iso && "quality" in iso.renderer ? (iso.renderer as { quality: { autoLabel(): string; detected?: { name: string; klass: string; remembered: boolean } | undefined } }).quality : undefined), gameplay: { ctx: menuCtx, send: sendIntent, social, clanTint: (t) => iso?.registry.clanPaletteForTint(t)?.primary, clanTint2: (t) => iso?.registry.clanPaletteForTint(t)?.secondary, startPlacing: (sel) => buildMode.start(sel, { fromMenu: true }), worldTools: worldToolsApi, renamePet },
+  menus = new GameMenus({ root, input, tutorial: { active: () => tutorialProgress().active, replay: () => { tutorialProgress().start(true); tutorialUi?.update(); }, next: () => { tutorialProgress().next(); tutorialUi?.update(); }, skip: () => { tutorialProgress().skip(); tutorialUi?.update(); } }, audio: audio.mixer, fx: { get: () => fxLayer.settings(), set: (v) => { saveFx(v); fxLayer.apply(v); }, click: () => audio.ui("ui.click") }, worldRules: () => (world.isRegistered(WorldRules) && world.has(world.environment, WorldRules) ? worldRules(world) : undefined), onQuit: quitToMenu, session: () => sessionInfo?.(), deleteProgress: () => deleteInfo?.(), setQuality: (p) => iso?.renderer.setQualityPreset(p), qualityInfo: () => (iso && "quality" in iso.renderer ? (iso.renderer as { quality: { autoLabel(): string; detected?: { name: string; klass: string; remembered: boolean } | undefined } }).quality : undefined), gameplay: { ctx: menuCtx, send: sendIntent, social, clanTint: (t) => iso?.registry.clanPaletteForTint(t)?.primary, clanTint2: (t) => iso?.registry.clanPaletteForTint(t)?.secondary, onBuildSelect: (sel) => buildMode.select(sel), startPlacing: (sel) => buildMode.start(sel, { fromMenu: true }), worldTools: worldToolsApi, renamePet },
     onChat: (text, channel, to) => { if (!session.client?.chat.send(channel as ChatChannel, text, to ? { to } : {})) menus?.pushChat("(not connected — message not sent)"); },
     mapBody: () => { const m = createWorldMap({ world: () => world, player: () => session.player, tiles: () => session.client?.tiles.tiles, send: sendIntent }); return [m.el]; } });
 }
@@ -289,7 +289,7 @@ const colors = ["#000", "#3a5", "#495", "#874"];
 let worldTools: WorldToolsHandle | undefined;
 const worldToolsApi = { road: (n: number) => worldTools?.road(n), roadSurface: () => worldTools?.roadSurface() ?? 0, placeSign: () => worldTools?.placeSign() ?? false, editNearestSign: () => worldTools?.editNearestSign() ?? false, surfaces: ROADS.surfaces.map((x) => x.name) };
 /** Build mode (aim-point placement); `buildMode.preview` is the Renderer's buildPreview. */
-const buildMode = new BuildMode({ input, ctx: () => menuCtx(), send: (i) => sendIntent(i), device: () => promptDevice(), onPickPiece: () => { if (promptDevice() !== "keyboardMouse") menus?.open("build"); }, onBack: () => menus?.open("build"),
+const buildMode = new BuildMode({ input, ctx: () => menuCtx(), send: (i) => sendIntent(i), device: () => promptDevice(), onPickPiece: () => menus?.open("build"), onBack: () => menus?.open("build"),
   tools: { road: () => worldTools?.road(), sign: () => { if (!worldTools?.editNearestSign()) worldTools?.placeSign(); } },
   aim: () => { const p = session.player; const pt = p !== undefined ? world.get(p, Transform) : undefined; return p !== undefined && pt ? aim.resolve(world, p, pt) : undefined; },
   onActiveChange: (on) => { const c = browserInput.controls; if (c) c.layout = on ? buildTouchLayout : gameplayTouchLayout(); } });
@@ -323,7 +323,7 @@ function onUiFrame(): void {
   tutorialUi?.frame(input, !!menus?.nav.isOpen);
   if (promptDevice() === "gamepad") markNavFocus(); // ADR-142: pad users get a visible menu focus ring
   lootAutoOpen(); // ADR-160 (tracks the open bag even while a menu is up, so closing the panel does not reopen it)
-  if (menus?.nav.isOpen) { buildMode.stop(); return; }
+  if (menus?.nav.isOpen) { if (menus.nav.top !== "build") buildMode.stop(); return; }
   camRot?.poll(); // ADR-253: gameplay, build mode and the road tool all rotate (menus own the D-pad / brackets)
   if (buildMode.active) { worldTools?.road(0); buildMode.update(); buildHud.update(); return; }
   buildHud.update();

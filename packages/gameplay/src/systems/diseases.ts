@@ -7,12 +7,13 @@
 import { holdingTorch } from "./crafting.js";
 import { entityIndex, Transform, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
-import { DamageCause, Dead, Diseases, Health, IntentAction, Inventory, MAX_DISEASES, PlayerIntent, Survival, VitalsState, snapStamina } from "../components.js";
+import { DamageCause, Dead, Diseases, Exposure, Health, IntentAction, Inventory, MAX_DISEASES, PlayerIntent, Survival, VitalsState, snapStamina } from "../components.js";
 import { gameplayDefs, isAuthority, rangeSlack } from "../config.js";
 import { secondsToTicks, type GameDefs } from "../defs.js";
 import { ConsumeFail, ConsumeFailed, emit } from "../events.js";
 import { readSlots, slotItem, writeSlots } from "../inventory.js";
-import { contractDisease, cureDisease, ensureDiseases, hasDisease, activeDiseases, nearLitCampfire, wearsMask, CARE_CURE_SECONDS, FLU_AFTER_SECONDS, careStatus, coldContractedTick } from "../diseases.js";
+import { contractDisease, cureDisease, ensureDiseases, hasDisease, activeDiseases, nearLitCampfire, wearsMask, CARE_CURE_SECONDS, FLU_AFTER_SECONDS, careStatus, coldContractedTick, infectionTier } from "../diseases.js";
+import { wetIllnessTimeMul, wetnessStage } from "../exposure-stages.js";
 import { pendingReady } from "../ready.js";
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
@@ -92,7 +93,8 @@ export function diseaseSystem(world: World, dt: number): void {
       const sv = world.get(e, Survival)!; const hp = world.get(e, Health)!;
       let hunger = sv.hunger, thirst = sv.thirst, stamina = sv.stamina, hpV = hp.hp, hurt = false;
       for (const d of actives) {
-        if (d.hpDps > 0) { hpV = Math.max(0, hpV - d.hpDps * dt); hurt = true; }
+        const hpDps = d.key === "wound_infection" && infectionTier(world, e) !== "septic" ? 0 : d.hpDps;
+        if (hpDps > 0) { hpV = Math.max(0, hpV - hpDps * dt); hurt = true; }
         hunger = Math.max(0, hunger - vt.hungerDecayPerSec * (d.hungerMul - 1) * dt);
         thirst = Math.max(0, thirst - vt.thirstDecayPerSec * (d.thirstMul - 1) * dt);
         stamina = Math.max(0, stamina - d.staminaDrainPerSec * dt);
@@ -103,28 +105,28 @@ export function diseaseSystem(world: World, dt: number): void {
     }
     // prolonged cold / heat (thresholds from vitals.json; sustained exposure, not a single cold tick)
     const body = world.getField(e, Survival, "bodyTemp") ?? vt.bodyTempNormal;
-    if (body < vt.hypothermiaBelow) {
+    const wet = world.getField(e, Exposure, "wetness") ?? 0;
+    const illnessTimeMul = wetIllnessTimeMul(wet);
+    // ADR-278: continuous cold OR continuous wetness is an illness exposure; brief wetting dries before the long threshold.
+    if (body < vt.hypothermiaBelow || wetnessStage(wet) !== undefined) {
       world.setField(e, Diseases, "coldTicks", (world.getField(e, Diseases, "coldTicks") ?? 0) + 1);
-      world.setField(e, Diseases, "heatTicks", 0);
-      if ((world.getField(e, Diseases, "coldTicks") ?? 0) >= secondsToTicks(tun.exposure.coldSeconds, dt)) {
+      if ((world.getField(e, Diseases, "coldTicks") ?? 0) >= secondsToTicks(tun.exposure.coldSeconds * illnessTimeMul, dt)) {
         world.setField(e, Diseases, "coldTicks", 0);
         if (!hasDisease(world, e, "common_cold")) contractDisease(world, e, "common_cold", dt);
       }
-    } else if (body > vt.hyperthermiaAbove) {
+    } else world.setField(e, Diseases, "coldTicks", 0);
+    // Heatstroke retains its original independent timer even while wet.
+    if (body > vt.hyperthermiaAbove) {
       world.setField(e, Diseases, "heatTicks", (world.getField(e, Diseases, "heatTicks") ?? 0) + 1);
-      world.setField(e, Diseases, "coldTicks", 0);
       if ((world.getField(e, Diseases, "heatTicks") ?? 0) >= secondsToTicks(tun.exposure.heatSeconds, dt)) {
         world.setField(e, Diseases, "heatTicks", 0);
         if (!hasDisease(world, e, "heatstroke")) contractDisease(world, e, "heatstroke", dt);
       }
-    } else {
-      world.setField(e, Diseases, "coldTicks", 0);
-      world.setField(e, Diseases, "heatTicks", 0);
-    }
+    } else world.setField(e, Diseases, "heatTicks", 0);
     // Task 31: an untreated cold develops into flu after FLU_AFTER_SECONDS; the care clock restarts for the flu.
     if (hasDisease(world, e, "common_cold")) {
       const contracted = coldContractedTick(world, e);
-      if (contracted !== undefined && world.tick - contracted >= secondsToTicks(FLU_AFTER_SECONDS, dt)) {
+      if (contracted !== undefined && world.tick - contracted >= secondsToTicks(FLU_AFTER_SECONDS * illnessTimeMul, dt)) {
         cureDisease(world, e, "common_cold");
         world.setField(e, Diseases, "careTicks", 0);
         contractDisease(world, e, "influenza", dt);

@@ -197,6 +197,8 @@ export const Diseases = defineComponent("Diseases", {
   coldTicks: "u32", heatTicks: "u32", sprintTicks: "u32", restTicks: "u32", contactTicks: "u32",
   /** Task 31: care-cure progress in ticks — continuous dry + fed + hydrated + warm time while sick (cold/flu). */
   careTicks: "u32",
+  /** ADR-280: tick rate used by the infection expiry clock; legacy saves default to the standard 20Hz. */
+  infectionHz: { type: "u16", default: 20 },
 }, { networked: true, persistent: true });
 /** Task 15 animal skills: per-animal level/XP (farm animals; pets mirror Pet.level), unspent skill points, and a
  * bitmask of bought tree nodes (bit i = tree node i). Networked (panels read it on every peer) and persistent

@@ -54,7 +54,7 @@ describe("loading gate (Task 14)", () => {
     const { w, p } = setup();
     w.add(p, G.PlayerReady, { ready: 0 });
     w.set(p, G.Survival, { hunger: 50 }); // below the well-fed regen threshold, so the drain is visible
-    expect(G.contractDisease(w, p, "common_cold")).toBe(true);
+    expect(G.contractDisease(w, p, "influenza")).toBe(true);
     const hp0 = w.getField(p, G.Health, "hp")!;
     steps(w, 200);
     expect(w.getField(p, G.Health, "hp")).toBe(hp0);

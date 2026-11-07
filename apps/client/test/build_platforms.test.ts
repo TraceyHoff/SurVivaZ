@@ -69,7 +69,7 @@ describe("gamepad (Xbox)", () => {
     expect(s.bm.context!.actions.map((a) => a.hint)).toEqual(["X", "Y", "hold X"]);
     btn("pad.y"); expect(names(s.sent)).toEqual(["gameplay.upgrade"]);
     btn("pad.x", 600); expect(names(s.sent)).toEqual(["gameplay.upgrade", "gameplay.demolish"]); // hold = confirmed
-    s.pad.set("pad.lb", 1); s.tick(); btn("pad.y"); s.pad.set("pad.lb", 0); s.tick(); expect(s.picked()).toBe(1); expect(s.bm.active).toBe(false); // LB+Y: back to piece menu
+    s.pad.set("pad.lb", 1); s.tick(); btn("pad.y"); s.pad.set("pad.lb", 0); s.tick(); expect(s.picked()).toBe(1); expect(s.bm.active).toBe(true); // ADR-279: picker suspends placement without leaving Building
   });
   test("B cancels", () => {
     const s = setup("gamepad"); s.bm.start({ piece: s.foundation, tier: 0, variant: 0, paint: 0 });

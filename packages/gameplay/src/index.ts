@@ -112,3 +112,5 @@ export * from "./dye.js"; // Task 25: dye system (DyeCmd, SlotDye, brush rule)
 export * from "./ai/hire_behaviors.js"; // Task 22: hired-worker sensors + job behaviors
 export * from "./inventory_ops.js"; // ADR-204
 export * from "./stance.js"; // ADR-244
+
+export * from "./exposure-stages.js";

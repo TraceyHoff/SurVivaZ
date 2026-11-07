@@ -3,6 +3,7 @@
  * Order (simulation phase): vitals.consume -> vitals.tick -> vitals.death.
  * Deterministic and RNG-free, so the client predicts it for its own entity.
  */
+import { temperatureTier } from "../exposure-stages.js";
 import { stanceMode, STANCE } from "../stance.js";
 import { StanceMode } from "../components.js";
 import { contractDisease, cureDiseasesForItem, hasDisease } from "../diseases.js";
@@ -119,8 +120,7 @@ export function consumeSystem(world: World, dt = 1 / 20): void {
   }
 }
 
-/** Task 23: heat-wave damage starts when the temperature reaches 90F (32.2C) — the air itself hurts, before body
- * temperature has had time to catch up. Same rate as hypo/hyperthermia (exposureDps). */
+/** Legacy 90°F climate reference. ADR-277: air never deals direct damage; final body tier does. */
 export const HEAT_DAMAGE_ABOVE_C = 32.2;
 /** Iron Stomach trade-off: spoiled food costs this much hp instead of sickness. */
 export const IRON_STOMACH_HP = 4;
@@ -216,11 +216,10 @@ export function vitalsSystem(world: World, dt: number): void {
     const hurt = (amount: number, c: DamageCause): void => { if (amount > 0) { dmg += amount; cause = c; } };
     if (hunger === 0) hurt(vt.starvationDps * dt, DamageCause.Starvation);
     if (thirst === 0) hurt(vt.dehydrationDps * dt, DamageCause.Dehydration);
-    if (body < vt.hypothermiaBelow) hurt(vt.exposureDps * dt, DamageCause.Hypothermia);
-    if (body > vt.hyperthermiaAbove) hurt(vt.exposureDps * dt, DamageCause.Hyperthermia);
-    // Task 23/24: 90F+ air hurts directly — applied in exposureSystem (it owns ambient + shelter + fire heat).
-    // Fire heat is subtracted outdoors only (a campfire's warmth is a controllable heat source, not the weather);
-    // inside an enclosed room the room's smoothed fire heat counts toward overheating.
+    const tier = temperatureTier(body);
+    if (tier === "freezing") hurt(vt.exposureDps * dt, DamageCause.Hypothermia);
+    if (tier === "overheating") hurt(vt.exposureDps * dt, DamageCause.Hyperthermia);
+    // ADR-277: one exposure damage channel, only at the final body-temperature tier.
     let hp = hs.data.hp[h]!;
     if (dmg > 0) { hp -= dmg; vs.data.lastDamageCause[v] = cause; }
     else if (hp > 0) { // hp 0 = dying this tick (death system runs next); no regen back from 0

@@ -38,17 +38,17 @@ describe("Task 13: HUD disease chips", () => {
       .toEqual(["dysentery", "heatstroke"]);
   });
 
-  test("Task 31: a wet chip (droplet + %) shows while wet, and flu carries the thermometer sprite", () => {
+  test("ADR-278: Wet uses its dedicated status key, separate from the flu disease", () => {
     const w = world(); const p = G.spawnPlayer(w, { x: 0, y: 0, clientId: 1 });
     w.setField(p, G.Exposure, "wetness", 0.5);
     G.contractDisease(w, p, "influenza");
     h = mountHud(() => w, () => p, {});
     const chips = Array.from(document.querySelectorAll<HTMLElement>("#hud .dchip"));
-    expect(chips.map((c) => c.dataset["disease"]).sort()).toEqual(["influenza", "wet"]);
-    const wet = chips.find((c) => c.dataset["disease"] === "wet")!;
-    expect(wet.textContent).toContain("Wet 50%");
+    expect(chips.map((c) => c.dataset["disease"] ?? c.dataset["status"]).sort()).toEqual(["influenza", "wet"]);
+    const wet = chips.find((c) => c.dataset["status"] === "wet")!;
+    expect(wet.textContent).toContain("Wet");
     expect(wet.title).toContain("dry indoors or by a fire");
-    expect(wet.querySelector("img")?.getAttribute("src")).toMatch(/^data:image\/png;base64,/);
+    expect(wet.querySelector("img")?.dataset["uiIcon"]).toBe("wet");
     const flu = chips.find((c) => c.dataset["disease"] === "influenza")!;
     expect(flu.textContent).toContain("Flu");
     expect(flu.querySelector("img")?.getAttribute("src")).toMatch(/^data:image\/png;base64,/);

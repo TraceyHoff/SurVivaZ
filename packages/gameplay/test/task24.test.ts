@@ -125,8 +125,12 @@ describe("Task 24 heat damage vs fire heat", () => {
     Object.assign(w.env(Weather), { kind: G.WeatherKind.Heat, intensity: 1, endsAtTick: 0xffffffff });
     const camp = place(w, b, "campfire", 10.5, 10.5); light(w, camp);
     const hp0 = w.get(p, G.Health)!.hp;
-    steps(w, 30 * SEC); // room heat ~3.3C on top of the 32C clamped base -> felt ~35C, damage from ~2s in
-    expect(w.get(p, G.Health)!.hp).toBeLessThan(hp0 - 20);
+    steps(w, 30 * SEC); // Room warms, but body is not yet at the damaging tier.
+    expect(w.get(p, G.Health)!.hp).toBe(hp0);
+    expect(feltOf(w, p)).toBeGreaterThan(32);
+    w.setField(p, G.Survival, "bodyTemp", 39);
+    steps(w, SEC);
+    expect(w.get(p, G.Health)!.hp).toBeLessThan(hp0);
   });
   it("standing by a campfire outdoors on a hot (not heat-wave) day does not hurt (Task 23 cut, now covered)", () => {
     const w = makeWorld(); const p = G.spawnPlayer(w, { x: 0, y: 0 });
@@ -156,18 +160,18 @@ describe("Task 24 outdoor cold damage 0-10F", () => {
     expect(G.COLD_DAMAGE_HI_C).toBeCloseTo((10 - 32) * 5 / 9, 9);
     expect(G.COLD_DAMAGE_INSULATION_C).toBe(10); // fur coat (7) + fur hat (3); a leather set is 8.5
   });
-  it("a naked player outdoors at 9F loses health within seconds, before hypothermia sets in", () => {
+  it("ADR-277: 9F progresses body temperature without early direct damage", () => {
     const { w, p } = coldWorld();
     const hp0 = w.get(p, G.Health)!.hp;
-    steps(w, 5 * SEC); // 2 hp/s direct damage; body temp only drops ~1C in 5s (still above 35C)
-    expect(w.get(p, G.Health)!.hp).toBeLessThan(hp0 - 5);
+    steps(w, 5 * SEC); // Warnings, not damage, before the final tier.
+    expect(w.get(p, G.Health)!.hp).toBe(hp0);
     expect(w.get(p, G.Survival)!.bodyTemp).toBeGreaterThan(35); // not the slow hypothermia rule
   });
-  it("a blizzard midnight (1.9F) hurts too — the deep end of the band", () => {
+  it("ADR-277: blizzard midnight also has no early direct damage", () => {
     const { w, p } = coldWorld(G.WeatherKind.Blizzard);
     const hp0 = w.get(p, G.Health)!.hp;
     steps(w, 5 * SEC);
-    expect(w.get(p, G.Health)!.hp).toBeLessThan(hp0 - 5);
+    expect(w.get(p, G.Health)!.hp).toBe(hp0);
   });
   it("fur coat + fur hat (insulation exactly 10) blocks the damage", () => {
     const { w, p } = coldWorld();
@@ -176,13 +180,13 @@ describe("Task 24 outdoor cold damage 0-10F", () => {
     steps(w, 5 * SEC);
     expect(w.get(p, G.Health)!.hp).toBe(w.get(p, G.Health)!.max);
   });
-  it("a full leather set (insulation 8.5) is just short and does not block it", () => {
+  it("ADR-277: leather reduces drift without a binary insulation damage cutoff", () => {
     const { w, p } = coldWorld();
     for (const k of ["leather_cap", "leather_jacket", "leather_trousers", "leather_boots", "leather_gloves"]) wear(w, p, k);
     expect(w.getField(p, G.Exposure, "insulation")).toBeCloseTo(8.5, 6);
     const hp0 = w.get(p, G.Health)!.hp;
     steps(w, 5 * SEC);
-    expect(w.get(p, G.Health)!.hp).toBeLessThan(hp0 - 5);
+    expect(w.get(p, G.Health)!.hp).toBe(hp0);
   });
   it("an enclosed room protects in the same weather", () => {
     const w = makeWorld(); const b = spawnLearned(w, { x: 10.5, y: 10.5 }); room(w, b);

@@ -12,15 +12,14 @@
  */
 import { addModifier, dayNoise, entityIndex, ModOp, Season, seasonFromDays, timeOfDay, Transform, Weather, type Entity, type SeasonInfo, type TimeOfDayInfo, type World } from "@engine/core";
 import { ClimateRes, climateAt, EmitterIndexRes, type BaseClimate, type ClimateContext, type ClimateModel, type ClimateSample } from "@engine/world";
-import { Buffs, ChunkSurface, DamageCause, Exposure, Health, RoomHeat, Stat, VitalsState, Wetness } from "../components.js";
+import { Buffs, ChunkSurface, Exposure, RoomHeat, Stat, Wetness } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks, WeatherKind, isSnowing, type EnvironmentTuning, type VitalsTuning, type WeatherDef } from "../defs.js";
 import { DayPhase, DayPhaseChanged, emit, WeatherChanged } from "../events.js";
 import { EmitterKind, isRaining } from "../realism.js";
 import { shelterAt, type Shelter } from "../building/shelter.js";
 import { waterproofOf } from "../combat/arms.js";
-import { pendingReady } from "../ready.js";
-import { HEAT_DAMAGE_ABOVE_C } from "./vitals.js";
+import { dryWetness } from "../exposure-stages.js";
 import { inWater } from "./movement.js";
 import { isUnderground, TERRAIN } from "../terrain_depth.js";
 
@@ -258,25 +257,15 @@ export function approachRoomHeat(current: number, target: number, dt: number): n
   if (!(dt > 0)) return current;
   return current + (target - current) * (1 - Math.exp(-dt / FIRE_HEAT_TAU_S));
 }
-/**
- * Task 24: outdoor cold damage band, 0–10°F in Celsius. Below 0°F the slower body-temperature hypothermia
- * (vitals) and the cold disease still apply; inside this band the air itself hurts directly, at the same rate
- * as hypo/hyperthermia. Enclosed players are protected by the room clamp; a roof-only lean-to still counts
- * as outside (shelter exposure > 0).
- */
+/** Legacy 0–10°F climate references; ADR-277 removed direct air-temperature damage. */
 export const COLD_DAMAGE_LO_C = ((0 - 32) * 5) / 9;
 export const COLD_DAMAGE_HI_C = ((10 - 32) * 5) / 9;
-/**
- * Task 24: total worn insulation (deg C) that blocks the 0–10°F outdoor cold damage — the same total the
- * character sheet shows. About a fur coat (7) + a warm hat (3), or a layered wool outfit (sweater 5 +
- * padded trousers 3 + wool hat 2.5); a basic leather set (~9) is just short. Insulation below this still
- * warms the slow body-temperature drift — it only stops blocking the fast direct damage.
- */
+/** Legacy insulation reference. All insulation now affects felt drift, not a binary HP-damage gate. */
 export const COLD_DAMAGE_INSULATION_C = 10;
 
 /**
  * Task 31: wet clothing insulates less — at full wetness it keeps only half its insulation (felt-temperature
- * shift only; the >= 10 cold-damage block still uses the dry total, unchanged). Worn gear shares the wearer's
+ * shift only). Worn gear shares the wearer's
  * wetness, so it dries with them — no per-item wetness state.
  */
 export const WET_INSULATION_LOSS = 0.5;
@@ -326,12 +315,12 @@ export function exposureSystem(world: World, dt: number): void {
     // it is not raining. Drying afterwards follows the existing rules below (indoors / by a fire).
     if (inWater(world, x, y)) wet += WATER_WET_PER_SEC * dt;
     else if (wdef.wetnessPerSec > 0 && sh.exposure > 0) wet += wdef.wetnessPerSec * w.intensity * sh.exposure * (1 - waterproofOf(world, e)) * dt;
-    else wet -= env.dryPerSec * (heat > 0 ? env.heatDryMul : 1) * dt;
+    else wet = dryWetness(wet, dt, env.dryPerSec * (heat > 0 ? env.heatDryMul : 1));
     wet = Math.min(1, Math.max(0, wet));
     const ambient = isUnderground(world, x, y) ? TERRAIN.undergroundTempC : ambient0 ?? ambientTemperature(world, x, y); // ADR-263
     // Task 23: clothing insulation pulls felt toward the comfort band — it warms in the cold and shades in the heat
     // (a fur coat no longer cooks its wearer in a heat wave); higher tiers insulate more (items.json).
-    // Task 31: wet clothing insulates less (effectiveInsulation); the cold-damage block below still uses the dry total.
+    // Task 31: wet clothing insulates less (effectiveInsulation); all worn insulation contributes continuously.
     const ins = ex.data.insulation[s]!;
     const insShift = ambient > vt.comfortMax ? -effectiveInsulation(ins, wet) : ambient < vt.comfortMin ? effectiveInsulation(ins, wet) : 0;
     let felt = ambient + insShift + shelterTempShift(sh, ambient, vt, env.shelterTempBonus)
@@ -342,27 +331,7 @@ export function exposureSystem(world: World, dt: number): void {
     else felt += heat;
     ex.data.wetness[s] = wet; ex.data.feltTemp[s] = felt; ex.data.sheltered[s] = sh.covered ? 1 : 0; ex.markChanged(idx);
 
-    // Task 24: temperature damage lives here (not vitals) because it needs ambient + shelter + fire heat together.
-    // Authority-only and skipped while the player is still loading in (Task 14 freeze), like vitals drains.
-    // Direct Health write, mirroring vitalsSystem's environmental damage (silent: no Damaged event / HitReact).
-    if (isAuthority(world) && world.has(e, Health) && !pendingReady(world, e)) {
-      const hurtTemp = (amount: number, cause: DamageCause): void => {
-        const hp = world.getField(e, Health, "hp"); if (hp === undefined || amount <= 0) return;
-        world.setField(e, Health, "hp", Math.max(0, hp - amount));
-        if (world.has(e, VitalsState)) world.setField(e, VitalsState, "lastDamageCause", cause);
-      };
-      // Heat: felt at/above 90F hurts. Outdoors the instant fire heat is subtracted — a campfire's warmth is a
-      // controllable heat source, not the weather (Task 23). Inside an enclosed room the felt already carries
-      // the room's smoothed fire heat, which counts: a sealed room with a roaring fire can overheat.
-      if ((enclosed ? felt : felt - heat) >= HEAT_DAMAGE_ABOVE_C) hurtTemp(vt.exposureDps * dt, DamageCause.Hyperthermia);
-      // Cold: 0–10F outdoors hurts directly unless the player wears enough insulation (COLD_DAMAGE_INSULATION_C,
-      // the same total the character sheet shows). Below 0F the slower body-temp hypothermia (vitals) and the
-      // cold disease still apply; this is the fast outdoor threat inside the band. It stacks with hypothermia
-      // once body temperature falls below 35C, exactly like heat damage stacks with hyperthermia.
-      if (!enclosed && ins < COLD_DAMAGE_INSULATION_C && ambient >= COLD_DAMAGE_LO_C && ambient <= COLD_DAMAGE_HI_C) {
-        hurtTemp(vt.exposureDps * dt, DamageCause.Hypothermia);
-      }
-    }
+    // ADR-277: felt temperature drives body-temperature progression; no instant air damage.
 
     // render-facing wetness (only write on change)
     const lvl = Math.round(wet * 255);
