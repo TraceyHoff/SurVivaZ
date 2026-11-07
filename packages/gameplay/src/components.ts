@@ -323,8 +323,10 @@ export const VehicleCondition = defineComponent("VehicleCondition", { crafterId:
 export const VehicleState = defineComponent("VehicleState", { flags: "u8" }, { networked: true, persistent: true });
 export const VEHICLE_ENGINE_ON = 1, VEHICLE_HEADLIGHTS = 2;
 /** ADR-110 planted crop / sapling / bush (farming.ts). kind = farming.json plantables index + 1 (0 = tilled soil, nothing planted);
- *  growth 0..1, stage = render stage; waterUntilTick = watered boost end; fertilized 0/1. Matures into a resource node. */
-export const Crop = defineComponent("Crop", { kind: "u8", stage: "u8", growth: "f32", waterUntilTick: "u32", fertilized: "u8" }, { networked: true, persistent: true });
+ *  growth 0..1, stage = render stage; waterUntilTick = watered boost end; fertilized 0/1; fertilizerUntilTick = dose expiry (ADR-287). Matures into a resource node. */
+export const Crop = defineComponent("Crop", { kind: "u8", stage: "u8", growth: "f32", waterUntilTick: "u32", fertilized: "u8", fertilizerUntilTick: "u32" }, { networked: true, persistent: true });
+/** ADR-287: planted provenance survives maturity; never attached to wild flora. */
+export const GrownPlant = defineComponent("GrownPlant", { kind: "u8", waterUntilTick: "u32", fertilizerUntilTick: "u32" }, { networked: true, persistent: true });
 /** ADR-113 skill progression (skills/progression.ts): xp toward next level, unspent points, respec count, nodes = bitset of
  * skills.json node indices (append-only order). Networked (own tree UI / toast) + persistent (saves, rejoin). */
 export const Progression = defineComponent("Progression", { xp: "u32", level: "u16", points: "u16", respecs: "u8", nodes: { type: "u32", length: 8 }, /* ADR-209 per-tree (index = skills.json categories) */ tver: "u8", txp: { type: "u32", length: 8 }, tlevel: { type: "u16", length: 8 }, tpoints: { type: "u16", length: 8 } }, { networked: true, persistent: true });
@@ -483,4 +485,5 @@ export const GAMEPLAY_COMPONENTS = [
   RecentCrafts, RecentBuilds, // append-only (Task 33: most-recently crafted recipes / placed pieces, most recent first)
   WorkerOrder, WorkerTarget, // append-only (ADR-259: detailed hired-human orders)
   TerrainEdit, // append-only (ADR-263: shovel terrain edits)
+  GrownPlant, // append-only (ADR-287)
 ] as const;

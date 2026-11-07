@@ -61,7 +61,9 @@ export const DISEASES_INFECTION_CLOCK_MIGRATIONS: readonly AddedFields[] = [
   { component: "Diseases", fields: ["infectionHz"] },
   { component: "Diseases", fields: ["careTicks", "infectionHz"] },
 ];
-export const DEFAULT_MIGRATIONS: readonly AddedFields[] = [...CRAFTER_ID_MIGRATIONS, APPEARANCE_VERSION_MIGRATION, ...CONTAINER_96_MIGRATIONS, ...INVENTORY_24_MIGRATIONS, ...APPEARANCE_HANDS_MIGRATIONS, APPEARANCE_SKIN_SCHEME_MIGRATION, PROGRESSION_TREES_MIGRATION, LOOTBAG_DESPAWN_MIGRATION, WORLD_RULES_AI_HUMANS_MIGRATION, DISEASES_CARE_TICKS_MIGRATION, ...DISEASES_INFECTION_CLOCK_MIGRATIONS];
+/** ADR-287: finite fertilizer timer; legacy fertilized flags receive one dose in gameplay. */
+export const CROP_FERTILIZER_MIGRATION: AddedFields = { component: "Crop", fields: ["fertilizerUntilTick"] };
+export const DEFAULT_MIGRATIONS: readonly AddedFields[] = [...CRAFTER_ID_MIGRATIONS, APPEARANCE_VERSION_MIGRATION, ...CONTAINER_96_MIGRATIONS, ...INVENTORY_24_MIGRATIONS, ...APPEARANCE_HANDS_MIGRATIONS, APPEARANCE_SKIN_SCHEME_MIGRATION, PROGRESSION_TREES_MIGRATION, LOOTBAG_DESPAWN_MIGRATION, WORLD_RULES_AI_HUMANS_MIGRATION, DISEASES_CARE_TICKS_MIGRATION, ...DISEASES_INFECTION_CLOCK_MIGRATIONS, CROP_FERTILIZER_MIGRATION];
 
 const BYTES: Record<FieldType, number> = { f32: 4, f64: 8, i8: 1, u8: 1, i16: 2, u16: 2, i32: 4, u32: 4 };
 export const oldSchemaOf = (s: Schema, added: readonly string[], grown: Readonly<Record<string, number>> = {}, oldDefaults: Readonly<Record<string, number>> = {}): Schema =>

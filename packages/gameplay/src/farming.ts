@@ -8,7 +8,7 @@
 import { DEFAULT_TICK_HZ, SeasonId, timeOfDay, Transform, Weather, entityIndex, seasonAt, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
 import raw from "../data/farming.json";
-import { BuildPiece, Crop, Dead, Equipment, IntentAction, PlayerIntent, ResourceNode, WorkerTarget } from "./components.js";
+import { BuildPiece, Crop, Dead, Equipment, GrownPlant, IntentAction, PlayerIntent, ResourceNode, WorkerTarget } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
 import type { GameDefs } from "./defs.js";
 import { takeSip } from "./food.js";
@@ -27,7 +27,7 @@ export type PlantType = "crop" | "bush" | "tree";
 export interface Plantable { seed: string; key: string; type: PlantType; growSeconds: number; stages: number; becomes: string; tiles: number[];
   /** ADR-247: world-spawned resource nodes of the same species (where the seed is first found). */
   wild: string[] }
-export interface FarmingData { unwateredMul: number; wateredMul: number; wateredSeconds: number; fertilizerMul: number; waterRadius: number; fertilizeRadius: number; plantReach: number; minSpacing: number; tickSeconds: number; plantables: Plantable[] }
+export interface FarmingData { unwateredMul: number; wateredMul: number; wateredSeconds: number; fertilizerMul: number; fertilizerSeconds: number; waterRadius: number; fertilizeRadius: number; plantReach: number; minSpacing: number; tickSeconds: number; plantables: Plantable[] }
 export const FARMING: FarmingData = raw as unknown as FarmingData;
 export const FARM_TOOL = { hoe: "hoe", wateringCan: "watering_can", fertilizer: "fertilizer" } as const;
 /** Crop.kind -> plantable (kind 0 = tilled soil). */
@@ -104,7 +104,7 @@ export function plant(world: World, e: Entity, seed: string, x: number, y: numbe
   if (!(p.type === "crop" && inPlanter(world, x, y)) && !tileOk(world, x, y, p.tiles)) return FarmFail.BadTile;
   if (p.type === "crop") {
     const soil = around.find((o) => world.get(o, Crop)?.kind === 0); if (soil === undefined) return hasHoe(world, e) ? FarmFail.NeedsSoil : FarmFail.NeedsHoe;
-    if (!dryRun) world.set(soil, Crop, { kind, stage: 0, growth: 0, waterUntilTick: Math.max(world.get(soil, Crop)!.waterUntilTick, dryClock(world)) }); return FarmFail.None;
+    if (!dryRun) world.set(soil, Crop, { kind, stage: 0, growth: 0, fertilized: 0, fertilizerUntilTick: 0, waterUntilTick: Math.max(world.get(soil, Crop)!.waterUntilTick, dryClock(world)) }); return FarmFail.None;
   }
   if (around.some((o) => world.has(o, Crop) || world.has(o, ResourceNode))) return FarmFail.Occupied;
   if (!dryRun) spawnCrop(world, x, y, kind); return FarmFail.None;
@@ -135,9 +135,10 @@ export function waterFromContainer(world: World, e: Entity, slot: number): numbe
 }
 const hasHoe = (world: World, e: Entity): boolean => { const id = [...gameplayDefs(world).items.values()].find((d) => d.key === FARM_TOOL.hoe)?.id; return !!id && countItem(world, e, id) > 0; };
 const crops = (world: World, x: number, y: number, r: number): Entity[] => near(world, x, y, r).filter((o) => (world.get(o, Crop)?.kind ?? 0) > 0);
+const fertilizerTicks = (): number => Math.round(FARMING.fertilizerSeconds * DEFAULT_TICK_HZ);
 export function fertilize(world: World, x: number, y: number): boolean {
-  const c = near(world, x, y, FARMING.fertilizeRadius).find((o) => { const k = world.get(o, Crop); return !!k && k.kind > 0 && k.fertilized === 0; });
-  if (c === undefined) return false; world.set(c, Crop, { fertilized: 1 }); return true;
+  const c = near(world, x, y, FARMING.fertilizeRadius).find((o) => { const k = world.get(o, Crop); return !!k && k.kind > 0 && (!k.fertilized || k.fertilizerUntilTick <= world.tick); });
+  if (c === undefined) return false; world.set(c, Crop, { fertilized: 1, fertilizerUntilTick: world.tick + fertilizerTicks() }); return true;
 }
 
 /** IntentAction.Use on a hoe / seed / sapling / watering can / fertilizer (authority; the client is corrected by replication). */
@@ -244,6 +245,11 @@ export function cropGrowthSystem(world: World): void {
   const dormant = isCropDormant(world);
   for (const e of [...world.query([Crop, Transform])].sort((a, b) => a - b)) {
     const c = world.get(e, Crop)!; const p = plantableOf(c.kind); if (!p) continue;
+    // Migrate legacy permanent fertilizer once; expired doses can be reapplied.
+    let fertilizerUntilTick = c.fertilizerUntilTick;
+    if (c.fertilized && !fertilizerUntilTick) fertilizerUntilTick = world.tick + fertilizerTicks();
+    const fertilized = c.fertilized && fertilizerUntilTick > world.tick ? 1 : 0;
+    if (fertilized !== c.fertilized || fertilizerUntilTick !== c.fertilizerUntilTick) world.set(e, Crop, { fertilized, fertilizerUntilTick });
     const tf = world.get(e, Transform)!; const under = isUnderground(world, tf.x, tf.y); // ADR-263: no seasons underground
     // ADR-286 water / drought clock: rain (open sky only) or water beside the plant keeps it watered; a legacy 0 starts now.
     let wut = c.waterUntilTick;
@@ -256,11 +262,12 @@ export function cropGrowthSystem(world: World): void {
       emit(world, PlantDied, { x: tf.x, y: tf.y, kind: c.kind }); continue;
     }
     if (dormant && !under) continue;
-    const cw = { waterUntilTick: wut, fertilized: c.fertilized };
+    const cw = { waterUntilTick: wut, fertilized };
     const mul = under ? undergroundGrowthMul(world, cw, tf.x, tf.y) : growthMul(world, cw, tf.x, tf.y); if (!(mul > 0)) continue;
     const growth = Math.min(1, c.growth + (dt / p.growSeconds) * mul);
     if (growth >= 1) { const t = world.get(e, Transform)!; const targetId = world.getField(e, WorkerTarget, "id");
       world.destroy(e); const node = spawnResourceNode(world, p.becomes, t.x, t.y);
+      world.add(node, GrownPlant, { kind: c.kind, waterUntilTick: wut, fertilizerUntilTick: fertilized ? fertilizerUntilTick : 0 });
       if (targetId) world.add(node, WorkerTarget, { id: targetId }); // a selected plot stays selected through maturity
       continue; }
     const stage = Math.min(p.stages - 1, Math.floor(growth * p.stages));
@@ -306,4 +313,29 @@ export function farmPrompt(world: World, e: Entity): FarmPrompt | undefined {
   const need = plantInFront !== undefined ? plantNeed(world, plantInFront) : undefined;
   if (need === "water" || need === "dark") { const f = need === "water" ? FarmFail.NeedsWater : FarmFail.TooDark; return { action: "Water", fail: f, label: FARM_FAIL_TEXT[f]!, target: plantInFront! }; }
   return undefined;
+}
+
+/** ADR-287: one inspected planted plant, never wild flora or bare soil. Authority-owned replicated timers.
+ * Hydration is remaining watered time, NOT the drought-death grace period. Growth never extrapolates while paused. */
+export const CROP_INSPECT_RANGE = FARMING.fertilizeRadius; // same short 1.5-tile reach as applying fertilizer
+export interface CropInspection { target: Entity; name: string; growth: number; hydration: number; fertilizer: number }
+export function cropInspection(world: World, player: Entity): CropInspection | undefined {
+  if (!world.has(player, Transform)) return undefined;
+  const at = plantSpot(world, player); const me = world.get(player, Transform)!;
+  const target = near(world, at.x, at.y, 1).sort((a, b) => {
+    const ta = world.get(a, Transform)!; const tb = world.get(b, Transform)!;
+    return Math.hypot(ta.x - at.x, ta.y - at.y) - Math.hypot(tb.x - at.x, tb.y - at.y) || a - b;
+  }).find((e) => {
+    const t = world.get(e, Transform)!;
+    if (Math.hypot(t.x - me.x, t.y - me.y) > CROP_INSPECT_RANGE) return false;
+    const c = world.get(e, Crop); const grown = world.get(e, GrownPlant);
+    return !!plantableOf(c?.kind ?? grown?.kind ?? 0) && (!grown || (world.get(e, ResourceNode)?.amount ?? 0) > 0);
+  });
+  if (target === undefined) return undefined;
+  const c = world.get(target, Crop); const grown = world.get(target, GrownPlant);
+  const state = c ?? grown!; const p = plantableOf(state.kind)!;
+  const clamp = (n: number): number => Math.max(0, Math.min(1, n));
+  return { target, name: p.key.replace(/_/g, " "), growth: c ? clamp(c.growth) : 1,
+    hydration: clamp((state.waterUntilTick - world.tick) / (FARMING.wateredSeconds * DEFAULT_TICK_HZ)),
+    fertilizer: c && !c.fertilized ? 0 : clamp((state.fertilizerUntilTick - world.tick) / fertilizerTicks()) };
 }

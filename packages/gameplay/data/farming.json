@@ -1,9 +1,10 @@
 {
-  "$comment": "ADR-110 farming. Seeds/saplings (items) planted with Use become a Crop entity that grows through `stages` over growSeconds (1-hour day => most crops mature in 6-18 min, trees ~30-40 min) and then turns into the `becomes` resource node (crop_* nodes are oneShot: harvested once, may drop seeds). Crops (type crop) need tilled soil (Use a hoe). Watering (watering can, or rain) gives wateredMul for wateredSeconds; fertilizer gives fertilizerMul until maturity. tiles: allowed terrain ids (0 = unknown, always allowed). ADR-247: each plantable lists `wild` = the world-spawned resource nodes of the SAME species; a seed/sapling may only be yielded by those nodes, by its `becomes` node, or by its crop_<key> harvest (no cross-species or generic seed sources).",
+  "$comment": "ADR-110 farming. Seeds/saplings (items) planted with Use become a Crop entity that grows through `stages` over growSeconds (1-hour day => most crops mature in 6-18 min, trees ~30-40 min) and then turns into the `becomes` resource node (crop_* nodes are oneShot: harvested once, may drop seeds). Crops (type crop) need tilled soil (Use a hoe). Watering (watering can, or rain) gives wateredMul for wateredSeconds; fertilizer gives fertilizerMul for fertilizerSeconds (ADR-287; elapsed simulation time). tiles: allowed terrain ids (0 = unknown, always allowed). ADR-247: each plantable lists `wild` = the world-spawned resource nodes of the SAME species; a seed/sapling may only be yielded by those nodes, by its `becomes` node, or by its crop_<key> harvest (no cross-species or generic seed sources).",
   "unwateredMul": 0.5,
   "wateredMul": 1.0,
   "wateredSeconds": 600,
   "fertilizerMul": 1.5,
+  "fertilizerSeconds": 600,
   "waterRadius": 2.0,
   "fertilizeRadius": 1.5,
   "plantReach": 2.5,
