@@ -1,3 +1,4 @@
+import { friendSpawn } from "./friend-spawn.js";
 import { giveSandboxKit, sandboxPetKit, sandboxPetCorner, sandboxSpawn } from "./sandbox.js";
 import { handLootTarget, Viewing, TerrainRes, terrainFromTileMap } from "@engine/gameplay";
 import { applyStanceInput, stanceBlocksActions, GameplayEdgeBits } from "@engine/gameplay"; // ADR-244
@@ -86,7 +87,9 @@ export interface GameServerOptions {
   serverFullDetail?: string;
   /** Dev load-test flag (NET_DEV_BOTS=1): accept DevBotHello-tagged connections in multiplayer. Default false. */
   devBots?: boolean;
-  /** Throttle deltas for entities far from all of a client's owned entities (P2P mobile host bandwidth; ADR-102). */
+  /** ADR-295: only room-code hosts opt in; resolve their own client id at join time. */
+  joinNearClient?: () => number | undefined;
+  /** Throttle deltas for distant owned entities (P2P mobile host bandwidth; ADR-102). */
   distantThrottle?: { nearTiles: number; interval: number };
   /** Chat (net ChatServer over core ChannelRegistry): local radius in tiles (default 48), per-player token bucket (default core 5 burst, 0.05/tick). */
   /** ADR-121 world rules for a NEW world (roaming hordes on/off, grace days); a save keeps its own. */
@@ -217,8 +220,11 @@ export function createGameServer(o: GameServerOptions): GameServer {
     },
     onClientJoin: (s, w) => {
       const at0 = pickSpawnPoint(w, "join", s.clientId); // least crowded of the 4 (+ jitter)
-      const at = o.devSandbox ? sandboxSpawn(spawnPoints(w)[0] ?? at0, s.clientId) : at0;
+      const hostId = o.joinNearClient?.(), friend = hostId !== undefined && hostId !== s.clientId ? players.get(hostId)?.entity : undefined;
+      const near = friend !== undefined ? friendSpawn(w, friend) : undefined;
+      const at = near ?? (o.devSandbox ? sandboxSpawn(spawnPoints(w)[0] ?? at0, s.clientId) : at0);
       const e = spawnPlayer(w, { x: at.x, y: at.y, clientId: s.clientId });
+      if (near) w.set(e, Transform, { z: near.z }); // saved-account restore below still wins
       // Task 14: vitals/disease/pet-hunger/spoilage freeze until this client sends gameplay.ready (or is a bot, see markVirtual)
       if (!w.has(e, PlayerReady)) w.add(e, PlayerReady, { ready: 0 });
       if (o.devSandbox) log(`sandbox kit: ${giveSandboxKit(w, e).length} items`);

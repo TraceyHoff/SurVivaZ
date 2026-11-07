@@ -1,3 +1,5 @@
+import { Transform } from "@engine/core";
+import { TerrainRes } from "@engine/gameplay";
 /**
  * P2P loopback e2e: the browser host (createLocalServer, mode "multiplayer") serving guests over an in-memory
  * paired fake data channel (reliable + unreliable with loss/reorder). No real WebRTC.
@@ -193,4 +195,18 @@ it("hosting uses the chosen seed and joining keeps it", async () => {
   const r = await rig({ seed: 424242 });
   try { expect(r.host.local.game.world.seed).toBe(424242); await join(r, "Guest"); expect(r.host.local.game.world.seed).toBe(424242); }
   finally { await end(r); }
+});
+
+
+it("ADR-295 actual room-code guests arrive beside the host", async () => {
+  const r = await rig();
+  try {
+    const w = r.host.local.game.world, host = r.host.local.game.players.get(r.host.hostClientId!)!.entity;
+    w.setResource(TerrainRes, { tileAt: () => 3, heightAt: () => 0 });
+    w.set(host, Transform, { x: 500.5, y: 500.5, z: 0 });
+    const guest = await join(r, "NearFriend"); await tick(r, 300);
+    const e = r.host.local.game.players.get(guest.client!.clientId)!.entity, p = w.get(e, Transform)!;
+    const distance = Math.hypot(p.x - 500.5, p.y - 500.5);
+    expect(distance).toBeGreaterThanOrEqual(1.5); expect(distance).toBeLessThanOrEqual(3);
+  } finally { await end(r); }
 });

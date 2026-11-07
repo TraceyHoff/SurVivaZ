@@ -53,6 +53,8 @@ export interface LocalServerOptions {
   extraTransports?: ServerTransport[];
   /** Player cap incl. the host's own client; extra joins are rejected (ServerFull + serverFullDetail). */
   maxClients?: number; serverFullDetail?: string;
+  /** ADR-295: room-code host identity; absent for ordinary local/singleplayer servers. */
+  joinNearClient?: () => number | undefined;
   /** Distant-entity delta throttle forwarded to the NetServer (P2P host; ADR-102). */
   distantThrottle?: { nearTiles: number; interval: number };
 }
@@ -140,6 +142,7 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
     animalCapMul: animalCapMulFor(maxBots, o.lowEnd ?? lowEndQuery()),
     transport: serverTransport, ...(store ? { store } : {}), seed, mode, ...(o.devSandbox ? { devSandbox: true } : {}), ...(o.worldRules ? { worldRules: o.worldRules } : {}),
     ...(o.maxClients !== undefined ? { maxClients: o.maxClients } : {}), ...(o.serverFullDetail ? { serverFullDetail: o.serverFullDetail } : {}), ...(o.log ? { log: o.log } : {}), ...(o.catalog ? { catalog: o.catalog, randomAppearance: true } : {}),
+    ...(o.joinNearClient ? { joinNearClient: o.joinNearClient } : {}),
     ...(o.population === false ? { population: false } : {}), ...(o.distantThrottle ? { distantThrottle: o.distantThrottle } : {}),
     // Task 22: the in-process bot host runs whenever AI humans are on — singleplayer always, multiplayer only
     // when the resolved host rule allows it (explicit settings override saved AI policy).
