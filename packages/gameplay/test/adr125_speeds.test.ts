@@ -27,7 +27,7 @@ describe("ADR-125 player speed tuning", () => {
     const d = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(b.x - a.x, b.y - a.y);
     const a0 = { ...w.get(p, Transform)! }; G.applyMovementInput(w, p, dir, .05);
     expect(d(a0, w.get(p, Transform)!)).toBeCloseTo(.05 * k * walk * G.speedMultiplier(w, p, false), 4);
-    for (let i = 0; i < 20; i++) G.applyMovementInput(w, p, dir, .05);
+    for (let i = 0; i < 80; i++) G.applyMovementInput(w, p, dir, .05);
     const a1 = { ...w.get(p, Transform)! }; G.applyMovementInput(w, p, dir, .05);
     expect(d(a1, w.get(p, Transform)!)).toBeCloseTo(.05 * k * walk * G.speedMultiplier(w, p, true), 4);
   });

@@ -8,7 +8,7 @@ import { makeWorld, steps } from "./helpers.js";
 const lake = (tx: number): number => (tx >= 0 && tx < 20 ? 1 : 3);
 function world() { const w = makeWorld(); w.setResource(G.TerrainRes, { tileAt: (tx: number) => lake(tx), heightAt: () => 0 }); return w; }
 const dx = (w: ReturnType<typeof makeWorld>, x: number, actions: number, running = false): number => {
-  const p = G.spawnPlayer(w, { x, y: 5.5 }); if (running) { for (let i = 0; i < 20; i++) { G.applyMovementInput(w, p, actions, .05); w.set(p, Transform, { x, y: 5.5 }); } }
+  const p = G.spawnPlayer(w, { x, y: 5.5 }); if (running) { for (let i = 0; i < 80; i++) { G.applyMovementInput(w, p, actions, .05); w.set(p, Transform, { x, y: 5.5 }); } }
   const a = w.get(p, Transform)!.x; G.applyMovementInput(w, p, actions, 0.05); return w.get(p, Transform)!.x - a;
 };
 const R = G.GameplayActions.MoveDown | G.GameplayActions.MoveRight;

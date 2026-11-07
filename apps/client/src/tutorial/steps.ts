@@ -39,7 +39,7 @@ const stat = (k: string) => (): string => `#hud [data-stat=${k}]`;
 export const TUTORIAL_STEPS: readonly TutStep[] = [
   // ---- moving ----
   { id: "move", section: "Start", title: "Welcome to SurVivaZ!", text: "Walk around with {A:Move}. Short tips pop up as you find new things.", done: grew("moved", 3), target: touchOr("[data-touch=move]"), ghost: "joystick" },
-  { id: "sprint", section: "Move", title: "Run", text: { all: "Keep moving in one direction for a moment to start running. You can turn while running; stop moving to walk again. Running uses stamina ⚡." }, done: grew("sprint", 3), target: stat("stamina"), when: has("moved", 25) },
+  { id: "sprint", section: "Move", title: "Run", text: { all: "Keep moving in one direction for 4 seconds to start running. You can turn while running; stop moving to walk again. Running uses stamina ⚡." }, done: grew("sprint", 3), target: stat("stamina"), when: has("moved", 25) },
   { id: "look", section: "Move", title: "Look around", text: { keyboardMouse: "Zoom in or out with {A:Camera.Zoom}.", gamepad: "Aim with {A:Aim}. Zoom with {A:Camera.Zoom}.", touch: "Zoom in or out: {A:Camera.Zoom}." }, done: any(grew("zoom"), grew("aim", 20)), when: has("moved", 60) },
   // ---- gathering + bag ----
   { id: "gather", section: "Gather", title: "Pick things up", text: { all: "Walk up to a bush, stick or rock. A hand ✋ means you can take it with bare hands. Press {A:Interact} to gather.", gamepad: "Walk up to a bush, stick or rock. A hand ✋ means you can take it with bare hands. Hold {A:Interact} to gather." }, done: grew("gain"), target: (d) => d === "touch" ? "[data-touch=context]" : "#tool-hint", when: has("nearNode") },

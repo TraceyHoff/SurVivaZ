@@ -2,7 +2,7 @@
 import type { Entity, World } from "@engine/core";
 import { AutoSprint } from "../components.js";
 
-export const AUTO_SPRINT_SECONDS = 1;
+export const AUTO_SPRINT_SECONDS = 4;
 /** Compare against the initial heading, not the previous frame: wobble is OK, circling is not a straight run-up. */
 export const AUTO_SPRINT_HEADING_COS = Math.cos(Math.PI / 3);
 export function autoSprintReady(world: World, e: Entity, dx: number, dy: number, dt: number): boolean {
@@ -18,7 +18,7 @@ export function autoSprintReady(world: World, e: Entity, dx: number, dy: number,
   const x = dx / length, y = dy / length;
   const same = state.seconds > 0 && x * state.headingX + y * state.headingY >= AUTO_SPRINT_HEADING_COS - 1e-6;
   const seconds = Math.min(AUTO_SPRINT_SECONDS, (same ? state.seconds : 0) + Math.max(0, dt));
-  const ready = seconds >= AUTO_SPRINT_SECONDS - 1e-6;
+  const ready = seconds >= AUTO_SPRINT_SECONDS - 1e-5;
   world.set(e, AutoSprint, { seconds: ready ? AUTO_SPRINT_SECONDS : seconds, headingX: same ? state.headingX : x, headingY: same ? state.headingY : y });
   return ready;
 }

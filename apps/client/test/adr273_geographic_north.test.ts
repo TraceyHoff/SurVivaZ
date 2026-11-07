@@ -111,12 +111,12 @@ describe("ADR-273 north-up world map and seed preview", () => {
       const e = new Event(type); Object.assign(e, { pointerId: 1, clientX: x, clientY: y }); canvas.dispatchEvent(e);
     };
     event("pointerdown", 240, 100); event("pointerup", 240, 100); submit();
-    const centre = sent[0]!.args, picked = canvasToWorld(240, 100, W, H, centre, 8);
+    const centre = sent[0]!.args, picked = canvasToWorld(240, 100, W, H, centre, 16);
     near(sent[1]!.args, picked);
     event("pointerdown", 240, 180); event("pointermove", 280, 180); event("pointerup", 280, 180);
     Array.from(m.el.querySelectorAll("button")).find(b => b.textContent === "Mark here")!.click(); submit();
-    near(sent[2]!.args, { x: centre.x - 5 * Math.SQRT1_2, y: centre.y + 5 * Math.SQRT1_2 });
-    const k = 8 * Math.SQRT1_2; expect(ctx.transform).toHaveBeenCalledWith(k, k, -k, k, 0, 0);
+    near(sent[2]!.args, { x: centre.x - 2.5 * Math.SQRT1_2, y: centre.y + 2.5 * Math.SQRT1_2 });
+    const k = 16 * Math.SQRT1_2; expect(ctx.transform).toHaveBeenCalledWith(k, k, -k, k, 0, 0);
     m.destroy();
   });
 });

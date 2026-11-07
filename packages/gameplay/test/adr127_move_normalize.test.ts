@@ -12,7 +12,7 @@ const DIRS: Record<string, number> = {
 const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(b.x - a.x, b.y - a.y);
 function step(bits: number, analog?: { x: number; y: number }, sprint = false) {
   const w = makeWorld(); const p = G.spawnPlayer(w, { x: 20, y: 20 });
-  if (sprint) for (let i = 0; i < 20; i++) G.applyMovementInput(w, p, bits, .05, analog);
+  if (sprint) for (let i = 0; i < 80; i++) G.applyMovementInput(w, p, bits, .05, analog);
   const a = { ...w.get(p, Transform)! }; G.applyMovementInput(w, p, bits, .05, analog);
   return { d: dist(a, w.get(p, Transform)!) / .05, mul: G.speedMultiplier(w, p, sprint), w, p };
 }

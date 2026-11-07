@@ -3395,3 +3395,21 @@ The default `charArt=v1` has **no dedicated block animation**: both the state ch
 **Art gap.** The cue is explicit world-space combat UI, not invented/recoloured/reused action art. Default v1 still has no raised-arm/weapon/shield pose; Art & Assets should supply unique, appearance-compatible block frames for the full default doll set. Do not force the male-only v2 sample onto all appearances or borrow an attack/carry pose. Existing dedicated v2 block frames remain hooked up unchanged.
 
 **Validation.** ADR-291 tests connect authoritative guard input to visible cue presence, release, damage reduction, exhaustion/re-arm, other humans, dead/aim exclusion and projection. Existing ADR-244 device binding and stance suites cover keyboard/mouse, LT and touch hold/release, frontal/back/range damage and stance interactions. Local Playwright screenshots and state/damage assertions are recorded under `/workspace/proof-block-fix/`.
+
+## ADR-292: Undistorted north-up World Map (SurVivaZ)
+
+- **Cause:** the map already used ADR-273's geographic basis (north = world -x-y, east = +x-y), not an isometric height projection. The received square chunk footprint consequently has diagonal edges. On a portrait phone the 480×360 canvas was additionally stretched to the panel width but a fixed 360 CSS pixels high, distorting terrain, angles and the compass.
+- **Decision:** preserve the correct shared north-up projection, picking inverse, marker/player coordinates, pan and pinch basis. Preserve the canvas's 4:3 aspect ratio at every viewport width instead of stretching it. Open at 16 pixels/tile instead of 8 so the local terrain fills the preview rather than presenting the entire received chunk footprint as a diamond. Add an axis-aligned geographic grid, explicit NORTH ↑ label, and explain that dark areas are unexplored. The rose remains north-up, independent of camera rotation. Zooming out can still reveal diagonal *unexplored boundaries*; these are not a rotated compass or world, and must not be filled with invented terrain.
+- **Validation:** cardinal world vectors agree with compass headings; forward/inverse coordinates preserve marker picking; portrait CSS retains 4:3. Existing marker, pan, zoom and pinch tests remain in force.
+
+## ADR-293: Respect authoritative travel facing when idle (SurVivaZ)
+
+- **Cause:** the shared player/AI-human movement path already keeps Transform.facing when movement stops. The client view treated a zero facing as missing and substituted a cached move angle. Zero is a valid heading (+x), including after turning back from another direction, so that fallback could resurrect a stale direction.
+- **Decision:** render the authoritative/predicted Transform.facing without a truthiness fallback or stale heading cache. Walking continues to turn smoothly, stopping keeps that facing; combat/block facing and camera-relative art rotation are unchanged. No new facing art or cancelled ADR-253 art work.
+- **Validation:** player and AI input paths walk then stop across all eight headings and retain their transform, including the zero-radian heading.
+
+## ADR-294: Four-second auto-sprint run-up (SurVivaZ)
+
+- **Decision:** increase ADR-289's shared on-foot warmup from 1.0 to 4.0 seconds. Keep the 60° initial-heading cone, ready latch through subsequent turns, reset on stopping, stance/stamina/deep-water/Broken Leg restrictions and explicit-only vehicle boost. The Run tutorial now says 4 seconds.
+- **Precision:** allow 0.00001 seconds of accumulated float32 rounding when reaching the threshold, then store exactly 4. This avoids accidentally needing an 81st 20-Hz tick because 80 float32 additions of 0.05 can total 3.999997.
+- **Validation:** 79 ticks still walk and tick 80 runs; pre-ready sharp turns reset, 45° movement does not, turning after ready stays running, stopping clears readiness, vehicle boost remains explicit.

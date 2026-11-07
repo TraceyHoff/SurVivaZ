@@ -57,9 +57,9 @@ export function pinchStep(o: { centre: { x: number; y: number }; scale: number; 
 export function createWorldMap(src: WorldMapSource, doc: Document = document): { el: HTMLElement; destroy(): void } {
   const el = doc.createElement("div"); el.dataset["role"] = "world-map"; el.style.cssText = "display:flex;flex-direction:column;gap:8px";
   const canvas = doc.createElement("canvas"); canvas.dataset["role"] = "map-canvas"; canvas.width = 480; canvas.height = 360;
-  canvas.style.cssText = "width:100%;height:360px;touch-action:none;background:#1b1f1a;border:2px solid #74432C;border-radius:8px;cursor:crosshair";
+  canvas.style.cssText = "display:block;width:100%;height:auto;aspect-ratio:4/3;box-sizing:border-box;touch-action:none;background:#1b1f1a;border:2px solid #74432C;border-radius:8px;cursor:crosshair";
   canvas.setAttribute("aria-label", "World map — drag to pan, pinch to zoom, tap a spot to place a marker");
-  const state = { centre: { x: 0, y: 0 }, scale: 8, following: true, drag: null as null | { px: number; py: number; cx: number; cy: number }, placed: null as null | { x: number; y: number },
+  const state = { centre: { x: 0, y: 0 }, scale: 16, following: true, drag: null as null | { px: number; py: number; cx: number; cy: number }, placed: null as null | { x: number; y: number },
     pointers: new Map<number, { x: number; y: number }>(), pinch: null as null | { d: number; mx: number; my: number }, pinched: false };
   const mapIdle = createIdleTracker();
   const controls = doc.createElement("div"); controls.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-items:center";
@@ -70,7 +70,7 @@ export function createWorldMap(src: WorldMapSource, doc: Document = document): {
   btn("Mark here", () => { state.placed = { ...state.centre }; showForm(); }, { pad: "X", padLabel: "Mark here" });
   btn("Mark my location", () => { const w = src.world(), p = src.player(); if (!w || p === undefined) return; const t = w.get(p, Transform); if (!t) return; state.placed = { x: t.x, y: t.y }; showForm(); });
   btn("Zoom +", () => { state.scale = Math.min(32, state.scale * 1.5); draw(); }); btn("Zoom −", () => { state.scale = Math.max(2, state.scale / 1.5); draw(); });
-  const note = doc.createElement("p"); note.dataset["role"] = "map-note"; note.style.cssText = "margin:0;font-size:13px"; note.textContent = "Tap a spot on the map (or use Mark here / Mark my location) to place a marker. Markers are small pins; tap one in the list to remove it.";
+  const note = doc.createElement("p"); note.dataset["role"] = "map-note"; note.style.cssText = "margin:0;font-size:13px"; note.textContent = "North is up ↑. Dark areas are unexplored. Tap a spot on the map (or use Mark here / Mark my location) to place a marker. Markers are small pins; tap one in the list to remove it.";
   // Marker creation form (hidden until a spot is picked).
   const form = doc.createElement("div"); form.dataset["role"] = "marker-form"; form.hidden = true; form.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-items:center";
   const labelInput = doc.createElement("input"); labelInput.type = "text"; labelInput.maxLength = 24; labelInput.placeholder = "Marker name"; labelInput.setAttribute("aria-label", "Marker name");
@@ -164,6 +164,15 @@ export function createWorldMap(src: WorldMapSource, doc: Document = document): {
       ctx.fillStyle = TILE_COLORS[id % TILE_COLORS.length]!; ctx.fillRect(x - bleed, y - bleed, 1 + 2 * bleed, 1 + 2 * bleed);
     }
     ctx.restore();
+    // ADR-292: a fixed geographic grid makes the north-up axes unambiguous even when the
+    // received chunk footprint has diagonal edges. Unknown terrain is never invented.
+    ctx.strokeStyle = "rgba(255,250,240,.12)"; ctx.lineWidth = 1; ctx.beginPath();
+    const origin = worldToCanvas(0, 0, W, H, c, s), spacing = 8 * s;
+    for (let x = ((origin.px % spacing) + spacing) % spacing; x < W; x += spacing) { ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+    for (let y = ((origin.py % spacing) + spacing) % spacing; y < H; y += spacing) { ctx.moveTo(0, y); ctx.lineTo(W, y); }
+    ctx.stroke();
+    ctx.fillStyle = "rgba(27,31,26,.85)"; ctx.fillRect(8, 8, 100, 24);
+    ctx.fillStyle = "#FFFAF0"; ctx.font = "bold 13px system-ui,sans-serif"; ctx.fillText("NORTH ↑", 16, 25);
     // Crosshair at the centre (the gamepad placement point).
     ctx.strokeStyle = "rgba(255,250,240,.8)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(W / 2 - 8, H / 2); ctx.lineTo(W / 2 + 8, H / 2); ctx.moveTo(W / 2, H / 2 - 8); ctx.lineTo(W / 2, H / 2 + 8); ctx.stroke();
     // Markers (small but visible pins).
