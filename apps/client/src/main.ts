@@ -1,6 +1,7 @@
 import { markNavFocus } from "./back-history.js";
 import { HeapTrend, MEMORY_BUDGETS, memoryProfileFor } from "./memory-budget.js";
 import { debugCamera, mountLootLabels } from "./loot-labels.js";
+import { mountGuardOverlay } from "./guard-overlay.js";
 import { mountNameTags } from "./name-tags.js";
 import { mountPetStatus } from "./pet-status.js";
 import { waitForWorldReady } from "./ready.js";
@@ -721,6 +722,10 @@ const fxLayer = mountFx(root, { world: () => world, player: () => session.player
   audio: () => audio, ground: (x, y, z) => groundZ(session.client?.tiles.tiles, x, y, z), tile: (x, y) => session.client?.tiles.tiles.getTile(x, y) ?? 3,
   hidden: () => !!menus?.nav.isOpen, lowEnd: LOW_END, console: memoryProfileFor(navigator.userAgent, location.search, false) === "console" });
 { const qa = (window as { __qa?: Record<string, unknown> }).__qa; if (qa) qa["fx"] = fxLayer; }
+// ADR-291: readable held guard even on the default v1 art (no block frames).
+mountGuardOverlay(root, { world: () => world, alpha: () => renderAlpha,
+  camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined),
+  hidden: () => !!menus?.nav.isOpen, ground: (x, y, z) => groundZ(session.client?.tiles.tiles, x, y, z) });
 // ADR-196: build ghost validity outline + magnet snap-edge highlight (WebGL2 and Canvas2D)
 mountSnapOverlay(root, { preview: () => (buildMode.active ? buildMode.preview : undefined), camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined), hidden: () => !!menus?.nav.isOpen, groundZ: () => iso?.ghostZ });
 // ADR-161: floating loot-bag / dropped-item labels with the Interact prompt
