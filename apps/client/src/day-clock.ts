@@ -5,7 +5,7 @@
  * epochTick}. Same for dedicated servers, P2P hosts and the singleplayer Worker (all reach the sim through a
  * NetClient). The client's own world.tick is NOT used: it starts at 0 on join and differs per client.
  */
-import { DayClock, DEFAULT_TICK_HZ, Season, TimeOfDay, dayFractionAt, dayLengthHours, sunFractionFor, worldDaylightHours, type World } from "@engine/core";
+import { DayClock, DEFAULT_TICK_HZ, Season, TimeOfDay, dayFractionAt, sunFractionFor, sunScheduleAt, SUN_OFF, worldSunSchedule, type SunSchedule, type World } from "@engine/core";
 
 export interface ServerTickSource { serverTickEstimate: number }
 const clock = new DayClock(2); // persists across reconnects: a new Welcome blends, never snaps
@@ -35,14 +35,14 @@ export const dayCount = (): number => lastDays;
 export const dayFraction = (): number => lastT;
 export const dayHours = (): number => lastT * 24;
 
-/** ADR-283: hours of daylight for the drawn day (shared world schedule); `ovSeason` (?season=) pins that season's midpoint. */
-export function daylightHoursAt(net: World, days: number = lastDays, ovSeason?: number): number {
+/** ADR-283: sunrise / sunset for the drawn day (shared world schedule); `ovSeason` (?season=) pins that season's midpoint. */
+export function sunScheduleNow(net: World, days: number = lastDays, ovSeason?: number): SunSchedule {
   if (ovSeason !== undefined && Number.isFinite(ovSeason) && net.isRegistered(Season) && net.has(net.environment, Season)) {
-    const L = net.env(Season).lengthDays; return dayLengthHours((((ovSeason % 4) + 4) % 4) * L + L / 2, L);
+    const L = net.env(Season).lengthDays; return sunScheduleAt((((ovSeason % 4) + 4) % 4) * L + L / 2, L);
   }
-  try { return worldDaylightHours(net, days); } catch { return 12; }
+  try { return worldSunSchedule(net, days); } catch { return SUN_OFF; }
 }
 /** ADR-283: the sun fraction (sunrise 0.25 / sunset 0.75) for a wall-clock fraction on the drawn day: lighting, sky, audio, FX. */
 export function sunFraction(net: World, frac: number, days: number = lastDays, ovSeason?: number): number {
-  return sunFractionFor(frac, daylightHoursAt(net, days, ovSeason));
+  return sunFractionFor(frac, sunScheduleNow(net, days, ovSeason));
 }

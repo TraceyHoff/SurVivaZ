@@ -1,7 +1,7 @@
 import { TimeOfDay } from "./builtins.js";
 import type { World } from "./world.js";
 import { Season } from "./season.js";
-import { dayLengthHours, sunFractionFor } from "./daylight.js";
+import { SUN_OFF, sunFractionFor, sunScheduleAt, type SunSchedule } from "./daylight.js";
 
 export interface TimeOfDayInfo {
   /** Fraction of the day in [0, 1). */
@@ -18,20 +18,22 @@ export interface TimeOfDayInfo {
   sunT?: number;
   /** ADR-283: hours of daylight today (12 with seasons off). */
   daylightHours?: number;
+  /** ADR-285: today's wall-clock sunrise / sunset hours. */
+  sun?: SunSchedule;
 }
-/** ADR-283: today's daylight hours from the replicated Season (12 when seasons are off / absent). */
-export function worldDaylightHours(world: World, days: number): number {
-  if (!world.isAlive(world.environment) || !world.isRegistered(Season) || !world.has(world.environment, Season)) return 12;
-  const s = world.env(Season); return dayLengthHours(days + s.offsetDays, s.lengthDays);
+/** ADR-283/285: today's sunrise / sunset from the replicated Season (6:00 AM-6:00 PM when seasons are off / absent). */
+export function worldSunSchedule(world: World, days: number): SunSchedule {
+  if (!world.isAlive(world.environment) || !world.isRegistered(Season) || !world.has(world.environment, Season)) return SUN_OFF;
+  const s = world.env(Season); return sunScheduleAt(days + s.offsetDays, s.lengthDays);
 }
 /** Derived time of day at `tick` (default world.tick). dayLengthTicks 0 (uninitialised) reports t = 0, day 0. */
 export function timeOfDay(world: World, tick = world.tick): TimeOfDayInfo {
   const tod = world.env(TimeOfDay); const len = tod.dayLengthTicks;
-  if (len <= 0) return { t: 0, hours: 0, day: 0, tickOfDay: 0, dayLengthTicks: 0, sunT: 0, daylightHours: 12 };
+  if (len <= 0) return { t: 0, hours: 0, day: 0, tickOfDay: 0, dayLengthTicks: 0, sunT: 0, daylightHours: 12, sun: SUN_OFF };
   const elapsed = tick - tod.epochTick; const day = Math.floor(elapsed / len); const tickOfDay = elapsed - day * len;
   const t = tickOfDay / len;
-  const daylightHours = worldDaylightHours(world, day + t);
-  return { t, hours: t * 24, day, tickOfDay, dayLengthTicks: len, sunT: daylightHours === 12 ? t : sunFractionFor(t, daylightHours), daylightHours };
+  const sun = worldSunSchedule(world, day + t);
+  return { t, hours: t * 24, day, tickOfDay, dayLengthTicks: len, sunT: sun === SUN_OFF ? t : sunFractionFor(t, sun), daylightHours: sun.sunset - sun.sunrise, sun };
 }
 /** Jump to `hours` (0-24) of `day` (default: current day) at the current tick. */
 export function setTimeOfDay(world: World, hours: number, day = timeOfDay(world).day): void {

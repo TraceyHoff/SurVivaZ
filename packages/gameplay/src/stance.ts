@@ -5,7 +5,7 @@
  * follows its carrier, block stamina break, sleep heal, the all-asleep time skip). Movement / stamina / damage / noise
  * / zombie sight read the replicated Stance, so client prediction applies the same multipliers.
  */
-import { Transform, setTimeOfDay, sunFractionOf, timeOfDay, wallHoursForSun, type Entity, type World } from "@engine/core";
+import { Transform, setTimeOfDay, sunFractionOf, timeOfDay, wallHoursForSun, SUN_OFF, type Entity, type World } from "@engine/core";
 import raw from "../data/stance.json";
 import { Anim, AnimState, BuildPiece, Dead, Driver, Equipment, Health, LootBag, Stance, StanceMode, Survival } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
@@ -226,7 +226,7 @@ export function timeSkip(world: World): boolean {
   const tod = timeOfDay(world); if (tod.dayLengthTicks <= 0) return false;
   // ADR-283: the night window is in sun hours (stretches with the season); the clock still steps in wall hours.
   const h = tod.hours, sh = sunFractionOf(tod) * 24; const night = sh >= STANCE.timeSkipFromHour || sh < STANCE.timeSkipWakeHour; if (!night || !allAsleep(world)) return false;
-  const wake = wallHoursForSun(STANCE.timeSkipWakeHour, tod.daylightHours ?? 12);
+  const wake = wallHoursForSun(STANCE.timeSkipWakeHour, tod.sun ?? SUN_OFF);
   const step = ((STANCE.timeSkipMul - 1) / tod.dayLengthTicks) * 24; let next = h + step; let day = tod.day;
   if (h > 12 && next >= 24) { next -= 24; day += 1; }
   if (h < wake + 1e-9 && h <= 12 && next >= wake) next = wake;

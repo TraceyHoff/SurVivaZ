@@ -5,7 +5,7 @@ import { TERRAIN, terrainFlowSystem } from "./terrain.js";
 import { HUSBANDRY_EVERY, husbandrySystem, husbandryUseSystem } from "./skills/husbandry.js";
 import { installProgression, progressionMigrateSystem, xpTravelSystem } from "./skills/progression.js";
 import { installPets, petSystem } from "./pets.js";
-import { DEFAULT_TICK_HZ, pruneModifiers, Season, setTimeOfDay, wallHoursForSun, worldDaylightHours, StallDisplay, TimeOfDay, Weather, type World } from "@engine/core";
+import { DEFAULT_TICK_HZ, pruneModifiers, Season, setTimeOfDay, wallHoursForSun, worldSunSchedule, StallDisplay, TimeOfDay, Weather, type World } from "@engine/core";
 import { installSpatialIndex, setClimateModel, ClimateRes } from "@engine/world";
 import { Buffs, Equipment, GAMEPLAY_COMPONENTS, IntentAction, Inventory, NO_SLOT, PlayerIntent } from "./components.js";
 import { GameplayConfig, type GameplayRole } from "./config.js";
@@ -182,5 +182,5 @@ export function equipmentSyncSystem(world: World): void {
 
 /** ADR-283: wall-clock hours on day 0 for a sun fraction (startTimeOfDay): follows day 0's seasonal sunrise. */
 export function newWorldStartHours(world: World, sunFraction: number): number {
-  let h = sunFraction * 24; for (let i = 0; i < 2; i++) h = wallHoursForSun(sunFraction * 24, worldDaylightHours(world, h / 24)); return h;
+  let h = sunFraction * 24; for (let i = 0; i < 2; i++) h = wallHoursForSun(sunFraction * 24, worldSunSchedule(world, h / 24)); return h;
 }

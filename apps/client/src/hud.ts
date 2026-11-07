@@ -7,7 +7,7 @@
 import { uiSprites } from "./ui-atlas.js";
 import { mountUi } from "./ui-root.js";
 import { Weather, Transform, type Entity, type World } from "@engine/core";
-import { dayCount, dayHours, daylightHoursAt } from "./day-clock.js";
+import { dayCount, dayHours, sunScheduleNow } from "./day-clock.js";
 import { formatClock12 } from "./clock-format.js";
 import { sunFractionFor } from "@engine/core";
 import { activeDiseases, diseasePresentation, infectionTier, Diseases, Exposure, Health, RoomHeat, Survival, temperatureTier, damagingTemperatureTier, wetnessStage } from "@engine/gameplay";
@@ -130,7 +130,7 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
       setText("clock", clockText, `${formatClock12(h)}${ov.hours !== undefined ? "*" : ""}`); // ADR-284: 12-hour AM/PM world clock
       setText("weather", weatherText, `${WEATHER_LABEL[wk] ?? "?"}${ov.weather !== undefined ? "*" : ""}`);
       setAttr("clockTitle", clock, "title", ov.hours !== undefined || ov.weather !== undefined ? "* view override (?time= / ?weather=)" : "");
-      const sh = sunFractionFor(h / 24, daylightHoursAt(w, undefined, ov.season)) * 24; const night = sh < 6 || sh >= 19; // ADR-283: seasonal sunrise / sunset if (ui) { const u = ui.url(night ? "ic_moon" : "ic_sun"); if (u && clockIcon.dataset["k"] !== String(night)) { clockIcon.src = u; clockIcon.dataset["k"] = String(night); } }
+      const sh = sunFractionFor(h / 24, sunScheduleNow(w, undefined, ov.season)) * 24; const night = sh < 6 || sh >= 19; // ADR-283: seasonal sunrise / sunset if (ui) { const u = ui.url(night ? "ic_moon" : "ic_sun"); if (u && clockIcon.dataset["k"] !== String(night)) { clockIcon.src = u; clockIcon.dataset["k"] = String(night); } }
     } catch { setText("clock", clockText, ""); setText("weather", weatherText, ""); }
     try { // ADR-239 season + temperature
       const days = dayCount(), si = ov.season !== undefined ? Math.floor(((ov.season % 4) + 4) % 4) : seasonAtDays(w, days).index;

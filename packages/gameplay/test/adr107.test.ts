@@ -82,6 +82,6 @@ describe("ADR-107 swimming", () => {
 });
 describe("ADR-107 world start time", () => {
   it("new worlds start in early daylight just after dawn", () => {
-    const w = makeWorld(); const h = timeOfDay(w).hours; expect(h).toBeGreaterThan(6); expect(h).toBeLessThan(8);
+    const w = makeWorld(); const tod = timeOfDay(w); const sr = tod.sun?.sunrise ?? 6; expect(tod.hours).toBeGreaterThan(sr); expect(tod.hours).toBeLessThan(sr + 2.5); // ADR-285: just after *that day's* dawn
   });
 });
