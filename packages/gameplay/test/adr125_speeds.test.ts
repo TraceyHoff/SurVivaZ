@@ -25,10 +25,11 @@ describe("ADR-125 player speed tuning", () => {
     const w = makeWorld(); const p = G.spawnPlayer(w, { x: 20, y: 20 });
     const dir = G.GameplayActions.MoveUp; const k = 1; // ADR-127: normalized
     const d = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(b.x - a.x, b.y - a.y);
-    const a0 = { ...w.get(p, Transform)! }; G.applyMovementInput(w, p, dir, 1);
-    expect(d(a0, w.get(p, Transform)!)).toBeCloseTo(k * walk * G.speedMultiplier(w, p, false), 4);
-    const a1 = { ...w.get(p, Transform)! }; G.applyMovementInput(w, p, dir | G.GameplayActions.Sprint, 1);
-    expect(d(a1, w.get(p, Transform)!)).toBeCloseTo(k * walk * G.speedMultiplier(w, p, true), 4);
+    const a0 = { ...w.get(p, Transform)! }; G.applyMovementInput(w, p, dir, .05);
+    expect(d(a0, w.get(p, Transform)!)).toBeCloseTo(.05 * k * walk * G.speedMultiplier(w, p, false), 4);
+    for (let i = 0; i < 20; i++) G.applyMovementInput(w, p, dir, .05);
+    const a1 = { ...w.get(p, Transform)! }; G.applyMovementInput(w, p, dir, .05);
+    expect(d(a1, w.get(p, Transform)!)).toBeCloseTo(.05 * k * walk * G.speedMultiplier(w, p, true), 4);
   });
   it("walk anim playback scales with walk speed (no foot sliding)", () => {
     expect(G.walkAnimRate(makeWorld())).toBeCloseTo(mv.walkSpeed / mv.walkAnimRefSpeed, 6);

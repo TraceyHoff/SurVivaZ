@@ -114,3 +114,5 @@ export * from "./inventory_ops.js"; // ADR-204
 export * from "./stance.js"; // ADR-244
 
 export * from "./exposure-stages.js";
+
+export { AUTO_SPRINT_SECONDS, AUTO_SPRINT_HEADING_COS } from "./systems/auto-sprint.js";

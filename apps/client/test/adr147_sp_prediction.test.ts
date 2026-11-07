@@ -28,7 +28,7 @@ async function runSp(jitter: boolean): Promise<{ corrections: number; max: numbe
   const loop = createGameLoop(world);
   let tc = 0, ts = 0, corrections = 0, max = 0, x0 = 0, staminaMin = 100;
   for (let f = 0; f < 1100; f++) {
-    if (f === 100) { buttons = Act.MoveRight | Act.Sprint; x0 = world.get(session.player!, Transform)!.x; }
+    if (f === 100) { buttons = Act.MoveRight; x0 = world.get(session.player!, Transform)!.x; }
     if (f === 700) buttons = Act.MoveUp; if (f === 1000) buttons = 0;
     const fdt = jitter ? 16.7 + (rng() - 0.5) * 8 + (f % 97 === 0 ? 60 : 0) : 1000 / 60;
     tc += fdt;

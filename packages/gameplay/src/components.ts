@@ -83,7 +83,7 @@ export const CraftingStation = defineComponent("CraftingStation", { kind: "u8", 
 export const Crafter = defineComponent("Crafter", { recipe: "u16", startTick: "u32", totalTicks: "u16" }, { networked: true });
 
 export const enum IntentAction {
-  None = 0, Gather = 1, Craft = 2, Use = 3, CancelCraft = 4, Equip = 5,
+  None = 0, Gather = 1, Craft = 2, Use = 3, CancelCraft = 4, Equip = 5, SelectHotbar = 6,
   Place = 10, Upgrade = 11, Repair = 12, Demolish = 13, Paint = 14,
   ToggleDoor = 20, LockDoor = 21, OpenContainer = 22, CloseContainer = 23, Deposit = 24, Withdraw = 25, ToggleFire = 26,
   Attack = 30, Reload = 31, Wear = 32, Boil = 33,
@@ -439,6 +439,13 @@ export const RecentBuilds = defineComponent("RecentBuilds", {
  */
 export const PlayerReady = defineComponent("PlayerReady", { ready: "u8" }, { networked: true });
 
+/** ADR-289: owner-replicated so reconciliation restores the warmup before replaying inputs. Not persisted. */
+export const AutoSprint = defineComponent("AutoSprint", {
+  seconds: "f32", headingX: "f32", headingY: "f32",
+}, { networked: true });
+
+export const HotbarSelection = defineComponent("HotbarSelection", { slot: { type: "u8", default: NO_SLOT } }, { networked: true });
+
 export const GAMEPLAY_COMPONENTS = [
   Emitter, Buffs,
   Health, ResourceNode, Survival, VitalsState, Exposure, Dead,
@@ -486,4 +493,5 @@ export const GAMEPLAY_COMPONENTS = [
   WorkerOrder, WorkerTarget, // append-only (ADR-259: detailed hired-human orders)
   TerrainEdit, // append-only (ADR-263: shovel terrain edits)
   GrownPlant, // append-only (ADR-287)
+  AutoSprint, HotbarSelection, // append-only (ADR-289)
 ] as const;

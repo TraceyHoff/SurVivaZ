@@ -107,10 +107,11 @@ describe("touch", () => {
     vc.pointerMove(2, atk.x - 200, atk.y); tick(); expect(sys.down("Primary")).toBe(false); vc.pointerUp(2); tick();
     const ctxBtn = vc.geometry().find((g) => g.id === "context")!; let canceled = false; sys.on("Interact", (e) => { if (e.phase === "canceled") canceled = true; });
     vc.pointerDown(3, ctxBtn.x, ctxBtn.y); tick(); vc.pointerMove(3, ctxBtn.x, ctxBtn.y - 300); tick(); vc.pointerUp(3); tick(); expect(sys.pressed("Interact")).toBe(false); expect(canceled).toBe(true);
-    const hb = vc.geometry().find((g) => g.id === "hotbar")!; vc.pointerDown(4, hb.x, hb.y); vc.pointerMove(4, hb.x + 50, hb.y + 5); vc.pointerUp(4); tick(); expect(sys.pressed("Hotbar3")).toBe(true);
+    // Radials remain supported for custom layouts, but are no longer an on-screen gameplay control (ADR-289).
+    const radial = new VirtualControls({ ...DEFAULT_TOUCH_LAYOUTS.gameplay, elements: [{ id: "hotbar", kind: "radial", anchor: { x: .6, y: .4 }, radius: 24, items: ["1","2","3","4","5","6","7","8"], control: "touch.hotbar" }] }, touch); radial.resize({ w: 844, h: 390 });
+    const hb = radial.geometry()[0]!; radial.pointerDown(4, hb.x, hb.y); radial.pointerMove(4, hb.x + 50, hb.y + 5); radial.pointerUp(4); tick(); expect(sys.pressed("Hotbar3")).toBe(true);
     vc.leftHanded = true; expect(vc.geometry().find((g) => g.id === "attack")!.x).toBeLessThan(400); vc.resize({ w: 1688, h: 780 }); expect(vc.scale).toBe(1.15); vc.resize({ w: 600, h: 300 }); expect(vc.scale).toBe(1); // ADR-133 clamp
-    const sp = new VirtualControls(DEFAULT_TOUCH_LAYOUTS.gameplay, touch); sp.resize({ w: 844, h: 390 }); const sprint = sp.geometry().find((g) => g.id === "sprint")!;
-    sp.pointerDown(5, sprint.x, sprint.y); tick(); sp.pointerUp(5); tick(); expect(sys.down("Sprint")).toBe(true); // toggle on touch
+    expect(vc.geometry().some(g => g.id === "sprint" || g.id === "hotbar")).toBe(false);
   });
   it("gestures: tap, double-tap, long-press, drag, swipe, pinch, rotate; device pulses", () => {
     const got: Gesture["type"][] = []; const dev = new TouchDevice(); const g = new GestureRecognizer((x) => got.push(x.type), {}, dev);

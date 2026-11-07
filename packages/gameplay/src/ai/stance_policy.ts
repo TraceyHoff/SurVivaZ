@@ -29,6 +29,7 @@ export function stancePolicy(c: AgentContext<StanceSensors>, o: AgentOutput, beh
     return;
   }
   let want = false;
+  // o.sprint expresses urgency here, not an on-foot speed override (ADR-289).
   if (!NO_SNEAK.has(behavior) && !o.sprint) {
     const z = c.memory.nearest("zombie", c.self.x, c.self.y, 0.3);
     if (z) { const d = Math.hypot(z.x - c.self.x, z.y - c.self.y); want = d >= SNEAK_MIN && d <= (w.crouched ? SNEAK_OUT : SNEAK_IN); }

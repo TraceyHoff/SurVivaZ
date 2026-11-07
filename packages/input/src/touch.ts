@@ -2,7 +2,7 @@ import { deadzoneRadial } from "./processors.js";
 import type { MapDevice } from "./devices.js";
 
 /** Data-only virtual control layout (Renderer/Art draw it from geometry()). Units: dp in a reference resolution. */
-export interface Anchor { x: number; y: number } // normalized 0..1 inside the safe area
+export interface Anchor { x: number; y: number; portrait?: { x: number; y: number } } // normalized 0..1 inside the safe area
 export type VirtualElement =
   | { id: string; kind: "joystick"; mode: "fixed" | "floating"; anchor: Anchor; radius: number; deadzone?: number; /** floating activation zone (normalized rect) */ zone?: { x: number; y: number; w: number; h: number }; control: string }
   | { id: string; kind: "button"; anchor: Anchor; radius: number; control: string; /** extra dp before a drag cancels the press */ slop?: number; label?: string; glyph?: string }
@@ -34,10 +34,11 @@ export class VirtualControls {
   get scale(): number { const s = this.screen; return Math.max(1, Math.min(1.15, Math.min(s.w / this.layout.reference.w, s.h / this.layout.reference.h))); }
   private place(el: VirtualElement): { x: number; y: number; r: number } {
     const s = this.screen, i = s.insets ?? { top: 0, right: 0, bottom: 0, left: 0 };
-    const ax = this.leftHanded ? 1 - el.anchor.x : el.anchor.x; const w = s.w - i.left - i.right, h = s.h - i.top - i.bottom;
-    // ADR-142: fractional anchors put edge buttons (Run at x=0.05) partly off a 390 px-wide phone; keep every control fully on screen
+    const anchor = s.w < s.h ? el.anchor.portrait ?? el.anchor : el.anchor;
+    const ax = this.leftHanded ? 1 - anchor.x : anchor.x; const w = s.w - i.left - i.right, h = s.h - i.top - i.bottom;
+    // ADR-142: fractional anchors put edge buttons (e.g. Crouch at x=0.05) partly off a 390 px-wide phone; keep every control fully on screen
     const r = el.radius * this.scale, m = el.kind === "joystick" ? 0 : r + TOUCH_EDGE_MARGIN, cl = (v: number, lo: number, hi: number) => (lo > hi ? (lo + hi) / 2 : Math.min(hi, Math.max(lo, v)));
-    return { x: cl(i.left + ax * w, i.left + m, s.w - i.right - m), y: cl(i.top + el.anchor.y * h, i.top + m, s.h - i.bottom - m), r };
+    return { x: cl(i.left + ax * w, i.left + m, s.w - i.right - m), y: cl(i.top + anchor.y * h, i.top + m, s.h - i.bottom - m), r };
   }
   geometry(): ElementGeometry[] {
     return this.layout.elements.map((el) => {

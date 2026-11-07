@@ -8,8 +8,8 @@ import { iconImg, iconUrl, isIconFile } from "./game-icons.js";
 
 /** Icon + short caption per control (ADR-133): every visible control says what it does. */
 export const TOUCH_LABELS: Record<string, { icon: string; text: string }> = {
-  attack: { icon: "ic_sword.png", text: "Hit" }, context: { icon: "ic_hand.png", text: "Use" }, sprint: { icon: "»", text: "Run" }, reload: { icon: "↻", text: "Reload" },
-  hotbar: { icon: "◎", text: "Slot" }, confirm: { icon: "✓", text: "Place" }, cancel: { icon: "✕", text: "Cancel" }, rotate: { icon: "⟳", text: "Rotate" },
+  attack: { icon: "ic_sword.png", text: "Hit" }, context: { icon: "ic_hand.png", text: "Use" }, boost: { icon: "»", text: "Boost" }, reload: { icon: "↻", text: "Reload" },
+  confirm: { icon: "✓", text: "Place" }, cancel: { icon: "✕", text: "Cancel" }, rotate: { icon: "⟳", text: "Rotate" },
   engine: { icon: "ic_key.png", text: "Engine" }, lights: { icon: "ic_bulb.png", text: "Lights" }, // ADR-170: only in the driving layout
   secondary: { icon: "ic_shield.png", text: "Block" }, crouch: { icon: "⤓", text: "Crouch" }, carry: { icon: "⇪", text: "Carry" }, sleep: { icon: "☾", text: "Sleep" }, // ADR-244
 };

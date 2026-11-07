@@ -13,7 +13,7 @@
  * so freshness is preserved (systems/spoilage.ts also re-bases when temperature changes the multiplier).
  */
 import { decayAt, entityIndex, type ComponentDef, type Entity, type World } from "@engine/core";
-import { Container, Inventory, PACK_SLOTS, type InvSchema } from "./components.js";
+import { Container, Inventory, PACK_SLOTS, HOTBAR_OFFSET, HotbarSelection, type InvSchema } from "./components.js";
 import { gameplayDefs } from "./config.js";
 import { skillMul } from "./skills/tree.js";
 import type { GameDefs, ItemCount } from "./defs.js";
@@ -257,4 +257,11 @@ export function moveSlotTuples(world: World, from: Entity, to: Entity, moves: re
     if (slotsAdd(b, item, m.count, defs, rebaseCreated(created, world.tick, fm, tm), dur, cr) !== m.count) return false;
   }
   writeSlots(world, from, a, defs); writeSlots(world, to, b, defs); return true;
+}
+
+/** ADR-289: selection survives consuming the final item and is independent of drawn equipment. */
+export function setHotbarSelection(world: World, e: Entity, slot: number): void {
+  if (slot < HOTBAR_OFFSET || slot >= HOTBAR_OFFSET + 8) return;
+  if (!world.has(e, HotbarSelection)) world.add(e, HotbarSelection);
+  world.setField(e, HotbarSelection, "slot", slot);
 }

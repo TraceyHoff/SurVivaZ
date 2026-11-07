@@ -1,3 +1,4 @@
+import { SelectHotbarCmd } from "../input.js";
 import { wetDrySeconds } from "../exposure-stages.js";
 import { ContainerToSlotCmd, MoveSlotCmd, SplitStackCmd } from "../inventory_ops.js";
 import { DropItemCmd, encodePetName, nearestPet, petName, PetResult, PetCommandCmd, PetGuardCmd, PetOfferCmd, PetRenameCmd } from "../pets.js";
@@ -82,6 +83,7 @@ export function useIntent(slot: number): MenuIntent { return intent(UseCmd, { sl
 /** Task 13: boil the filled raw-water container in `slot` at a lit campfire (server validates the fire). */
 export function boilIntent(slot: number): MenuIntent { return intent(BoilCmd, { slot }); }
 /** ADR-135: main-hand equip (same command the hotbar keys send) and wear/unwear toggle for gear slots. */
+export const selectHotbarIntent = (slot: number): MenuIntent => intent(SelectHotbarCmd, { slot });
 export const equipIntent = (slot: number): MenuIntent => intent(EquipCmd, { slot });
 /** ADR-204: split `count` off a stack (where 0 = own inventory, 1 = open container) / move a slot (swap) e.g. onto the hotbar. */
 export const splitStackIntent = (slot: number, count: number, where = 0): MenuIntent => intent(SplitStackCmd, { where, slot, count });

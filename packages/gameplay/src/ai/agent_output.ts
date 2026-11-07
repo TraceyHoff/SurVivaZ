@@ -36,7 +36,7 @@ export function actionIntent(action: string): BotIntent | undefined {
 export const agentOutputIntents = (out: AgentOutput): BotIntent[] => out.actions.map(actionIntent).filter((x): x is BotIntent => x !== undefined);
 
 /**
- * One InputFrame for an AgentOutput via intentToFrame: move (+sprint) with the output's aim, then each action's bits and
+ * One InputFrame for an AgentOutput via intentToFrame: move (+vehicle boost) with the output's aim, then each action's bits and
  * commands merged in. Target 0 gathers (Primary bit, no command): the bot hits whatever is in front, like a human.
  */
 export function agentOutputFrame(out: AgentOutput, tick: number, reg: CommandRegistry): InputFrame {

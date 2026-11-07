@@ -33,7 +33,7 @@ function walk(w: World, e: Entity, dx: number, dy: number, n: number, trace?: { 
 describe("ADR-212 walker collision", () => {
   it("foundations are walked on at deck-top height with a smooth step-up and step-down", () => {
     const { w, me } = base(); tp(w, me, -1.5, 0.5);
-    const tr: { x: number; y: number; z: number }[] = []; walk(w, me, 1, 0, 40, tr);
+    const tr: { x: number; y: number; z: number }[] = []; walk(w, me, 1, 0, 30, tr); // ADR-289: auto-run would carry 40 ticks beyond the deck
     expect(at(w, me).x).toBeGreaterThan(1.5); // walked onto the deck (foundations are not obstacles)
     expect(at(w, me).z).toBeCloseTo(d.movement.deckStandHeight, 5);
     for (let i = 1; i < tr.length; i++) { const dz = tr[i]!.z - tr[i - 1]!.z; expect(dz).toBeGreaterThanOrEqual(-1e-9); expect(dz).toBeLessThanOrEqual(d.movement.stepRate * DT + 1e-6); }

@@ -32,6 +32,7 @@ export function intentToFrame(intent: BotIntent, tick: number, reg: CommandRegis
       f.moveX = clamp1(intent.dx / len); f.moveY = clamp1(intent.dy / len);
       if (intent.dx > 0.38 * len) f.actions |= GameplayActions.MoveRight; else if (intent.dx < -0.38 * len) f.actions |= GameplayActions.MoveLeft;
       if (intent.dy > 0.38 * len) f.actions |= GameplayActions.MoveDown; else if (intent.dy < -0.38 * len) f.actions |= GameplayActions.MoveUp;
+      // Sprint remains a vehicle-boost request only; on-foot movement uses the shared warmup.
       if (intent.sprint) f.actions |= GameplayActions.Sprint;
       if (!aim) { f.aimX = f.moveX; f.aimY = f.moveY; }
       break;

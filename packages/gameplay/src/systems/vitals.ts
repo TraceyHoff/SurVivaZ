@@ -13,7 +13,7 @@ import { Anim, AnimState, BodyTemp, NO_SLOT, Buffs, DamageCause, Dead, Exposure,
 import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks } from "../defs.js";
 import { ConsumeFail, ConsumeFailed, Died, emit, ItemConsumed, WaterDrunk, Vital, VitalDepleted } from "../events.js";
-import { readSlots, slotFreshness, slotItem, takeFromSlot } from "../inventory.js";
+import { setHotbarSelection, readSlots, slotFreshness, slotItem, takeFromSlot } from "../inventory.js";
 import { hasPerk, skillMul } from "../skills/tree.js";
 import { fillContainer, spoilStageIndex, spoilStages, takeSip } from "../food.js";
 import { inWater } from "./movement.js";
@@ -56,7 +56,7 @@ export function consumeSystem(world: World, dt = 1 / 20): void {
   for (const e of world.query([PlayerIntent, Survival, Health], [Dead])) {
     const s = intent.slot(entityIndex(e));
     if (intent.data.action[s] !== IntentAction.Use) continue;
-    const slot = intent.data.slot[s]!;
+    const slot = intent.data.slot[s]!; setHotbarSelection(world, e, slot);
     const tf = world.get(e, Transform); const wet = !!tf && nearWater(world, tf.x, tf.y);
     const anim = (a: Anim): void => { if (isAuthority(world) || world.has(e, AnimState)) setAnimOf(world, e, a); };
     if (slot === NO_SLOT) {

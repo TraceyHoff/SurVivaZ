@@ -7,8 +7,9 @@ import { makeWorld, steps } from "./helpers.js";
 // lake: water for 0 <= x < 20 (any y), grass elsewhere. Shallow band = x 0..1 and 18..19; deep = x 2..17.
 const lake = (tx: number): number => (tx >= 0 && tx < 20 ? 1 : 3);
 function world() { const w = makeWorld(); w.setResource(G.TerrainRes, { tileAt: (tx: number) => lake(tx), heightAt: () => 0 }); return w; }
-const dx = (w: ReturnType<typeof makeWorld>, x: number, actions: number): number => {
-  const p = G.spawnPlayer(w, { x, y: 5.5 }); const a = w.get(p, Transform)!.x; G.applyMovementInput(w, p, actions, 0.05); return w.get(p, Transform)!.x - a;
+const dx = (w: ReturnType<typeof makeWorld>, x: number, actions: number, running = false): number => {
+  const p = G.spawnPlayer(w, { x, y: 5.5 }); if (running) { for (let i = 0; i < 20; i++) { G.applyMovementInput(w, p, actions, .05); w.set(p, Transform, { x, y: 5.5 }); } }
+  const a = w.get(p, Transform)!.x; G.applyMovementInput(w, p, actions, 0.05); return w.get(p, Transform)!.x - a;
 };
 const R = G.GameplayActions.MoveDown | G.GameplayActions.MoveRight;
 
@@ -26,8 +27,8 @@ describe("ADR-181 shallow vs deep water", () => {
     expect(dx(w, 0.5, R) / land).toBeCloseTo(0.7, 2);
     expect(dx(w, 10.5, R) / land).toBeCloseTo(G.defaultDefs().movement.swimSpeedMul, 2);
     expect(G.defaultDefs().movement.swimSpeedMul).toBeLessThan(0.4);
-    expect(dx(w, 10.5, R | G.GameplayActions.Sprint)).toBeCloseTo(dx(w, 10.5, R), 5);
-    expect(dx(w, 0.5, R | G.GameplayActions.Sprint)).toBeGreaterThan(dx(w, 0.5, R) * 1.2);
+    expect(dx(w, 10.5, R, true)).toBeCloseTo(dx(w, 10.5, R), 5);
+    expect(dx(w, 0.5, R, true)).toBeGreaterThan(dx(w, 0.5, R) * 1.2);
   });
   it("shallow is walkable for non-swimmers (AI, vehicles); deep blocks them", () => {
     const w = world();

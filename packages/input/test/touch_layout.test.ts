@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { VirtualControls, TouchDevice, DEFAULT_TOUCH_LAYOUTS } from "../src/index.js";
 
 /** ADR-133: compact, non-overlapping touch cluster at common phone landscape sizes. */
-const PHONES: [number, number, number][] = [[844, 390, 47], [915, 412, 0], [780, 360, 0], [740, 360, 0], [667, 375, 0], [896, 414, 44], [932, 430, 59], [1024, 480, 0]];
+const PHONES: [number, number, number][] = [[844, 390, 47], [915, 412, 0], [780, 360, 0], [740, 360, 0], [667, 375, 0], [896, 414, 44], [932, 430, 59], [1024, 480, 0], [375, 667, 0], [390, 844, 0], [320, 568, 0]];
 const MENU = new Set(["inventory", "crafting", "map", "chat", "social", "build", "back"]); // replaced by the DOM menu bar
 
 for (const name of ["gameplay", "building"] as const) describe(`touch layout ${name}`, () => {
@@ -22,7 +22,7 @@ for (const name of ["gameplay", "building"] as const) describe(`touch layout ${n
 describe("touch layout audit (ADR-133)", () => {
   it("gameplay keeps only controls with a consumer; no large aim pad", () => {
     const ids = DEFAULT_TOUCH_LAYOUTS.gameplay.elements.filter((e) => !MENU.has(e.id)).map((e) => e.id).sort();
-    expect(ids).toEqual(["attack", "carry", "context", "crouch", "hotbar", "move", "reload", "secondary", "sleep", "sprint"]); // ADR-244 adds block / crouch + contextual carry / sleep
+    expect(ids).toEqual(["attack", "carry", "context", "crouch", "move", "reload", "secondary", "sleep"]); // ADR-244 adds block / crouch + contextual carry / sleep
     expect(DEFAULT_TOUCH_LAYOUTS.building.elements.filter((e) => !MENU.has(e.id)).map((e) => e.id).sort()).toEqual(["cancel", "confirm", "move", "rotate"]);
     for (const e of DEFAULT_TOUCH_LAYOUTS.gameplay.elements) if (e.kind !== "joystick") expect(e.radius, e.id).toBeLessThanOrEqual(28);
   });

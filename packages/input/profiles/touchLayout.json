@@ -29,7 +29,8 @@
     "kind": "button",
     "anchor": {
      "x": 0.92,
-     "y": 0.8
+     "y": 0.8,
+     "portrait": { "x": 0.9, "y": 0.69 }
     },
     "radius": 28,
     "control": "touch.btn.attack",
@@ -40,54 +41,24 @@
     "kind": "button",
     "anchor": {
      "x": 0.83,
-     "y": 0.86
+     "y": 0.86,
+     "portrait": { "x": 0.72, "y": 0.76 }
     },
     "radius": 24,
     "control": "touch.btn.context",
     "glyph": "touch.button.context"
    },
    {
-    "id": "hotbar",
-    "kind": "radial",
-    "anchor": {
-     "x": 0.84,
-     "y": 0.62
-    },
-    "radius": 24,
-    "innerRadius": 8,
-    "items": [
-     "1",
-     "2",
-     "3",
-     "4",
-     "5",
-     "6",
-     "7",
-     "8"
-    ],
-    "control": "touch.hotbar"
-   },
-   {
     "id": "reload",
     "kind": "button",
     "anchor": {
      "x": 0.94,
-     "y": 0.58
+     "y": 0.58,
+     "portrait": { "x": 0.9, "y": 0.56 }
     },
     "radius": 22,
     "control": "touch.btn.reload",
     "glyph": "touch.button.reload"
-   },
-   {
-    "id": "sprint",
-    "kind": "button",
-    "anchor": {
-     "x": 0.05,
-     "y": 0.42
-    },
-    "radius": 22,
-    "control": "touch.btn.sprint",
-    "glyph": "touch.button.sprint"
    },
    {
     "id": "inventory",
@@ -171,7 +142,8 @@
     "kind": "button",
     "anchor": {
      "x": 0.735,
-     "y": 0.72
+     "y": 0.72,
+     "portrait": { "x": 0.54, "y": 0.69 }
     },
     "radius": 24,
     "control": "touch.btn.secondary",
@@ -193,7 +165,8 @@
     "kind": "button",
     "anchor": {
      "x": 0.76,
-     "y": 0.5
+     "y": 0.5,
+     "portrait": { "x": 0.54, "y": 0.53 }
     },
     "radius": 22,
     "control": "touch.btn.carry",
@@ -204,7 +177,8 @@
     "kind": "button",
     "anchor": {
      "x": 0.665,
-     "y": 0.56
+     "y": 0.56,
+     "portrait": { "x": 0.72, "y": 0.43 }
     },
     "radius": 22,
     "control": "touch.btn.sleep",
@@ -242,7 +216,8 @@
     "kind": "button",
     "anchor": {
      "x": 0.92,
-     "y": 0.8
+     "y": 0.8,
+     "portrait": { "x": 0.9, "y": 0.69 }
     },
     "radius": 28,
     "control": "touch.btn.confirm",
@@ -253,7 +228,8 @@
     "kind": "button",
     "anchor": {
      "x": 0.83,
-     "y": 0.86
+     "y": 0.86,
+     "portrait": { "x": 0.72, "y": 0.76 }
     },
     "radius": 24,
     "control": "touch.btn.cancel",
@@ -264,7 +240,8 @@
     "kind": "button",
     "anchor": {
      "x": 0.84,
-     "y": 0.62
+     "y": 0.62,
+     "portrait": { "x": 0.72, "y": 0.6 }
     },
     "radius": 24,
     "control": "touch.btn.rotate",

@@ -1,3 +1,4 @@
+import { autoSprintReady } from "./auto-sprint.js";
 import { applyDamage } from "../combat/combat.js";
 import { ladderBetween, terrainMoveBlocked } from "../building/terrain-ladder.js";
 /**
@@ -218,10 +219,15 @@ export function applyTerrainFall(world: World, e: Entity, x: number, y: number, 
 /** Applies one tick of movement input (server authority + client prediction). Writes PlayerIntent.moving/sprint. */
 export function applyMovementInput(world: World, e: Entity, actions: number, dt: number, analog?: { x?: number | undefined; y?: number | undefined }): void {
   const t = world.get(e, Transform); if (!t) return;
-  if (world.has(e, Driver)) return; // riders move with their vehicle (gameplay.vehicles)
+  if (world.has(e, Driver)) {
+    autoSprintReady(world, e, 0, 0, dt);
+    if (world.has(e, PlayerIntent)) world.set(e, PlayerIntent, { moving: 0, sprint: 0 });
+    return;
+  } // riders move with their vehicle (gameplay.vehicles)
   const dead = world.has(e, Dead);
   const { dx, dy } = dead ? { dx: 0, dy: 0 } : moveVector(actions, analog);
-  const moving = dx || dy ? 1 : 0; const sprint = moving && actions & A.Sprint && stanceAllowsSprint(world, e) && !(t.z < 0.5 && inDeepWater(world, t.x, t.y)) ? 1 : 0; // ADR-181: no sprint while swimming
+  const moving = dx || dy ? 1 : 0; const ready = autoSprintReady(world, e, dx, dy, dt);
+  const sprint = ready && (world.getField(e, Survival, "stamina") ?? 0) > 0 && stanceAllowsSprint(world, e) && !(t.z < 0.5 && inDeepWater(world, t.x, t.y)) ? 1 : 0; // ADR-181: no sprint while swimming
   // ADR-147: PlayerIntent is not networked, so a client replica has none and its predicted vitals never drained sprint
   // stamina (the replica's stamina lagged the server by the snapshot delay, sprint ended a tick apart: a rubber-band).
   // The predicting client keeps a local PlayerIntent on its own entity so movement + vitals replay like the server.

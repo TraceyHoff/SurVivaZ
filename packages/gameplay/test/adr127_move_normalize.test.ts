@@ -10,10 +10,11 @@ const DIRS: Record<string, number> = {
   upLeft: A.MoveUp | A.MoveLeft, upRight: A.MoveUp | A.MoveRight, downLeft: A.MoveDown | A.MoveLeft, downRight: A.MoveDown | A.MoveRight,
 };
 const dist = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(b.x - a.x, b.y - a.y);
-function step(bits: number, analog?: { x: number; y: number }, dt = 1) {
+function step(bits: number, analog?: { x: number; y: number }, sprint = false) {
   const w = makeWorld(); const p = G.spawnPlayer(w, { x: 20, y: 20 });
-  const a = { ...w.get(p, Transform)! }; G.applyMovementInput(w, p, bits, dt, analog);
-  return { d: dist(a, w.get(p, Transform)!), mul: G.speedMultiplier(w, p, (bits & A.Sprint) !== 0), w, p };
+  if (sprint) for (let i = 0; i < 20; i++) G.applyMovementInput(w, p, bits, .05, analog);
+  const a = { ...w.get(p, Transform)! }; G.applyMovementInput(w, p, bits, .05, analog);
+  return { d: dist(a, w.get(p, Transform)!) / .05, mul: G.speedMultiplier(w, p, sprint), w, p };
 }
 describe("ADR-127 normalized movement", () => {
   const walk = G.defaultDefs().movement.walkSpeed;
@@ -25,7 +26,7 @@ describe("ADR-127 normalized movement", () => {
     it(`${name}: unit vector, moves walkSpeed (and walkSpeed x sprintMul sprinting)`, () => {
       const v = G.moveDirection(bits); expect(Math.hypot(v.dx, v.dy)).toBeCloseTo(1, 9);
       const r = step(bits); expect(r.d).toBeCloseTo(walk * r.mul, 4);
-      const s = step(bits | A.Sprint); expect(s.d).toBeCloseTo(walk * s.mul, 4);
+      const s = step(bits, undefined, true); expect(s.d).toBeCloseTo(walk * s.mul, 4);
     });
   }
   it("screen mapping: up = -x-y, right = +x-y, down+right = +x", () => {

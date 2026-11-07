@@ -297,7 +297,7 @@ export function hireBehaviors(): GameBehavior[] {
         { name: "hostile", curve: step01, input: (c) => (c.world.defend ? 1 : 0) }],
       run: (c, o) => { instantChores(c, o); const h = c.world.hire; if (!h) return false; const d = c.world.defend;
         if (!d) { if (Math.hypot(h.ax - c.self.x, h.ay - c.self.y) > 3) goTo(c, o, h.ax, h.ay); else stop(o); return false; }
-        const dist = toward(o, c.self.x, c.self.y, d.x, d.y, 1); o.sprint = dist > 4 && c.self.stamina > 0.4;
+        const dist = toward(o, c.self.x, c.self.y, d.x, d.y, 1); o.sprint = dist > 4 && c.self.stamina > 0.4; // urgency/stance hint only; shared movement owns on-foot auto-sprint (ADR-289)
         if (dist < 1.4) { stop(o); if (cooled(c, "hitAt", 10)) { o.actions.push(`attack:${d.id}`); c.bb.set("hitAt", c.self.tick); } } } },
     { name: "work_farm", inertia: 0.5, traits: { industriousness: 0.8 }, considerations: [
         { name: "job", curve: step01, input: hiredJob(WorkerJob.Farm) },

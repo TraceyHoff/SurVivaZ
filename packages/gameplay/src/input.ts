@@ -4,6 +4,7 @@
  * input phase. Gameplay queues commands per entity and turns ONE per tick into PlayerIntent (so a burst of commands
  * is processed in order over consecutive ticks, identically on server and predicting client).
  */
+import { autoSprintReady } from "./systems/auto-sprint.js";
 import { ROAD_COMMANDS } from "./roads.js";
 import { TERRAIN_COMMANDS } from "./terrain.js";
 import { slotItem } from "./inventory.js";
@@ -39,6 +40,8 @@ export const GatherCmd = defineCommand("gameplay.gather", T);
 export const CraftCmd = defineCommand("gameplay.craft", { recipe: "u16" });
 export const CancelCraftCmd = defineCommand("gameplay.cancelCraft", {});
 export const UseCmd = defineCommand("gameplay.use", { slot: "u8" });
+export const SelectHotbarCmd = defineCommand("gameplay.selectHotbar", { slot: "u8" });
+export const HOTBAR_COMMANDS: readonly [CommandDef, IntentAction][] = [[SelectHotbarCmd, IntentAction.SelectHotbar]];
 export const EquipCmd = defineCommand("gameplay.equip", { slot: "u8" });
 /** x,y in tiles (piece center / pointer), level = z, rot 0..3 (cell/edge) or 0..freeRotSteps-1 (free). */
 export const PlaceCmd = defineCommand("gameplay.place", { piece: "u16", x: "f32", y: "f32", level: "u8", rot: "u8", tier: "u8", variant: "u8" });
@@ -84,7 +87,7 @@ export const COMMAND_ENTITY_FIELDS: Readonly<Record<string, readonly string[]>> 
 };
 /** Suggested per-command rate limits (per second) for net's limiter; gameplay still enforces cooldowns. */
 export const COMMAND_RATES: Readonly<Record<string, number>> = {
-  ...Object.fromEntries([...GAMEPLAY_COMMANDS, ...ARMS_COMMANDS].map(([d]) => [d.name, d === PlaceCmd ? 8 : 20])), ...ECONOMY_COMMAND_RATES, ...INVENTORY_OP_RATES,
+  ...Object.fromEntries([...GAMEPLAY_COMMANDS, ...ARMS_COMMANDS].map(([d]) => [d.name, d === PlaceCmd ? 8 : 20])), ...ECONOMY_COMMAND_RATES, ...INVENTORY_OP_RATES, [SelectHotbarCmd.name]: 20,
   ...Object.fromEntries(MAP_MARKER_COMMANDS.map((d) => [d.name, 10])),
   ...Object.fromEntries(DISEASE_COMMANDS.map(([d]) => [d.name, 10])),
   ...Object.fromEntries(WORKER_COMMANDS.map((d) => [d.name, 10])),
@@ -117,6 +120,7 @@ export function registerGameplayCommands(reg: CommandRegistry = new CommandRegis
   for (const d of WORKER_COMMANDS) reg.register(d); // append-only (Task 22): AI-human hire / job / dismiss
   for (const d of DYE_COMMANDS) reg.register(d); // append-only (Task 25): dye hair / worn / held (brush + dye)
   for (const d of TERRAIN_COMMANDS) reg.register(d); // append-only (ADR-263 / Task 36): shovel raise / lower
+  for (const [d] of HOTBAR_COMMANDS) reg.register(d); // ADR-289: append-only, idempotent HUD selection
   return reg;
 }
 
@@ -146,17 +150,18 @@ export function applyGameplayInput(world: World, e: Entity, frame: InputFrame | 
   if (!world.has(e, PlayerIntent)) return;
   const actions = frame?.actions ?? 0;
   if (world.has(e, Driver)) { // riders steer their vehicle with the same move axes; Sprint = boost (ADR-096)
+    autoSprintReady(world, e, 0, 0, 0);
     const b = driveFromBits(actions); const analog = analogMoving(frame);
     setDriveInput(world, e, analog ? frame!.moveX! : b.x, analog ? frame!.moveY! : b.y, (actions & GameplayActions.Sprint) !== 0);
     world.set(e, PlayerIntent, { moving: 0, sprint: 0, charge: 0 });
-  } else world.set(e, PlayerIntent, { moving: actions & MOVE || analogMoving(frame) ? 1 : 0, sprint: actions & GameplayActions.Sprint ? 1 : 0, charge: actions & GameplayHoldBits.Charge ? 1 : 0 });
+  } else world.set(e, PlayerIntent, { moving: actions & MOVE || analogMoving(frame) ? 1 : 0, sprint: 0, charge: actions & GameplayHoldBits.Charge ? 1 : 0 });
   for (const c of frame?.commands ?? []) queueCommand(world, e, reg, c);
   if (!frame) return;
   for (const c of edgeCommands(frame.edges ?? 0, world, e)) { try { queueCommand(world, e, reg, reg.make(c.def, c.values)); } catch { /* not in this registry */ } }
   runInputHooks(world, e, frame, reg);
 }
 export function queueCommand(world: World, e: Entity, reg: CommandRegistry, c: Command): boolean {
-  const def = reg.def(c.type); const entry = def && (GAMEPLAY_COMMANDS.find(([d]) => d.name === def.name) ?? ARMS_COMMANDS.find(([d]) => d.name === def.name) ?? DISEASE_COMMANDS.find(([d]) => d.name === def.name));
+  const def = reg.def(c.type); const entry = def && (GAMEPLAY_COMMANDS.find(([d]) => d.name === def.name) ?? ARMS_COMMANDS.find(([d]) => d.name === def.name) ?? DISEASE_COMMANDS.find(([d]) => d.name === def.name) ?? HOTBAR_COMMANDS.find(([d]) => d.name === def.name));
   if (!entry) return false;
   let qs = world.getResource(CommandQueues); if (!qs) world.setResource(CommandQueues, (qs = new Map()));
   let q = qs.get(e); if (!q) qs.set(e, (q = []));

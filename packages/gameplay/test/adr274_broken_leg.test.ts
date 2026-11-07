@@ -68,7 +68,8 @@ describe("ADR-274 faster humans, broken legs and splints", () => {
     const { w, p } = setup(); fall(w, p, .1); expect(expiry(w, p)).toBe(w.tick + 1800);
   });
   it.each([false, true])("halves actual ground walk/sprint movement (sprint=%s)", sprint => {
-    const { w, p } = setup(0); const actions = G.GameplayActions.MoveUp | (sprint ? G.GameplayActions.Sprint : 0);
+    const { w, p } = setup(0); const actions = G.GameplayActions.MoveUp;
+    if (sprint) for (let i = 0; i < 20; i++) G.applyMovementInput(w, p, actions, .05);
     const start = w.get(p, Transform)!;
     G.applyMovementInput(w, p, actions, .1); const healthy = w.get(p, Transform)!;
     w.set(p, Transform, start); G.contractDisease(w, p, "broken_leg"); G.applyMovementInput(w, p, actions, .1);

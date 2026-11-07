@@ -37,6 +37,7 @@ export const GAMEPLAY_REPLICATION: readonly Replication[] = [
   r(C.MapMarker, "markers"), // world-map markers: visibility-filtered (private = owner only, party / clan = live members)
   r(C.Diseases, "all"), // Task 13: HUD chips + transmission + move penalty read it on every peer
   r(C.Worker, "all"), r(C.WorkerOrder, "all"), r(C.WorkerTarget, "all"), // ADR-259
+  r(C.AutoSprint, "owner"), r(C.HotbarSelection, "owner"), // ADR-289: shared movement prediction state
   r(C.AnimalSkills, "all"), // Task 15: animal skill panels read points/nodes on every peer
 ];
 export function replicationOf(def: ComponentDef): Replication | undefined { return GAMEPLAY_REPLICATION.find((x) => x.def === def); }

@@ -15,7 +15,7 @@ describe("ADR-133 touch overlay", () => {
     expect(el("attack").textContent).toBe("Hit"); expect(el("attack").querySelector("img")?.getAttribute("src")).toBe(iconUrl("ic_sword.png")); expect(el("reload").style.display).toBe("none");
     geo = [{ id: "confirm", kind: "button" as const, x: 50, y: 50, r: 28, pressed: false, visible: true }]; o.draw();
     expect(el("attack").style.display).toBe("none"); expect(el("confirm").getAttribute("aria-label")).toBe("Place");
-    for (const id of ["attack", "context", "sprint", "reload", "hotbar", "confirm", "cancel", "rotate"]) expect(TOUCH_LABELS[id]?.text, id).toBeTruthy();
+    for (const id of ["attack", "context", "boost", "reload", "confirm", "cancel", "rotate"]) expect(TOUCH_LABELS[id]?.text, id).toBeTruthy();
     syncTouchHidden(hidden, { reload: true }); expect(hidden.has("reload")).toBe(false); o.destroy();
   });
   it("long-press / selection menus are blocked except in text fields", () => {

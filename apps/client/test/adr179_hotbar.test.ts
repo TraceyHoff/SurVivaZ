@@ -45,3 +45,30 @@ describe("ADR-179 hotbar DOM", () => {
     h.update(false); expect(h.el.hidden).toBe(true); h.destroy();
   });
 });
+
+describe("ADR-289 direct hotbar taps", () => {
+  it("single tap selects, double tap activates once, slow/different taps only select; no canvas fall-through", () => {
+    let now = 0; const equip = vi.fn(), activate = vi.fn(), canvas = vi.fn();
+    const h = mountHotbar({ view: () => view, equip, activate, now: () => now, device: () => "touch" }); h.update(true);
+    document.body.addEventListener("pointerdown", canvas);
+    const tap = (slot: number) => { const b = h.el.querySelector(`[data-slot="${slot}"]`)!; b.dispatchEvent(new Event("pointerdown", { bubbles: true })); (b as HTMLElement).click(); };
+    tap(18); expect(equip).toHaveBeenLastCalledWith(18); expect(activate).not.toHaveBeenCalled();
+    now = 120; tap(18); expect(activate).toHaveBeenCalledTimes(1); expect(activate).toHaveBeenCalledWith(18);
+    now = 500; tap(18); now = 1000; tap(18); expect(activate).toHaveBeenCalledTimes(1);
+    now = 1100; tap(16); expect(equip).toHaveBeenLastCalledWith(16); expect(activate).toHaveBeenCalledTimes(1);
+    expect(canvas).not.toHaveBeenCalled(); document.body.removeEventListener("pointerdown", canvas); h.destroy();
+  });
+  it("rebuilds between taps do not lose the double tap; hidden bar clears pending taps", () => {
+    let now = 0, v = view; const activate = vi.fn(); const h = mountHotbar({ view: () => v, equip: vi.fn(), activate, now: () => now, device: () => "touch" }); h.update(true);
+    (h.el.querySelector('[data-slot="18"]') as HTMLElement).click(); v = [{ ...view[1]!, equipped: true }]; h.update(true); now = 100;
+    (h.el.querySelector('[data-slot="18"]') as HTMLElement).click(); expect(activate).toHaveBeenCalledTimes(1);
+    now = 500; (h.el.querySelector('[data-slot="18"]') as HTMLElement).click(); h.update(false); h.update(true); now = 600;
+    (h.el.querySelector('[data-slot="18"]') as HTMLElement).click(); expect(activate).toHaveBeenCalledTimes(1); h.destroy();
+  });
+  it("selected empty slots and equipped tools have a high-contrast yellow inset ring without changing geometry", () => {
+    let selected = 23; const h = mountHotbar({ view: () => view, equip: vi.fn(), selectedSlot: () => selected, device: () => "touch" }); h.update(true);
+    expect(h.el.querySelector('[data-slot="23"]')?.getAttribute("data-selected")).toBe("true"); expect(h.el.querySelector('[data-slot="23"]')?.getAttribute("aria-pressed")).toBe("true");
+    expect(document.head.textContent).toContain("inset 0 0 0 2px #FFDF00");
+    selected = 18; h.update(true); expect(h.el.querySelector('[data-slot="23"]')?.getAttribute("data-selected")).toBe("false"); expect(h.el.querySelector('[data-slot="18"]')?.getAttribute("data-selected")).toBe("true"); h.destroy();
+  });
+});

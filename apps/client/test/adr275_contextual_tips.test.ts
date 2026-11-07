@@ -103,3 +103,14 @@ describe("ADR-275 contextual tips", () => {
     expect(p["day"]).toBe(2);
   });
 });
+
+test("ADR-289 teaches real auto-sprint and direct hotbar taps, never removed controls", () => {
+  const run = TUTORIAL_STEPS.find(s => s.id === "sprint")!;
+  expect(JSON.stringify(run.text)).toContain("Keep moving in one direction"); expect(JSON.stringify(run.text)).toContain("turn while running");
+  expect(JSON.stringify(run.text)).not.toContain("{A:Sprint}"); expect(run.target?.("touch")).toBe("#hud [data-stat=stamina]");
+  expect(run.when?.({ moved: 24 })).toBe(false); expect(run.when?.({ moved: 25 })).toBe(true);
+  expect(run.done?.({ sprint: 2 }, { sprint: 0 })).toBe(false); expect(run.done?.({ sprint: 3 }, { sprint: 0 })).toBe(true);
+  const equip = TUTORIAL_STEPS.find(s => s.id === "equip")!;
+  expect(JSON.stringify(equip.text)).toContain("Double-tap a slot to use an item or equip a tool"); expect(equip.target?.("touch")).toBe("#hotbar");
+  expect(JSON.stringify(TUTORIAL_STEPS)).not.toMatch(/data-touch=(sprint|hotbar)/);
+});

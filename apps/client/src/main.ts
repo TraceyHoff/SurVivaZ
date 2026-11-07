@@ -45,7 +45,7 @@ import { ClanRoster, ClanRosterMember, OnlinePlayer, VehicleStationOpenedEvt, Pe
 import { terrainRejectText } from "./terrain-reject.js";
 import { inventoryOpRejectText } from "./inventory-reject.js";
 import { netIdOf, ChatChannel, type ChatDelivered } from "@engine/net";
-import { WorldRules, worldRules, ROADS, holdsRangedWeapon, Sign, signText, Road, StallHeader, buildView, listItemIntents, setStallOpenIntent, stallView, nearestStall, inventoryView, equipIntent, useIntent, moveSlotIntent, hotbarConsumes, gameplayDefs, BuildPiece, compassOf } from "@engine/gameplay";
+import { WorldRules, worldRules, ROADS, holdsRangedWeapon, Sign, signText, Road, StallHeader, buildView, listItemIntents, setStallOpenIntent, stallView, nearestStall, inventoryView, selectHotbarIntent, equipIntent, useIntent, moveSlotIntent, hotbarConsumes, gameplayDefs, BuildPiece, compassOf } from "@engine/gameplay";
 import { replicaTerrain } from "./replica-terrain.js";
 import { SocialDirectory, hasCreatedLook, setAppearanceIntent, interactPanel, petEventText, workerEventText, petRenameIntent, readyIntent, UseCmd, GatherCmd, farmPrompt, TerrainRes, type MenuCtx, type MenuIntent } from "@engine/gameplay";
 import { ClientSession } from "./session.js";
@@ -71,7 +71,7 @@ import { mountTutorial } from "./tutorial/overlay.js";
 import { TutorialProber, type ProbeSample } from "./tutorial/probe.js";
 import { Health, Zombie, Progression, hasDisease, worldDays } from "@engine/gameplay";
 import { sunFractionOf, timeOfDay } from "@engine/core";
-import { Survival, heldTool, ResourceNode, toolHint, Animal, LootBag, openContainer } from "@engine/gameplay";
+import { Survival, PlayerIntent, HotbarSelection, heldTool, ResourceNode, toolHint, Animal, LootBag, openContainer } from "@engine/gameplay";
 import { AudioSystem } from "./audio/index.js";
 import { mountDeathScreen, type DeathScreen } from "./death-screen.js";
 import { mountPadDebug } from "./pad-input.js";
@@ -147,6 +147,7 @@ const MENU_BAR_IDS = new Set(["inventory", "crafting", "map", "chat", "social", 
 const touchLayout = { ...DEFAULT_TOUCH_LAYOUTS.gameplay, elements: DEFAULT_TOUCH_LAYOUTS.gameplay.elements.filter((e) => !MENU_BAR_IDS.has(e.id)) };
 /** ADR-170: the driving layout adds Engine / Lights buttons (right side, clear of reload / hotbar / attack); swapped in only while seated. */
 const driveTouchLayout = { ...touchLayout, elements: [...touchLayout.elements,
+  { id: "boost", kind: "button" as const, anchor: { x: 0.05, y: 0.42 }, radius: 22, control: "touch.btn.sprint", label: "Boost" },
   { id: "engine", kind: "button" as const, anchor: { x: 0.86, y: 0.4 }, radius: 20, control: "touch.btn.engine", label: "Engine" },
   { id: "lights", kind: "button" as const, anchor: { x: 0.94, y: 0.4 }, radius: 20, control: "touch.btn.lights", label: "Lights" }] };
 let vehicleCtl: VehicleControls | undefined;
@@ -306,7 +307,7 @@ const buildTouchLayout = { ...DEFAULT_TOUCH_LAYOUTS.building, elements: DEFAULT_
   (window as { __survivazMem?: unknown }).__survivazMem = () => ({ profile: prof.name, budget: prof, usedMB: (pm()?.usedJSHeapSize ?? 0) / 1048576, floorMB: trend.lastFloorMB, slopeMBPerMin: trend.slopeMBPerMin(), windows: trend.windows, leaking: trend.leaking(prof), domNodes: document.getElementsByTagName("*").length });
 }
 if (params.get("dev") === "sandbox") (window as { __qa?: unknown }).__qa = { input, G: () => import("@engine/gameplay"), C: () => import("@engine/core"), iso: () => iso, view: () => camRot?.view, setView: (q: number) => camRot?.set(q), tutorial: () => tutProgress, tutProbe: () => tutProber.probe(), petKit: () => session.devPetKit(), session: () => session, buildMode, send: (i: MenuIntent) => sendIntent(i), ctx: () => menuCtx(), gp: { buildView, listItemIntents, setStallOpenIntent, stallView, nearestStall, inventoryView, gameplayDefs }, world: () => world, player: () => session.player, menus: () => menus, stalls: () => world.isRegistered(StallHeader) ? [...world.query([StallHeader])].length : 0, roads: () => world.isRegistered(Road) ? [...world.query([Road])].length : 0, signs: () => world.isRegistered(Sign) ? [...world.query([Sign, Transform])].map((e) => signText(world, e)) : [], nodes: () => world.isRegistered(ResourceNode) ? [...world.query([ResourceNode, Transform])].filter((n) => world.getField(n, ResourceNode, "amount") !== 0).map((n) => { const t = world.get(n, Transform)!; const d = gameplayDefs(world).resources.get(world.getField(n, ResourceNode, "kind")!); return { x: t.x, y: t.y, key: d?.key, tool: d?.requiredTool }; }) : [], hint: () => { const p = session.player; return p !== undefined ? toolHint(world, p) : undefined; }, animals: () => world.isRegistered(Animal) ? [...world.query([Animal, Transform])].map((e) => { const t = world.get(e, Transform)!; return { e, x: t.x, y: t.y, kind: world.getField(e, Animal, "kind") }; }) : [], net: () => session.client ? { ...session.client.stats, pending: (session.client as unknown as { pending?: unknown[] }).pending?.length } : undefined, zoom: () => ({ user: camZoom?.user, indoor: camZoom?.indoor, cam: iso?.renderer.camera.zoom, cut: iso?.renderer.indoor }), pos: () => { const p = session.player; const t = p !== undefined ? world.get(p, Transform) : undefined; return t ? { x: t.x, y: t.y } : undefined; } };
-/** ADR-179/180: Hotbar1..8 (1-8 keys / D-pad, LB+D-pad / touch "Slot" radial) now reach the sim as frame edges; only the
+/** ADR-179/180: Hotbar1..8 (1-8 keys / D-pad, LB+D-pad) now reach the sim as frame edges; only the
  * pad RB/LB tap cycle (HotbarNext/Prev, which needs the filled-slot list) is sent from here, so nothing fires twice. */
 function hotbarInput(): void {
   let slot = -1;
@@ -674,7 +675,7 @@ tutorialUi = mountTutorial({ root, progress: tutorialProgress(), bindings: input
       try { if (pt && world.isRegistered(BuildPiece)) { pieces = 0; campfires = 0; stations = 0; const defs = gameplayDefs(world); for (const e of world.query([BuildPiece, Transform])) { const t = world.get(e, Transform)!; if ((t.x - pt.x) ** 2 + (t.y - pt.y) ** 2 < 144) { pieces++; const def = defs.pieces.get(world.getField(e, BuildPiece, "type") ?? -1); if (def?.key === "campfire") campfires++; if (def && def.station !== 0) stations++; /* StationKind.None = 0 */ } } } } catch { pieces = undefined; campfires = undefined; stations = undefined; }
       try { if (world.has(c.player, Survival)) sv = world.get(c.player, Survival) as { hunger: number; thirst: number; stamina: number; maxStamina: number }; } catch { /* none */ } }
     const av = input.vector("Aim");
-    tutProber.sample({ pos: pt ? { x: pt.x, y: pt.y } : undefined, sprinting: input.down("Sprint"), zoom: iso?.renderer.camera.zoom, aiming: Math.hypot(av[0], av[1]) > 0.3 || input.down("Primary"),
+    tutProber.sample({ pos: pt ? { x: pt.x, y: pt.y } : undefined, sprinting: !!(c?.player !== undefined && world.getField(c.player, PlayerIntent, "sprint") && (sv?.stamina ?? 0) > 0), zoom: iso?.renderer.camera.zoom, aiming: Math.hypot(av[0], av[1]) > 0.3 || input.down("Primary"),
       items, menuOpen: !!menus?.nav.isOpen, hunger: sv?.hunger, thirst: sv?.thirst, toolKind: tk, buildActive: buildMode.active, buildRot: buildMode.rot, menuTop: menus?.nav.top, pieces, campfires, stations, ...tutorialTriggers(p, pt, sv) });
     return tutProber.probe();
   } });
@@ -694,7 +695,8 @@ farm = mountFarmPrompt(root, {
   use: (p) => { if (p.action === "Harvest") { if (p.target !== undefined) sendIntent({ cmd: GatherCmd, args: { target: p.target }, entities: ["target"] }); } else if (p.slot !== undefined) sendIntent({ cmd: UseCmd, args: { slot: p.slot } }); },
 });
 // ADR-179: visible hotbar (inventory slots 1..8) bottom-centre; equips like the Hotbar1..8 bindings
-const hotbar = mountHotbar({ device: promptDevice, equip: (slot) => { const c = menuCtx(); sendIntent(c && hotbarConsumes(c.world, c.player, slot) ? useIntent(slot) : equipIntent(slot)); }, /* ADR-223: food in the hotbar is eaten */ icon: (icon, item) => panelIcon(world, icon, String(item)),
+const hotbar = mountHotbar({ selectedSlot: () => session.player !== undefined ? world.getField(session.player, HotbarSelection, "slot") : undefined, device: promptDevice, equip: (slot) => sendIntent(selectHotbarIntent(slot)),
+  activate: (slot) => { const c = menuCtx(); sendIntent(c && hotbarConsumes(c.world, c.player, slot) ? useIntent(slot) : selectHotbarIntent(slot)); }, /* ADR-289: single tap selects, double tap uses / equips */ icon: (icon, item) => panelIcon(world, icon, String(item)),
   move: (from, to) => sendIntent(moveSlotIntent(from, to)), /* ADR-231: drag between HUD hotbar slots */
   view: () => { const c = menuCtx(); if (!c) return undefined; try { return inventoryView(c); } catch { return undefined; } } });
 let hotbarT = 0;

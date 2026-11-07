@@ -91,7 +91,7 @@ describe("ADR-144 overlay placement", () => {
     const root = document.getElementById("game-root")!; let dev: "keyboardMouse" | "gamepad" = "keyboardMouse";
     const p = new TutorialProgress(TUTORIAL_STEPS, mem(), "k"); p.start(); p.go(TUTORIAL_STEPS.findIndex((s) => s.id === "sprint"));
     const ui = mountTutorial({ root, progress: p, bindings: input() as unknown as BindingSource, device: () => dev, probe: () => ({}), hidden: () => false });
-    ui.update(); expect(ui.el.hidden).toBe(false); expect(ui.el.textContent).toContain("Shift");
+    ui.update(); expect(ui.el.hidden).toBe(false); expect(ui.el.textContent).toContain("Keep moving in one direction"); expect(ui.el.textContent).not.toContain("Shift");
     dev = "gamepad"; ui.update(); expect(ui.el.dataset["device"]).toBe("gamepad"); expect(ui.el.textContent).not.toContain("Shift");
     expect(ui.el.querySelector(".tut-head [data-tut=next]")).not.toBeNull(); /* ADR-275 portrait: dismiss stays visible in the header */ expect(ui.el.querySelector("[data-tut=back]")).toBeNull(); expect(ui.el.textContent).not.toMatch(/\d+ of \d+/);
     (ui.el.querySelector("[data-tut=next]") as HTMLElement).click(); expect(p.seen.has("sprint")).toBe(true); expect(ui.el.hidden).toBe(true);

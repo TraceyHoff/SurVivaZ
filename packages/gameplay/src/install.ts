@@ -7,12 +7,12 @@ import { installProgression, progressionMigrateSystem, xpTravelSystem } from "./
 import { installPets, petSystem } from "./pets.js";
 import { DEFAULT_TICK_HZ, pruneModifiers, Season, setTimeOfDay, wallHoursForSun, worldSunSchedule, StallDisplay, TimeOfDay, Weather, type World } from "@engine/core";
 import { installSpatialIndex, setClimateModel, ClimateRes } from "@engine/world";
-import { Buffs, Equipment, GAMEPLAY_COMPONENTS, IntentAction, Inventory, NO_SLOT, PlayerIntent } from "./components.js";
+import { HOTBAR_OFFSET, Buffs, Equipment, GAMEPLAY_COMPONENTS, IntentAction, Inventory, NO_SLOT, PlayerIntent } from "./components.js";
 import { GameplayConfig, type GameplayRole } from "./config.js";
 import { defaultDefs } from "./data.js";
 import { WeatherKind, type GameDefs } from "./defs.js";
 import { commandIntentSystem } from "./input.js";
-import { slotItem } from "./inventory.js";
+import { setHotbarSelection, slotItem } from "./inventory.js";
 import { applyReplication, type NetReplicationHooks } from "./replication.js";
 import { chunkSurfaceSystem, clockSystem, exposureSystem, EXPOSURE_EVERY, gameplayClimateModel, SURFACE_EVERY, weatherSystem } from "./systems/environment.js";
 import { craftingSystem } from "./systems/crafting.js";
@@ -159,11 +159,14 @@ export function clearIntentsSystem(world: World): void {
 export function equipSystem(world: World): void {
   const st = world.store(PlayerIntent);
   for (let k = 0; k < st.size; k++) {
-    if (st.data.action[k] !== IntentAction.Equip) continue;
+    const select = st.data.action[k] === IntentAction.SelectHotbar;
+    if (st.data.action[k] !== IntentAction.Equip && !select) continue;
     const e = st.dense[k]!; if (!world.has(e, Equipment) || !world.has(e, Inventory)) continue;
     const slot = st.data.slot[k]!; const cur = world.getField(e, Equipment, "mainHandSlot");
     const it = slotItem(world, e, slot);
-    const next = cur === slot || !it || it.count === 0 ? NO_SLOT : slot;
+    if (select && (slot < HOTBAR_OFFSET || slot >= HOTBAR_OFFSET + 8)) continue;
+    setHotbarSelection(world, e, slot);
+    const next = (!select && cur === slot) || !it || it.count === 0 ? NO_SLOT : slot;
     world.set(e, Equipment, { mainHandSlot: next, mainHandItem: next === NO_SLOT ? 0 : it.item });
   }
 }
