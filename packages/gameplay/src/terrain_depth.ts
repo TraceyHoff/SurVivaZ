@@ -7,7 +7,7 @@ import { worldTileKey, worldTileFromKey } from "@engine/world";
 import { TerrainEdit } from "./components.js";
 
 export const TERRAIN = {
-  /** ±25 levels around the generated ground. */ maxLevels: 25,
+  /** ADR-297: absolute terrain levels, relative to the world height-zero datum. */ minLevel: -60, maxLevel: 75,
   /** Reach (tiles from the body centre to the target tile centre). */ reach: 3,
   /** Dug this many levels below ground (or more) = underground. */ undergroundDepth: 3,
   /** Underground air temperature (60°F). */ undergroundTempC: (60 - 32) * 5 / 9,
@@ -17,7 +17,7 @@ export const TERRAIN = {
 } as const;
 
 /** Absolute level bounds (flowing-water height encoding range, ADR-263 waterDepth.ts). */
-export const LEVEL_MIN = -30, LEVEL_MAX = 47;
+export const LEVEL_MIN = TERRAIN.minLevel, LEVEL_MAX = TERRAIN.maxLevel;
 interface EditIdx { tiles: Map<number, Entity>; size: number; tick: number }
 const idxCache = new WeakMap<World, EditIdx>();
 export const tkey = worldTileKey;

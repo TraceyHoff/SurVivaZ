@@ -49,11 +49,11 @@ describe("ADR-272 sampled seed preview and wilderness", () => {
     expect(nodes).toBeGreaterThan(0);
   });
   it("quadruples the collision-free terrain/road domain without an eager world allocation", () => {
-    expect(WORLD_TILE_DIAMETER).toBe(131072); expect(WORLD_TILE_DIAMETER ** 2 / 65536 ** 2).toBe(4);
+    expect(WORLD_TILE_DIAMETER).toBe(262144); expect(WORLD_TILE_DIAMETER ** 2 / 131072 ** 2).toBe(4);
     const points: [number, number][] = [[0, 32768], [1, -32768], [0, 60000], [1, -5536], [-65536, -65536], [65535, 65535]];
     expect(new Set(points.map(([x, y]) => worldTileKey(x, y))).size).toBe(points.length);
     for (const [x, y] of points) expect(worldTileFromKey(worldTileKey(x, y))).toEqual([x, y]);
-    expect(WORLD_TILE_HALF_EXTENT).toBe(65536);
+    expect(WORLD_TILE_HALF_EXTENT).toBe(131072);
   });
   it("streaming stays bounded at the new distant coordinates, with at most four loads per update", () => {
     const cm = new ChunkManager({ provider: new ProceduralGenerator({ seed: 1234 }), loadRadius: 2, unloadMargin: 1, cacheSize: 64, maxLoadsPerUpdate: 4, maxLoadTimeMs: 2 });

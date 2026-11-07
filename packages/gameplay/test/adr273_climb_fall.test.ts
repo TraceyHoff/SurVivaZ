@@ -14,17 +14,26 @@ function setup(height: number, role: "server" | "client" = "server") {
 }
 const inputX = { x: Math.SQRT1_2, y: Math.SQRT1_2 };
 describe("ADR-273 climb and gravity", () => {
-  it.each([1, 2, 3, 4, 8, 22])("unaided natural ascent of %i tiles", h => {
+  it.each([1, 2, 3, 4, 8, 22, 60, 75])("unaided natural ascent of %i tiles", h => {
     const { w, p } = setup(h); G.applyMovementInput(w, p, 0, .1, inputX);
     expect(w.get(p, Transform)!.x > 1).toBe(h <= 3);
   });
-  it.each([0, 1, 3, 4, 6, 10, 14, 20])("a %i tile drop applies scaled damage exactly once", h => {
+  it.each([0, 1, 3, 4, 6, 10, 14, 20, 60, 75])("a %i tile drop applies scaled damage exactly once", h => {
     const { w, p } = setup(-h); const hp = w.getField(p, G.Health, "hp")!;
     G.applyMovementInput(w, p, 0, .1, inputX);
     expect(w.get(p, Transform)!.x).toBeGreaterThan(1);
     expect(w.getField(p, G.Health, "hp")).toBeCloseTo(Math.max(0, hp - G.terrainFallDamage(h)));
     G.applyMovementInput(w, p, 0, .05, inputX);
     expect(w.getField(p, G.Health, "hp")).toBeCloseTo(Math.max(0, hp - G.terrainFallDamage(h)));
+  });
+  it("ADR-297: a fall from +75 to -60 uses the unchanged 135-tile damage formula", () => {
+    const {w,p}=setup(-60); const terrain=w.resource(G.TerrainRes);
+    for(let y=-4;y<5;y++)for(let x=-4;x<1;x++)terrain.setRawHeight!(x,y,75);
+    const hp=w.getField(p,G.Health,"hp")!;
+    G.applyMovementInput(w,p,0,.1,inputX);
+    expect(w.getField(p,G.Health,"hp")).toBe(Math.max(0,hp-G.terrainFallDamage(135)));
+    expect(Number.isFinite(G.terrainFallDamage(135))).toBe(true);
+    expect(G.terrainFallDamage(135)).toBeGreaterThan(G.terrainFallDamage(75));
   });
   it("a four tile stumble is mild, ten serious and fifteen lethal to a healthy human", () => {
     expect([3, 4, 6, 10, 14, 15].map(G.terrainFallDamage)).toEqual([0, 4, 15, 49, 99, 114]);

@@ -9,7 +9,7 @@ export type ChunkKey = string;
 /** Tile ids are u16 numeric ids into a tile registry (0 = empty). */
 export class Chunk {
   readonly tiles = new Uint16Array(CHUNK_AREA);
-  /** Terrain height level per tile. ADR-263: signed (Int8) so a shovel can dig below level 0 (Task 36: ±25 around ground).
+  /** Terrain height level per tile. ADR-263: signed (Int8) so a shovel can dig below level 0 (ADR-297: -60..75 absolute terrain levels).
    * Binary codecs still write one byte per tile (two's complement), so stored 0..127 saves are unchanged. */
   readonly height = new Int8Array(CHUNK_AREA);
   /** ADR-263: height edits since the last drain (heights have no delta stream; TileSync resends the chunk in full). */
@@ -124,9 +124,10 @@ export function applyTileDelta(chunk: Chunk, bytes: Uint8Array): void {
 
 /** Supported high-precision play/build domain (not a terrain-generation border). The generator remains
  * unbounded; terrain/road tile indices previously aliased outside a 65,536-tile-wide square.
- * Two 17-bit axes now cover the whole f32-safe square: 131,072 x 131,072 tiles (4x area).
+ * ADR-296: two 18-bit axes cover 262,144 x 262,144 tiles (4x ADR-272 area).
+ * This is a supported indexing domain, not a new generation border. At the outer edge f32 resolution is 1/128 tile.
  * Runtime keys are rebuilt on load, so this does not change saved chunk/entity formats. */
-export const WORLD_TILE_HALF_EXTENT = F32_SAFE_TILE_RANGE;
+export const WORLD_TILE_HALF_EXTENT = F32_SAFE_TILE_RANGE * 2;
 export const WORLD_TILE_DIAMETER = WORLD_TILE_HALF_EXTENT * 2;
 export const worldTileKey = (x: number, y: number): number => (x + WORLD_TILE_HALF_EXTENT) * WORLD_TILE_DIAMETER + y + WORLD_TILE_HALF_EXTENT;
 export const worldTileFromKey = (key: number): [number, number] => [Math.floor(key / WORLD_TILE_DIAMETER) - WORLD_TILE_HALF_EXTENT, (key % WORLD_TILE_DIAMETER) - WORLD_TILE_HALF_EXTENT];

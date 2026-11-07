@@ -3,7 +3,7 @@
  *  - A shovel (any tier, items.json tool.kind "shovel") raises or lowers the ground one level per use. Players use the
  *    one in their main hand (hotbar); hired AI humans may use one carried in their bag. Edits write the chunk height
  *    field ADR-254 generated (so cliff faces / ledge lips redraw) and keep a TerrainEdit entity with the offset from the
- *    generated ground, clamped to ±TERRAIN.maxLevels (25 up, 25 down).
+ *    generated ground; absolute terrain levels are limited to -60..75 (ADR-297).
  *  - Flowing water: water spreads, one tile per neighbour per flow step, from any water tile into an adjacent dug tile
  *    (dig < 0) whose bed is at or below the source water's surface (a natural lake's surface is the flat ADR-182 level,
  *    a flowed tile's surface is its own bed). Raised ground (walls / berms) and undug ground never flood, so elevated
@@ -108,8 +108,8 @@ export function editTerrain(world: World, e: Entity, tx: number, ty: number, dir
   if (blocked(world, tx, ty)) return TerrainFail.Occupied;
   const level = terrainLevel(id, h); // bed level (flowing water decodes its height offset)
   const nextDig = water ? dig : dig + (up ? 1 : -1); const nextLevel = water ? level : level + (up ? 1 : -1);
-  // ±25 around the generated ground; LEVEL_MIN..LEVEL_MAX keeps every level storable as flowing water too
-  if (Math.abs(nextDig) > TERRAIN.maxLevels || nextLevel < LEVEL_MIN || nextLevel > LEVEL_MAX) return TerrainFail.Limit;
+  // ADR-297: absolute height-zero datum; both humans and players use this validation.
+  if (nextLevel < LEVEL_MIN || nextLevel > LEVEL_MAX) return TerrainFail.Limit;
   // ADR-264: one unit of earth per edit, including filling water and undoing earlier edits.
   // exchangeItems validates on scratch slots: previews never mutate inventory, and a full bag never loses dug soil.
   const soil = itemIdSafe(world, "soil");
@@ -134,8 +134,11 @@ function setDig(world: World, tx: number, ty: number, dig: number): void {
 /** Tests / tools: write a terrain edit offset (and the matching height) directly, no shovel / reach checks. */
 export function setTerrainDig(world: World, tx: number, ty: number, dig: number): void {
   const t = world.getResource(TerrainRes); const cur = terrainDigAt(world, tx, ty);
-  if (t?.setRawHeight) t.setRawHeight(tx, ty, raw(t, tx, ty) + (dig - cur));
-  setDig(world, tx, ty, Math.max(-TERRAIN.maxLevels, Math.min(TERRAIN.maxLevels, dig))); wake(world, tx, ty);
+  if (!t?.setRawHeight) return;
+  const id = t.tileAt(tx, ty); const height = terrainLevel(id, raw(t, tx, ty));
+  const next = Math.max(LEVEL_MIN, Math.min(LEVEL_MAX, height + dig - cur));
+  t.setRawHeight(tx, ty, isWaterId(id) ? flowWaterRaw(next) : next);
+  setDig(world, tx, ty, cur + next - height); wake(world, tx, ty);
 }
 
 /**

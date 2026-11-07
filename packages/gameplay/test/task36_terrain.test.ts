@@ -1,4 +1,4 @@
-// ADR-263 (Task 36): shovel terrain editing (±25), flowing water, underground darkness / 60°F / growth.
+// ADR-263/297: shovel terrain editing (-60..75), flowing water, underground darkness / 60°F / growth.
 import { describe, expect, it } from "vitest";
 import { setSeason, Weather, type Entity, type World } from "@engine/core";
 import { TileMap, isFlowWater, renderTileHeight, terrainLevel, WATER_TILE } from "@engine/world";
@@ -22,20 +22,20 @@ const hold = (w: World, p: Entity, key: string): void => {
 const hAt = (w: World, x: number, y: number): number => w.resource(G.TerrainRes).heightAt(x, y);
 
 describe("ADR-263 shovel terrain editing", () => {
-  it("needs a shovel in hand; raises and lowers one level per use and clamps at ±25 around ground", () => {
+  it("needs a shovel in hand; raises and lowers one level per use and clamps at absolute -60..75", () => {
     const w = makeWorld(); field(w, 2); const p = G.spawnPlayer(w, { x: 0.5, y: 0.5, clientId: 1 });
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.NoShovel);
     expect(hAt(w, 1, 0)).toBe(2);
-    hold(w, p, "stone_shovel"); expect(G.holdingShovel(w, p)).toBe(true);
+    w.set(p, G.Inventory, { maxWeight: 0 }); hold(w, p, "stone_shovel"); expect(G.holdingShovel(w, p)).toBe(true);
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.None);
     expect(hAt(w, 1, 0)).toBe(1); expect(G.terrainDigAt(w, 1, 0)).toBe(-1);
     expect(w.resource(G.TerrainRes).tileAt(1, 0)).toBe(G.TERRAIN.earthTile); // dug earth
-    for (let i = 0; i < 40; i++) G.editTerrain(w, p, 1, 0, -1);
-    expect(G.terrainDigAt(w, 1, 0)).toBe(-25); expect(hAt(w, 1, 0)).toBe(2 - 25);
+    for (let i = 0; i < 70; i++) G.editTerrain(w, p, 1, 0, -1);
+    expect(G.terrainDigAt(w, 1, 0)).toBe(-62); expect(hAt(w, 1, 0)).toBe(-60);
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.Limit);
-    G.addItem(w, p, id("soil"), 25); // the 25 dug units fill the pit; another 25 build the mound
-    for (let i = 0; i < 60; i++) G.editTerrain(w, p, 1, 0, 1);
-    expect(G.terrainDigAt(w, 1, 0)).toBe(25); expect(hAt(w, 1, 0)).toBe(2 + 25);
+    G.addItem(w, p, id("soil"), 75); // the 62 dug units fill the pit; another 73 reach absolute +75
+    for (let i = 0; i < 140; i++) G.editTerrain(w, p, 1, 0, 1);
+    expect(G.terrainDigAt(w, 1, 0)).toBe(73); expect(hAt(w, 1, 0)).toBe(75);
     expect(G.editTerrain(w, p, 1, 0, 1)).toBe(G.TerrainFail.Limit);
     expect(G.editTerrain(w, p, 9, 9, -1)).toBe(G.TerrainFail.TooFar);
     // back to ground removes the edit record
@@ -76,7 +76,7 @@ describe("ADR-263 shovel terrain editing", () => {
     // Digging a mound back down also yields soil; a rejected boundary edit does not.
     G.setTerrainDig(w, 1, 0, 1);
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.None); expect(G.countItem(w, p, id("soil"))).toBe(1);
-    G.setTerrainDig(w, 1, 0, -25);
+    G.setTerrainDig(w, 1, 0, -62);
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.Limit); expect(G.countItem(w, p, id("soil"))).toBe(1);
   });
 
@@ -93,6 +93,23 @@ describe("ADR-263 shovel terrain editing", () => {
       expect(hAt(w, 1, 0)).toBe(2); expect(G.terrainDigAt(w, 1, 0)).toBe(0);
       expect(w.get(p, G.Inventory)).toEqual(inv); expect(G.countItem(w, p, id("soil"))).toBe(0);
     }
+  });
+
+  it.each([false, true])("ADR-297: player/worker extremes conserve soil with fixed column storage (worker=%s)", worker => {
+    const w = makeWorld(); const map = field(w, 0); const p = G.spawnPlayer(w, { x: .5, y: .5, maxWeight: 0 });
+    if (worker) { w.add(p, G.Worker, {} as never); G.addItem(w, p, id("stone_shovel"), 1); }
+    else hold(w, p, "stone_shovel");
+    const bytes = [...map.loadedChunks()].reduce((n,c) => n + c.height.byteLength + c.tiles.byteLength, 0);
+    for (let i=0;i<60;i++) expect(G.editTerrain(w,p,1,0,-1)).toBe(G.TerrainFail.None);
+    expect(hAt(w,1,0)).toBe(-60); expect(G.countItem(w,p,id("soil"))).toBe(60);
+    expect(G.editTerrain(w,p,1,0,-1)).toBe(G.TerrainFail.Limit);
+    G.addItem(w,p,id("soil"),75);
+    for(let i=0;i<135;i++) expect(G.editTerrain(w,p,1,0,1)).toBe(G.TerrainFail.None);
+    expect(hAt(w,1,0)).toBe(75); expect(G.countItem(w,p,id("soil"))).toBe(0);
+    expect(G.editTerrain(w,p,1,0,1)).toBe(G.TerrainFail.Limit);
+    expect([...w.query([G.TerrainEdit])]).toHaveLength(1);
+    expect([...map.loadedChunks()].reduce((n,c)=>n+c.height.byteLength+c.tiles.byteLength,0)).toBe(bytes);
+    G.setTerrainDig(w,1,0,-999); expect(hAt(w,1,0)).toBe(-60); expect(G.terrainDigAt(w,1,0)).toBe(-60);
   });
 
   it("negative heights round-trip through the chunk codec and net runs as signed bytes", async () => {
@@ -124,6 +141,19 @@ describe("ADR-263 flowing water", () => {
     expect(renderTileHeight(WATER_TILE, t.rawHeightAt!(0, 0))).toBe(0);
     // swimming / wading rules see the new water
     expect(G.inWater(w, 4.5, 0.5)).toBe(true);
+  });
+
+  it("ADR-297: deep flooded pits retain -60 and fill with exactly one Soil", () => {
+    const w=makeWorld(); const map=field(w,0); map.setTile(0,0,WATER_TILE);
+    G.setTerrainDig(w,1,0,-60); expect(G.isUnderground(w,1,0)).toBe(true);
+    expect(G.terrainFlowStep(w)).toBe(1); expect(hAt(w,1,0)).toBe(-60);
+    G.setTerrainDig(w,1,0,999);expect(hAt(w,1,0)).toBe(75);expect(G.terrainDigAt(w,1,0)).toBe(75);
+    G.setTerrainDig(w,1,0,-999);expect(hAt(w,1,0)).toBe(-60);expect(G.terrainDigAt(w,1,0)).toBe(-60);
+    const p=G.spawnPlayer(w,{x:2.5,y:.5});hold(w,p,"stone_shovel");G.addItem(w,p,id("soil"),1);
+    expect(G.editTerrain(w,p,1,0,1)).toBe(G.TerrainFail.None);
+    expect(G.countItem(w,p,id("soil"))).toBe(0);expect(hAt(w,1,0)).toBe(-60);
+    expect(w.resource(G.TerrainRes).tileAt(1,0)).toBe(G.TERRAIN.earthTile);
+    expect(G.editTerrain(w,p,1,0,-1)).toBe(G.TerrainFail.Limit);
   });
 
   it("an isolated pit stays dry; a channel dug uphill of the water does not fill; raising water fills it in", () => {
