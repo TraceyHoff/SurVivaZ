@@ -3317,3 +3317,41 @@ SurVivaZ shows a small, non-focusable inspection panel above the existing farm p
 - **Fertilizer** (amber): absent unless there is fertilizer remaining (no blank third row). Fertilizer already existed: the `fertilizer` item, bone-meal/fiber recipe, Use action and 1.5× growth multiplier. Its boolean was permanent until maturity; there was no duration, manure or compost timer to expose. Finish that partial lifecycle with a data-driven 600-second dose (`fertilizerSeconds`) and authority-owned `Crop.fertilizerUntilTick`. The dose drains in simulation time, including dark/dry/dormant time, expires the boost and permits another application. Legacy fertilized plants receive one finite dose on their first authority crop update. No new items, recipes, sprites or art.
 
 Both components use the existing schema-based snapshots/deltas and persistence; an added-field save migration preserves legacy Crop chunks and zero-fills the new timer; no new packet type. The schema hash changes, so clients and servers must update together (existing mismatch rejection remains intact). Mature nodes keep their original harvest/respawn behavior; their displayed tending timers count down without imposing new growth/death rules. Growth and plant prompts are otherwise unchanged from ADR-286.
+
+## ADR-288: Consolidate usable pieces in the Furniture build-menu section (SurVivaZ)
+
+**Status:** accepted.
+
+**Context:** Furniture already existed, and storage_box, basic_storage_box, large_chest, wardrobes,
+beds, chairs, tables, shelves and preservation storage already belonged to it. Other usable furniture
+was scattered among Decor, Plants, Wall and Outdoor. Players should find placed storage, appearance
+editing and farming furniture together, not hunt through decorative/structural categories.
+
+**Decision:** retain and promote the existing **Furniture** category immediately after Structure.
+Consolidate the following existing pieces (no new recipes, pieces or art):
+
+- Decor → Furniture: barrel_storage, basket, mirror_standing, mirror_wall.
+- Plants → Furniture: herb_planter, window_planter.
+- Wall → Furniture: weapon_rack, wall_shelf.
+- Outdoor → Furniture: apiary, feeding_trough, pet_trough, planter_box, garden_bed.
+
+Crop plots (`features.planter`), wardrobes/mirrors (`features.wardrobe`), then containers are shown
+first within Furniture; stable catalog order is retained within each job. Existing beds/seating,
+tables, cabinets and kitchen furniture remain there. Catalog generator categories match the data.
+The tab uses the existing text/chrome, not a borrowed sprite. Category keys and the shared
+`data-tabs=tab` controls remain intact: LB/RB cycles categories; D-pad + A selects tabs/tiles.
+The existing phone horizontal tab strip also applies to short landscape screens, preventing wrapped
+categories from squeezing the last furniture row; the scrollable piece grid remains in use.
+
+**Boundaries:** crafting stations, defensive devices, lamps and market stalls retain their existing categories. A fuel/ammo slot does not make those storage furniture.
+Purely decorative crates/barrels, park benches, plants, rugs, clocks, fountains, wells and scarecrows remain in their
+existing decorative/outdoor categories (no corresponding storage/planter/wardrobe behavior).
+Fences, gates, paths, earthworks, foundations, floors, walls, roofs, stairs, doors/windows and the
+terrain ladder keep their existing categories (the ladder is currently Decor). No placement, snap,
+layer, costs, unlock, variants, painting, art, gameplay or ADR-277/281 hologram-swap path changes.
+
+**Verification:** client build-window tests cover named existing and newly consolidated furniture,
+absence from every old category, unchanged structural/outdoor/decor pieces, category order,
+LB/RB, D-pad + A and choosing starter storage through the existing placement callback. Offline
+sandbox browser proofs cover desktop and portrait/landscape phone layout. TypeScript 5.9.3,
+production client build and full Vitest suite (maxWorkers=2) are recorded with the proof artifacts.

@@ -543,11 +543,26 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
         if (tinted && tintCss) { b.dataset["tint"] = "clan"; b.style.setProperty("--bt", tintCss); }
         return b;
       };
-      const wt = src.worldTools; const cats = [...new Set(all.map((p) => p.category))]; if (wt) cats.push("roads"); if (!cats.includes(buildCat)) buildCat = all.find((p) => p.id === buildSel.piece)?.category ?? cats[0] ?? "structure";
+      // ADR-288: keep Furniture beside Structure, including on the phone's scrolling tab strip.
+      const wt = src.worldTools; const cats = [...new Set(all.map((p) => p.category))];
+      const furnitureIndex = cats.indexOf("furniture");
+      if (furnitureIndex >= 0) { cats.splice(furnitureIndex, 1); cats.splice(cats.indexOf("structure") + 1, 0, "furniture"); }
+      if (wt) cats.push("roads");
+      if (!cats.includes(buildCat)) buildCat = all.find((p) => p.id === buildSel.piece)?.category ?? cats[0] ?? "structure";
       const v = all.filter((p) => p.category === buildCat);
+      // Useful furniture first: crop plots, wardrobes, then containers, before the seating/decorative furniture.
+      // Stable within each job; only the menu order changes, never the selected piece or placement path.
+      if (buildCat === "furniture") {
+        const defs = gameplayDefs(c.world);
+        const rank = (p: (typeof v)[number]): number => {
+          const d = defs.pieces.get(p.id)!;
+          return d.features.planter ? 0 : d.features.wardrobe ? 1 : d.container ? 2 : 3;
+        };
+        v.sort((a, b) => rank(a) - rank(b));
+      }
       if (!v.some((p) => p.id === buildSel.piece) && v[0]) { buildSel.piece = v[0].id; buildSel.variant = 0; }
       const out: Node[] = []; const cg0 = grid(); cg0.dataset["role"] = "build-cats"; cg0.dataset["tabs"] = "tab";
-      for (const k of cats) cg0.append(btn(k, `bcat-${k}`, () => { buildCat = k; kit.rerender(); }, { pressed: k === buildCat, alt: k !== buildCat }));
+      for (const k of cats) cg0.append(btn(k[0]!.toUpperCase() + k.slice(1), `bcat-${k}`, () => { buildCat = k; kit.rerender(); }, { pressed: k === buildCat, alt: k !== buildCat }));
       out.push(cg0);
       if (buildCat === "roads" && wt) {
         // ADR-224: roads & signs are a tab of their own (keeps the piece view short)

@@ -1,6 +1,6 @@
 /**
  * Task 34: buildable Apiary + bees deposit honey in it.
- * Pinned numbers: Apiary tier 1, 12 slots, cost planks 6 + rope 2, category outdoor; bees deposit into the nearest
+ * Pinned numbers: Apiary tier 1, 12 slots, cost planks 6 + rope 2, category furniture (ADR-288); bees deposit into the nearest
  * Apiary within 10 tiles (H.troughRange) INSTEAD of the trough; no Apiary -> trough as before; Apiary-only (no
  * trough) still produces; a full Apiary falls back to the trough; full Apiary + full trough keeps the honey
  * (produceAt stays past-due, retried next tick) — never silently lost. Bee honey rate stays 360s; non-bee
@@ -62,10 +62,10 @@ describe("Task 34: pet favourite treats", () => {
 });
 
 describe("Task 34: Apiary piece", () => {
-  it("Apiary data: tier 1, 12-slot container, planks 6 + rope 2, outdoor, placeable, openable as storage", () => {
+  it("Apiary data: tier 1, 12-slot container, planks 6 + rope 2, furniture, placeable, openable as storage", () => {
     const { w, p } = fresh(); pens(w, p);
     const def = d.pieces.get(pid("apiary"))!;
-    expect(def.fixedTier).toBe(1); expect(def.container).toBe(12); expect(def.category).toBe("outdoor");
+    expect(def.fixedTier).toBe(1); expect(def.container).toBe(12); expect(def.category).toBe("furniture");
     expect(def.placement).toBe(G.Placement.Free); expect(def.ground).toBe(true);
     expect(G.pieceCost(d, def, def.fixedTier).map((c) => [d.items.get(c.item)!.key, c.count])).toEqual([["planks", 6], ["rope", 2]]);
     const r = put(w, p, "apiary", BASE.x + 1.5, BASE.y + 0.5, 0, 0, undefined, STAND);

@@ -59,7 +59,7 @@ add("statue_large", ["hero", "horse", "obelisk"], { ...DEC, layer: 2, solid: tru
 add("vase", ["tall", "round", "painted", "amphora"], { ...DEC, hp: 15, paintable: true, cost: [c("clay", 2)] }, { to: ["potted_plant"], tint: "#c87850", scale: 0.8 });
 add("crate_decor", ["single", "stack", "open"], { ...DEC, layer: 2, solid: true, rotSteps: 4, cost: [c("planks", 3)] }, { to: ["storage_box"], tint: "#c8a060" });
 add("barrel_decor", ["upright", "side", "water"], { ...DEC, layer: 2, solid: true, cost: [c("planks", 4), c("iron_ingot", 1)] }, { to: ["storage_box"], tint: "#906040" });
-add("barrel_storage", ["oak", "iron_band"], { ...DEC, layer: 2, solid: true, container: 8, spoilMul: 0.9, cost: [c("hardwood_planks", 5), c("iron_ingot", 1)] }, { to: ["storage_box"], tint: "#906040" });
+add("barrel_storage", ["oak", "iron_band"], { ...DEC, layer: 2, solid: true, container: 8, spoilMul: 0.9, cost: [c("hardwood_planks", 5), c("iron_ingot", 1)], category: "furniture" }, { to: ["storage_box"], tint: "#906040" });
 add("trophy_mount", ["deer", "elk", "moose", "boar", "wolf", "bear", "bison", "rabbit"], { ...MOUNT, category: "decor", hp: 40, cost: [c("hide", 2), c("planks", 1), c("bone", 1)] }, { to: ["trophy_skull"] });
 add("clan_flag", ["pole", "crossed", "tall"], { ...DEC, hp: 50, paintable: true, features: { clanTint: true }, cost: [c("cloth", 3), c("sticks", 3), c("dye", 1)] }, { to: ["banner"] });
 add("sign", ["post", "hanging", "arrow", "board"], { ...DEC, rotSteps: 4, hp: 40, cost: [c("planks", 2), c("sticks", 1)] }, { to: ["windsock", "banner"], tint: "#b08850" });
@@ -67,12 +67,12 @@ add("sign_wall", ["plain", "carved"], { ...MOUNT, category: "decor", hp: 30, cos
 add("curtains", ["short", "long", "sheer", "heavy"], { ...MOUNT, category: "decor", hp: 20, paintable: true, cost: [c("cloth", 3), c("sticks", 1)] }, { to: ["banner_wall"] });
 add("clock", ["grandfather", "mantel"], { ...DEC, layer: 2, solid: true, rotSteps: 4, tier: 3, hp: 80, cost: [c("hardwood_planks", 4), c("mechanism", 1), c("glass", 1)] }, { to: ["pillar", "mirror"], tint: "#7a5030" });
 add("clock_wall", ["round", "cuckoo"], { ...MOUNT, category: "decor", tier: 3, hp: 30, cost: [c("planks", 2), c("mechanism", 1)] }, { to: ["painting", "banner_wall"] });
-add("mirror_standing", ["oval", "tall"], { ...DEC, layer: 2, solid: true, rotSteps: 4, hp: 60, tier: 2, features: { wardrobe: true }, cost: [c("hardwood_planks", 3), c("glass", 2)] }, { to: ["mirror"] });
-add("mirror_wall", ["round", "gilded"], { ...MOUNT, category: "decor", hp: 30, tier: 2, features: { mount: true, wardrobe: true }, cost: [c("glass", 2), c("planks", 1)] }, { to: ["mirror", "painting"] });
+add("mirror_standing", ["oval", "tall"], { ...DEC, layer: 2, solid: true, rotSteps: 4, hp: 60, tier: 2, features: { wardrobe: true }, cost: [c("hardwood_planks", 3), c("glass", 2)], category: "furniture" }, { to: ["mirror"] });
+add("mirror_wall", ["round", "gilded"], { ...MOUNT, hp: 30, tier: 2, features: { mount: true, wardrobe: true }, cost: [c("glass", 2), c("planks", 1)], category: "furniture" }, { to: ["mirror", "painting"] });
 add("pottery", ["jug", "bowl_stack", "urn", "pitcher"], { ...DEC, hp: 15, paintable: true, cost: [c("clay", 2)] }, { to: ["potted_plant"], tint: "#b86840", scale: 0.6 });
 add("books", ["stack", "open", "row"], { ...DEC, hp: 10, cost: [c("cloth", 1), c("leather", 1)] }, { to: ["storage_box"], tint: "#803030", scale: 0.4 });
 add("dishes", ["plates", "cups", "set", "cutlery"], { ...DEC, hp: 10, cost: [c("clay", 1)] }, { to: ["potted_plant"], tint: "#e8e8e0", scale: 0.4 });
-add("basket", ["wicker", "laundry", "fruit"], { ...DEC, hp: 15, container: 2, cost: [c("reeds", 4)] }, { to: ["storage_box"], tint: "#d0b070", scale: 0.6 });
+add("basket", ["wicker", "laundry", "fruit"], { ...DEC, hp: 15, container: 2, cost: [c("reeds", 4)], category: "furniture" }, { to: ["storage_box"], tint: "#d0b070", scale: 0.6 });
 // ---- house plants ----
 const PL = { layer: 3, category: "plants" };
 add("plant_floor", ["fern", "palm", "ficus", "monstera", "snake_plant"], { ...PL, hp: 20, cost: [c("clay", 2), c("fiber", 2)] }, { to: ["potted_plant"], scale: 1.2 });
@@ -81,14 +81,14 @@ add("cactus", ["barrel", "saguaro", "prickly", "flowering"], { ...PL, hp: 25, co
 add("flowers_pot", ["rose", "tulip", "daisy", "lavender", "sunflower"], { ...PL, hp: 15, cost: [c("clay", 1), c("fiber", 1), c("dye", 1)] }, { to: ["flower_box", "potted_plant"], scale: 0.7 });
 add("hanging_plant", ["ivy", "spider", "pearls"], { ...PL, hp: 10, ground: false, cost: [c("clay", 1), c("rope", 1), c("fiber", 1)] }, { to: ["potted_plant"], scale: 0.8 });
 add("bonsai", ["pine", "maple"], { ...PL, hp: 15, tier: 2, cost: [c("clay", 2), c("fiber", 1)] }, { to: ["potted_plant"], tint: "#609050", scale: 0.6 });
-add("herb_planter", ["wood", "clay", "stone"], { ...PL, layer: 2, hp: 60, features: { planter: true }, cost: [c("planks", 3), c("clay", 2)] }, { to: ["flower_box"] });
-add("window_planter", ["wood", "clay"], { ...MOUNT, category: "plants", hp: 30, features: { mount: true, planter: true }, cost: [c("planks", 2), c("clay", 1)] }, { to: ["flower_box"] });
+add("herb_planter", ["wood", "clay", "stone"], { ...PL, layer: 2, hp: 60, features: { planter: true }, cost: [c("planks", 3), c("clay", 2)], category: "furniture" }, { to: ["flower_box"] });
+add("window_planter", ["wood", "clay"], { ...MOUNT, hp: 30, features: { mount: true, planter: true }, cost: [c("planks", 2), c("clay", 1)], category: "furniture" }, { to: ["flower_box"] });
 // ---- wall hangings ----
 add("painting_wall", ["landscape", "portrait", "still_life", "abstract", "seascape", "battle", "map", "hunt"], { ...MOUNT, hp: 20, cost: [c("planks", 1), c("cloth", 1), c("dye", 2)] }, { to: ["painting"] });
 add("poster", ["wanted", "propaganda", "band", "map", "recruit", "travel"], { ...MOUNT, hp: 5, cost: [c("fiber", 2), c("dye", 1)] }, { to: ["painting"], scale: 0.8 });
 add("tapestry", ["hunt", "crest", "forest", "dragon"], { ...MOUNT, hp: 30, paintable: true, cost: [c("cloth", 4), c("dye", 2)] }, { to: ["banner_wall"] });
-add("weapon_rack", ["swords", "spears", "rifles", "bows"], { ...MOUNT, hp: 60, container: 4, cost: [c("planks", 4), c("nails", 2)] }, { to: ["banner_wall", "painting"], tint: "#906040" });
-add("wall_shelf", ["plank", "double", "corner", "potted"], { ...MOUNT, hp: 40, container: 2, cost: [c("planks", 2), c("nails", 1)] }, { to: ["painting"], tint: "#b08850" });
+add("weapon_rack", ["swords", "spears", "rifles", "bows"], { ...MOUNT, hp: 60, container: 4, cost: [c("planks", 4), c("nails", 2)], category: "furniture" }, { to: ["banner_wall", "painting"], tint: "#906040" });
+add("wall_shelf", ["plank", "double", "corner", "potted"], { ...MOUNT, hp: 40, container: 2, cost: [c("planks", 2), c("nails", 1)], category: "furniture" }, { to: ["painting"], tint: "#b08850" });
 add("shield_mount", ["round", "kite", "clan"], { ...MOUNT, hp: 50, features: { mount: true, clanTint: true }, cost: [c("planks", 2), c("iron_ingot", 1)] }, { to: ["banner_wall"] });
 add("map_board", ["region", "battle"], { ...MOUNT, hp: 20, cost: [c("planks", 2), c("cloth", 1)] }, { to: ["painting"] });
 // ---- rugs: layer 1 so furniture (2) and decor (3) sit on top; variant = pattern overlay, paint = tint colour ----
@@ -101,10 +101,10 @@ add("fence_picket", ["white", "natural", "rustic"], { ...OUT, layer: 1, solid: t
 add("fence_rail", ["split", "post"], { ...OUT, layer: 1, solid: true, blocksPath: true, rotSteps: 4, hp: 100, cost: [c("wood", 2), c("rope", 1)] }, { to: ["fence", "wall_low"], tint: "#a07850" });
 add("fence_iron", ["plain", "spiked"], { ...OUT, layer: 1, solid: true, blocksPath: true, rotSteps: 4, hp: 400, tier: 3, cost: [c("iron_ingot", 2)] }, { to: ["fence", "wall_low"], tint: "#505860" });
 add("garden_gate", ["picket", "iron", "rustic"], { ...OUT, layer: 1, solid: true, door: true, blocksPath: true, rotSteps: 4, hp: 150, cost: [c("planks", 4), c("nails", 2)] }, { to: ["gate_clan", "door_wood"], scale: 0.6 });
-add("feeding_trough", ["wood", "stone", "hay"], { ...OUT, layer: 2, solid: true, rotSteps: 4, hp: 120, container: 6, footprint: { w: 2, h: 1 }, cost: [c("planks", 4), c("nails", 2)] }, { to: ["storage_box"], tint: "#a07850" }); // ADR-113 pens
+add("feeding_trough", ["wood", "stone", "hay"], { ...OUT, layer: 2, solid: true, rotSteps: 4, hp: 120, container: 6, footprint: { w: 2, h: 1 }, cost: [c("planks", 4), c("nails", 2)], category: "furniture" }, { to: ["storage_box"], tint: "#a07850" }); // ADR-113 pens
 add("bench_park", ["wood", "iron", "stone"], { ...OUT, rotSteps: 4, footprint: { w: 2, h: 1 }, hp: 150, cost: [c("planks", 4), c("iron_ingot", 1)] }, { to: ["chair"] });
-add("planter_box", ["long", "square", "raised"], { ...OUT, hp: 60, features: { planter: true }, cost: [c("planks", 4), c("clay", 1)] }, { to: ["flower_box"] });
-add("garden_bed", ["raised", "stone"], { ...OUT, layer: 1, hp: 80, footprint: { w: 2, h: 1 }, features: { planter: true }, cost: [c("planks", 6)] }, { to: ["flower_box"], scale: 1.5 });
+add("planter_box", ["long", "square", "raised"], { ...OUT, hp: 60, features: { planter: true }, cost: [c("planks", 4), c("clay", 1)], category: "furniture" }, { to: ["flower_box"] });
+add("garden_bed", ["raised", "stone"], { ...OUT, layer: 1, hp: 80, footprint: { w: 2, h: 1 }, features: { planter: true }, cost: [c("planks", 6)], category: "furniture" }, { to: ["flower_box"], scale: 1.5 });
 add("fountain", ["tiered", "round", "lion"], { ...OUT, solid: true, tier: 3, hp: 600, footprint: { w: 2, h: 2 }, cost: [c("stone_brick", 16), c("mortar", 4), c("iron_pipe", 2)] }, { to: ["campfire", "pillar"], tint: "#a0c0e0", scale: 1.6 });
 add("well", ["stone", "roofed"], { ...OUT, solid: true, tier: 2, hp: 500, footprint: { w: 2, h: 2 }, cost: [c("stone_brick", 12), c("rope", 2), c("planks", 4)] }, { to: ["campfire", "pillar"], tint: "#909090", scale: 1.5 });
 add("scarecrow", ["classic", "pumpkin", "tattered"], { ...OUT, hp: 60, cost: [c("sticks", 4), c("cloth", 2), c("fiber", 4)] }, { to: ["windsock", "banner"], tint: "#d0b070" });

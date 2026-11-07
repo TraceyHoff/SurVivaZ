@@ -1258,7 +1258,8 @@ html[data-slot-dragging] .gm-modal .gm-panel [data-role=inv-layout] button[data-
 /* ---- ADR-224 build window: category + tier tabs, tile grid (glyph preview, cost, lock), details pane; no hover tooltips ---- */
 .gm-modal .gm-panel:has([data-role=build-cats]){width:min(720px,96vw);max-width:min(720px,96vw)}
 .gm-modal .gm-panel [data-role=body] [data-role=build-cats],.gm-modal .gm-panel [data-role=body] [data-role=build-tiers]{display:flex;flex-wrap:wrap;gap:4px;padding:8px 2px 2px}
-@media (max-width:620px){.gm-modal .gm-panel [data-role=body] [data-role=build-cats],.gm-modal .gm-panel [data-role=body] [data-role=build-tiers]{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-padding:8px}}
+/* ADR-288: short landscape phones need the same single-row category strip as portrait. */
+@media (max-width:620px),(max-height:500px){.gm-modal .gm-panel [data-role=body] [data-role=build-cats],.gm-modal .gm-panel [data-role=body] [data-role=build-tiers]{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-padding:8px}}
 .gm-modal .gm-panel [data-role=build-cats] button,.gm-modal .gm-panel [data-role=build-tiers] button{flex:0 0 auto;padding:2px 10px;font-size:13px;text-transform:capitalize;min-height:38px}
 .gm-modal .gm-panel [data-role=body] :is([data-role=build-cats],[data-role=build-tiers],[data-role=craft-cats]) button[aria-pressed=true]::after{display:none}
 .gm-modal .gm-panel [data-role=build-tiers] button[data-locked]{opacity:.7}

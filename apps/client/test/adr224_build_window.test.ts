@@ -47,6 +47,44 @@ describe("ADR-224 build window", () => {
     const other = Array.from(cats).find((b) => b.getAttribute("aria-pressed") !== "true") as HTMLElement; const before = tiles[0]!.dataset["key"]; other.click();
     expect(document.querySelector<HTMLElement>("[data-role=piece-grid] [data-role=piece]")!.dataset["key"]).not.toBe(before); menus.destroy();
   });
+  test("ADR-288: Furniture consolidates storage, wardrobes and crop plots without moving structure", () => {
+    const { menus } = setup(); menus.open("build");
+    const tabKeys = Array.from(document.querySelectorAll<HTMLElement>("[data-role=build-cats] button")).map((b) => b.dataset["key"]);
+    expect(tabKeys.slice(0, 2)).toEqual(["bcat-structure", "bcat-furniture"]);
+    const furniture = ["storage_box", "basic_storage_box", "large_chest", "wardrobe_rustic", "wardrobe_fine", "wardrobe_luxury",
+      "herb_planter", "window_planter", "planter_box", "garden_bed", "barrel_storage", "basket", "mirror_standing", "mirror_wall",
+      "weapon_rack", "wall_shelf", "apiary", "feeding_trough", "pet_trough", "salt_barrel", "curing_box", "cold_store",
+      "bed", "chair", "table", "shelf_rustic"];
+    const tile = (key: string) => `[data-role=piece-grid] [data-key=piece-${d.pieceId(key)}]`;
+    q("[data-key=bcat-furniture]").click();
+    expect(q("[data-key=bcat-furniture]").textContent).toBe("Furniture");
+    for (const key of furniture) expect(document.querySelector(tile(key)), key).not.toBeNull();
+    expect(q("[data-role=piece-grid] button .nm").textContent).toBe("herb planter");
+    for (const cat of ["structure", "decor", "plants", "wall", "outdoor"]) {
+      q(`[data-key=bcat-${cat}]`).click();
+      for (const key of furniture) expect(document.querySelector(tile(key)), `${key} not in ${cat}`).toBeNull();
+    }
+    q("[data-key=bcat-structure]").click();
+    for (const key of ["foundation", "wall", "floor", "roof_flat", "stairs", "door_wood"]) expect(document.querySelector(tile(key)), key).not.toBeNull();
+    q("[data-key=bcat-outdoor]").click();
+    for (const key of ["fence_picket", "garden_gate", "path_stone", "bench_park"]) expect(document.querySelector(tile(key)), key).not.toBeNull();
+    q("[data-key=bcat-decor]").click();
+    for (const key of ["crate_decor", "ladder"]) expect(document.querySelector(tile(key)), key).not.toBeNull();
+    menus.destroy();
+  });
+  test("ADR-288: pad shoulders, D-pad and A reach Furniture and choose a piece through the existing placement path", () => {
+    const { menus, w, me, press, seek, placing } = setup(); rich(w, me as never);
+    menus.open("build"); q("[data-key=bcat-structure]").click();
+    press(PAD.RB); expect(q("[data-key=bcat-furniture]").getAttribute("aria-pressed")).toBe("true");
+    press(PAD.LB); expect(q("[data-key=bcat-structure]").getAttribute("aria-pressed")).toBe("true");
+    seek("[data-key=bcat-furniture]"); press(PAD.A);
+    expect(q("[data-key=bcat-furniture]").getAttribute("aria-pressed")).toBe("true");
+    seek(`[data-key=piece-${d.pieceId("basic_storage_box")}]`); press(PAD.A);
+    expect(placing).toHaveLength(1); expect(placing[0]).toMatchObject({ piece: d.pieceId("basic_storage_box") });
+    expect(menus.nav.isOpen).toBe(false);
+    // Restore the remembered tier so this pad placement does not leak state into the existing tier test.
+    menus.open("build"); q("[data-key=bcat-structure]").click(); q("[data-role=build-tiers] button").click(); menus.destroy();
+  });
   test("structural pieces get tier tabs (LT/RT) and the tile cost follows the tier", () => {
     const { menus } = setup(); menus.open("build"); q("[data-key=bcat-structure]").click();
     const tg = q("[data-role=build-tiers]"); expect(tg.dataset["tabs"]).toBe("page"); const tb = tg.querySelectorAll<HTMLElement>("button"); expect(tb.length).toBeGreaterThan(1);

@@ -3475,7 +3475,7 @@
       "hp": 80,
       "solid": true,
       "ground": true,
-      "category": "decor",
+      "category": "furniture",
       "container": 8,
       "spoilMul": 0.9,
       "cost": [
@@ -3585,7 +3585,7 @@
       "tier": 1,
       "hp": 120,
       "ground": true,
-      "category": "outdoor",
+      "category": "furniture",
       "container": 12,
       "cost": [
         {
@@ -3832,7 +3832,7 @@
       "hp": 60,
       "solid": true,
       "ground": true,
-      "category": "decor",
+      "category": "furniture",
       "rotSteps": 4,
       "features": {
         "wardrobe": true
@@ -3867,7 +3867,7 @@
         "mount": true,
         "wardrobe": true
       },
-      "category": "decor",
+      "category": "furniture",
       "cost": [
         {
           "resource": "glass",
@@ -3976,7 +3976,7 @@
       "hp": 15,
       "solid": false,
       "ground": true,
-      "category": "decor",
+      "category": "furniture",
       "container": 2,
       "cost": [
         {
@@ -4183,7 +4183,7 @@
       "hp": 60,
       "solid": false,
       "ground": true,
-      "category": "plants",
+      "category": "furniture",
       "features": {
         "planter": true
       },
@@ -4218,7 +4218,7 @@
         "mount": true,
         "planter": true
       },
-      "category": "plants",
+      "category": "furniture",
       "cost": [
         {
           "resource": "planks",
@@ -4354,7 +4354,7 @@
       "features": {
         "mount": true
       },
-      "category": "wall",
+      "category": "furniture",
       "container": 4,
       "cost": [
         {
@@ -4387,7 +4387,7 @@
       "features": {
         "mount": true
       },
-      "category": "wall",
+      "category": "furniture",
       "container": 2,
       "cost": [
         {
@@ -4822,7 +4822,7 @@
       "hp": 120,
       "solid": true,
       "ground": true,
-      "category": "outdoor",
+      "category": "furniture",
       "rotSteps": 4,
       "container": 6,
       "footprint": {
@@ -4889,7 +4889,7 @@
       "hp": 60,
       "solid": false,
       "ground": true,
-      "category": "outdoor",
+      "category": "furniture",
       "features": {
         "planter": true
       },
@@ -4920,7 +4920,7 @@
       "hp": 80,
       "solid": false,
       "ground": true,
-      "category": "outdoor",
+      "category": "furniture",
       "footprint": {
         "w": 2,
         "h": 1
@@ -5210,7 +5210,7 @@
       "hp": 100,
       "solid": true,
       "ground": true,
-      "category": "outdoor",
+      "category": "furniture",
       "rotSteps": 4,
       "container": 6,
       "footprint": {
