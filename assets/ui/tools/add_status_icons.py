@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Append status-effect HUD icons painted with the uikit (same Ink style as the st_* icons in uikit/icons.py)
-to the UI atlas: broken_leg plus nine dedicated temperature / wetness tier icons.
+to the UI atlas: broken_leg, nine temperature / wetness tier icons and three infection tier icons.
 
 The tier motifs are original silhouettes, not copies of vital_*, st_* or icon_temp*.
 Flat fills + explicit hard shades use Ink outlines without its soft interior shading.
@@ -165,10 +165,51 @@ def soaked(c):
     bead(c, 4, 20, 4); bead(c, 28, 20, 3)
 
 
+def infected(c):
+    """Early warning: a peach skin patch with a small plaster over a nick and a pink redness ring."""
+    cel(c, [(4,10),(10,5),(22,4),(28,10),(28,22),(22,28),(10,28),(4,22)], '#FFCBA4')
+    c.poly([(22,5),(28,10),(28,22),(22,28),(18,28),(24,20),(24,11)], '#EFA884')
+    cel(c, blob(16, 16, 7.2, 6.4, wob=0.25, seed=71), '#FF8FA0', 1.0)               # mild redness
+    cel(c, [(8,19),(21,8),(25,12),(12,23)], '#F4D9A8', 1.0)                              # plaster strip
+    cel(c, [(13,15),(17,11),(20,14),(16,18)], '#FFF4E0', .7)                             # gauze pad
+    for x, y in [(10,18),(22,11)]:
+        c.line([(x,y),(x+.2,y+.2)], '#C99E73', 1.0)
+    c.shine(9, 9, 1.0, 1.6, 190)
+
+
+def festering(c):
+    """Clearly worse: a big puffy throbbing lump, sickly yellow-green stained wrap, throb marks."""
+    for pts in [[(3,9),(6,10)],[(3,15),(6,15)],[(26,6),(29,4)],[(27,12),(30,11)]]:
+        c.line(pts, INK, 2.4); c.line(pts, '#E8423F', 1.1)
+    cel(c, blob(16, 17, 11.5, 10.5, wob=0.35, seed=72), '#F2606A', 1.3)               # angry swelling
+    c.poly([(20,9),(26,13),(27,21),(22,26),(16,27),(22,21),(23,14)], '#C8394F')
+    cel(c, [(5,17),(27,13),(28,19),(6,23)], '#F1EBC8', 1.0)                              # wrap
+    c.poly([(12,17),(20,15.5),(21,19),(13,21)], '#B8D45A')                                # sickly stain
+    c.poly([(14,17.5),(18,16.8),(18.5,18.6),(14.6,19.4)], '#E5E86A')
+    c.line([(9,8),(12,6)], '#FFD3D3', 1.6)
+
+
+def septic(c):
+    """Damage tier: woozy pallid lilac face with swirl eyes and fever cheeks, under a red danger badge."""
+    cel(c, [(5,14),(8,8),(15,6),(22,8),(26,14),(26,22),(21,28),(11,28),(5,22)], '#DCCFE8', 1.3)
+    c.poly([(21,9),(26,14),(26,22),(21,28),(15,28),(22,21),(23,14)], '#AE98C8')
+    for cx in (11.5, 19.5):
+        c.line([(cx,15),(cx+1.6,15.6),(cx+1.2,17.4),(cx-.8,17.6),(cx-1.6,15.6),(cx,14)], INK, 1.0)
+    c.poly([(7,19),(10,19),(9.5,21),(7.5,21)], '#E5708C'); c.poly([(21,19),(24,19),(23.5,21),(21.5,21)], '#E5708C')
+    c.line([(12,24),(14,23),(16,24),(18,23),(20,24)], INK, 1.1)                          # wobbly mouth
+    cel(c, [(22,1.5),(30.5,1.5),(30.5,10),(26.3,12.5),(22,10)], '#D6334A', 1.1)       # danger badge
+    cel(c, [(25.4,3.5),(27.2,3.5),(26.9,7.6),(25.7,7.6)], '#FFF3BA', .5)
+    cel(c, [(25.6,8.8),(27,8.8),(27,10.1),(25.6,10.1)], '#FFF3BA', .4)
+    c.line([(3,6),(5,4),(7,6),(5,8),(4,7)], '#D6334A', 1.2)                             # dizzy swirl
+    c.line([(9,9),(12,7.5)], '#FFFFFF', 1.5)
+
+
+INFECTION_ICONS = {'infected': infected, 'festering': festering, 'septic': septic}
+
 TIER_ICONS = {'chilly': chilly, 'cold': cold, 'freezing': freezing,
               'hot': hot, 'sweltering': sweltering, 'overheating': overheating,
               'damp': damp, 'wet': wet, 'soaked': soaked}
-ICONS = {'broken_leg': broken_leg, **TIER_ICONS}
+ICONS = {'broken_leg': broken_leg, **TIER_ICONS, **INFECTION_ICONS}
 
 
 def render(fn, sc):
