@@ -19,7 +19,7 @@ import { CorrectionSampler, type CorrectionSource } from "./correction-sampler.j
 import { World, Transform, PrevTransform, TimeOfDay, Weather, Appearance, PlayerId, defineComponent, slotIndex, type WearableSlot, entityIndex, type Entity, seasonAtDays, type SeasonInfo } from "@engine/core";
 import { CHUNK_SIZE, tileToChunk, tileToLocal, renderTileHeight, type TileMap } from "@engine/world";
 import { setDayFraction, setSeasonState, resolveOffHandSprite, CharArtMapper, parseCharArt, type CharArt } from "@engine/render";
-import { dayCount } from "./day-clock.js";
+import { dayCount, sunFraction } from "./day-clock.js";
 import { clanPieceTint, clanPieceTintPair } from "./clan-tint.js";
 import { pieceVariantOpts } from "./piece-variant.js";
 import { loadManifest, buildPieceVisual, type AssetRegistry } from "@engine/assets";
@@ -447,8 +447,9 @@ export class IsoView {
     // ADR-115: never re-derive time from the view's own tick (that desynced peers); draw the shared server-tick clock.
     const frac = this.ov.hours !== undefined ? this.ov.hours / 24 : dayFrac;
     td.epochTick = frac !== undefined ? Math.round(v.tick - frac * td.dayLengthTicks) : nt.epochTick;
-    setDayFraction(v, frac);
-    { const len = td.dayLengthTicks, days = dayFrac !== undefined ? dayCount() : (net.tick - nt.epochTick) / len; setSeasonState(v, viewSeason(net, days, this.ov.season)); }
+    { const len = td.dayLengthTicks, days = dayFrac !== undefined ? dayCount() : (net.tick - nt.epochTick) / len; setSeasonState(v, viewSeason(net, days, this.ov.season));
+      // ADR-283: lighting reads the seasonal sun fraction (sunrise 0.25 / sunset 0.75); the wall clock stays on the HUD.
+      setDayFraction(v, frac !== undefined ? sunFraction(net, frac, days, this.ov.season) : undefined); }
     const w = v.env(Weather), nw = net.env(Weather) as unknown as Record<string, number>;
     for (const k of Object.keys(w)) (w as unknown as Record<string, number>)[k] = nw[k] ?? 0;
     if (this.ov.weather !== undefined) { w.kind = this.ov.weather; w.intensity = this.ov.intensity ?? 1; }

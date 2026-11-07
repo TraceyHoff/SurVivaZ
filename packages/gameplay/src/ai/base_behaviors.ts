@@ -12,7 +12,7 @@ import { planTerrainBase } from "./terrain_base.js";
  *  - refuel: keep the base fire burning through the night. - leave_base / sleep: door-aware in / out of the 2x2 base.
  */
 import { storageDepositActions, storageWithdrawActions } from "./storage_api.js";
-import { timeOfDay, Transform, type Agent, type AgentContext, type Entity, type World } from "@engine/core";
+import { timeOfDay, sunFractionOf, Transform, type Agent, type AgentContext, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
 import { Animal, AttachKind, BotHome, BuildPiece, Container, Dead, Fuel, LootBag, NO_SLOT, StanceMode, Survival, Viewing, Worn } from "../components.js";
@@ -68,7 +68,7 @@ export function fillPlanSensors(world: World, self: Entity, view: AgentWorldView
   }
   const hungry = (view as { self?: unknown }) && a.bb.num("hungerSeen", 1) < 0.5;
   const woodId = plannerIndex(defs).item.get("wood")?.id; let woodBag = 0; if (woodId !== undefined) for (let i = 0; i < slots.items.length; i++) if (slots.items[i] === woodId) woodBag += slots.counts[i] ?? 0;
-  const body = world.getField(self, Survival, "bodyTemp") ?? 37; const dayT = timeOfDay(world).t;
+  const body = world.getField(self, Survival, "bodyTemp") ?? 37; const dayT = sunFractionOf(timeOfDay(world));
   const freezing = body < 36.4 && woodBag < 7 && !(bs?.complete) && !(bs?.stations.get(StationKind.Campfire)?.lit);
   const winter = isWinter(world); if (winter) view.winter = true;
   const evening = dayT >= 0.45 && dayT < 0.66; // h11-h16: stock the night's fuel (NIGHT_WOOD) before the cold sets in
@@ -380,7 +380,7 @@ export function baseSleepRun(c: Ctx, o: { moveX: number; moveY: number; aimX: nu
 }
 /** ADR-252: the cold hours (h15-h7.5) with a base fire in reach: stay by it and keep it stocked, like a player banking the hearth. */
 function bankHours(c: Ctx): boolean {
-  const w = worldOf(c); if (!w) return false; const t = timeOfDay(w).t; if (t < 0.62 && t >= 0.31) return false;
+  const w = worldOf(c); if (!w) return false; const t = sunFractionOf(timeOfDay(w)); if (t < 0.62 && t >= 0.31) return false;
   const f = c.world.bs?.stations.get(StationKind.Campfire); if (!f || Math.hypot(f.x - c.self.x, f.y - c.self.y) > 400) return false; // far bots walk home for the night
   const sw = plannerIndex(gdefs(c)).item.get("wood")?.id; const sb = sw !== undefined ? (c.world.bs?.storage?.counts.get(sw) ?? 0) : 0;
   return f.lit || (c.world.woodTotal ?? 0) > 0 || sb > 0;

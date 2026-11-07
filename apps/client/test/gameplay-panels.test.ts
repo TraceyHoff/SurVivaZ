@@ -159,14 +159,14 @@ describe("gameplay panels (ADR-095 shell)", () => {
     menus.open("character");
     const txt = (role: string) => q(`[data-role=${role}]`).textContent!;
     expect(q("[data-menu=character]").textContent).toContain("Character sheet — Ada");
-    expect(txt("sheet-body-temp")).toMatch(/Body temperature: -?−?\d+°[CF]/);
+    expect(txt("sheet-body-temp")).toMatch(/Body temperature: -?−?\d+(\.\d)?°[CF]/);
     expect(txt("sheet-health")).toBe("Health: 100/100");
     expect(txt("sheet-hunger")).toBe("Food: 100/100");
     expect(txt("sheet-thirst")).toBe("Water: 100/100");
     expect(txt("sheet-stamina")).toBe("Energy: 100/100");
     expect(txt("sheet-xp")).toMatch(/Level 1 · 0\/\d+ XP/);
     expect(txt("sheet-diseases")).toBe("Diseases: Healthy");
-    expect(txt("sheet-insulation")).toBe("Insulation: Base 0.0°C + clothing 0.0°C");
+    expect(txt("sheet-insulation")).toBe("Insulation: Base 0.0°F + clothing 0.0°F"); // ADR-282: °F default (a 7 °C difference = 12.6 °F)
     expect(txt("sheet-worn")).toContain("Nothing — craft clothing");
     expect(txt("sheet-shelter")).toMatch(/Outside: .* · summer/);
     // wearing a fur coat adds its insulation to the sheet, with a per-item row
@@ -174,8 +174,8 @@ describe("gameplay panels (ADR-095 shell)", () => {
     const slot = G.listSlots(w, me).find((s) => s.item === id("fur_coat"))!.slot;
     expect(G.wearSlot(w, me, slot)).toBe(true);
     menus.refresh();
-    expect(txt("sheet-insulation")).toBe("Insulation: Base 0.0°C + clothing 7.0°C");
-    expect(txt("sheet-worn")).toMatch(/Fur Coat · \+7\.0°C/);
+    expect(txt("sheet-insulation")).toBe("Insulation: Base 0.0°F + clothing 12.6°F");
+    expect(txt("sheet-worn")).toMatch(/Fur Coat · \+12\.6°F/);
     menus.destroy();
   });
   test("Task 31: Character panel is details only — wardrobe controls live in the Wardrobe panel", () => {

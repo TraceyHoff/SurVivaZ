@@ -28,7 +28,7 @@ import { hasDisease, iconForItem, ROADS, clanTintIndex,
   treeShortName, treeIndex, readSlots, SPRITE_FALLBACKS, characterSheetView, dyeView, dyeIntent, wetnessStage,
   recentBuildsView, recentCraftsView,
 } from "@engine/gameplay";
-import { formatTemp, loadTempUnit } from "./hud-temp.js";
+import { formatBodyTemp, formatTemp, formatTempDelta, loadTempUnit } from "./hud-temp.js";
 import { colorChoices, requestCharacterEdit } from "./character-creator.js";
 import { GroupRole, Membership, PlayerId, SLOT_PALETTE, swatchColor, Transform, type Entity, type WearableSlot } from "@engine/core";
 
@@ -650,7 +650,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
         const unit = loadTempUnit();
         const row = (label: string, text: string, role: string): HTMLElement => { const p = kit.para(`${label}: ${text}`); p.dataset["role"] = role; return p; };
         out.push(heading(`Character sheet — ${sheet.name || "Survivor"}`));
-        out.push(row("Body temperature", formatTemp(sheet.bodyTempC, unit), "sheet-body-temp"));
+        out.push(row("Body temperature", formatBodyTemp(sheet.bodyTempC, unit), "sheet-body-temp"));
         out.push(row("Health", `${Math.round(sheet.health)}/${Math.round(sheet.maxHealth)}`, "sheet-health"));
         out.push(row("Food", `${Math.round(sheet.hunger)}/100`, "sheet-hunger"));
         out.push(row("Water", `${Math.round(sheet.thirst)}/100`, "sheet-thirst"));
@@ -664,8 +664,8 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
         out.push(disRow);
         // Task 31: wet clothing insulates less — the sheet shows the effective total while wet
         out.push(row("Insulation", sheet.wetness > 0.05
-          ? `Base ${sheet.insulationBase.toFixed(1)}°C + clothing ${sheet.insulationClothing.toFixed(1)}°C (${sheet.insulationWet.toFixed(1)}°C while wet)`
-          : `Base ${sheet.insulationBase.toFixed(1)}°C + clothing ${sheet.insulationClothing.toFixed(1)}°C`, "sheet-insulation"));
+          ? `Base ${formatTempDelta(sheet.insulationBase, unit)} + clothing ${formatTempDelta(sheet.insulationClothing, unit)} (${formatTempDelta(sheet.insulationWet, unit)} while wet)`
+          : `Base ${formatTempDelta(sheet.insulationBase, unit)} + clothing ${formatTempDelta(sheet.insulationClothing, unit)}`, "sheet-insulation"));
         // Task 31: how long until dry (only while wet), and how long until the care cure (only while sick)
         const stage = wetnessStage(sheet.wetness);
         if (stage) {
@@ -679,7 +679,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
           const first = sheet.diseases[0]; if (first) careRow.prepend(conditionIconImg(first.icon, 14, first.name));
           out.push(careRow);
         }
-        if (sheet.worn.length) for (const it of sheet.worn) out.push(row(it.slot, `${it.name} · +${it.insulation.toFixed(1)}°C`, "sheet-worn"));
+        if (sheet.worn.length) for (const it of sheet.worn) out.push(row(it.slot, `${it.name} · +${formatTempDelta(it.insulation, unit)}`, "sheet-worn"));
         else out.push(row("Worn", "Nothing — craft clothing to stay warm and dry", "sheet-worn"));
         out.push(row(sheet.enclosed ? "Indoors" : sheet.sheltered ? "Sheltered" : "Outside",
           `${formatTemp(sheet.indoorC, unit)}${sheet.sheltered ? ` (outside ${formatTemp(sheet.ambientC, unit)})` : ""} · ${sheet.seasonName}`, "sheet-shelter"));

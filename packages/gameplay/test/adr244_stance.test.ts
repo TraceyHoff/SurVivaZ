@@ -1,6 +1,6 @@
 /** ADR-244: block / crouch / carry / sleep / aim mechanics (server-authoritative Stance, replicated). */
 import { describe, expect, it } from "vitest";
-import { applySnapshot, decodeSnapshot, encodeSnapshot, NetId, setTimeOfDay, timeOfDay, Transform, type Entity, type World } from "@engine/core";
+import { applySnapshot, decodeSnapshot, encodeSnapshot, NetId, setTimeOfDay, timeOfDay, Transform, wallHoursForSun, type Entity, type World } from "@engine/core";
 import * as G from "../src/index.js";
 import { makeWorld, steps } from "./helpers.js";
 
@@ -129,7 +129,7 @@ describe("ADR-244 sleep (bed)", () => {
     const h0 = timeOfDay(w).hours; expect(G.timeSkip(w)).toBe(false); expect(timeOfDay(w).hours).toBeCloseTo(h0, 5);
     inp(w, b, { rest: true }); expect(G.allAsleep(w)).toBe(true); expect(G.timeSkip(w)).toBe(true); expect(timeOfDay(w).hours).toBeGreaterThan(h0);
     for (let i = 0; i < 100000 && G.timeSkip(w); i++);
-    expect(timeOfDay(w).hours).toBeCloseTo(STANCE.timeSkipWakeHour, 1);
+    const tod = timeOfDay(w); expect(tod.hours).toBeCloseTo(wallHoursForSun(STANCE.timeSkipWakeHour, tod.daylightHours ?? 12), 1); // ADR-283: wakes at that day's sunrise
     setTimeOfDay(w, 12); expect(G.timeSkip(w)).toBe(false); // no daytime skip
   });
 });

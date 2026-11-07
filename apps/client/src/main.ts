@@ -65,12 +65,12 @@ import { controlLabel, mountFarmPrompt, quickUseFires, type PromptDevice } from 
 import { attachContextRecovery, effectiveLevel, retryIsoAtSafe } from "./gl-recovery.js";
 import { BootUI, loadSettings, newWorldRules } from "./menu.js";
 import { EDIT_CHAR_KEY, creatorShotFromQuery, creatorShotLook, loadCharacter, previewModeFromQuery, saveCharacter, showCharacterCreator, type CharacterSaveKind, type StoredCharacter } from "./character-creator.js";
-import { sampleDayClock } from "./day-clock.js";
+import { sampleDayClock, sunFraction } from "./day-clock.js";
 import { TUTORIAL_STEPS, TutorialProgress, tutorialKey } from "./tutorial/steps.js";
 import { mountTutorial } from "./tutorial/overlay.js";
 import { TutorialProber, type ProbeSample } from "./tutorial/probe.js";
 import { Health, Zombie, Progression, hasDisease, worldDays } from "@engine/gameplay";
-import { timeOfDay } from "@engine/core";
+import { sunFractionOf, timeOfDay } from "@engine/core";
 import { Survival, heldTool, ResourceNode, toolHint, Animal, LootBag, openContainer } from "@engine/gameplay";
 import { AudioSystem } from "./audio/index.js";
 import { mountDeathScreen, type DeathScreen } from "./death-screen.js";
@@ -367,7 +367,8 @@ function render(w: World, alpha: number): void {
   wireChat();
   try { deathUi?.frame(); } catch { /* never break a frame */ }
   const dayFrac = sampleDayClock(w, session.client, alpha); // ADR-115: one clock for lighting + HUD
-  audioFrame(w, dayFrac);
+  const sunFrac = sunFraction(w, dayFrac); // ADR-283: seasonal sunrise / sunset for day-night audio + FX
+  audioFrame(w, sunFrac);
   inviteNotices();
   if (menus?.nav.isOpen) { const now = performance.now(); if (now >= menuRefreshAt) { menuRefreshAt = now + MENU_REFRESH_MS; menus.refresh(); } }
   iso?.syncGhost(buildMode.preview, w);
@@ -379,7 +380,7 @@ function render(w: World, alpha: number): void {
     const before = iso.renderer.completeFrames;
     iso.render(w, session.client?.tiles.tiles, session.player, alpha, dayFrac);
     if (iso.renderer.completeFrames !== before) camRot?.frameComplete();
-    try { fxLayer.draw(dayFrac); } catch { /* effects must never break a frame */ }
+    try { fxLayer.draw(sunFrac); } catch { /* effects must never break a frame */ }
     diag?.afterRender(); return;
   }
   if (!ctx) return;
@@ -654,7 +655,7 @@ function tutorialTriggers(p: Entity | undefined, pt: { x: number; y: number } | 
   try { out.nearNode = toolHint(world, p) !== undefined; } catch { /* none */ }
   try { if (world.has(p, Health)) { const h = world.get(p, Health)!; out.hp = h.hp; out.hpMax = h.max; } } catch { /* none */ }
   if (sv?.stamina !== undefined) out.stamina = (sv.stamina / Math.max(1, sv.maxStamina ?? 100)) * 100;
-  try { const t = timeOfDay(world); if (t.dayLengthTicks > 0) { out.hours = t.hours; out.day = worldDays(world); } } catch { /* none */ }
+  try { const t = timeOfDay(world); if (t.dayLengthTicks > 0) { out.hours = sunFractionOf(t) * 24; out.day = worldDays(world); } } catch { /* none */ }
   try { if (pt && world.isRegistered(Zombie)) { let best = Infinity; for (const z of world.query([Zombie, Transform])) { const t = world.get(z, Transform)!; best = Math.min(best, Math.hypot(t.x - pt.x, t.y - pt.y)); } if (best < Infinity) out.zombieDist = best; } } catch { /* none */ }
   try { out.brokenLeg = hasDisease(world, p, "broken_leg"); } catch { /* none */ }
   try { if (world.isRegistered(Progression) && world.has(p, Progression)) { const g = world.get(p, Progression) as unknown as { points: number; tpoints?: ArrayLike<number>; nodes?: ArrayLike<number> }; let pts = g.points; for (const v of Array.from(g.tpoints ?? [])) pts += v; let n = 0; for (const w of Array.from(g.nodes ?? [])) { let x = w >>> 0; while (x) { n += x & 1; x >>>= 1; } } out.skillPoints = pts; out.skillNodes = n; } } catch { /* none */ }

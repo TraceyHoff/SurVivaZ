@@ -18,7 +18,7 @@ export const TIPS: readonly string[] = [
   "Pets can guard a spot, a building, a station, or a friend — open your pet's panel and pick Guard.",
   "Hunger drains slowly, thirst faster — keep cooked food and a filled waterskin on you.",
   "Roofs and upper floors need a wall below them somewhere in the same cluster, or they won't place.",
-  "A fully enclosed, roofed room holds 8–32°C — build shelter before the heat wave or the cold snap.",
+  "A fully enclosed, roofed room holds {temp:8}–{temp:32} — build shelter before the heat wave or the cold snap.",
   "Your pack holds 24 slots — stash spare gear in a chest at your base.",
   "Heat waves are rarer now but still deadly — stay indoors, drink, and rest through the worst of it.",
   "Press M for the world map — place markers for your base, water, and good loot, and share them with your party or clan.",

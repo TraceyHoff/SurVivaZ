@@ -18,6 +18,24 @@ export const toF = (c: number): number => c * 9 / 5 + 32;
 export function formatTemp(c: number, unit: TempUnit = "F"): string {
   const v = Math.round(unit === "F" ? toF(c) : c); return `${v < 0 ? "−" : ""}${Math.abs(v)}°${unit}`;
 }
+/** ADR-282: a temperature *difference* (insulation, warmth bonus) in the unit: ×9/5 for °F, no +32 offset. "+1.5°F". */
+export function formatTempDelta(dc: number, unit: TempUnit = "F", digits = 1): string {
+  const v = unit === "F" ? dc * 9 / 5 : dc; const r = Number(Math.abs(v).toFixed(digits)); return `${v < 0 && r !== 0 ? "−" : ""}${r.toFixed(digits)}°${unit}`;
+}
+/** ADR-282: body temperature (one decimal, so 37.0°C / 98.6°F stays readable). */
+export function formatBodyTemp(c: number, unit: TempUnit = "F"): string { const v = unit === "F" ? toF(c) : c; return `${v.toFixed(1)}°${unit}`; }
+/** ADR-282: player-facing copy writes temperatures as tokens, never as a hardcoded unit: `{temp:8}` (a Celsius reading),
+ *  `{tempDelta:2}` (a Celsius difference). Rendered in the player's unit at display time. */
+export function localizeTemps(text: string, unit: TempUnit = loadTempUnit()): string {
+  return text.replace(/\{(temp|tempDelta):(-?[0-9.]+)\}/g, (_, k: string, n: string) => (k === "temp" ? formatTemp(Number(n), unit) : formatTempDelta(Number(n), unit, 0)));
+}
+/** ADR-282: fired on window when the player changes the unit so open screens re-render at once (display only, never replicated). */
+export const TEMP_UNIT_EVENT = "survivaz:temp-unit";
+/** ADR-282: persist a chosen unit immediately (standing preference) and notify listeners. */
+export function saveTempUnit(unit: TempUnit): void {
+  try { const s = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as object; localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...s, tempUnit: unit, tempUnitChosen: true })); } catch { /* private mode */ }
+  try { window.dispatchEvent(new CustomEvent(TEMP_UNIT_EVENT, { detail: unit })); } catch { /* no window (tests / worker) */ }
+}
 /** Gauge scale (deg C) - covers winter blizzard nights to summer heat waves. */
 export const GAUGE_MIN = -20, GAUGE_MAX = 40;
 /** 0..1 marker position on the gauge. */

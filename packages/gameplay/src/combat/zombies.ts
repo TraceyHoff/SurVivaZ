@@ -12,7 +12,7 @@
  * It turns aggressive at dusk and calm at dawn, staggered per zombie (zombieAggressive). Far zombies despawn.
  */
 import { isCrouched, STANCE } from "../stance.js";
-import { entityIndex, NetId, Transform, timeOfDay, type Entity, type World } from "@engine/core";
+import { entityIndex, NetId, Transform, timeOfDay, sunFractionOf, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
 import { Anim, AnimState, Attacker, BodyTemp, Dead, Exposure, Health, NoiseLevel, Survival, Zombie, ZombieBrain, ZState } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
@@ -38,7 +38,7 @@ import { gateZombieKind } from "./zombie_gate.js";
 import { inSpawnSafeRadius } from "../spawn_points.js";
 
 const PHASE_KEY = { [DayPhase.Night]: "night", [DayPhase.Dawn]: "dawn", [DayPhase.Day]: "day", [DayPhase.Dusk]: "dusk" } as const;
-export const currentPhaseKey = (world: World): "night" | "dawn" | "day" | "dusk" => PHASE_KEY[dayPhase(timeOfDay(world).t)];
+export const currentPhaseKey = (world: World): "night" | "dawn" | "day" | "dusk" => PHASE_KEY[dayPhase(sunFractionOf(timeOfDay(world)))];
 
 /** Paths (sim-local, server). */
 const paths = new WeakMap<World, Map<Entity, { tiles: [number, number][]; i: number }>>();
@@ -127,7 +127,7 @@ function acquire(world: World, z: Entity, x: number, y: number, def: ZombieDef, 
  * by a stable 0..ai.aggroStaggerT offset (NetId hash) so a crowd wakes / settles over time instead of all at once.
  * No clock (dayLengthTicks 0) reads t = 0: night, aggressive. Horde members ignore this (always aggressive).
  */
-export function zombieAggressive(world: World, z: Entity, t = timeOfDay(world).t): boolean {
+export function zombieAggressive(world: World, z: Entity, t = sunFractionOf(timeOfDay(world))): boolean {
   if (world.has(z, HordeMember)) return true;
   const ai = gameplayDefs(world).ai; const id = (world.getField(z, NetId, "id") ?? z) >>> 0;
   const o = (((Math.imul(id ^ 0x9e3779b9, 0x85ebca6b) >>> 0) % 1000) / 1000) * ai.aggroStaggerT;
@@ -156,7 +156,7 @@ export const snuffTargetOf = (world: World, z: Entity): Entity | undefined => sn
 export function zombieAISystem(world: World, dt: number): void {
   if (!isAuthority(world)) return;
   const defs = gameplayDefs(world); const ai = defs.ai; const tf = world.store(Transform); const br = world.store(ZombieBrain);
-  const ps = pathsOf(world); const phase = currentPhaseKey(world); const todT = timeOfDay(world).t;
+  const ps = pathsOf(world); const phase = currentPhaseKey(world); const todT = sunFractionOf(timeOfDay(world));
   const avoid = defs.lightAvoid.phases.includes(phase); const sn = snuffsOf(world);
   // Task 29: living survivors with Transform, sorted for deterministic tie-breaks; rebuilt per
   // tick (cheap: players are few) and shared by acquire + the despawn check below. Guarded: worlds

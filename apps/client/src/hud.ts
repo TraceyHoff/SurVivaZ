@@ -7,11 +7,13 @@
 import { uiSprites } from "./ui-atlas.js";
 import { mountUi } from "./ui-root.js";
 import { Weather, Transform, type Entity, type World } from "@engine/core";
-import { dayCount, dayHours } from "./day-clock.js";
+import { dayCount, dayHours, daylightHoursAt } from "./day-clock.js";
+import { formatClock12 } from "./clock-format.js";
+import { sunFractionFor } from "@engine/core";
 import { activeDiseases, diseasePresentation, infectionTier, Diseases, Exposure, Health, RoomHeat, Survival, temperatureTier, damagingTemperatureTier, wetnessStage } from "@engine/gameplay";
 import { conditionIconImg } from "./game-icons.js";
 import { seasonAtDays } from "@engine/core";
-import { formatTemp, gaugeFrac, GAUGE_GRADIENT, hudAirTemp, hudShelteredTemp, loadTempUnit, SEASON_LABEL, tempBand, type TempUnit } from "./hud-temp.js";
+import { formatBodyTemp, formatTemp, gaugeFrac, TEMP_UNIT_EVENT, GAUGE_GRADIENT, hudAirTemp, hudShelteredTemp, loadTempUnit, SEASON_LABEL, tempBand, type TempUnit } from "./hud-temp.js";
 
 export const WEATHER_LABEL = ["Clear", "Rain", "Storm", "Snow", "Fog", "Overcast", "Heat", "Blizzard", "Windy"];
 const STATS = [
@@ -123,12 +125,12 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
   const update = (): void => {
     const w = world(); const p = player();
     try {
-      const h = ov.hours ?? dayHours(); const hh = Math.floor(h), mm = Math.floor((h - hh) * 60);
+      const h = ov.hours ?? dayHours();
       const wk = ov.weather ?? w.env(Weather).kind;
-      setText("clock", clockText, `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}${ov.hours !== undefined ? "*" : ""}`);
+      setText("clock", clockText, `${formatClock12(h)}${ov.hours !== undefined ? "*" : ""}`); // ADR-284: 12-hour AM/PM world clock
       setText("weather", weatherText, `${WEATHER_LABEL[wk] ?? "?"}${ov.weather !== undefined ? "*" : ""}`);
       setAttr("clockTitle", clock, "title", ov.hours !== undefined || ov.weather !== undefined ? "* view override (?time= / ?weather=)" : "");
-      const night = h < 6 || h >= 19; if (ui) { const u = ui.url(night ? "ic_moon" : "ic_sun"); if (u && clockIcon.dataset["k"] !== String(night)) { clockIcon.src = u; clockIcon.dataset["k"] = String(night); } }
+      const sh = sunFractionFor(h / 24, daylightHoursAt(w, undefined, ov.season)) * 24; const night = sh < 6 || sh >= 19; // ADR-283: seasonal sunrise / sunset if (ui) { const u = ui.url(night ? "ic_moon" : "ic_sun"); if (u && clockIcon.dataset["k"] !== String(night)) { clockIcon.src = u; clockIcon.dataset["k"] = String(night); } }
     } catch { setText("clock", clockText, ""); setText("weather", weatherText, ""); }
     try { // ADR-239 season + temperature
       const days = dayCount(), si = ov.season !== undefined ? Math.floor(((ov.season % 4) + 4) % 4) : seasonAtDays(w, days).index;
@@ -174,12 +176,15 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
           const name = key[0]!.toUpperCase() + key.slice(1);
           c.append(conditionIconImg(key, 11, name), ` ${name}`); c.title = title; c.style.background = color; chips.append(c);
         };
-        if (tier) status(tier, `${tier} — body ${sv!.bodyTemp.toFixed(1)}°C. ${damagingTemperatureTier(tier) ? "Losing health!" : "Find comfortable shelter before this worsens."}`, tier === "chilly" || tier === "cold" || tier === "freezing" ? "#386DA6" : "#AC432B");
+        if (tier) status(tier, `${tier} — body ${formatBodyTemp(sv!.bodyTemp, unit)}. ${damagingTemperatureTier(tier) ? "Losing health!" : "Find comfortable shelter before this worsens."}`, tier === "chilly" || tier === "cold" || tier === "freezing" ? "#386DA6" : "#AC432B");
         if (stage) status(stage, `${stage} — dry indoors or by a fire; deeper wetness takes longer to dry`, "#4A7A9E");
         if (!ro) publishHudBottom(); // no ResizeObserver: chips are the only content that changes the HUD height
       }
     } catch { /* replica without Diseases yet */ }
   };
   const timer = setInterval(update, 250); update();
-  return { destroy: () => { clearInterval(timer); removeEventListener("resize", publishHudBottom); ro?.disconnect(); root.remove(); style.remove(); } };
+  // ADR-282: a unit change in Settings re-renders the gauge at once (the 1 s poll stays as a cross-tab fallback)
+  const onUnit = (): void => { if (!ov.unit) { unit = loadTempUnit(); unitAt = Date.now(); try { update(); } catch { /* never break the HUD */ } } };
+  addEventListener(TEMP_UNIT_EVENT, onUnit);
+  return { destroy: () => { clearInterval(timer); removeEventListener("resize", publishHudBottom); removeEventListener(TEMP_UNIT_EVENT, onUnit); ro?.disconnect(); root.remove(); style.remove(); } };
 }

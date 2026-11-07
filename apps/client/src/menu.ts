@@ -5,6 +5,7 @@
  */
 import { sampleWorldPreview, worldPreviewSvg, randomWorldSeed } from "@engine/world";
 import { parseWorldSeed } from "./world-seed.js";
+import { localizeTemps, saveTempUnit } from "./hud-temp.js";
 import { deleteConfirm, deleteLocalProgress, listLocalSaves, type LocalSaveKind } from "./delete-progress.js";
 import { BUILD_HASH } from "./error-log.js";
 import { mountUi } from "./ui-root.js";
@@ -40,7 +41,7 @@ export function tempUnitControl(s: { tempUnit?: string; tempUnitChosen?: boolean
   const t = document.createElement("span"); t.textContent = "Temperature 🌡"; const g = document.createElement("span"); g.style.cssText = "display:flex;gap:6px";
   const bs = (["F", "C"] as const).map((u) => { const b = document.createElement("button"); b.type = "button"; b.dataset["unit"] = u; b.dataset["key"] = `temp-unit-${u}`; b.setAttribute("role", "radio");
     b.textContent = u === "F" ? "°F" : "°C"; b.title = u === "F" ? "Fahrenheit" : "Celsius"; b.style.cssText = "min-width:56px;min-height:40px;padding:6px 12px";
-    b.addEventListener("click", () => { v = u; touched = true; sync(); }); g.append(b); return b; });
+    b.addEventListener("click", () => { v = u; touched = true; sync(); saveTempUnit(u); }); /* ADR-282: applies at once everywhere */ g.append(b); return b; });
   const sync = (): void => { for (const b of bs) { const on = b.dataset["unit"] === v; b.className = on ? "" : "alt"; b.setAttribute("aria-checked", String(on)); b.setAttribute("aria-pressed", String(on)); } };
   sync(); row.append(t, g);
   return { el: row, value: () => v, patch: () => (touched || s?.tempUnitChosen ? { tempUnit: v, tempUnitChosen: true } : {}) };
@@ -193,7 +194,7 @@ export class BootUI {
     if (BR.loadingAnim) { const cf = document.createElement("div"); cf.className = "cf"; track.append(cf); }
     track.setAttribute("role", "progressbar"); track.setAttribute("aria-valuemin", "0"); track.setAttribute("aria-valuemax", "100"); this.track = track;
     this.lbl.className = "lbl"; this.lbl.setAttribute("aria-live", "polite");
-    this.tip.className = "tip"; this.tip.dataset["role"] = "tip"; this.tip.textContent = TIPS[0]!;
+    this.tip.className = "tip"; this.tip.dataset["role"] = "tip"; this.tip.textContent = localizeTemps(TIPS[0]!);
     this.body.append(this.lane, this.lbl, this.tip);
     this.tipsOn(true);
     try { this.bar.reducedMotion = matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { /* old browsers */ }
@@ -224,7 +225,7 @@ export class BootUI {
   private tipsOn(on: boolean): void {
     if (this.tipTimer) { clearInterval(this.tipTimer); this.tipTimer = 0; }
     this.tip.style.display = on ? "" : "none";
-    if (on) this.tipTimer = window.setInterval(() => { this.tipIdx = nextTip(this.tipIdx); this.tip.textContent = TIPS[this.tipIdx]!; }, TIP_ROTATION_MS);
+    if (on) this.tipTimer = window.setInterval(() => { this.tipIdx = nextTip(this.tipIdx); this.tip.textContent = localizeTemps(TIPS[this.tipIdx]!); }, TIP_ROTATION_MS);
   }
   /**
    * Task 14: the SECOND loading screen, same visual style as the first, shown after the player picks a game

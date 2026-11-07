@@ -5,7 +5,7 @@ import { TERRAIN, terrainFlowSystem } from "./terrain.js";
 import { HUSBANDRY_EVERY, husbandrySystem, husbandryUseSystem } from "./skills/husbandry.js";
 import { installProgression, progressionMigrateSystem, xpTravelSystem } from "./skills/progression.js";
 import { installPets, petSystem } from "./pets.js";
-import { DEFAULT_TICK_HZ, pruneModifiers, Season, setTimeOfDay, StallDisplay, TimeOfDay, Weather, type World } from "@engine/core";
+import { DEFAULT_TICK_HZ, pruneModifiers, Season, setTimeOfDay, wallHoursForSun, worldDaylightHours, StallDisplay, TimeOfDay, Weather, type World } from "@engine/core";
 import { installSpatialIndex, setClimateModel, ClimateRes } from "@engine/world";
 import { Buffs, Equipment, GAMEPLAY_COMPONENTS, IntentAction, Inventory, NO_SLOT, PlayerIntent } from "./components.js";
 import { GameplayConfig, type GameplayRole } from "./config.js";
@@ -112,11 +112,14 @@ export function installGameplay(world: World, options: GameplayOptions | number 
   world.setResource(GameplayConfig, { defs, role });
   const dayLengthTicks = opts.dayLengthTicks ?? Math.round(env.dayLengthSeconds * (opts.tickHz ?? DEFAULT_TICK_HZ));
   // Environment singleton is created by core; initialise TimeOfDay once (dayLengthTicks 0 = uninitialised).
-  if (world.env(TimeOfDay).dayLengthTicks === 0) { world.env(TimeOfDay).dayLengthTicks = dayLengthTicks; setTimeOfDay(world, env.startTimeOfDay * 24, 0); }
+  const freshClock = world.env(TimeOfDay).dayLengthTicks === 0;
+  if (freshClock) { world.env(TimeOfDay).dayLengthTicks = dayLengthTicks; setTimeOfDay(world, env.startTimeOfDay * 24, 0); }
   world.set(world.environment, Weather, { kind: WeatherKind.Clear });
   // ADR-239: seasons ride on the day clock; offsetDays starts the cycle at startSeason (server meta restores it).
   if (!world.isRegistered(Season)) world.register(Season);
   if (!world.has(world.environment, Season)) { const st = env.seasons; world.add(world.environment, Season, st ? { lengthDays: st.lengthDays, blendDays: st.blendDays, offsetDays: st.startSeason * st.lengthDays } : { lengthDays: 0 }); }
+  // ADR-283: startTimeOfDay is a sun fraction (0.3 = just after dawn), so a new world starts just after *that day's* sunrise.
+  if (freshClock) setTimeOfDay(world, newWorldStartHours(world, env.startTimeOfDay), 0);
   if (role !== "client") setWorldRules(world, opts.worldRules ?? {});
   installSpatialIndex(world);
   installGameplayContainers(world);
@@ -176,3 +179,8 @@ export function equipmentSyncSystem(world: World): void {
 
 // ---- spawn helpers (server spawns; NetId assignment is @engine/net's job) ----------------------
 
+
+/** ADR-283: wall-clock hours on day 0 for a sun fraction (startTimeOfDay): follows day 0's seasonal sunrise. */
+export function newWorldStartHours(world: World, sunFraction: number): number {
+  let h = sunFraction * 24; for (let i = 0; i < 2; i++) h = wallHoursForSun(sunFraction * 24, worldDaylightHours(world, h / 24)); return h;
+}

@@ -10,7 +10,7 @@
  * WeatherKind values are stable (renderer contract): 0 Clear, 1 Rain, 2 Storm, 3 Snow, 4 Fog, 5 Overcast, 6 Heat, 7 Blizzard, 8 Windy.
  *  - seasons (ADR-239): core Season on the environment; season weather tables + seasonal temperature live here.
  */
-import { addModifier, dayNoise, entityIndex, ModOp, Season, seasonFromDays, timeOfDay, Transform, Weather, type Entity, type SeasonInfo, type TimeOfDayInfo, type World } from "@engine/core";
+import { addModifier, dayNoise, entityIndex, ModOp, Season, seasonFromDays, timeOfDay, sunFractionOf, Transform, Weather, type Entity, type SeasonInfo, type TimeOfDayInfo, type World } from "@engine/core";
 import { ClimateRes, climateAt, EmitterIndexRes, type BaseClimate, type ClimateContext, type ClimateModel, type ClimateSample } from "@engine/world";
 import { Buffs, ChunkSurface, Exposure, RoomHeat, Stat, Wetness } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
@@ -37,8 +37,8 @@ export function dayPhase(t: number): DayPhase {
 export function clockSystem(world: World): void {
   const before = timeOfDay(world, world.tick), after = timeOfDay(world, world.tick + 1);
   if (after.dayLengthTicks === 0) return;
-  const pa = dayPhase(after.t);
-  if (pa !== dayPhase(before.t)) emit(world, DayPhaseChanged, { phase: pa, day: after.day });
+  const pa = dayPhase(sunFractionOf(after));
+  if (pa !== dayPhase(sunFractionOf(before))) emit(world, DayPhaseChanged, { phase: pa, day: after.day });
 }
 
 const NEUTRAL: WeatherDef = { kind: WeatherKind.Clear, weight: 0, durationSeconds: [0, 0], intensity: [0, 0], tempOffset: 0, wetnessPerSec: 0, thirstMul: 1, staminaRegenMul: 1, windSpeed: [0, 0] };
@@ -235,7 +235,7 @@ export function shelteredAirTemp(world: World, x: number, y: number, z = 0, wind
   return { temp: enclosed ? Math.min(vt.comfortMax, Math.max(vt.comfortMin, t)) + fireHeat : t, sheltered: sh.exposure < 1, enclosed, exposure: sh.exposure };
 }
 export function threatLevel(world: World): number {
-  return dayPhase(timeOfDay(world).t) === DayPhase.Night ? gameplayDefs(world).environment.nightThreatMul : 1;
+  return dayPhase(sunFractionOf(timeOfDay(world))) === DayPhase.Night ? gameplayDefs(world).environment.nightThreatMul : 1;
 }
 
 /** Heat (deg C) at a position from Heat emitters (lit fires), walls occlude. */
@@ -355,7 +355,7 @@ function setMul(world: World, e: Entity, stat: Stat, value: number, expiresAtTic
 export function chunkSurfaceSystem(world: World, dt: number): void {
   if (!isAuthority(world)) return;
   const env = gameplayDefs(world).environment; const w = world.env(Weather);
-  const curve = -Math.cos(2 * Math.PI * timeOfDay(world).t);
+  const curve = -Math.cos(2 * Math.PI * sunFractionOf(timeOfDay(world)));
   const sun = w.kind === WeatherKind.Clear || w.kind === WeatherKind.Heat ? Math.max(0, curve) : 0;
   const rain = isRaining(w.kind) ? env.surface.rainPerSec * w.intensity : 0;
   const dry = env.surface.dryPerSec * (1 + env.surface.windDryMul * w.windSpeed + env.surface.sunDryMul * sun);

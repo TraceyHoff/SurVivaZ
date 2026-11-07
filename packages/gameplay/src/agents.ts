@@ -6,7 +6,7 @@
  */
 import { pickSkillNode, treesOf } from "./skills/progression.js";
 import { Progression } from "./components.js";
-import { Agent, AgentController, BehaviorRegistry, ChatTemplates, Rng, Transform, canSee, entityIndex, timeOfDay, type AgentContext, type AgentIdentity, type AgentSelf, type BehaviorDef, type ScheduleSlot, type World, type Entity, type Imperfections, type PerceptionConfig } from "@engine/core";
+import { Agent, AgentController, BehaviorRegistry, ChatTemplates, Rng, Transform, canSee, entityIndex, timeOfDay, sunFractionOf, type AgentContext, type AgentIdentity, type AgentSelf, type BehaviorDef, type ScheduleSlot, type World, type Entity, type Imperfections, type PerceptionConfig } from "@engine/core";
 import raw from "../data/agents.json";
 import { Animal, Dead, Health, ResourceNode, Survival, Zombie, WorkerJob } from "./components.js";
 import { currentPhaseKey } from "./combat/zombies.js";
@@ -62,7 +62,7 @@ export function buildAgentSelf(world: World, self: Entity, a: Agent): AgentSelf 
   const t = world.get(self, Transform); if (!t) return undefined;
   const sv = world.get(self, Survival); const hp = world.get(self, Health);
   const facing = a.bb.num("facing", t.facing); const tod = timeOfDay(world);
-  return { x: t.x, y: t.y, facing, hp: hp ? hp.hp / Math.max(1, hp.max) : 1, hunger: (sv?.hunger ?? 100) / 100, thirst: (sv?.thirst ?? 100) / 100, stamina: sv ? sv.stamina / Math.max(1, sv.maxStamina) : 1, tick: world.tick, dayT: tod.t, phase: currentPhaseKey(world) };
+  return { x: t.x, y: t.y, facing, hp: hp ? hp.hp / Math.max(1, hp.max) : 1, hunger: (sv?.hunger ?? 100) / 100, thirst: (sv?.thirst ?? 100) / 100, stamina: sv ? sv.stamina / Math.max(1, sv.maxStamina) : 1, tick: world.tick, dayT: sunFractionOf(tod), phase: currentPhaseKey(world) };
 }
 /**
  * `candidates` (optional, ADR-105): entities to consider instead of every Transform entity (e.g. a spatial-hash lookup
@@ -99,7 +99,7 @@ export function buildAgentView(world: World, self: Entity, a: Agent, home: { x: 
   const view: AgentWorldView = { seen, home, playerName }; fillAgentSensors(world, self, view, (sv?.hunger ?? 100) < 50); fillPartySensors(world, self, view); fillClanSensors(world, self, view); if ((treesOf(world, self) ?? []).some((t) => t.points > 0)) { // ADR-221: per-tree points since ADR-209 (global points is always 0)
     const p = pickSkillNode(world, self, a.identity.traits); if (p !== undefined) view.skillPick = p; } fillVehicleSensors(world, self, view); fillStanceSensors(world, self, view); fillGoalSensors(world, self, view, a); fillHireSensors(world, self, view, a); observeSocialMemory(world, self, a);
   return {
-    self: { x: t.x, y: t.y, facing, hp: hp ? hp.hp / Math.max(1, hp.max) : 1, hunger: (sv?.hunger ?? 100) / 100, thirst: (sv?.thirst ?? 100) / 100, stamina: sv ? sv.stamina / Math.max(1, sv.maxStamina) : 1, tick: world.tick, dayT: tod.t, phase: currentPhaseKey(world) },
+    self: { x: t.x, y: t.y, facing, hp: hp ? hp.hp / Math.max(1, hp.max) : 1, hunger: (sv?.hunger ?? 100) / 100, thirst: (sv?.thirst ?? 100) / 100, stamina: sv ? sv.stamina / Math.max(1, sv.maxStamina) : 1, tick: world.tick, dayT: sunFractionOf(tod), phase: currentPhaseKey(world) },
     world: view,
   };
 }
