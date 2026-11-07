@@ -59,6 +59,7 @@ export const FireToggled = ev<{ entity: Entity; lit: number }>("gameplay.FireTog
 // building
 export const PiecePlaced = ev<{ piece: Entity; type: number; builder: Entity }>("gameplay.PiecePlaced");
 export const FarmFailed = ev<{ entity: Entity; reason: number }>("gameplay.FarmFailed");
+export const PlantDied = ev<{ x: number; y: number; kind: number }>("gameplay.PlantDied");
 export const BuildFailed = ev<{ entity: Entity; action: number; reason: BuildFail }>("gameplay.BuildFailed");
 export const PieceDamaged = ev<{ piece: Entity; hp: number; amount: number; attacker: Entity }>("gameplay.PieceDamaged");
 export const PieceDestroyed = ev<{ piece: Entity; type: number; cause: DestroyCause }>("gameplay.PieceDestroyed");

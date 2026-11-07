@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { Transform } from "@engine/core";
-import { addItem, animalDefs, clutterForChunk, CLUTTER_KEYS, Crop, cropGrowthSystem, FARMING, gameplayDefs, IntentAction, plant, ResourceNode, scaleAnimalCaps, setIntent, spawnPlayer, spawnResourceNode, till, water, fertilize, growthMul, CROP_EVERY, countItem } from "../src/index.js";
+import { Transform, Weather } from "@engine/core";
+import { addItem, animalDefs, clutterForChunk, CLUTTER_KEYS, Crop, cropGrowthSystem, FARMING, gameplayDefs, IntentAction, plant, ResourceNode, scaleAnimalCaps, setIntent, spawnPlayer, spawnResourceNode, till, water, fertilize, growthMul, CROP_EVERY, countItem, WeatherKind } from "../src/index.js";
 import { toSpawnEntries } from "../src/ai/population.js";
 import { makeWorld, steps } from "./helpers.js";
 
@@ -23,8 +23,9 @@ describe("ADR-110 wildlife, farming, flora, clutter", () => {
     expect(till(w, p, 11.5, 10.5)).toBe(0); expect(till(w, p, 11.5, 10.5)).toBe(3);
     expect(plant(w, p, "wheat_seeds", 11.5, 10.5)).toBe(0);
     const crop = [...w.query([Crop])][0]!; expect(w.get(crop, Crop)!.kind).toBeGreaterThan(0);
-    const dry = growthMul(w, w.get(crop, Crop)!); water(w, 11.5, 10.5); expect(fertilize(w, 11.5, 10.5)).toBe(true);
-    expect(growthMul(w, w.get(crop, Crop)!)).toBeCloseTo(dry * 3);
+    w.env(Weather).kind = WeatherKind.Clear; expect(growthMul(w, w.get(crop, Crop)!)).toBe(0); // ADR-286: a dry plant does not grow
+    water(w, 11.5, 10.5); const wet = growthMul(w, w.get(crop, Crop)!); expect(wet).toBeGreaterThan(0); expect(fertilize(w, 11.5, 10.5)).toBe(true);
+    expect(growthMul(w, w.get(crop, Crop)!)).toBeCloseTo(wet * FARMING.fertilizerMul);
     const grow = FARMING.plantables.find((x) => x.seed === "wheat_seeds")!.growSeconds;
     const stages = new Set<number>();
     for (let i = 0; i < grow && w.isAlive(crop); i++) { cropGrowthSystem(w); if (w.isAlive(crop)) stages.add(w.get(crop, Crop)!.stage); }

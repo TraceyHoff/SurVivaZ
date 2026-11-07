@@ -5,14 +5,15 @@
  * ADR-247: a seed/sapling drops only from its OWN species (`wild` nodes, its `becomes` node, crop_<key>); see seedSourceIssues.
  * Authority-only and RNG-free; Crop is networked + persistent so fields survive restarts and replicate to clients.
  */
-import { DEFAULT_TICK_HZ, SeasonId, Transform, Weather, entityIndex, seasonAt, type Entity, type World } from "@engine/core";
+import { DEFAULT_TICK_HZ, SeasonId, timeOfDay, Transform, Weather, entityIndex, seasonAt, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
 import raw from "../data/farming.json";
 import { BuildPiece, Crop, Dead, Equipment, IntentAction, PlayerIntent, ResourceNode, WorkerTarget } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
 import type { GameDefs } from "./defs.js";
+import { takeSip } from "./food.js";
 import { countItem, readSlots, slotItem, takeFromSlot } from "./inventory.js";
-import { emit, FarmFailed, XpActivity } from "./events.js";
+import { emit, FarmFailed, PlantDied, XpActivity } from "./events.js";
 import { indexEntity, spawnResourceNode } from "./spawn.js";
 import { hasPrivilege } from "./building/place.js";
 import { populationTile } from "./population.js";
@@ -67,7 +68,7 @@ export function cropSpriteKey(kind: number, stage: number): string {
   return p.type === "crop" ? `crop_${p.key}_${stage}` : `sapling_${p.key}_${stage}`;
 }
 
-export const enum FarmFail { None = 0, NoPrivilege = 1, BadTile = 2, Occupied = 3, NeedsSoil = 4, NothingToTend = 5, /** crop seed with no soil and no hoe to till it */ NeedsHoe = 6 }
+export const enum FarmFail { None = 0, NoPrivilege = 1, BadTile = 2, Occupied = 3, NeedsSoil = 4, NothingToTend = 5, /** crop seed with no soil and no hoe to till it */ NeedsHoe = 6, /** ADR-286 status */ NeedsWater = 7, /** ADR-286 status */ TooDark = 8 }
 
 /** Planting spot: one tile in front of the player, snapped to the tile centre. */
 export function plantSpot(world: World, e: Entity): { x: number; y: number } {
@@ -85,7 +86,7 @@ export function inPlanter(world: World, x: number, y: number): boolean {
   return near(world, x, y, 0.75).some((o) => { const t = world.getField(o, BuildPiece, "type"); return t !== undefined && !!defs.pieces.get(t)?.features.planter; });
 }
 export function spawnCrop(world: World, x: number, y: number, kind = 0): Entity {
-  const e = world.create(); world.add(e, Transform, { x, y }).add(e, Crop, { kind, stage: 0, growth: 0, waterUntilTick: 0, fertilized: 0 }); indexEntity(world, e); return e;
+  const e = world.create(); world.add(e, Transform, { x, y }).add(e, Crop, { kind, stage: 0, growth: 0, waterUntilTick: kind > 0 ? dryClock(world) : 0, fertilized: 0 }); indexEntity(world, e); return e;
 }
 /** Till the spot (hoe). */
 export function till(world: World, e: Entity, x: number, y: number, dryRun = false): FarmFail {
@@ -103,7 +104,7 @@ export function plant(world: World, e: Entity, seed: string, x: number, y: numbe
   if (!(p.type === "crop" && inPlanter(world, x, y)) && !tileOk(world, x, y, p.tiles)) return FarmFail.BadTile;
   if (p.type === "crop") {
     const soil = around.find((o) => world.get(o, Crop)?.kind === 0); if (soil === undefined) return hasHoe(world, e) ? FarmFail.NeedsSoil : FarmFail.NeedsHoe;
-    if (!dryRun) world.set(soil, Crop, { kind, stage: 0, growth: 0 }); return FarmFail.None;
+    if (!dryRun) world.set(soil, Crop, { kind, stage: 0, growth: 0, waterUntilTick: Math.max(world.get(soil, Crop)!.waterUntilTick, dryClock(world)) }); return FarmFail.None;
   }
   if (around.some((o) => world.has(o, Crop) || world.has(o, ResourceNode))) return FarmFail.Occupied;
   if (!dryRun) spawnCrop(world, x, y, kind); return FarmFail.None;
@@ -112,6 +113,25 @@ export function water(world: World, x: number, y: number): number {
   const until = world.tick + Math.round(FARMING.wateredSeconds * DEFAULT_TICK_HZ); let n = 0;
   for (const o of near(world, x, y, FARMING.waterRadius)) if ((world.get(o, Crop)?.kind ?? 0) > 0) { world.set(o, Crop, { waterUntilTick: until }); n++; }
   return n;
+}
+/** ADR-286: waterUntilTick for a freshly planted (dry) plant: the drought clock starts now (0 = unset: re-started on the next crop tick). */
+const dryClock = (world: World): number => world.tick;
+/** ADR-286: plants in front of `e` (plantSpot, waterRadius) that are not watered right now. */
+export function thirstyPlantsInFront(world: World, e: Entity): Entity[] {
+  if (!world.has(e, Transform)) return []; const at = plantSpot(world, e);
+  return crops(world, at.x, at.y, FARMING.waterRadius).filter((o) => world.get(o, Crop)!.waterUntilTick <= world.tick);
+}
+/**
+ * ADR-286: pour one sip from a held liquid container (waterskin, flask, canteen... any item with sips > 0 still holding
+ * water) onto the thirsty plants in front. Authority only; consumes the sip. Returns plants watered (0 = nothing done).
+ * Underground plants never get rain, so this (or a watering can / water flowing beside them) is how they are watered.
+ */
+export function waterFromContainer(world: World, e: Entity, slot: number): number {
+  const thirsty = thirstyPlantsInFront(world, e); if (!thirsty.length) return 0;
+  if (!takeSip(world, e, slot)) return 0;
+  const until = world.tick + Math.round(FARMING.wateredSeconds * DEFAULT_TICK_HZ);
+  for (const o of thirsty) world.set(o, Crop, { waterUntilTick: until });
+  emit(world, XpActivity, { entity: e, source: "water", units: 1 }); return thirsty.length;
 }
 const hasHoe = (world: World, e: Entity): boolean => { const id = [...gameplayDefs(world).items.values()].find((d) => d.key === FARM_TOOL.hoe)?.id; return !!id && countItem(world, e, id) > 0; };
 const crops = (world: World, x: number, y: number, r: number): Entity[] => near(world, x, y, r).filter((o) => (world.get(o, Crop)?.kind ?? 0) > 0);
@@ -140,10 +160,32 @@ export function farmUseSystem(world: World): void {
   }
 }
 
-/** Growth multiplier right now (watered by can or rain, fertilizer). */
-export function growthMul(world: World, c: { waterUntilTick: number; fertilized: number }): number {
-  const wet = c.waterUntilTick > world.tick || isRaining(world.env(Weather).kind);
-  return (wet ? FARMING.wateredMul : FARMING.unwateredMul) * (c.fertilized ? FARMING.fertilizerMul : 1);
+/** ADR-286: true while the sun is up (that day's ADR-285 sunrise..sunset on the shared world clock). */
+export function isSunUp(world: World): boolean {
+  const tod = timeOfDay(world); if (!tod.dayLengthTicks || !tod.sun) return true;
+  return tod.hours >= tod.sun.sunrise && tod.hours < tod.sun.sunset;
+}
+/** ADR-286: drought death after this many ticks past the last watering (two full in-game days). */
+export function droughtTicks(world: World): number {
+  const len = timeOfDay(world).dayLengthTicks; return 2 * (len > 0 ? len : 3600 * DEFAULT_TICK_HZ);
+}
+export type PlantNeed = "growing" | "water" | "dark" | "dormant";
+/** ADR-286: why a plant is (not) growing now: pure read, used by prompts, QA and tests. */
+export function plantNeed(world: World, e: Entity): PlantNeed | undefined {
+  const c = world.get(e, Crop); const t = world.get(e, Transform); if (!c || !t || !plantableOf(c.kind)) return undefined;
+  const under = isUnderground(world, t.x, t.y);
+  if (!under && isCropDormant(world)) return "dormant";
+  if (!(c.waterUntilTick > world.tick || (!under && isRaining(world.env(Weather).kind)) || nearWater(world, t.x, t.y))) return "water";
+  if ((under || !isSunUp(world)) && lightAt(world, t.x, t.y, 0) === undefined) return "dark";
+  return "growing";
+}
+/** Growth multiplier right now. ADR-286: a surface plant needs water (can, container, rain or water beside it) AND light
+ * (the sun between sunrise and sunset, or an artificial light reaching it at night); otherwise 0 (paused). */
+export function growthMul(world: World, c: { waterUntilTick: number; fertilized: number }, x?: number, y?: number): number {
+  const wet = c.waterUntilTick > world.tick || isRaining(world.env(Weather).kind) || (x !== undefined && y !== undefined && nearWater(world, x, y));
+  if (!wet) return 0;
+  if (!isSunUp(world) && (x === undefined || y === undefined || lightAt(world, x, y, 0) === undefined)) return 0;
+  return FARMING.wateredMul * (c.fertilized ? FARMING.fertilizerMul : 1);
 }
 /**
  * ADR-263 (Task 36): growth multiplier for a crop underground (dug >= 3 levels below ground). Rain does not reach it and
@@ -203,8 +245,19 @@ export function cropGrowthSystem(world: World): void {
   for (const e of [...world.query([Crop, Transform])].sort((a, b) => a - b)) {
     const c = world.get(e, Crop)!; const p = plantableOf(c.kind); if (!p) continue;
     const tf = world.get(e, Transform)!; const under = isUnderground(world, tf.x, tf.y); // ADR-263: no seasons underground
+    // ADR-286 water / drought clock: rain (open sky only) or water beside the plant keeps it watered; a legacy 0 starts now.
+    let wut = c.waterUntilTick;
+    if ((!under && isRaining(world.env(Weather).kind)) || nearWater(world, tf.x, tf.y)) wut = Math.max(wut, world.tick + Math.round(FARMING.wateredSeconds * DEFAULT_TICK_HZ));
+    else if (wut === 0) wut = dryClock(world);
+    if (dormant && !under && wut < world.tick) wut = world.tick; // ADR-286: no drought clock while dormant (winter)
+    if (wut !== c.waterUntilTick) world.set(e, Crop, { waterUntilTick: wut });
+    if (world.tick > wut + droughtTicks(world)) { // ADR-286: died of prolonged drought (crop -> bare tilled soil; sapling / bush gone)
+      if (p.type === "crop") world.set(e, Crop, { kind: 0, stage: 0, growth: 0, waterUntilTick: 0, fertilized: 0 }); else world.destroy(e);
+      emit(world, PlantDied, { x: tf.x, y: tf.y, kind: c.kind }); continue;
+    }
     if (dormant && !under) continue;
-    const mul = under ? undergroundGrowthMul(world, c, tf.x, tf.y) : growthMul(world, c); if (!(mul > 0)) continue;
+    const cw = { waterUntilTick: wut, fertilized: c.fertilized };
+    const mul = under ? undergroundGrowthMul(world, cw, tf.x, tf.y) : growthMul(world, cw, tf.x, tf.y); if (!(mul > 0)) continue;
     const growth = Math.min(1, c.growth + (dt / p.growSeconds) * mul);
     if (growth >= 1) { const t = world.get(e, Transform)!; const targetId = world.getField(e, WorkerTarget, "id");
       world.destroy(e); const node = spawnResourceNode(world, p.becomes, t.x, t.y);
@@ -219,6 +272,7 @@ export function cropGrowthSystem(world: World): void {
 export const FARM_FAIL_TEXT: Readonly<Record<number, string>> = {
   [FarmFail.NoPrivilege]: "Inside someone else's claim", [FarmFail.BadTile]: "Can't farm on this ground", [FarmFail.Occupied]: "Too close to another plant",
   [FarmFail.NeedsSoil]: "Needs tilled soil — use a hoe first", [FarmFail.NothingToTend]: "No crops here to tend", [FarmFail.NeedsHoe]: "You need a hoe to till soil first",
+  [FarmFail.NeedsWater]: "Plant needs water", [FarmFail.TooDark]: "Too dark to grow — needs sunlight or a light",
 };
 export type FarmAction = "Till" | "Plant" | "Water" | "Fertilize" | "Harvest" | "Tame" | "Feed" | "Eat" | "Drink"; // Eat / Drink: ADR-128 quick-use consume; Tame / Feed: ADR-113 husbandryPrompt
 export interface FarmPrompt { action: FarmAction; /** Use slot (Harvest goes through Interact / gather instead) */ slot?: number; target?: Entity; /** predicted failure (dry run) */ fail: FarmFail; label: string }
@@ -239,11 +293,17 @@ export function farmPrompt(world: World, e: Entity): FarmPrompt | undefined {
   if (node !== undefined) { const { slot: _s, ...p } = mk("Harvest", FarmFail.None, { target: node }); return p; }
   // ADR-128: quick-use eats/drinks the held consumable; empty hands next to water drink from the tile (slot NO_SLOT)
   const food = key ? defs.items.get(item) : undefined;
+  // ADR-286: a liquid container holding water pours on a thirsty plant in front (instead of drinking)
+  if (food?.food && food.sips > 0 && readSlots(world, e).durability(slot) > 0 && thirstyPlantsInFront(world, e).length) return { ...mk("Water", FarmFail.None), label: `Water plant (${food.name})` };
   const wet = nearWater(world, me.x, me.y);
   // ADR-176: an empty liquid container next to water refills (same Use path); say so instead of a dead "Drink"
   if (food?.food && food.sips > 0 && readSlots(world, e).durability(slot) <= 0 && wet) return { ...mk("Drink", FarmFail.None), label: `Refill ${food.name}` };
   if (food?.food) return mk(food.sips > 0 || (food.food.thirst > 0 && food.food.hunger <= 0) ? "Drink" : "Eat", FarmFail.None);
   // ADR-176: drinking from the tile no longer needs empty hands (holding an axe/tool by water used to hide the prompt)
   if (wet) return { action: "Drink", slot: 255, fail: FarmFail.None, label: "Drink water" };
+  // ADR-286: say why the plant in front is not growing (needs water / too dark); pure read
+  const plantInFront = crops(world, at.x, at.y, FARMING.waterRadius)[0];
+  const need = plantInFront !== undefined ? plantNeed(world, plantInFront) : undefined;
+  if (need === "water" || need === "dark") { const f = need === "water" ? FarmFail.NeedsWater : FarmFail.TooDark; return { action: "Water", fail: f, label: FARM_FAIL_TEXT[f]!, target: plantInFront! }; }
   return undefined;
 }

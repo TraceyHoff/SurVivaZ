@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { idleOutput, installPermissions, scoreBehavior, PlayerId, Transform, type AgentContext } from "@engine/core";
+import { idleOutput, installPermissions, scoreBehavior, PlayerId, setTimeOfDay, Transform, type AgentContext } from "@engine/core";
 import * as G from "../src/index.js";
 import { makeWorld, steps } from "./helpers.js";
 
@@ -115,7 +115,7 @@ describe("ADR-259 detailed hired-human orders", () => {
     const { w, p, bot, view } = setup();
     const crop = G.spawnCrop(w, 2, 0, G.plantableBySeed("wheat_seeds"));
     expect(G.setWorkerJob(w, p, bot, G.WorkerJob.Farm, { kind: 2, target: crop })).toBe(0);
-    const id = w.getField(crop, G.WorkerTarget, "id"); w.set(crop, G.Crop, { growth: 1 }); G.cropGrowthSystem(w);
+    const id = w.getField(crop, G.WorkerTarget, "id"); w.set(crop, G.Crop, { growth: 1, waterUntilTick: w.tick + 1_000_000 }); setTimeOfDay(w, 12); G.cropGrowthSystem(w); // ADR-286: growth needs water + light
     const node = G.workerOrderTarget(w, bot)!; expect(node).toBeDefined(); expect(w.has(node, G.ResourceNode)).toBe(true);
     expect(w.getField(node, G.WorkerTarget, "id")).toBe(id); expect(view().world.farm?.harvest?.id).toBe(node);
     w.setField(node, G.ResourceNode, "amount", 1);

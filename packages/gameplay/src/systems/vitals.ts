@@ -3,6 +3,7 @@
  * Order (simulation phase): vitals.consume -> vitals.tick -> vitals.death.
  * Deterministic and RNG-free, so the client predicts it for its own entity.
  */
+import { thirstyPlantsInFront, waterFromContainer } from "../farming.js";
 import { temperatureTier } from "../exposure-stages.js";
 import { stanceMode, STANCE } from "../stance.js";
 import { StanceMode } from "../components.js";
@@ -71,6 +72,13 @@ export function consumeSystem(world: World, dt = 1 / 20): void {
     const { item } = slotItem(world, e, slot);
     const food = defs.items.get(item)?.food; if (!food) continue;
     const idef = defs.items.get(item)!;
+    // ADR-286: a container holding water, used facing a thirsty plant, waters it (one sip) instead of drinking
+    if (idef.sips > 0 && readSlots(world, e).durability(slot) > 0 && thirstyPlantsInFront(world, e).length) {
+      if (world.tick < (ready.get(e) ?? 0)) continue;
+      ready.set(e, world.tick + CONSUME_COOLDOWN_TICKS);
+      if (isAuthority(world) && !world.isReplaying) waterFromContainer(world, e, slot);
+      continue;
+    }
     if (world.tick < (ready.get(e) ?? 0)) { emit(world, ConsumeFailed, { entity: e, item, reason: ConsumeFail.Cooldown }); continue; }
     // Cure-only medical supplies are applied, not eaten. A healthy human keeps their splint.
     const cureOnly = idef.cures.length > 0 && food.hunger === 0 && food.thirst === 0 && food.health === 0;

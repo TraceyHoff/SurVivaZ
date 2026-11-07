@@ -303,6 +303,7 @@ describe("ADR-260: plants start their growth cycle in Spring", () => {
   it("a planted crop does not grow across mid-winter ticks and does grow across spring ticks", () => {
     const { w } = fresh();
     const bush = cropAt(w, BASE.x + 3, BASE.y, "berry_seeds", 0.1);
+    w.set(bush, G.Crop, { waterUntilTick: w.tick + 1_000_000 }); // ADR-286: watered (growth needs water + light)
     setSeason(w, 2, 1); for (let i = 0; i < 5; i++) G.cropGrowthSystem(w);
     expect(w.get(bush, G.Crop)!.growth).toBeCloseTo(0.1, 6);
     setSeason(w, 3, 0); let prev = w.get(bush, G.Crop)!.growth;

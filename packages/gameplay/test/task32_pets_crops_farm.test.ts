@@ -295,6 +295,7 @@ describe("Task 32: new crops", () => {
       expect(G.plant(w, p, seed, spot.x, spot.y)).toBe(G.FarmFail.None);
       const crop = [...w.query([G.Crop])].find((e) => { const t = w.get(e, Transform)!; return t.x === spot.x && t.y === spot.y; })!;
       expect(w.get(crop, G.Crop)!.kind).toBe(kind);
+      G.water(w, spot.x, spot.y); // ADR-286: growth needs water
       const mul = G.growthMul(w, w.get(crop, G.Crop)!);
       G.cropGrowthSystem(w);
       expect(w.get(crop, G.Crop)!.growth).toBeCloseTo(mul / secs, 6); // 1s of growth at this crop's rate
