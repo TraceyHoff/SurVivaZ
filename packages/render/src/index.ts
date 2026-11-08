@@ -9,6 +9,7 @@ export * from "./IsoRenderer.js";
 export { AsyncReadback } from "./gl/readback.js";
 export * from "./camera.js";
 export * from "./assets/atlasManager.js";
+export * from "./assets/asset-fetch.js";
 export * from "./assets/texturePacker.js";
 export * from "./style.js";
 export * from "./env.js";

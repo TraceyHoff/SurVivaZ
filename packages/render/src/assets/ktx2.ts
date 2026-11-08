@@ -1,4 +1,5 @@
 import { reportRenderError } from "../report.js";
+import { assetBytes } from "./asset-fetch.js";
 /**
  * KTX2 (Basis Universal) transcoding. The Basis transcoder (Apache-2.0, Binomial LLC; vendored from three.js r170
  * examples/jsm/libs/basis, see vendor/basis/README.md) lives in packages/render/vendor/basis and is loaded lazily on the
@@ -111,13 +112,13 @@ export const basisTranscoder: Ktx2Transcoder = async (data, target, srgb = false
 };
 
 /** Load + transcode a KTX2 page; null (caller uses the PNG) when disabled, unsupported or on any failure. */
-export async function loadKtx2(url: string, c: CompressedTextureSupport, srgb = false, fetcher: (u: string) => Promise<ArrayBuffer> = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(String(r.status)); return r.arrayBuffer(); }): Promise<Ktx2Image | null> {
+export async function loadKtx2(url: string, c: CompressedTextureSupport, srgb = false, fetcher: (u: string) => Promise<ArrayBuffer> = assetBytes): Promise<Ktx2Image | null> {
   const t = ktx2Target(c); if (!t) return null;
   try { return await (transcoder ?? basisTranscoder)(await fetcher(url), t, srgb); } catch (e) { warnOnce(url, e); return null; }
 }
 
 /** Transcode level 0 of a KTX2 (typically a UASTC mask) to straight RGBA8 pixels (basis cTFRGBA32 = 13); null on failure. */
-export async function loadKtx2Rgba(url: string, fetcher: (u: string) => Promise<ArrayBuffer> = async (u) => { const r = await fetch(u); if (!r.ok) throw new Error(String(r.status)); return r.arrayBuffer(); }): Promise<{ width: number; height: number; data: Uint8Array } | null> {
+export async function loadKtx2Rgba(url: string, fetcher: (u: string) => Promise<ArrayBuffer> = assetBytes): Promise<{ width: number; height: number; data: Uint8Array } | null> {
   if (!enabled) return null;
   try {
     const buf = await fetcher(url);

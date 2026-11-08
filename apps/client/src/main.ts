@@ -17,8 +17,8 @@ let camZoom: ZoomControl | undefined; let padZoomT = 0; // ADR-177
 let camRot: CameraRotateControl | undefined; // ADR-253
 import { mountUi } from "./ui-root.js";
 import { showRenderError, glInfo } from "./glcheck.js";
-import { errorLog, installGlobalErrorCapture, logRecoverable } from "./error-log.js";
-import { setRenderErrorSink } from "@engine/render";
+import { BUILD_HASH, errorLog, installGlobalErrorCapture, logRecoverable } from "./error-log.js";
+import { assetBytes, setAssetCacheVersion, setRenderErrorSink } from "@engine/render";
 import { startDiag } from "./diag.js";
 import { installFullscreenRestore, exitFullscreen } from "./fullscreen.js";
 import { uiRoot, safeAreaInsets } from "./ui-root.js";
@@ -97,6 +97,7 @@ let iso: IsoView | undefined;
 const WEATHERS = ["clear", "rain", "storm", "snow", "fog", "overcast", "heat", "blizzard", "windy"];
 const SEASONS = ["summer", "fall", "winter", "spring"]; // ADR-239 ?season= view override (name or 0..3 fractional blend)
 const num = (k: string): number | undefined => { const v = params.get(k); return v === null || !Number.isFinite(Number(v)) ? undefined : Number(v); };
+setAssetCacheVersion(BUILD_HASH);
 const wq = params.get("weather"); const wi = wq ? WEATHERS.indexOf(wq) : -1;
 const sq = params.get("season"); const si = sq ? (SEASONS.indexOf(sq === "autumn" ? "fall" : sq) >= 0 ? SEASONS.indexOf(sq === "autumn" ? "fall" : sq) : Number.isFinite(Number(sq)) ? Number(sq) : -1) : -1;
 const seasonOv = si >= 0 ? { season: si } : {};
@@ -157,7 +158,7 @@ const gameplayTouchLayout = (): typeof touchLayout => (vehicleCtl?.driving ? dri
 const browserInput = attachBrowserInput(canvas, input, { ...(matchMedia("(pointer: coarse)").matches ? { virtualLayout: touchLayout } : {}), insets: () => safeAreaInsets() });
 let menus: GameMenus | undefined;
 /** ADR-117 audio (Web Audio mixer + snapshot-driven director); low-CPU mode follows LOW_END-style detection. */
-const audio = new AudioSystem({ base: import.meta.env.BASE_URL, lowEnd: params.get("gl") === "lowend" || (navigator.hardwareConcurrency ?? 8) <= 4 || ((navigator as { deviceMemory?: number }).deviceMemory ?? 8) <= 2 });
+const audio = new AudioSystem({ base: import.meta.env.BASE_URL, lowEnd: params.get("gl") === "lowend" || (navigator.hardwareConcurrency ?? 8) <= 4 || ((navigator as { deviceMemory?: number }).deviceMemory ?? 8) <= 2, fetchBytes: assetBytes });
 audio.start();
 document.addEventListener("visibilitychange", () => audio.mixer.setSuspended("hidden", document.hidden));
 wireUiSounds(audio);

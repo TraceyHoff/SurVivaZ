@@ -3532,3 +3532,13 @@ Each building type also rolls extra furnishings from a separate seed stream so e
 **Not changed.** Fall-damage formula, Broken Leg rolls, drop-edge relief drawing, or boot-menu settings.
 
 **Validation.** A 3-tile hidden drop is green, a 4-tile drop is yellow at 100 HP, and a 15-tile drop is red at 100 HP (and yellow at 200 HP). q0 hidden dirs are (−1, 0) and (0, −1). The settings checkbox defaults on. A player near the far rim picks that drop; standing on the camera-near corner of the same tile does not.
+
+## ADR-307: Faster asset loading (SurVivaZ)
+
+**Context.** Boot still waited on every resident atlas as a PNG `fetch` + `createImageBitmap`, and return visits revalidated dozens of files against GitHub Pages' short cache lifetime. Wearables, vehicles, and building tiers already stream on demand; the remaining wait was duplicate downloads, unbounded parallel decodes, and starting those transfers only after the main bundle had parsed.
+
+**Decision.** All art and audio bytes go through `assetFetch`: in-flight requests are deduped, successful responses live in a Cache Storage bucket named `survivaz-art-<build hash>` (stale buckets from older deploys are dropped), and HTTP `force-cache` is tried before the network. Image decode runs through a concurrency slot (8) so a hundred atlases do not decode in one task. A tiny `prefetch-art` module starts on page open, reads the served manifest index, and warms resident atlas images (not streamed vehicles, building tiers, or wearable cosmetics) so those transfers overlap JS parse. The renderer and audio mixer consume the same cache, so a warmed file is not fetched again.
+
+**Not changed.** Atlas residency / streaming pools, KTX2 quality choices (character bodies stay lossless PNG), texture budgets, or graphics quality. This is a load-path upgrade only.
+
+**Validation.** Parallel `assetFetch` of one URL hits the network once and serves the second caller (and a later call) from Cache Storage. `shouldPrefetchAtlas` keeps characters and body sheets and skips vehicles, `building_t*`, wearable cosmetics, and other stream sheets. Changing the build hash drops the previous cache bucket.

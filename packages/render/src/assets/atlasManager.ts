@@ -35,6 +35,7 @@ import type { AssetManager } from "@engine/core";
 import type { RectTable } from "./texturePacker.js";
 import { PageLRU, PRIO_NEAR, VramAccountant, rgbaBytes, type VramStats } from "../gl/vram.js";
 import { blockBytes, GL_FORMAT, ktx2Target, loadKtx2, loadKtx2Rgba, type Ktx2Target } from "./ktx2.js";
+import { assetFetch, withAssetSlot } from "./asset-fetch.js";
 import type { CompressedTextureSupport } from "../gl/capabilities.js";
 import { isEnclosurePieceKey, lCornerArmPiece, streamingFallbackKeys } from "../building/modular.js";
 
@@ -358,9 +359,11 @@ async function fitToPage(img: ImageLike, w: number, h: number): Promise<ImageLik
 }
 
 export async function defaultImageLoader(url: string): Promise<ImageLike> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`image fetch failed ${res.status}: ${url}`);
-  return createImageBitmap(await res.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+  return withAssetSlot(async () => {
+    const res = await assetFetch(url);
+    if (!res.ok) throw new Error(`image fetch failed ${res.status}: ${url}`);
+    return createImageBitmap(await res.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+  });
 }
 
 export class AtlasManager {

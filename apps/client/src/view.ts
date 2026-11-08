@@ -18,7 +18,7 @@ import { showRenderError, glInfo, BlackFrameCheck } from "./glcheck.js";
 import { CorrectionSampler, type CorrectionSource } from "./correction-sampler.js";
 import { World, Transform, PrevTransform, TimeOfDay, Weather, Appearance, PlayerId, defineComponent, slotIndex, type WearableSlot, entityIndex, type Entity, seasonAtDays, type SeasonInfo } from "@engine/core";
 import { CHUNK_SIZE, tileToChunk, tileToLocal, renderTileHeight, type TileMap } from "@engine/world";
-import { setDayFraction, setSeasonState, resolveOffHandSprite, CharArtMapper, parseCharArt, type CharArt } from "@engine/render";
+import { assetFetch, setDayFraction, setSeasonState, resolveOffHandSprite, CharArtMapper, parseCharArt, type CharArt } from "@engine/render";
 import { dayCount, sunFraction } from "./day-clock.js";
 import { clanPieceTint, clanPieceTintPair } from "./clan-tint.js";
 import { pieceVariantOpts } from "./piece-variant.js";
@@ -357,16 +357,16 @@ export class IsoView {
     const stopWatch = watchResources(/\.(png|webp|ktx2|avif|jpe?g)(\?|$)/i, (n, bytes) => onStage("atlases", countFraction(n, expected), `Loading sprite atlases (${n}/${expected}${bytes ? `, ${(bytes / 1048576).toFixed(1)} MB` : ""})`));
     try { await renderer.atlas.setRegistry(registry, sources); } finally { stopWatch(); }
     onStage("atlases", 1); onStage("variants", 0);
-    const pv = await fetch(packBase + "piece_variants.json").then((r) => (r.ok ? r.json() : null)).catch(() => null) as { pieces?: Record<string, string[]> } | null;
+    const pv = await assetFetch(packBase + "piece_variants.json").then((r) => (r.ok ? r.json() : null)).catch(() => null) as { pieces?: Record<string, string[]> } | null;
     if (pv?.pieces) renderer.atlas.setPieceVariants(pv.pieces);
     for (const a of ["characters", "characters_b", "characters_c"]) if (registry.atlases.has(a)) {
-      const h = await fetch(`${packBase}atlases/${a}.hands.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      const h = await assetFetch(`${packBase}atlases/${a}.hands.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
       if (h?.hands) renderer.atlas.setHands(a, h);
     }
     onStage("lighting", 0);
     const tuningUrl = `${base}art/survival_fx/render_tuning.json`;
     const look = await renderer.loadLook(tuningUrl);
-    const lights = new LightTable(); lights.load(await fetch(tuningUrl).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+    const lights = new LightTable(); lights.load(await assetFetch(tuningUrl).then((r) => (r.ok ? r.json() : null)).catch(() => null));
     if (look.warnings.length) console.info("render tuning:", look.warnings);
     renderer.camera.zoom = DESKTOP_ZOOM; // main.ts attachZoom then sizes it per viewport (ADR-100)
     onStage("ready", 0);
@@ -956,7 +956,7 @@ interface Spec {
 
 /** `<art>/manifests.index.json` (written by vite.config.ts with only the served fragments) or MANIFEST_INDEX (manifest-index.ts). */
 async function loadMergedManifest(art: string): Promise<ReturnType<typeof loadManifest>> {
-  const get = async (u: string): Promise<unknown> => { try { const r = await fetch(u); return r.ok ? await r.json() : undefined; } catch { return undefined; } };
+  const get = async (u: string): Promise<unknown> => { try { const r = await assetFetch(u); return r.ok ? await r.json() : undefined; } catch { return undefined; } };
   const idx = (await get(art + "manifests.index.json")) as { fragments?: ManifestFragmentRef[] } | undefined;
   const charArt = parseCharArt(new URLSearchParams(globalThis.location?.search ?? "").get("charArt"), (() => { try { return globalThis.localStorage?.getItem("charArt"); } catch { return null; } })());
   const list = withCharArtFragment(idx?.fragments?.length ? idx.fragments : MANIFEST_INDEX, charArt); // ADR-240: v2 sample only with charArt
