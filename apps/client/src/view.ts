@@ -377,6 +377,10 @@ export class IsoView {
   private presentedPivot: { x: number; y: number; z: number } | undefined;
   rotationPivot(): { x: number; y: number; z: number } | undefined { return this.presentedPivot; }
   private ladderSections = new Map<Entity, Entity[]>();
+  /** ADR-299: tiles where someone is InShaft, so the hatch lid uses Art's open state. */
+  private openHatchTiles = new Set<string>();
+  /** ADR-299: pit-floor landing companion for each shaft hatch (net entity -> view entity). */
+  private hatchBottoms = new Map<Entity, Entity>();
   syncGhost(p: import("@engine/gameplay").BuildPreview | undefined, net: World): void {
     if (!p && !this.ghost) return;
     this.ghost ??= new BuildGhost(this.view, VPiece as never, this.registry);
@@ -411,6 +415,38 @@ export class IsoView {
       }
     }
     for (const [e, parts] of this.ladderSections) if (!active.has(e)) { for (const part of parts) v.destroy(part); this.ladderSections.delete(e); }
+  }
+
+  /** ADR-299: draw Art's shaft_hatch_bottom at the live hole floor under each placed hatch. */
+  private syncHatchBottoms(net: World, tiles: TileMap | undefined): void {
+    const v = this.view, active = new Set<Entity>();
+    let defs: ReturnType<typeof gameplayDefs> | undefined;
+    try { defs = gameplayDefs(net); } catch { defs = undefined; }
+    if (!defs) {
+      for (const [, part] of this.hatchBottoms) v.destroy(part);
+      this.hatchBottoms.clear();
+      return;
+    }
+    for (const e of net.query([GPiece, Transform])) {
+      const bp = net.get(e, GPiece)!; if (!defs.pieces.get(bp.type)?.features.shaftHatch) continue;
+      const base = this.map.get(e); if (base === undefined || !v.has(base, VPiece)) continue;
+      const tierKey = bp.tier ? `shaft_hatch_bottom@tier${bp.tier}` : "shaft_hatch_bottom";
+      const visualId = this.registry.spriteForPiece(this.pk(tierKey) ?? tierKey)
+        ?? this.registry.spriteForPiece(this.pk("shaft_hatch_bottom") ?? "shaft_hatch_bottom");
+      if (!visualId) continue;
+      active.add(e);
+      let part = this.hatchBottoms.get(e);
+      if (!part) { part = v.create(); v.add(part, Transform).add(part, PrevTransform).add(part, VPiece); this.hatchBottoms.set(e, part); }
+      const t = net.get(e, Transform)!;
+      const z = groundZ(tiles, t.x, t.y, t.z);
+      const tf = { x: t.x, y: t.y, z, facing: t.facing };
+      v.set(part, Transform, tf); v.set(part, PrevTransform, tf);
+      const src = v.get(base, VPiece)!;
+      v.set(part, VPiece, { visualId, variant: src.variant, tint: src.tint, damageStage: src.damageStage, rotation: src.rotation, level: 0, layer: 0, ghost: 0 });
+      const idx = this.pieceTintIdx.get(base);
+      if (idx) this.setPieceTint(part, visualId, idx);
+    }
+    for (const [e, part] of this.hatchBottoms) if (!active.has(e)) { v.destroy(part); this.hatchBottoms.delete(e); }
   }
 
   resize(w: number, h: number, dpr: number): void {
@@ -473,6 +509,15 @@ export class IsoView {
         if (!pd?.features.shaftHatch) continue;
         const pt = net.get(pe, Transform)!;
         hatchTiles.add(`${Math.floor(pt.x)},${Math.floor(pt.y)}`);
+      }
+    }
+    this.openHatchTiles.clear();
+    if (net.isRegistered(InShaft)) {
+      for (const te of net.query([InShaft, Transform])) {
+        if (!net.getField(te, InShaft, "down")) continue;
+        const tt = net.get(te, Transform)!;
+        const k = `${Math.floor(tt.x)},${Math.floor(tt.y)}`;
+        if (hatchTiles.has(k)) this.openHatchTiles.add(k);
       }
     }
     const rimPiece = (x: number, y: number, z: number): number => {
@@ -595,6 +640,7 @@ export class IsoView {
     for (const [ne, ve] of this.map) if (!seen.has(ne)) { if (ve === this.focusVe) { r.setFocusEntity(-1); this.focusVe = -1; } v.destroy(ve); this.map.delete(ne); this.corrSampler.forget(ne); this.characters.delete(ve); this.movingVe.delete(ve); this.driverVe.delete(ve); this.bedOf.delete(ve); this.carriedOf.delete(ve); this.lightOf.delete(ne); this.dropHeldLight(ve); this.pieceStates.delete(ve); this.pieceScales.delete(ve); this.pieceLit.delete(ve); this.litHearths.delete(ve); this.pieceTintPairs.delete(ve); this.pieceTintIdx.delete(ve); this.nodeAmt.delete(ne); this.nodeHit.delete(ne); this.animalHp.delete(ne); this.animalPrev.delete(ne); this.scales.delete(ve); this.hitSeen.delete(ne); this.hitPoseOf.delete(ve); this.gearOf.delete(ve); }
 
     this.syncTerrainLadders(net, tiles);
+    this.syncHatchBottoms(net, tiles);
     this.syncClutter(tiles, ground);
     this.syncVehicles(net, player, ground, frac);
     const camE = CAM_ANIMAL && this.camAnimal !== undefined ? this.camAnimal : player;
@@ -743,7 +789,16 @@ export class IsoView {
     const t = this.pieceTintPairs.get(ve); this.view.set(ve, VPiece, { tint: t ? t[0] : 0 });
   }
   private syncPieceState(net: World, e: Entity, ve: Entity, defs: ReturnType<typeof gameplayDefs> | undefined): void {
-    const def = defs?.pieces.get(net.get(e, GPiece)?.type ?? -1) as { fired?: boolean } | undefined; if (!def?.fired) return;
+    const p0 = net.get(e, GPiece); if (!p0 || !defs) return;
+    const pieceDef = defs.pieces.get(p0.type);
+    if (pieceDef?.features.shaftHatch) {
+      const t = net.get(e, Transform)!;
+      const open = this.openHatchTiles.has(`${Math.floor(t.x)},${Math.floor(t.y)}`);
+      const vis = buildPieceVisual(this.registry, { type: p0.type, ...pieceArt(net, p0.type, p0.rot), tint: p0.tint, paint: p0.paint, damageStage: p0.damageStage, state: open ? "open" : "closed" }, { tier: p0.tier, pieceKey: (typ) => this.pk(defs.pieces.get(typ)?.key), ...pieceVariantOpts(pieceDef.variantNames, p0.variant) });
+      this.pieceStates.set(ve, vis.stateIndex);
+      return;
+    }
+    const def = pieceDef as { fired?: boolean } | undefined; if (!def?.fired) return;
     if ((net.tick + entityIndex(e)) % 15 !== 0 && this.pieceStates.has(ve)) return; // cheap: lit flips are rare
     const fire = this.siblings(net, e).find((o) => net.has(o, Fuel)); const lit = fire !== undefined && net.get(fire, Fuel)!.lit === 1;
     const p = net.get(e, GPiece)!;
