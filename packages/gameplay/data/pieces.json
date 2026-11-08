@@ -576,7 +576,7 @@
       "privilegeRadius": 12,
       "cost": [
         {
-          "resource": "hardwood",
+          "resource": "wood",
           "amount": 10
         },
         {
