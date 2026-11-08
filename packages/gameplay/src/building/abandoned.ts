@@ -1,6 +1,6 @@
 /**
- * ADR-300: seed-driven abandoned structures stamped from real base-building pieces.
- * Layout, furnishings, disrepair, and loot are a pure function of (world seed, origin).
+ * ADR-300 / ADR-301: seed-driven abandoned structures stamped from real base-building pieces.
+ * Layout, furnishings, stations, disrepair, and searchable container loot are a pure function of (world seed, origin).
  */
 import { PlayerId, Transform, type Entity, type World } from "@engine/core";
 import { CHUNK_SIZE, isWaterId, parseChunkKey, waterDepthAt, WaterDepth, type ChunkKey } from "@engine/world";
@@ -297,11 +297,50 @@ const STONE_KINDS = new Set<number>([
   AbandonedKind.Townhouse, AbandonedKind.Manor, AbandonedKind.LargeHomestead,
 ]);
 
+function extrasFor(kind: AbandonedKindId): readonly { key: string; x: number; y: number; level?: number; chance: number }[] {
+  if (kind === AbandonedKind.Shed) return [{ key: "workbench", x: 1.5, y: 0.5, chance: 0.28 }];
+  if (kind === AbandonedKind.HunterShack) return [{ key: "workbench", x: 1.5, y: 2.5, chance: 0.22 }, { key: "basic_storage_box", x: 2.5, y: 1.5, chance: 0.4 }];
+  if (kind === AbandonedKind.Cabin) return [{ key: "wood_stove", x: 0.5, y: 2.5, chance: 0.45 }, { key: "workbench", x: 2.5, y: 0.5, chance: 0.22 }];
+  if (kind === AbandonedKind.Workshop) return [{ key: "anvil", x: 0.5, y: 2.5, chance: 0.55 }, { key: "furnace", x: 4.5, y: 2.5, chance: 0.4 }];
+  if (kind === AbandonedKind.Cottage || kind === AbandonedKind.TwoStoryCottage) {
+    return [
+      { key: "wood_stove", x: 4.5, y: 3.5, chance: 0.38 }, { key: "workbench", x: 0.5, y: 2.5, chance: 0.22 },
+      ...(kind === AbandonedKind.TwoStoryCottage ? [{ key: "table_lamp", x: 4.5, y: 2.5, level: 1, chance: 0.5 }, { key: "chair", x: 2.5, y: 3.5, level: 1, chance: 0.45 }] : []),
+    ];
+  }
+  if (kind === AbandonedKind.Farmhouse || kind === AbandonedKind.TwoStoryFarmhouse) {
+    return [
+      { key: "cook_range", x: 5.5, y: 3.5, chance: 0.42 }, { key: "stove_iron", x: 0.5, y: 3.5, chance: 0.3 },
+      { key: "workbench", x: 5.5, y: 4.5, chance: 0.22 }, { key: "salt_barrel", x: 0.5, y: 4.5, chance: 0.4 },
+    ];
+  }
+  if (kind === AbandonedKind.Barn) return [{ key: "workbench", x: 2.5, y: 2.5, chance: 0.25 }, { key: "salt_barrel", x: 3.5, y: 1.5, chance: 0.35 }];
+  if (kind === AbandonedKind.Homestead || kind === AbandonedKind.TwoStoryHomestead) {
+    return [{ key: "wood_stove", x: 4.5, y: 3.5, chance: 0.4 }, { key: "workbench", x: 0.5, y: 2.5, chance: 0.25 }, { key: "well", x: 5.5, y: 5.5, chance: 0.38 }];
+  }
+  if (kind === AbandonedKind.LargeHomestead || kind === AbandonedKind.Manor) {
+    return [
+      { key: "cook_range", x: 5.5, y: 3.5, chance: 0.5 }, { key: "workbench", x: 0.5, y: 3.5, chance: 0.28 },
+      { key: "anvil", x: 6.5, y: 4.5, chance: 0.18 }, { key: "well", x: 7.5, y: 6.5, chance: 0.4 }, { key: "salt_barrel", x: 5.5, y: 5.5, chance: 0.35 },
+    ];
+  }
+  if (kind === AbandonedKind.Townhouse) return [{ key: "stove_iron", x: 3.5, y: 1.5, chance: 0.45 }, { key: "cook_range", x: 1.5, y: 3.5, chance: 0.28 }, { key: "workbench", x: 0.5, y: 1.5, chance: 0.2 }];
+  return [];
+}
+function extraRole(key: string): Role {
+  return key.includes("storage") || key.includes("chest") || key === "barrel_storage" || key.includes("wardrobe") || key === "salt_barrel" ? "loot" : "furniture";
+}
+
 export function planAbandonedSite(seed: number, originX: number, originY: number, opts: { kind?: AbandonedKindId; rot?: number; ruin?: number; tier?: number } = {}): PlannedSite {
   const rand = rng(hashU32(seed >>> 0, originX, originY, 0xA5B30001));
   const kind = opts.kind ?? pickKind(rand);
   const rot = opts.rot ?? (rand() * 4 | 0);
-  const built = rotateBuilt(buildKind(kind), rot);
+  const built0 = buildKind(kind);
+  const extraRand = rng(hashU32(seed >>> 0, originX, originY, 0x57A70001));
+  for (const ex of extrasFor(kind)) {
+    if (extraRand() < ex.chance) built0.pieces.push({ key: ex.key, x: ex.x, y: ex.y, level: ex.level ?? 0, rot: 0, role: extraRole(ex.key) });
+  }
+  const built = rotateBuilt(built0, rot);
   const ruin = opts.ruin ?? (0.18 + rand() * 0.62);
   const tier = opts.tier ?? (STONE_KINDS.has(kind) && rand() < 0.35 ? 2 : 1);
   const pieces: PlannedPiece[] = built.pieces.map((s) => {
@@ -358,15 +397,32 @@ function nearSpawn(ox: number, oy: number, w: number, h: number): boolean {
   return false;
 }
 
-const LOOT = ["wood", "stone", "nails", "cloth", "rope", "apple", "potato", "blueberry", "scrap_metal"] as const;
+const LOOT_COMMON = ["wood", "stone", "nails", "cloth", "rope", "fiber", "sticks", "planks", "scrap_metal"] as const;
+const LOOT_FOOD = ["apple", "potato", "blueberry", "carrot", "corn", "wild_onion", "bread", "salt", "raspberry"] as const;
+const LOOT_SEEDS = ["wheat_seeds", "carrot_seeds", "seed_potato", "corn_seeds", "onion_seeds", "berry_seeds"] as const;
+const LOOT_MED = ["bandage", "cloth", "medicated_bandage"] as const;
+const LOOT_RARE = ["torch", "stone_knife", "leg_splint", "stone_axe"] as const;
+const LOOT_CLOTHES = ["cloth", "padded_cloth", "cloth_gloves", "cloth_mask", "leather_boots", "leather_cap"] as const;
+
+function pickLoot(rand: () => number, wardrobe: boolean): { key: string; count: number } {
+  const r = rand();
+  const pool = wardrobe
+    ? (r < 0.62 ? LOOT_CLOTHES : r < 0.88 ? LOOT_COMMON : LOOT_RARE)
+    : r < 0.48 ? LOOT_COMMON : r < 0.72 ? LOOT_FOOD : r < 0.86 ? LOOT_SEEDS : r < 0.95 ? LOOT_MED : LOOT_RARE;
+  const key = pool[(rand() * pool.length) | 0]!;
+  const rare = (LOOT_RARE as readonly string[]).includes(key);
+  return { key, count: rare ? 1 : 1 + (rand() * 4 | 0) };
+}
 
 function fillLoot(world: World, piece: Entity, rand: () => number): void {
   const box = resolveAttachment(world, piece, AttachKind.Storage); if (!box) return;
   const defs = gameplayDefs(world);
-  const n = 1 + (rand() * 3 | 0);
+  const type = world.getField(piece, BuildPiece, "type");
+  const wardrobe = !!(type !== undefined && defs.pieces.get(type)?.features.wardrobe);
+  const n = 2 + (rand() * 4 | 0);
   for (let i = 0; i < n; i++) {
-    const key = LOOT[(rand() * LOOT.length) | 0]!;
-    try { const id = defs.itemId(key); addItem(world, box, id, 1 + (rand() * 4 | 0)); } catch { /* item renamed */ }
+    const pick = pickLoot(rand, wardrobe);
+    try { addItem(world, box, defs.itemId(pick.key), pick.count); } catch { /* item renamed */ }
   }
 }
 

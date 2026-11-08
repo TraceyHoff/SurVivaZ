@@ -3470,3 +3470,15 @@ Players and AI humans repair damaged pieces with the existing Repair action. `Re
 **Not changed.** Piece ids, building tiers, climb/support rules, streaming budgets, or networked component masks.
 
 **Validation.** The same seed reprints the same plan; a different seed does not. A ruin-0 shed is enclosed and furnished; a homestead has garden and pen pieces; two- and three-story stamps include stairs, an upper floor, and a roof at the top story. High ruin omits only non-structural pieces and damages HP. Restamping the same origin is a no-op. Repair restores HP. Reclaim assigns ownership and rejects a second actor. AI sensors see nearby unowned sites and `reclaim:<id>` maps to `ReclaimCmd`.
+
+## ADR-301: Searchable loot and usable stations in abandoned structures (SurVivaZ)
+
+**Context.** ADR-300 stamps furnished abandoned buildings from real pieces, including storage boxes and some furniture. Players needed those containers to hold searchable loot they can take, and buildings needed a seed-based chance of crafting stations and other usable furniture rather than only decorative interiors.
+
+**Decision.** Every placed storage piece (chests, boxes, barrels, wardrobes, salt barrels) is filled from a seed-hashed loot table: common materials, food, seeds, medical supplies, and rare tools, with wardrobes biased toward clothing. Players open those containers with the existing search/withdraw flow and can take what they find. Unclaimed wilderness sites stay usable; reclaim still transfers the pieces and their remaining contents.
+
+Each building type also rolls extra furnishings from a separate seed stream so existing layouts stay stable: a chance of workbenches, anvils, furnaces, wood stoves, iron stoves, cook ranges, wells, and extra chairs, lamps, or storage, on top of the furniture each template already includes (beds, tables, fireplaces, campfires, garden beds, troughs). Fired cooking pieces and workbenches/anvils/furnaces keep their normal `CraftingStation` attachments, so they work the same as player-built stations.
+
+**Not changed.** Piece ids, container UI, privilege/reclaim rules, streaming budgets, or networked component masks.
+
+**Validation.** A ruin-0 shed's storage has items a player can open and withdraw. The same seed reprints the same container contents; a different seed does not. A workshop always includes a usable workbench. Across origins, workshops sometimes roll an anvil or furnace, cottages a stove or workbench, and homesteads a well; stamped chance stations carry `CraftingStation`.
