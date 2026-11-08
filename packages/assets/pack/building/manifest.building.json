@@ -8,7 +8,7 @@
    "frameW": 84,
    "frameH": 96,
    "columns": 24,
-   "rows": 15,
+   "rows": 16,
    "ktx2": "atlases/building_t1.ktx2"
   },
   {
@@ -17,7 +17,7 @@
    "frameW": 84,
    "frameH": 96,
    "columns": 24,
-   "rows": 15,
+   "rows": 16,
    "ktx2": "atlases/building_t2.ktx2"
   },
   {
@@ -26,7 +26,7 @@
    "frameW": 84,
    "frameH": 96,
    "columns": 24,
-   "rows": 15,
+   "rows": 16,
    "ktx2": "atlases/building_t3.ktx2"
   },
   {
@@ -35,7 +35,7 @@
    "frameW": 84,
    "frameH": 96,
    "columns": 24,
-   "rows": 15,
+   "rows": 16,
    "ktx2": "atlases/building_t4.ktx2"
   },
   {
@@ -50908,6 +50908,271 @@
      "fps": 1
     }
    }
+  },
+  {
+   "key": "bld_shaft_hatch_t1",
+   "category": "building",
+   "atlas": "building_t1",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.75
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      352
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "shaft_hatch@tier1",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      352,
+      353,
+      354,
+      355
+     ],
+     [
+      356,
+      357,
+      358,
+      359
+     ],
+     [
+      360,
+      361,
+      362,
+      363
+     ],
+     [
+      364,
+      365,
+      366,
+      367
+     ]
+    ],
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_shaft_hatch",
+   "category": "building",
+   "atlas": "building_t1",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.75
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      352
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "shaft_hatch",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      352,
+      353,
+      354,
+      355
+     ],
+     [
+      356,
+      357,
+      358,
+      359
+     ],
+     [
+      360,
+      361,
+      362,
+      363
+     ],
+     [
+      364,
+      365,
+      366,
+      367
+     ]
+    ],
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_shaft_hatch_t2",
+   "category": "building",
+   "atlas": "building_t2",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.75
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      352
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "shaft_hatch@tier2",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      352,
+      353,
+      354,
+      355
+     ],
+     [
+      356,
+      357,
+      358,
+      359
+     ],
+     [
+      360,
+      361,
+      362,
+      363
+     ],
+     [
+      364,
+      365,
+      366,
+      367
+     ]
+    ],
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_shaft_hatch_t3",
+   "category": "building",
+   "atlas": "building_t3",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.75
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      352
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "shaft_hatch@tier3",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      352,
+      353,
+      354,
+      355
+     ],
+     [
+      356,
+      357,
+      358,
+      359
+     ],
+     [
+      360,
+      361,
+      362,
+      363
+     ],
+     [
+      364,
+      365,
+      366,
+      367
+     ]
+    ],
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_shaft_hatch_t4",
+   "category": "building",
+   "atlas": "building_t4",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.75
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      352
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "shaft_hatch@tier4",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      352,
+      353,
+      354,
+      355
+     ],
+     [
+      356,
+      357,
+      358,
+      359
+     ],
+     [
+      360,
+      361,
+      362,
+      363
+     ],
+     [
+      364,
+      365,
+      366,
+      367
+     ]
+    ],
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
   }
  ],
  "clanPalettes": [

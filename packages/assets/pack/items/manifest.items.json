@@ -193,7 +193,7 @@
    "frameW": 32,
    "frameH": 32,
    "columns": 16,
-   "rows": 18,
+   "rows": 19,
    "residency": "stream",
    "pages": [
     {
@@ -17402,6 +17402,74 @@
     "idle": {
      "frames": [
       2
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_shaft_hatch_t1",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      287
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_shaft_hatch_t2",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      288
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_shaft_hatch_t3",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      289
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_shaft_hatch_t4",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      290
      ],
      "fps": 1
     }

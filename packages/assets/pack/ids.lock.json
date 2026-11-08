@@ -5375,7 +5375,16 @@
     "ladder": 5373,
     "cz_acc_gear_cloth_mask_female": 5374,
     "cz_acc_gear_cloth_mask_male": 5375,
-    "leg_splint": 5376
+    "leg_splint": 5376,
+    "bld_shaft_hatch": 5377,
+    "bld_shaft_hatch_t1": 5378,
+    "bld_shaft_hatch_t2": 5379,
+    "bld_shaft_hatch_t3": 5380,
+    "bld_shaft_hatch_t4": 5381,
+    "build_shaft_hatch_t1": 5382,
+    "build_shaft_hatch_t2": 5383,
+    "build_shaft_hatch_t3": 5384,
+    "build_shaft_hatch_t4": 5385
   },
   "sounds": {
     "amb_rain": 1,

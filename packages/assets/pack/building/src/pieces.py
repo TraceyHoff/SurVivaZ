@@ -175,6 +175,74 @@ def roof_chimney(tier):
     return bx, []
 CHIMNEY_SMOKE_Z = 46
 
+
+def shaft_hatch(tier):
+    """Ground-rim trapdoor: solid walkable lid, recessed dark shaft seam.
+
+    Authored independently of floor_hatch_frame/foundation. Hinges face -y;
+    each quarter turn is rendered, never mirrored. All geometry stays in one cell.
+    """
+    bx = []
+    def box(x0, x1, y0, y1, z0, z1, material, texture="flat"):
+        bx.append(B(x0, x1, y0, y1, z0, z1, material,
+                    top=tx(texture), left=flat(), right=flat()))
+
+    # Dark earthen throat visible around, but not through, the closed lid.
+    box(-.46, .46, -.46, .46, 0, 1, "ink")
+    rim, texture = {"wood": ("wood_dark", "planks"),
+                    "stone": ("stone", "ashlar"),
+                    "metal": ("metal_teal", "flat"),
+                    "reinforced": ("slate", "plates")}[tier]
+    for a, b, c, d in [(-.5, .5, -.5, -.38), (-.5, .5, .38, .5),
+                        (-.5, -.38, -.38, .38), (.38, .5, -.38, .38)]:
+        box(a, b, c, d, 0, 4, rim, texture)
+    if tier == "wood":
+        # Five individually edged boards, with two iron hinge straps.
+        for i in range(5):
+            x = -.345 + i * .138
+            box(x, x + .132, -.345, .345, 1.8, 4.6, "wood", "deck")
+        for x in (-.23, .19):
+            box(x, x + .045, -.40, .18, 4.6, 5.2, "iron")
+    elif tier == "stone":
+        # Wide ashlar kerb joints and a single heavy beveled lifting slab.
+        for x in (-.26, .23):
+            for y in (-.49, .39):
+                box(x, x + .025, y, y + .10, 4, 4.15, "ink")
+        box(-.345, .345, -.345, .345, 1.8, 4.8, "slate")
+        box(-.30, .30, -.30, .30, 4.8, 5.8, "stone")
+        for x in (-.27, .20):
+            box(x, x + .07, -.405, -.23, 5.8, 6.5, "iron")
+    elif tier == "metal":
+        # Teal folded steel lid, inset iron tread plate and corner bolt heads.
+        box(-.35, .35, -.35, .35, 1.8, 4.8, "metal_teal")
+        box(-.27, .27, -.27, .27, 4.8, 5.2, "iron", "diamond")
+        for x in (-.29, .26):
+            for y in (-.28, .25):
+                box(x, x + .035, y, y + .035, 5.2, 6, "metal_teal")
+        for x in (-.24, .17):
+            box(x, x + .07, -.41, -.25, 4.8, 6, "iron")
+    else:
+        # Armoured lid with a genuine raised X brace, rivets and hazard kerb.
+        box(-.35, .35, -.35, .35, 1.8, 5.2, "iron", "plates")
+        for i in range(12):
+            x = -.30 + i * .05
+            for y in (x, -x - .05):
+                box(x, x + .05, y, y + .05, 5.2, 6.5, "metal_teal")
+        for x in (-.46, .42):
+            for y in (-.31, -.10, .11, .29):
+                box(x, x + .04, y, y + .065, 4, 4.8, "gold")
+        for x in (-.29, .26):
+            for y in (-.29, .26):
+                box(x, x + .035, y, y + .035, 5.2, 6.5, "metal_teal")
+        for x in (-.25, .16):
+            box(x, x + .09, -.42, -.25, 5.2, 6.5, "slate")
+    # Small recessed pull at the front; no tall handle to trip over.
+    z = 6.5 if tier == "reinforced" else 6
+    box(-.10, .10, .18, .29, z, z + .25, "ink")
+    box(-.075, .075, .205, .24, z + .25, z + 1, "metal_teal" if tier == "metal" else "iron")
+    return bx, []
+
+
 # piece key -> (kind, builder/arg, layer, rows, tall, existing)
 #   rows: 1 symmetric (rotationArt mirror, one row), 2 axis pieces (rows 0/1 reused for rot 2/3), 4 unique
 W = lambda kind: (lambda tier: b2.wall(tier, kind))
@@ -205,9 +273,12 @@ PIECES = {
   "roof_hip":            ("roof", "hip", 0, 4, False, True),
   "roof_corner":         ("roof", "corner", 0, 4, False, True),
   "roof_chimney":        ("boxes", roof_chimney, 0, 4, True, False),
+  "shaft_hatch":         ("boxes", shaft_hatch, 0, 4, False, False),
 }
 # ADR-253: these shipped one mirrored row; now 4 drawn rotations (rot 0 unchanged, back rotations show back details from
 # assets/tools/backs.py). Their extra rows go after every existing frame on the tier page so other indices do not move.
 OLD_ROWS = {k: 1 for k in ("foundation", "foundation_stilt", "floor", "floor_hatch_frame", "floor_skylight", "pillar", "roof_flat", "roof_chimney")}
+# New art is appended after every shipped frame, including ADR-253 rotations.
+OLD_ROWS["shaft_hatch"] = 0
 # extra piece keys that reuse another piece's frames (main-pack art-only keys get tier art too)
 ALIAS = {"wall_corner": "wall_corner_outer", "roof_ridge": "roof_gable"}
