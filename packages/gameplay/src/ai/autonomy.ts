@@ -20,6 +20,7 @@ import { pieceCost } from "../building/place.js";
 import { StructureIndexRes } from "../building/structure.js";
 import { bumpStat } from "./planner.js";
 import { maxHpOf } from "../building/integrity.js";
+import { nearbyAbandonedWork } from "../building/abandoned.js";
 import { resolveAttachment } from "../building/links.js";
 import { armCraft, goTo, bindAgentWorld, fillPlanSensors, noteTripWanted } from "./base_behaviors.js";
 
@@ -28,6 +29,7 @@ export interface GoalSensors {
   waterAt?: { x: number; y: number };
   equipSlot?: number;
   repairTarget?: { id: number; x: number; y: number };
+  reclaimTarget?: { id: number; x: number; y: number };
   gatherScanned?: boolean;
   /** body temperature under COLD_BELOW (night without a fire / clothes) */
   cold?: boolean;
@@ -94,7 +96,7 @@ function homeScan(world: World, defs: GameDefs, hx: number, hy: number, fireType
   }
   if (m.size > 256) m.clear(); m.set(key, r); return r;
 }
-const SENSOR_KEYS = ["plan", "base", "bs", "craftCount", "craftTicks", "huntTarget", "panel", "tripWanted", "surplus", "woodTotal", "stoneTotal", "junk", "winter", "craftRecipe", "buildPlan", "gatherNode", "gatherScanned", "waterAt", "equipSlot", "repairTarget", "needs", "cold", "chill", "fire", "fireMissing", "woodSlot"] as const;
+const SENSOR_KEYS = ["plan", "base", "bs", "craftCount", "craftTicks", "huntTarget", "panel", "tripWanted", "surplus", "woodTotal", "stoneTotal", "junk", "winter", "craftRecipe", "buildPlan", "gatherNode", "gatherScanned", "waterAt", "equipSlot", "repairTarget", "reclaimTarget", "needs", "cold", "chill", "fire", "fireMissing", "woodSlot"] as const;
 const sensed = new WeakMap<Agent, { tick: number; home: string; s: Partial<GoalSensors> }>();
 export function fillGoalSensors(world: World, self: Entity, view: AgentWorldView, a: Agent): void {
   const wk = world.get(self, Worker); const order = world.getArray(self, WorkerOrder, "selections");
@@ -204,6 +206,20 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
   }
   // repair: own-base pieces under 60% hp near home (gameplay.repair; the server charges the cost)
   if (hs.repair !== undefined && world.isAlive(hs.repair)) { const p = world.get(hs.repair, Transform); if (p) view.repairTarget = { id: hs.repair, x: p.x, y: p.y }; }
+  const selfT = world.get(self, Transform);
+  if (selfT) {
+    const work = nearbyAbandonedWork(world, selfT.x, selfT.y);
+    if (work) {
+      // Unclaimed ruins: reclaim after the bot has a tool or a base so day-one gather/craft still runs.
+      if (work.repair !== undefined && !view.repairTarget && !work.reclaim && world.isAlive(work.repair)) {
+        const p = world.get(work.repair, Transform);
+        if (p) view.repairTarget = { id: work.repair, x: p.x, y: p.y };
+      }
+      if (work.reclaim && GOAL_CRAFTS.some((k) => { const it = item(k); return !!it && have(it.id) > 0; })) {
+        view.reclaimTarget = { id: work.marker, x: work.x, y: work.y };
+      }
+    }
+  }
 }
 // Task 29: pieceAt memo. fillAgentSensors asks for the same (type, home, 6) up to 4x per bot view rebuild,
 // and the uncached scan is ~100us in a busy base (a full BuildPiece query + a Transform copy per piece).
@@ -314,6 +330,14 @@ export function autonomyBehaviors(): GameBehavior[] {
         const r = c.world.repairTarget; if (!r) return false;
         if (goTo(c, o, r.x, r.y, 0.8) > 2) { if (stuckOn(c, r.x, r.y)) { c.bb.set("repairAt", c.self.tick); return false; } return; }
         o.moveX = 0; o.moveY = 0; o.actions.push(`repair:${r.id}`); c.bb.set("repairAt", c.self.tick); if (c.world.base) bumpStat(c.agent, "repairs", c.self.tick); return false;
+      } },
+    { name: "reclaim", traits: { industriousness: 0.45 }, considerations: [
+        { name: "site", curve: { type: "step", at: 0.5 }, input: (c) => (c.world.reclaimTarget ? cooled(c.self.tick, c.bb.num("reclaimAt", -1e9), 100) : 0) },
+        { name: "calm", curve: { type: "step", at: 0.5 }, input: (c) => (c.memory.nearest("zombie", c.self.x, c.self.y, 0.3) ? 0 : 1) }],
+      run: (c, o) => {
+        const r = c.world.reclaimTarget; if (!r) return false;
+        if (goTo(c, o, r.x, r.y, 0.8) > 2) { if (stuckOn(c, r.x, r.y)) { c.bb.set("reclaimAt", c.self.tick); return false; } return; }
+        o.moveX = 0; o.moveY = 0; o.actions.push(`reclaim:${r.id}`); c.bb.set("reclaimAt", c.self.tick); return false;
       } },
   ];
 }

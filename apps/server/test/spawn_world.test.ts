@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TimeOfDay, Transform, World, timeOfDay } from "@engine/core";
-import { BuildPiece, spawnPoints } from "@engine/gameplay";
+import { BuildPiece, PieceOwner, gameplayDefs, spawnPoints } from "@engine/gameplay";
 import { LoopbackNetwork, NetClient } from "@engine/net";
 import { ProceduralGenerator, computeSpawnPoints } from "@engine/world";
 import { createGameServer, applyMoveInput, installDemoWorld, DEMO_COMMANDS, DEMO_EVENTS } from "../src/main.js";
@@ -23,7 +23,10 @@ async function setup(seed = 77) {
 describe("world start (ADR-106)", { timeout: 30_000 }, () => {
   it("is a blank slate: no starter camp pieces", async () => {
     const { gs, tick } = await setup(); tick(5);
-    expect([...gs.world.query([BuildPiece])]).toHaveLength(0);
+    const pieces = [...gs.world.query([BuildPiece])];
+    expect(pieces.every((e) => (gs.world.getField(e, PieceOwner, "player") ?? 0) === 0)).toBe(true);
+    const totem = (() => { try { return gameplayDefs(gs.world).pieceId("claim_totem"); } catch { return -1; } })();
+    expect(pieces.filter((e) => gs.world.getField(e, BuildPiece, "type") === totem)).toHaveLength(0);
   });
   it("exposes the seed's four spawn points and spreads joining players over all of them", async () => {
     const { gs, tick, connect } = await setup(77);

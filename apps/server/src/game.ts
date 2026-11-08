@@ -6,7 +6,7 @@ import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSig
 /** Authoritative game server: world + gameplay + streaming chunks + persistence + NetServer sessions. */
 import { ChannelRegistry, CommandRejected, DEFAULT_TICK_HZ, FixedLoop, installCommandHandlers, cosmeticsHashes, type CosmeticCatalogLike, Membership, Owner, PlayerId, Season, SEASON_COUNT, TimeOfDay, Transform, World, type Entity, type PermissionsRes } from "@engine/core";
 import { CHUNK_SIZE, ChunkManager, ProceduralGenerator, computeSpawnPoints, chunkKeyOf, type BuildingGrid, type PopulationSpawner } from "@engine/world";
-import { spawnPoints, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
+import { spawnPoints, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, stampAbandonedChunk, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
   appearanceServerHooks, applyReplication, installStallBuyHook, installViewBonus, setHitValidator, installPvp, installBedRespawn, installCraftQueue, installExpressionCommands, installVehicleCommands, installVehicleCraftCommands, installVehicleGuard, requestEmote, CraftQueue, CraftQueuesRes, playerNames, stallListing, listingRevision, stallOf, tillOf, StallHeader, StallOwnerKind, installMapMarkerCommands, MapMarker } from "@engine/gameplay";
 import { AppearanceServer, ChatServer, NameSync, NetServer, StallResult, StallServer, TileSync, validateHit, type ClientSession, type ServerTransport, type StallHooks } from "@engine/net";
 import { createAgentStore, type AgentIdentityStore } from "./agents.js";
@@ -178,7 +178,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   const defs = gameplayDefs(world);
   const resIds = new Map<number, number>();
   for (const [kind, key] of Object.entries(NODE_RESOURCES)) { try { resIds.set(Number(kind), defs.resourceId(key)); } catch { /* resource renamed: skip */ } }
-  chunks.onLoad((_c, nodes) => { for (const n of nodes) { const id = resIds.get(n.kind); if (id !== undefined) spawnResourceNode(world, id, n.tx + 0.5, n.ty + 0.5); } });
+  chunks.onLoad((_c, nodes) => { for (const n of nodes) { const id = resIds.get(n.kind); if (id !== undefined) spawnResourceNode(world, id, n.tx + 0.5, n.ty + 0.5); } stampAbandonedChunk(world, _c.key); });
 
   const mode = gameModeConfig(o.mode ?? "multiplayer", !!o.virtualPlayers, worldRules(world).aiHumans);
   const players = new Map<number, Player>();
@@ -292,7 +292,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   if (o.catalog) installCustomization(world, { catalog: o.catalog, handlers });
   installSkillHandlers(world, handlers); // ADR-113
   let cmdSeq = 0;
-  const INPUT_QUEUE = new Set([...GAMEPLAY_COMMANDS, ...ARMS_COMMANDS, ...DISEASE_COMMANDS, ...HOTBAR_COMMANDS].map(([d]) => d.name));
+  const INPUT_QUEUE = new Set([...GAMEPLAY_COMMANDS, ...ARMS_COMMANDS, ...DISEASE_COMMANDS, ...HOTBAR_COMMANDS, ...RECLAIM_COMMANDS].map(([d]) => d.name));
   const netDefOf = new Map<number, (typeof GAMEPLAY_NET_COMMANDS)[number]["net"]>(); // core command type -> net mirror
   for (const { core, net: def } of GAMEPLAY_NET_COMMANDS) {
     if (!o.catalog && (core.name === "gameplay.setAppearance" || core.name === "gameplay.equipCosmetic")) continue; // no catalog: unhandled

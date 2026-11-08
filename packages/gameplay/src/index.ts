@@ -37,6 +37,7 @@ export * from "./building/place.js";
 export * from "./building/surface.js"; // ADR-162
 export * from "./building/integrity.js";
 export * from "./building/actions.js";
+export * from "./building/abandoned.js";
 export * from "./building/ghost.js";
 export * from "./building/shelter.js";
 export * from "./building/persist.js";

@@ -21,6 +21,7 @@ import { destroyPiece, maxHpOf } from "./integrity.js";
 import { isShaftHatchPiece, useShaftHatch } from "./terrain-hatch.js";
 import { pieceOf, resolveAttachment } from "./links.js";
 import { hasPrivilege, pieceCost, pieceUnlocked, tribeOf, tryPlace } from "./place.js";
+import { reclaimAbandonedSite } from "./abandoned.js";
 import { structures } from "./structure.js";
 
 type Fail = (reason: BuildFail) => void;
@@ -38,8 +39,18 @@ export function buildActionSystem(world: World, dt: number): void {
   const defs = gameplayDefs(world); const b = defs.building; const it = world.store(PlayerIntent); const idx = structures(world);
   for (const e of world.query([PlayerIntent, Transform], [Dead])) {
     const s = it.slot(entityIndex(e)); const action = it.data.action[s]!;
-    if (action < IntentAction.Place || action > IntentAction.Paint) continue;
     const fail: Fail = (reason) => emit(world, BuildFailed, { entity: e, action, reason });
+    if (action === IntentAction.Reclaim) {
+      const target = it.data.target[s]! as Entity;
+      if (!world.isAlive(target)) { fail(BuildFail.InvalidTarget); continue; }
+      if (!inReach(world, e, target, b.buildReach)) { fail(BuildFail.OutOfRange); continue; }
+      const tf = world.get(target, Transform);
+      if (tf && !hasPrivilege(world, e, tf.x, tf.y)) { fail(BuildFail.NoPrivilege); continue; }
+      const reason = reclaimAbandonedSite(world, e, target);
+      if (reason) fail(reason);
+      continue;
+    }
+    if (action < IntentAction.Place || action > IntentAction.Paint) continue;
     if (action === IntentAction.Place) {
       const r = tryPlace(world, e, { piece: it.data.piece[s]!, x: it.data.x[s]!, y: it.data.y[s]!, level: it.data.level[s]!, rot: it.data.rot[s]!, tier: it.data.tier[s]!, variant: it.data.variant[s]! });
       if (!r.ok) fail(r.reason);

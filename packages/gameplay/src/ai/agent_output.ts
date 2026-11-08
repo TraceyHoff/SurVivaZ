@@ -9,7 +9,7 @@ import { DropItemCmd, PetOfferCmd } from "../pets.js";
 import { UnlockSkillCmd } from "../skills/progression.js";
 import type { AgentOutput, CommandRegistry, Entity, InputFrame, World } from "@engine/core";
 import { intentToFrame, type BotIntent } from "./bot_input.js";
-import { CloseContainerCmd, DepositCmd, EquipCmd, GameplayActions, OpenContainerCmd, PlaceCmd, RepairCmd, ToggleDoorCmd, ToggleFireCmd, UpgradeCmd, UseCmd, WearCmd, WithdrawCmd } from "../input.js";
+import { CloseContainerCmd, DepositCmd, EquipCmd, GameplayActions, OpenContainerCmd, PlaceCmd, ReclaimCmd, RepairCmd, ToggleDoorCmd, ToggleFireCmd, UpgradeCmd, UseCmd, WearCmd, WithdrawCmd } from "../input.js";
 import { BuyFromStallCmd, OpenStallCmd } from "../economy/stall.js";
 import { QueueCraftCmd } from "../systems/craft_queue.js";
 import { PartyAcceptCmd, PartyDeclineCmd, PartyInviteCmd, PartyKickCmd, PartyLeaveCmd } from "../party.js";
@@ -83,6 +83,7 @@ export function actionCommand(action: string): AgentCommand | undefined {
     if (k === "drop") return ok && n.length >= 2 && n[0]! > 0 && n[1]! > 0 ? { type: DropItemCmd.name, payload: { item: n[0]!, count: n[1]! } } : undefined; // ADR-252 inventory "Drop"
     if (k === "door") return ok ? { type: ToggleDoorCmd.name, payload: { target: n[0]! } } : undefined;
     if (k === "dye") return ok && n.length >= 4 ? { type: DyeCmd.name, payload: { kind: n[0]!, slot: n[1]!, palette: n[2]!, index: n[3]! } } : undefined; } // Task 25: bot dye (same command players send; server re-validates brush + dye)
+  if (action.startsWith("reclaim:")) { const n = Number(action.split(":")[1]); if (!Number.isInteger(n) || n < 0) return undefined; return { type: ReclaimCmd.name, payload: { target: n } }; }
   if (action.startsWith("equip:") || action.startsWith("repair:")) { const n = Number(action.split(":")[1]); if (!Number.isInteger(n) || n < 0) return undefined; return action[0] === "e" ? { type: EquipCmd.name, payload: { slot: n } } : { type: RepairCmd.name, payload: { target: n } }; } // ADR-203
   if (action.startsWith("upgrade:")) { const [, a, b] = action.split(":"); const t = Number(a), tier = Number(b); return Number.isInteger(t) && t > 0 && Number.isInteger(tier) && tier >= 0 ? { type: UpgradeCmd.name, payload: { target: t, tier } } : undefined; } // Task 28: bot home upgrade (same command players send; server re-validates cost + skill)
   const it = actionIntent(action); if (!it) return undefined;

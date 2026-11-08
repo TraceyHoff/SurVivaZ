@@ -37,10 +37,20 @@ export const ChunkNodes = defineResource<Map<ChunkKey, Entity[]>>("gameplay.Chun
  * Hooks gameplay into a ChunkManager: terrain lookup, node spawning on load (authority only; clients receive
  * nodes by replication) and despawn on unload. Returns a detach function.
  */
+type ChunkLoadHook = (world: World, key: ChunkKey) => void;
+const chunkLoadHooks: ChunkLoadHook[] = [];
+/** Extra authority work after a chunk's resource nodes spawn (abandoned sites, etc.). */
+export function addChunkLoadHook(hook: ChunkLoadHook): void { chunkLoadHooks.push(hook); }
+
 export function attachWorldStreaming(world: World, chunks: ChunkManager): () => void {
   world.setResource(TerrainRes, terrainFromTileMap(chunks));
   if (!world.getResource(ChunkNodes)) world.setResource(ChunkNodes, new Map());
-  const offLoad = chunks.onLoad((chunk, nodes) => { if (isAuthority(world)) spawnChunkNodes(world, chunk.key, nodes); });
+  const offLoad = chunks.onLoad((chunk, nodes) => {
+    if (isAuthority(world)) {
+      spawnChunkNodes(world, chunk.key, nodes);
+      for (const hook of chunkLoadHooks) hook(world, chunk.key);
+    }
+  });
   const offUnload = chunks.onUnload((chunk) => despawnChunkNodes(world, chunk.key));
   return () => { offLoad(); offUnload(); };
 }

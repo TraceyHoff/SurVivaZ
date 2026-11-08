@@ -47,6 +47,7 @@ export const EquipCmd = defineCommand("gameplay.equip", { slot: "u8" });
 export const PlaceCmd = defineCommand("gameplay.place", { piece: "u16", x: "f32", y: "f32", level: "u8", rot: "u8", tier: "u8", variant: "u8" });
 export const UpgradeCmd = defineCommand("gameplay.upgrade", { target: "u32", tier: "u8" });
 export const RepairCmd = defineCommand("gameplay.repair", T);
+export const ReclaimCmd = defineCommand("gameplay.reclaim", { target: "u32" });
 export const DemolishCmd = defineCommand("gameplay.demolish", T);
 export const PaintCmd = defineCommand("gameplay.paint", { target: "u32", paint: "u8" });
 export const ToggleDoorCmd = defineCommand("gameplay.toggleDoor", T);
@@ -67,6 +68,8 @@ export const BoilCmd = defineCommand("gameplay.boil", { slot: "u8" });
 export const ARMS_COMMANDS: readonly [CommandDef, IntentAction][] = [[ReloadCmd, IntentAction.Reload], [WearCmd, IntentAction.Wear]];
 /** Task 13: disease actions (append-only ids, registered last). */
 export const DISEASE_COMMANDS: readonly [CommandDef, IntentAction][] = [[BoilCmd, IntentAction.Boil]];
+/** ADR-300: reclaim an abandoned site (append-only, registered last). */
+export const RECLAIM_COMMANDS: readonly [CommandDef, IntentAction][] = [[ReclaimCmd, IntentAction.Reclaim]];
 
 /** Registration order = command ids (same list on both peers). Append only. */
 export const GAMEPLAY_COMMANDS: readonly [CommandDef, IntentAction][] = [
@@ -79,6 +82,7 @@ export const GAMEPLAY_COMMANDS: readonly [CommandDef, IntentAction][] = [
 /** Command fields carrying a NetId that net must resolve to a local Entity before applyGameplayInput. */
 export const COMMAND_ENTITY_FIELDS: Readonly<Record<string, readonly string[]>> = {
   ...Object.fromEntries(GAMEPLAY_COMMANDS.filter(([d]) => "target" in d.schema).map(([d]) => [d.name, ["target"]])),
+  [ReclaimCmd.name]: ["target"],
   ...ECONOMY_ENTITY_FIELDS,
   ...VEHICLE_ENTITY_FIELDS,
   ...VEHICLE_CRAFT_ENTITY_FIELDS,
@@ -92,6 +96,7 @@ export const COMMAND_RATES: Readonly<Record<string, number>> = {
   ...Object.fromEntries(DISEASE_COMMANDS.map(([d]) => [d.name, 10])),
   ...Object.fromEntries(WORKER_COMMANDS.map((d) => [d.name, 10])),
   ...Object.fromEntries(DYE_COMMANDS.map((d) => [d.name, 10])),
+  [ReclaimCmd.name]: 20,
 };
 
 export function registerGameplayCommands(reg: CommandRegistry = new CommandRegistry()): CommandRegistry {
@@ -121,6 +126,7 @@ export function registerGameplayCommands(reg: CommandRegistry = new CommandRegis
   for (const d of DYE_COMMANDS) reg.register(d); // append-only (Task 25): dye hair / worn / held (brush + dye)
   for (const d of TERRAIN_COMMANDS) reg.register(d); // append-only (ADR-263 / Task 36): shovel raise / lower
   for (const [d] of HOTBAR_COMMANDS) reg.register(d); // ADR-289: append-only, idempotent HUD selection
+  for (const [d] of RECLAIM_COMMANDS) reg.register(d); // ADR-300: append-only reclaim
   return reg;
 }
 
@@ -161,7 +167,7 @@ export function applyGameplayInput(world: World, e: Entity, frame: InputFrame | 
   runInputHooks(world, e, frame, reg);
 }
 export function queueCommand(world: World, e: Entity, reg: CommandRegistry, c: Command): boolean {
-  const def = reg.def(c.type); const entry = def && (GAMEPLAY_COMMANDS.find(([d]) => d.name === def.name) ?? ARMS_COMMANDS.find(([d]) => d.name === def.name) ?? DISEASE_COMMANDS.find(([d]) => d.name === def.name) ?? HOTBAR_COMMANDS.find(([d]) => d.name === def.name));
+  const def = reg.def(c.type); const entry = def && (GAMEPLAY_COMMANDS.find(([d]) => d.name === def.name) ?? ARMS_COMMANDS.find(([d]) => d.name === def.name) ?? DISEASE_COMMANDS.find(([d]) => d.name === def.name) ?? HOTBAR_COMMANDS.find(([d]) => d.name === def.name) ?? RECLAIM_COMMANDS.find(([d]) => d.name === def.name));
   if (!entry) return false;
   let qs = world.getResource(CommandQueues); if (!qs) world.setResource(CommandQueues, (qs = new Map()));
   let q = qs.get(e); if (!q) qs.set(e, (q = []));

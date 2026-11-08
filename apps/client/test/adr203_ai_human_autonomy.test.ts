@@ -1,6 +1,6 @@
 // ADR-203: AI humans (virtual players) pursue their own goals: move, gather, craft, build, tend a fire.
 import { beforeAll, describe, expect, it } from "vitest";
-import { setTimeOfDay, timeOfDay } from "@engine/core";
+import { setTimeOfDay, timeOfDay, Transform } from "@engine/core";
 import { MemoryWorldStore } from "@engine/persist";
 import { BuildPiece, CraftCompleted, ItemGathered, gameplayDefs } from "@engine/gameplay";
 import { createLocalServer, type LocalServer } from "../src/local.js";
@@ -16,9 +16,18 @@ describe("AI human autonomy (ADR-203)", () => {
     W.events.on(ItemGathered as never, (e: { entity: number }) => { if (bots.has(e.entity as never)) gatheredAt.push(W.tick - start); });
     W.events.on(CraftCompleted as never, (e: { entity: number; recipe: number }) => { if (bots.has(e.entity as never)) crafted.add(gameplayDefs(W).recipes.get(e.recipe)?.key ?? "?"); });
     const fire = [...gameplayDefs(W).pieces.values()].find((p) => p.key === "campfire")!.id;
+    const homes = [...bots].map((e) => W.get(e, Transform)!).filter(Boolean);
     for (let i = 0; i < 2800 && fireBy < 0; i++) {
       local.pump(50); await Promise.resolve();
-      if (i % 20 === 0) for (const e of W.query([BuildPiece])) if (W.getField(e, BuildPiece, "type") === fire) { fireBy = W.tick - start; fireHour = timeOfDay(W).hours; break; }
+      if (i % 20 === 0) {
+        for (const e of W.query([BuildPiece])) {
+          if (W.getField(e, BuildPiece, "type") !== fire) continue;
+          const t = W.get(e, Transform);
+          if (t && homes.some((h) => Math.hypot(t.x - h.x, t.y - h.y) <= 16)) {
+            fireBy = W.tick - start; fireHour = timeOfDay(W).hours; break;
+          }
+        }
+      }
     }
   }, 240_000);
 

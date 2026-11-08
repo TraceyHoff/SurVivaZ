@@ -14,7 +14,7 @@ import { buildFailText } from "./build-hud.js";
  *    the compact HUD carries floor ▲▼ and the contextual Repair / Upgrade / Demolish buttons.
  *  - a placed piece under the aim is the `target`; `context` lists its labelled actions (shown only when targeted).
  */
-import { BuildPiece, snapPlacement, validatePlacement, buildPreviewFor, fineEligible, FINE_ROT, FINE_ROT_STEPS, rotationSteps, buildView, demolishIntent, gameplayDefs, moveVector, pieceTargetAt, placementTarget, placePreviewIntent, repairIntent, rotateStep, structures, upgradeIntent,
+import { BuildPiece, snapPlacement, validatePlacement, buildPreviewFor, fineEligible, FINE_ROT, FINE_ROT_STEPS, rotationSteps, buildView, demolishIntent, gameplayDefs, moveVector, pieceTargetAt, placementTarget, placePreviewIntent, reclaimIntent, repairIntent, rotateStep, structures, upgradeIntent,
   type BuildPreview, type BuildSelection, type MenuCtx, type MenuIntent, type PieceTarget, type PlacementAim } from "@engine/gameplay";
 import { Transform } from "@engine/core";
 import { rotateScreenVec } from "@engine/input";
@@ -40,7 +40,7 @@ export interface BuildModeOptions {
   /** ADR-171: road tool / sign placing from inside build mode (HUD 🛣 / 🪧, KBM T / N, pad LT+X / LT+Y). Build mode stops first. */
   tools?: { road(): void; sign(): void };
 }
-export type BuildActionId = "repair" | "upgrade" | "demolish";
+export type BuildActionId = "repair" | "upgrade" | "demolish" | "reclaim";
 export interface BuildContextAction { id: BuildActionId; label: string; hint: string; enabled: boolean; armed?: boolean }
 export interface BuildContextView { target: PieceTarget; title: string; actions: BuildContextAction[] }
 /** Gamepad cursor speed (tiles/s at full stick). */
@@ -49,9 +49,9 @@ export const PAD_CURSOR_SPEED = 5;
 export const REFRESH_STEP = 0.125, REFRESH_MAX_MS = 100;
 export const DEMOLISH_CONFIRM_MS = 3000;
 const HINTS: Record<BuildDevice, Record<BuildActionId, string>> = {
-  keyboardMouse: { repair: "H", upgrade: "U", demolish: "X" },
-  gamepad: { repair: "X", upgrade: "Y", demolish: "hold X" },
-  touch: { repair: "", upgrade: "", demolish: "" },
+  keyboardMouse: { repair: "H", upgrade: "U", demolish: "X", reclaim: "C" },
+  gamepad: { repair: "X", upgrade: "Y", demolish: "hold X", reclaim: "" },
+  touch: { repair: "", upgrade: "", demolish: "", reclaim: "" },
 };
 const label = (k: string): string => k.replace(/_/g, " ").replace(/^\w/, (m) => m.toUpperCase());
 
@@ -144,6 +144,7 @@ export class BuildMode {
     this.refresh(); const t = this.target; if (!t) return false;
     if (id === "repair") { if (!t.canRepair) { this.toast = "Nothing to repair"; return false; } if (!t.canAfford.repair) { this.toast = "Can't afford repair"; return false; } this.toast = "Repairing…"; return this.o.send(repairIntent(t.entity)); }
     if (id === "upgrade") { if (!t.canUpgrade || t.nextTier === undefined) { this.toast = "Already top tier"; return false; } if (!t.canAfford.upgrade) { this.toast = `Need materials for ${label(t.nextTierKey!)}`; return false; } this.toast = `Upgrading to ${label(t.nextTierKey!)}…`; return this.o.send(upgradeIntent(t.entity, t.nextTier)); }
+    if (id === "reclaim") { if (!t.canReclaim) { this.toast = "Nothing to reclaim"; return false; } this.toast = "Reclaiming…"; return this.o.send(reclaimIntent(t.entity)); }
     const verb = t.pickup ? "Pick up" : "Demolish"; // ADR-250: pickup pieces (basic_storage_box) refund in full
     if (!confirmed && !this.demolishArmed) { this.demolishArmedAt = this.now(); this.toast = `${verb}? Press again to confirm`; return false; }
     this.disarm(); this.toast = t.pickup ? "Picking up…" : "Demolishing…"; return this.o.send(demolishIntent(t.entity));
@@ -153,6 +154,7 @@ export class BuildMode {
     return { target: t, title: `${label(t.pieceKey)} · ${label(t.tierKey)} · ${Math.round((100 * t.hp) / Math.max(1, t.maxHp))}%`, actions: [
       { id: "repair", label: "Repair", hint: h.repair, enabled: t.canRepair && t.canAfford.repair },
       { id: "upgrade", label: t.nextTierKey ? `Upgrade → ${label(t.nextTierKey)}` : "Upgrade", hint: h.upgrade, enabled: t.canUpgrade && t.canAfford.upgrade },
+      ...(t.canReclaim ? [{ id: "reclaim" as const, label: "Reclaim", hint: h.reclaim, enabled: true }] : []),
       { id: "demolish", label: t.pickup ? (armed ? "Confirm pick up" : "Pick up") : armed ? "Confirm demolish" : "Demolish", hint: h.demolish, enabled: true, armed },
     ] };
   }

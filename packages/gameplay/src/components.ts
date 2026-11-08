@@ -85,6 +85,7 @@ export const Crafter = defineComponent("Crafter", { recipe: "u16", startTick: "u
 export const enum IntentAction {
   None = 0, Gather = 1, Craft = 2, Use = 3, CancelCraft = 4, Equip = 5, SelectHotbar = 6,
   Place = 10, Upgrade = 11, Repair = 12, Demolish = 13, Paint = 14,
+  Reclaim = 15,
   ToggleDoor = 20, LockDoor = 21, OpenContainer = 22, CloseContainer = 23, Deposit = 24, Withdraw = 25, ToggleFire = 26,
   Attack = 30, Reload = 31, Wear = 32, Boil = 33,
 }
@@ -449,6 +450,11 @@ export const HotbarSelection = defineComponent("HotbarSelection", { slot: { type
 /** ADR-299: the player/AI human is at the bottom of a shaft hatch on their current tile (otherwise they stand on the lid). */
 export const InShaft = defineComponent("InShaft", { down: "u8" }, { networked: true, persistent: true });
 
+/** ADR-300: persistent marker for a seed-stamped abandoned site (not networked). */
+export const AbandonedSite = defineComponent("AbandonedSite", {
+  originX: "i32", originY: "i32", width: "u8", height: "u8", kind: "u8", stories: "u8", claimed: "u8", claimedBy: "u32",
+}, { persistent: true });
+
 export const GAMEPLAY_COMPONENTS = [
   Emitter, Buffs,
   Health, ResourceNode, Survival, VitalsState, Exposure, Dead,
@@ -498,4 +504,5 @@ export const GAMEPLAY_COMPONENTS = [
   GrownPlant, // append-only (ADR-287)
   AutoSprint, HotbarSelection, // append-only (ADR-289)
   InShaft, // append-only (ADR-299)
+  AbandonedSite, // append-only (ADR-300)
 ] as const;

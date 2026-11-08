@@ -3456,3 +3456,17 @@ The default `charArt=v1` has **no dedicated block animation**: both the state ch
 **Not changed.** Face ladders, floor hatch frames, climb/fall numbers, shovel limits, and building tiers besides this new piece.
 
 **Validation.** Placement rejects flat ground and accepts a real hole at every material tier without a skill unlock. Walking onto the lid deals no fall damage; use descends and ascends; deepening the hole keeps the ride working; a connected pit enters shaft mode; leaving a deep shaft on foot is blocked until you ride up.
+
+## ADR-300: Seed-driven abandoned structures (SurVivaZ)
+
+**Context.** The world had resource nodes and decorative clutter, but no pre-built homes made from the modular base-building set. Players and AI humans needed to find lived-in sheds, cottages, homesteads, and other buildings — including two- and three-story houses — whose layout, furnishings, and disrepair change with the world seed, then repair and reclaim those sites as their own.
+
+**Decision.** On authority chunk load, stamp a sparse catalog of abandoned sites from existing pieces (`foundation`, walls, doors, windows, stairs, floors, roofs, furniture, fences, garden beds, troughs). Kind, rotation, origin inside the chunk, ruin, and loot are a pure function of `(world seed, location)`. Sites stay inside one chunk, skip water, steep ground, and the approximate dawn-spawn clearings, and persist via a non-networked `AbandonedSite` marker so a reload or a total demolish does not regenerate the ruin. Resource nodes that land inside the footprint are despawned after the stamp.
+
+Single-story types include sheds, cottages, cabins, workshops, hunter shacks, barns with pens, farmhouses, and homesteads with fenced gardens and animal pens. Multistory types use the existing stairs / `floor` / `floor_stairwell` / `roof_flat` rules: two-story cottages, farmhouses, and homesteads, three-story townhouses, and larger two-story manors. Load-bearing decks, walls, and stairs are never omitted; disrepair is HP / `damageStage` plus missing doors, windows, furniture, fence, and some roof tiles.
+
+Players and AI humans repair damaged pieces with the existing Repair action. `ReclaimCmd` (`IntentAction.Reclaim = 15`, registered last so command ids stay stable) transfers `PieceOwner` and `Tribe` on unowned site pieces and yard contents to the actor. A second actor cannot take an already-claimed site. Sites do not spawn a `claim_totem`; land protection still uses a totem the reclaiming player or AI places themselves.
+
+**Not changed.** Piece ids, building tiers, climb/support rules, streaming budgets, or networked component masks.
+
+**Validation.** The same seed reprints the same plan; a different seed does not. A ruin-0 shed is enclosed and furnished; a homestead has garden and pen pieces; two- and three-story stamps include stairs, an upper floor, and a roof at the top story. High ruin omits only non-structural pieces and damages HP. Restamping the same origin is a no-op. Repair restores HP. Reclaim assigns ownership and rejects a second actor. AI sensors see nearby unowned sites and `reclaim:<id>` maps to `ReclaimCmd`.

@@ -26,6 +26,7 @@ import { installDiseases } from "./diseases.js";
 import { recruitmentSystem } from "./recruitment.js";
 import { animSettleSystem } from "./systems/movement.js";
 import { installShaftHatchInput } from "./building/terrain-hatch.js";
+import { installAbandonedStructures } from "./building/abandoned.js";
 import { stanceSystem } from "./stance.js";
 import { installBuildingSystems, BUILDING_SYSTEMS } from "./building/install.js";
 import { installCombatSystems, COMBAT_SYSTEMS } from "./combat/install.js";
@@ -147,6 +148,7 @@ export function installGameplay(world: World, options: GameplayOptions | number 
     world.addSystem(phase, name, fn, every ? { every } : {});
   }
   installShaftHatchInput(world, queueCommand, ToggleDoorCmd);
+  installAbandonedStructures(world);
 }
 
 /** One-shot actions are consumed at the end of the simulation phase (so simulate() replays are correct). */

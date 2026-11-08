@@ -13,7 +13,8 @@ import { outerCornerRots, pieceCost, snapPlacement, validatePlacement, type Snap
 import { isFineRot, isLCorner, rotParts, rotatedSize, structures, type StructureIndex } from "../building/structure.js";
 import { maxHpOf } from "../building/integrity.js";
 import { BuildPiece, Dead, EdgeSide, PieceSlot } from "../components.js";
-import { DemolishCmd, RepairCmd, UpgradeCmd } from "../input.js";
+import { DemolishCmd, ReclaimCmd, RepairCmd, UpgradeCmd } from "../input.js";
+import { siteOf, siteUnclaimed } from "../building/abandoned.js";
 import { countItem } from "../inventory.js";
 import { placeIntent, type BuildSelection, type MenuIntent } from "./menus.js";
 
@@ -296,7 +297,7 @@ export interface PieceTarget {
   entity: Entity; piece: number; pieceKey: string; level: number; tier: number; tierKey: string; hp: number; maxHp: number;
   /** Next tier for Upgrade (undefined when not tiered / already top tier). */
   nextTier: number | undefined; nextTierKey: string | undefined;
-  canRepair: boolean; canUpgrade: boolean; canAfford: { repair: boolean; upgrade: boolean };
+  canRepair: boolean; canUpgrade: boolean; canReclaim: boolean; canAfford: { repair: boolean; upgrade: boolean };
   /** ADR-250: Demolish is a "Pick up" (full refund x hp fraction, contents drop as a bag). */
   pickup: boolean;
 }
@@ -322,9 +323,10 @@ export function pieceTargetAt(world: World, player: Entity, at: { x: number; y: 
   const has = (cost: { item: number; count: number }[]) => cost.every((c) => countItem(world, player, c.item) >= c.count);
   const missing = 1 - bp.hp / Math.max(1, maxHp); const mul = d.tiers[bp.tier]?.repairMul ?? 0.3;
   return { entity: best, piece: def.id, pieceKey: def.key, level: world.getField(best, PieceSlot, "z") ?? 0, tier: bp.tier, tierKey: tierKey(bp.tier), hp: bp.hp, maxHp,
-    nextTier: next, nextTierKey: next === undefined ? undefined : tierKey(next), canRepair: bp.hp < maxHp, canUpgrade: next !== undefined, pickup: def.pickup,
+    nextTier: next, nextTierKey: next === undefined ? undefined : tierKey(next), canRepair: bp.hp < maxHp, canUpgrade: next !== undefined, canReclaim: (() => { const site = siteOf(world, best); return !!site && siteUnclaimed(world, site); })(), pickup: def.pickup,
     canAfford: { repair: has(pieceCost(d, def, bp.tier, mul * missing)), upgrade: next !== undefined && has(pieceCost(d, def, next)) } };
 }
 export const repairIntent = (target: Entity): MenuIntent => ({ cmd: RepairCmd, args: { target }, entities: ["target"] });
+export const reclaimIntent = (target: Entity): MenuIntent => ({ cmd: ReclaimCmd, args: { target }, entities: ["target"] });
 export const upgradeIntent = (target: Entity, tier: number): MenuIntent => ({ cmd: UpgradeCmd, args: { target, tier }, entities: ["target"] });
 export const demolishIntent = (target: Entity): MenuIntent => ({ cmd: DemolishCmd, args: { target }, entities: ["target"] });
