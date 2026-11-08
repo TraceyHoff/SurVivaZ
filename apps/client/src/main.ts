@@ -2,6 +2,7 @@ import { markNavFocus } from "./back-history.js";
 import { HeapTrend, MEMORY_BUDGETS, memoryProfileFor } from "./memory-budget.js";
 import { debugCamera, mountLootLabels } from "./loot-labels.js";
 import { mountGuardOverlay } from "./guard-overlay.js";
+import { mountLedgeWarning } from "./ledge-warning.js";
 import { mountNameTags } from "./name-tags.js";
 import { mountPetStatus } from "./pet-status.js";
 import { waitForWorldReady } from "./ready.js";
@@ -726,6 +727,13 @@ const fxLayer = mountFx(root, { world: () => world, player: () => session.player
 mountGuardOverlay(root, { world: () => world, alpha: () => renderAlpha,
   camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined),
   hidden: () => !!menus?.nav.isOpen, ground: (x, y, z) => groundZ(session.client?.tiles.tiles, x, y, z) });
+// ADR-306: color-coded hidden-ledge drop arrow (Settings → Hidden ledge warnings).
+let ledgeWarnOn = true, ledgeWarnAt = 0;
+mountLedgeWarning(root, { world: () => world, player: () => session.player, alpha: () => renderAlpha,
+  camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined),
+  hidden: () => !!menus?.nav.isOpen || buildMode.active || !!vehicleCtl?.driving,
+  enabled: () => { const n = performance.now(); if (n >= ledgeWarnAt) { ledgeWarnAt = n + 1000; ledgeWarnOn = loadSettings().ledgeWarnings !== false; } return ledgeWarnOn; },
+  ground: (x, y, z) => groundZ(session.client?.tiles.tiles, x, y, z) });
 // ADR-196: build ghost validity outline + magnet snap-edge highlight (WebGL2 and Canvas2D)
 mountSnapOverlay(root, { preview: () => (buildMode.active ? buildMode.preview : undefined), target: () => (buildMode.active ? buildMode.targetOutline : undefined), camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined), hidden: () => !!menus?.nav.isOpen, groundZ: () => iso?.ghostZ });
 // ADR-161: floating loot-bag / dropped-item labels with the Interact prompt

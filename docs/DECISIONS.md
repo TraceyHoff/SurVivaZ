@@ -3512,3 +3512,23 @@ Each building type also rolls extra furnishings from a separate seed stream so e
 **Not changed.** Outdoor default zoom, user zoom range, build-mode zoom, cutaway region detection, piece ids, or networked component masks.
 
 **Validation.** Indoor easing still settles on `INDOOR_GAIN` and stacks with user zoom. Enclosure keys match walls/doors/gates and reject furniture. A south/east wall in front of the player fades; a back wall and furniture do not; roofs and upper stories still fade.
+
+## ADR-305: Keep last travel heading when idle (SurVivaZ)
+
+**Context.** Players reported that after walking south (toward the camera) the character snapped to look north when they stopped, instead of keeping the south heading. ADR-293 already treated a stored facing of zero as a real east heading rather than "unset," and the sim does not write facing while input is idle. The live snap still happened: walk art for south can look correct while a stored or interpolated heading reads as north, so the correctly mapped idle pose then showed the back of the head. Walking into a wall also never turned the body, so a later stop could keep an older heading.
+
+**Decision.** `applyMovementInput` turns toward the move vector whenever there is movement input, even if collision or a ledge blocks the step, and never writes facing when input is zero. `turnFacing` wraps the result into (-π, π] so 8-bit net quantization cannot clamp a spun-around angle. The client view records each entity's last nonzero travel heading from its position delta and, when idle, draws that heading instead of a stored pose that has snapped opposite the walk (`facingAfterTravel`). The compass still settles north when idle (Task 10); this change is the character sprite only.
+
+**Not changed.** Sprite sheets, cancelled facing-art work, `directionIndex` mapping, walk/idle dirFrames, compass HUD, or map rose.
+
+**Validation.** After `MoveDown` and then idle input, sim facing stays at geographic south (π/4), not north (−3π/4). `facingAfterTravel` with a southbound delta and a stored north heading returns south when the body stops. Existing ADR-293 tests still keep the travel heading across all eight directions.
+
+## ADR-306: Color-coded hidden ledge drop warnings (SurVivaZ)
+
+**Context.** Camera-hidden terrain drop-offs (ADR-276 rear/−u/−v edges) are easy to walk off. Players asked for a downward arrow and the integer tile drop when approaching those hidden ledges, colored by how dangerous the fall is, and a settings toggle for a harder run without the hint.
+
+**Decision.** A client overlay (`ledge-warning.ts`) shows one downward screen arrow plus the tile count at the rim when the player is on or walking toward a camera-hidden neighbor that is at least one tile lower. Color uses `terrainFallDamage` against current HP: green (`#3DCC6A`) if damage is 0 (including a ladder between the tiles), yellow (`#F0C040`) if the fall hurts but leaves them alive, red (`#E23B3B`) if damage is at least current HP. Heights go through `shaftAwareHeight` so hatches count as the live floor. The in-game Settings checkbox "Hidden ledge warnings" (`ledgeWarnings`, default on via `!== false`) persists with the other HUD toggles. The overlay hides when menus, build mode, or driving would cover it.
+
+**Not changed.** Fall-damage formula, Broken Leg rolls, drop-edge relief drawing, or boot-menu settings.
+
+**Validation.** A 3-tile hidden drop is green, a 4-tile drop is yellow at 100 HP, and a 15-tile drop is red at 100 HP (and yellow at 200 HP). q0 hidden dirs are (−1, 0) and (0, −1). The settings checkbox defaults on. A player near the far rim picks that drop; standing on the camera-near corner of the same tile does not.

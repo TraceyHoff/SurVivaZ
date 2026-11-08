@@ -264,6 +264,8 @@ export class GameMenus {
     const l5 = document.createElement("label"); l5.append("Show tool needed near resources", th);
     const nt = document.createElement("input"); nt.type = "checkbox"; nt.checked = s.nameTags !== false; nt.dataset["key"] = "name-tags"; // ADR-173
     const l6 = document.createElement("label"); l6.append("Show player names", nt);
+    const lw = document.createElement("input"); lw.type = "checkbox"; lw.checked = s.ledgeWarnings !== false; lw.dataset["key"] = "ledge-warnings"; // ADR-306
+    const l8 = document.createElement("label"); l8.append("Hidden ledge warnings", lw);
     const tu = tempUnitControl(s); const l7 = tu.el; // ADR-239/243: °F / °C toggle, first row
     const q = document.createElement("select");
     const qi = this.o.qualityInfo?.(); // ADR-116: Auto shows what it picked; the detected device tier is listed below
@@ -275,7 +277,7 @@ export class GameMenus {
     const del = this.o.deleteProgress?.();
     const wr = this.o.worldRules?.(); const l4 = document.createElement("small"); l4.dataset["role"] = "world-rules"; l4.style.cssText = "display:block;opacity:.8";
     l4.textContent = wr ? `This world: zombie hordes ${wr.hordes ? `ON (after ${wr.hordeGraceDays} in-game days)` : "OFF"} · AI humans ${wr.aiHumans ? "ON" : "OFF"}` : "";
-    return this.panel("settings", "Settings", [l7, l1, l2, l5, l6, l3, ...(wr ? [l4] : []), ...(this.o.fx ? [fxSettingsRows(this.o.fx)] : []), ...(this.o.audio ? [audioSettingsRows(this.o.audio)] : [])], [...(this.o.tutorial ? [["📖 Play the guide again", () => { this.nav.closeAll(); this.o.tutorial!.replay(); }, "alt"] as [string, () => void, string]] : []), ...(del ? [[del.label, () => this.open("delete-progress"), "alt"] as [string, () => void, string]] : []), ["🐞 Error log", () => this.open("error-log"), "alt"],["Save", () => { saveSettings({ ...loadSettings(), showHud: hud.checked, fullscreen: fs.checked, toolHints: th.checked, nameTags: nt.checked, ...tu.patch() }); const qp = parsePreset(q.value) ?? DEFAULT_QUALITY_PRESET; savePreset(qp); this.o.setQuality?.(qp); this.nav.close(); }], ["Back", () => this.nav.close(), "alt"]]);
+    return this.panel("settings", "Settings", [l7, l1, l2, l5, l6, l8, l3, ...(wr ? [l4] : []), ...(this.o.fx ? [fxSettingsRows(this.o.fx)] : []), ...(this.o.audio ? [audioSettingsRows(this.o.audio)] : [])], [...(this.o.tutorial ? [["📖 Play the guide again", () => { this.nav.closeAll(); this.o.tutorial!.replay(); }, "alt"] as [string, () => void, string]] : []), ...(del ? [[del.label, () => this.open("delete-progress"), "alt"] as [string, () => void, string]] : []), ["🐞 Error log", () => this.open("error-log"), "alt"],["Save", () => { saveSettings({ ...loadSettings(), showHud: hud.checked, fullscreen: fs.checked, toolHints: th.checked, nameTags: nt.checked, ledgeWarnings: lw.checked, ...tu.patch() }); const qp = parsePreset(q.value) ?? DEFAULT_QUALITY_PRESET; savePreset(qp); this.o.setQuality?.(qp); this.nav.close(); }], ["Back", () => this.nav.close(), "alt"]]);
   }
   private deletePanel(): HTMLElement {
     const d = this.o.deleteProgress?.();

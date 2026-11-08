@@ -1,6 +1,7 @@
 import { autoSprintReady } from "./auto-sprint.js";
 import { applyDamage } from "../combat/combat.js";
 import { ladderBetween, terrainMoveBlocked } from "../building/terrain-ladder.js";
+export { ladderBetween };
 import { shaftAwareHeight, updateShaftOccupancy } from "../building/terrain-hatch.js";
 /**
  * Player movement (moved from apps/server protocol.ts). Same function on the server and in client prediction:
@@ -252,10 +253,12 @@ export function applyMovementInput(world: World, e: Entity, actions: number, dt:
     if (x === t.x && dx && !dy) y = doorAssist(world, x, y, dx, 0, sp, level, swim, e);
     else if (y === t.y && dy && !dx) x = doorAssist(world, x, y, dy, 1, sp, level, swim, e);
     if (level === 0) applyTerrainFall(world, e, assistX, assistY, x, y, dt);
+    // ADR-305: turn toward the move even when a wall or ledge blocks the step, and never reset facing on idle.
+    const nextFacing = turnFacing(t.facing ?? 0, Math.atan2(dy, dx), dt);
     if (x !== t.x || y !== t.y) {
-      world.set(e, Transform, { x, y, facing: turnFacing(t.facing ?? 0, Math.atan2(dy, dx), dt) });
+      world.set(e, Transform, { x, y, facing: nextFacing });
       updateShaftOccupancy(world, e, t.x, t.y, x, y);
-    }
+    } else world.set(e, Transform, { facing: nextFacing });
   }
   settleStandZ(world, e, dt); // ADR-212: decks are walked on at deck-top height
 }
@@ -273,12 +276,26 @@ function doorAssist(world: World, x: number, y: number, d: number, axis: 0 | 1, 
  * turning while walking looks smooth. Position still moves in the input direction at full speed at once (responsive);
  * only the sprite's facing lags, at most ~0.16 s for a 90° turn. */
 export const PLAYER_TURN_RATE = 10;
+/** Wrap a world facing into (-π, π] so 8-bit net quantization does not clamp a spun-around angle. */
+export function normalizeFacing(a: number): number {
+  const x = ((a + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+  return x === -Math.PI ? Math.PI : x;
+}
+/**
+ * ADR-305: visual facing while moving stays `curFacing` (the sim heading, so walk frames keep matching
+ * prediction). When the body stops, keep `last` travel heading instead of a stored pose that can snap
+ * to north. A zero delta does not clear `last`.
+ */
+export function facingAfterTravel(curFacing: number, dx: number, dy: number, last?: number): { facing: number; last: number | undefined } {
+  if (dx * dx + dy * dy > 1e-6) return { facing: curFacing, last: Math.atan2(dy, dx) };
+  return { facing: last ?? curFacing, last };
+}
 /** Facing after `dt` seconds of turning from `cur` toward `target`, at most PLAYER_TURN_RATE rad/s, shortest way round. */
 export function turnFacing(cur: number, target: number, dt: number): number {
   let d = (target - cur) % (Math.PI * 2);
   if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2;
   const step = PLAYER_TURN_RATE * dt;
-  return cur + Math.max(-step, Math.min(step, d));
+  return normalizeFacing(cur + Math.max(-step, Math.min(step, d)));
 }
 export function walkAnimRate(world: World): number { const mv = gameplayDefs(world).movement; return mv.walkAnimRefSpeed > 0 ? mv.walkSpeed / mv.walkAnimRefSpeed : 1; }
 
