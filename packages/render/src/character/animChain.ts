@@ -2,7 +2,7 @@
  * ADR-241: per-entity anim chain selector for the v2 player anim set (player_v2_spec §6 / §12). AnimState says WHAT the
  * character does; the chain says which manifest anim plays it, given what the character holds (weapon class from
  * gameplay `weaponClassOf`), whether it moves, drives, or lies in a bed. Every chain ends in a v1 anim, so v1 art
- * (no block / attack_* / crouch_* / carry_* / sleep* / vehicle frames) plays exactly what it played before.
+ * now includes dedicated block frames; missing layers still fall back to idle. Other chains retain their existing fallbacks.
  * Returns shared frozen arrays: allocation-free per frame.
  */
 import { AnimState } from "@engine/core";

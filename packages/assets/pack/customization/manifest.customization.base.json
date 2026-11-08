@@ -1051,6 +1051,831 @@
    "masksKtx2": {
     "tintmask": "atlases/cz_sleep_acc_cloth_mask.tintmask.ktx2"
    }
+  },
+  {
+   "key": "cz_block_body_0",
+   "image": "atlases/cz_block_body_0.png",
+   "frameW": 34,
+   "frameH": 60,
+   "columns": 30,
+   "rows": 3,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_body_0@2x.png",
+     "ktx2": "atlases/cz_block_body_0@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_body_0.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_body_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_body_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_body_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_eyes_0",
+   "image": "atlases/cz_block_eyes_0.png",
+   "frameW": 30,
+   "frameH": 48,
+   "columns": 34,
+   "rows": 20,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_eyes_0@2x.png",
+     "ktx2": "atlases/cz_block_eyes_0@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_eyes_0.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_eyes_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_eyes_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_eyes_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_eyes_1",
+   "image": "atlases/cz_block_eyes_1.png",
+   "frameW": 30,
+   "frameH": 48,
+   "columns": 34,
+   "rows": 2,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_eyes_1@2x.png",
+     "ktx2": "atlases/cz_block_eyes_1@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_eyes_1.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_eyes_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_eyes_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_eyes_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_face_0",
+   "image": "atlases/cz_block_face_0.png",
+   "frameW": 28,
+   "frameH": 50,
+   "columns": 36,
+   "rows": 20,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_face_0@2x.png",
+     "ktx2": "atlases/cz_block_face_0@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_face_0.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_face_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_face_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_face_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_face_1",
+   "image": "atlases/cz_block_face_1.png",
+   "frameW": 30,
+   "frameH": 51,
+   "columns": 34,
+   "rows": 10,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_face_1@2x.png",
+     "ktx2": "atlases/cz_block_face_1@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_face_1.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_face_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_face_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_face_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hair_0",
+   "image": "atlases/cz_block_hair_0.png",
+   "frameW": 36,
+   "frameH": 56,
+   "columns": 28,
+   "rows": 18,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hair_0@2x.png",
+     "ktx2": "atlases/cz_block_hair_0@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hair_0.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hair_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hair_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hair_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hair_1",
+   "image": "atlases/cz_block_hair_1.png",
+   "frameW": 40,
+   "frameH": 56,
+   "columns": 25,
+   "rows": 18,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hair_1@2x.png",
+     "ktx2": "atlases/cz_block_hair_1@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hair_1.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hair_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hair_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hair_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hair_2",
+   "image": "atlases/cz_block_hair_2.png",
+   "frameW": 44,
+   "frameH": 56,
+   "columns": 23,
+   "rows": 16,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hair_2@2x.png",
+     "ktx2": "atlases/cz_block_hair_2@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hair_2.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hair_2.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hair_2.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hair_2.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hair_3",
+   "image": "atlases/cz_block_hair_3.png",
+   "frameW": 39,
+   "frameH": 57,
+   "columns": 26,
+   "rows": 16,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hair_3@2x.png",
+     "ktx2": "atlases/cz_block_hair_3@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hair_3.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hair_3.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hair_3.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hair_3.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hair_4",
+   "image": "atlases/cz_block_hair_4.png",
+   "frameW": 44,
+   "frameH": 57,
+   "columns": 23,
+   "rows": 16,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hair_4@2x.png",
+     "ktx2": "atlases/cz_block_hair_4@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hair_4.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hair_4.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hair_4.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hair_4.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hair_5",
+   "image": "atlases/cz_block_hair_5.png",
+   "frameW": 44,
+   "frameH": 60,
+   "columns": 23,
+   "rows": 16,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hair_5@2x.png",
+     "ktx2": "atlases/cz_block_hair_5@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hair_5.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hair_5.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hair_5.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hair_5.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hair_6",
+   "image": "atlases/cz_block_hair_6.png",
+   "frameW": 39,
+   "frameH": 63,
+   "columns": 26,
+   "rows": 16,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hair_6@2x.png",
+     "ktx2": "atlases/cz_block_hair_6@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hair_6.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hair_6.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hair_6.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hair_6.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hair_7",
+   "image": "atlases/cz_block_hair_7.png",
+   "frameW": 46,
+   "frameH": 63,
+   "columns": 22,
+   "rows": 4,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hair_7@2x.png",
+     "ktx2": "atlases/cz_block_hair_7@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hair_7.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hair_7.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hair_7.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hair_7.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hands_0",
+   "image": "atlases/cz_block_hands_0.png",
+   "frameW": 28,
+   "frameH": 35,
+   "columns": 36,
+   "rows": 27,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hands_0@2x.png",
+     "ktx2": "atlases/cz_block_hands_0@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hands_0.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hands_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hands_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hands_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hat_0",
+   "image": "atlases/cz_block_hat_0.png",
+   "frameW": 40,
+   "frameH": 61,
+   "columns": 25,
+   "rows": 16,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hat_0@2x.png",
+     "ktx2": "atlases/cz_block_hat_0@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hat_0.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hat_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hat_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hat_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hat_1",
+   "image": "atlases/cz_block_hat_1.png",
+   "frameW": 36,
+   "frameH": 61,
+   "columns": 28,
+   "rows": 15,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hat_1@2x.png",
+     "ktx2": "atlases/cz_block_hat_1@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hat_1.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hat_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hat_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hat_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hat_2",
+   "image": "atlases/cz_block_hat_2.png",
+   "frameW": 44,
+   "frameH": 62,
+   "columns": 23,
+   "rows": 16,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hat_2@2x.png",
+     "ktx2": "atlases/cz_block_hat_2@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hat_2.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hat_2.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hat_2.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hat_2.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hat_3",
+   "image": "atlases/cz_block_hat_3.png",
+   "frameW": 44,
+   "frameH": 64,
+   "columns": 23,
+   "rows": 14,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hat_3@2x.png",
+     "ktx2": "atlases/cz_block_hat_3@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hat_3.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hat_3.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hat_3.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hat_3.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hat_4",
+   "image": "atlases/cz_block_hat_4.png",
+   "frameW": 40,
+   "frameH": 68,
+   "columns": 25,
+   "rows": 15,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hat_4@2x.png",
+     "ktx2": "atlases/cz_block_hat_4@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hat_4.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hat_4.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hat_4.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hat_4.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_hat_5",
+   "image": "atlases/cz_block_hat_5.png",
+   "frameW": 42,
+   "frameH": 75,
+   "columns": 24,
+   "rows": 10,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_hat_5@2x.png",
+     "ktx2": "atlases/cz_block_hat_5@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_hat_5.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_hat_5.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_hat_5.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_hat_5.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_shoes_0",
+   "image": "atlases/cz_block_shoes_0.png",
+   "frameW": 26,
+   "frameH": 21,
+   "columns": 39,
+   "rows": 46,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_shoes_0@2x.png",
+     "ktx2": "atlases/cz_block_shoes_0@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_shoes_0.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_shoes_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_shoes_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_shoes_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_shoes_1",
+   "image": "atlases/cz_block_shoes_1.png",
+   "frameW": 24,
+   "frameH": 22,
+   "columns": 42,
+   "rows": 4,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_shoes_1@2x.png",
+     "ktx2": "atlases/cz_block_shoes_1@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_shoes_1.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_shoes_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_shoes_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_shoes_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_accessory_0",
+   "image": "atlases/cz_block_accessory_0.png",
+   "frameW": 40,
+   "frameH": 37,
+   "columns": 25,
+   "rows": 26,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_accessory_0@2x.png",
+     "ktx2": "atlases/cz_block_accessory_0@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_accessory_0.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_accessory_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_accessory_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_accessory_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_accessory_1",
+   "image": "atlases/cz_block_accessory_1.png",
+   "frameW": 40,
+   "frameH": 47,
+   "columns": 25,
+   "rows": 20,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_accessory_1@2x.png",
+     "ktx2": "atlases/cz_block_accessory_1@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_accessory_1.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_accessory_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_accessory_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_accessory_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_accessory_2",
+   "image": "atlases/cz_block_accessory_2.png",
+   "frameW": 32,
+   "frameH": 57,
+   "columns": 31,
+   "rows": 6,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_accessory_2@2x.png",
+     "ktx2": "atlases/cz_block_accessory_2@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_accessory_2.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_accessory_2.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_accessory_2.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_accessory_2.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_bottom_0",
+   "image": "atlases/cz_block_bottom_0.png",
+   "frameW": 28,
+   "frameH": 26,
+   "columns": 36,
+   "rows": 39,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_bottom_0@2x.png",
+     "ktx2": "atlases/cz_block_bottom_0@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_bottom_0.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_bottom_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_bottom_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_bottom_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_bottom_1",
+   "image": "atlases/cz_block_bottom_1.png",
+   "frameW": 32,
+   "frameH": 27,
+   "columns": 31,
+   "rows": 17,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_bottom_1@2x.png",
+     "ktx2": "atlases/cz_block_bottom_1@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_bottom_1.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_bottom_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_bottom_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_bottom_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_top_0",
+   "image": "atlases/cz_block_top_0.png",
+   "frameW": 29,
+   "frameH": 37,
+   "columns": 35,
+   "rows": 27,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_top_0@2x.png",
+     "ktx2": "atlases/cz_block_top_0@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_top_0.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_top_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_top_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_top_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_top_1",
+   "image": "atlases/cz_block_top_1.png",
+   "frameW": 31,
+   "frameH": 37,
+   "columns": 32,
+   "rows": 27,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_top_1@2x.png",
+     "ktx2": "atlases/cz_block_top_1@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_top_1.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_top_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_top_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_top_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_top_2",
+   "image": "atlases/cz_block_top_2.png",
+   "frameW": 33,
+   "frameH": 37,
+   "columns": 30,
+   "rows": 27,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_top_2@2x.png",
+     "ktx2": "atlases/cz_block_top_2@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_top_2.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_top_2.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_top_2.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_top_2.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_top_3",
+   "image": "atlases/cz_block_top_3.png",
+   "frameW": 33,
+   "frameH": 38,
+   "columns": 30,
+   "rows": 26,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_top_3@2x.png",
+     "ktx2": "atlases/cz_block_top_3@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_top_3.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_top_3.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_top_3.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_top_3.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_top_4",
+   "image": "atlases/cz_block_top_4.png",
+   "frameW": 33,
+   "frameH": 39,
+   "columns": 30,
+   "rows": 26,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_top_4@2x.png",
+     "ktx2": "atlases/cz_block_top_4@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_top_4.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_top_4.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_top_4.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_top_4.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_block_top_5",
+   "image": "atlases/cz_block_top_5.png",
+   "frameW": 33,
+   "frameH": 40,
+   "columns": 30,
+   "rows": 8,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_block_top_5@2x.png",
+     "ktx2": "atlases/cz_block_top_5@2x.ktx2",
+     "masksKtx2": {
+      "tintmask": "atlases/cz_block_top_5.tintmask@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_block_top_5.tintmask.png"
+   },
+   "ktx2": "atlases/cz_block_top_5.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_block_top_5.tintmask.ktx2"
+   }
   }
  ],
  "sprites": [
@@ -21904,6 +22729,1075 @@
          "x": 2,
          "y": -20.26,
          "angle": 11.3,
+         "len": 1,
+         "behind": true
+        }
+       }
+      }
+     }
+    },
+    "block": {
+     "frames": [
+      0,
+      1,
+      2
+     ],
+     "fps": 10,
+     "directions": 8,
+     "dirStride": 3,
+     "loop": false,
+     "dirFrames": [
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 40,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 43,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 46,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 49,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 52,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 55,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 58,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 61,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 41,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 44,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 47,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 50,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 53,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 56,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 59,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 62,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 42,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 45,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 48,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 51,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 54,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 57,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 60,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 63,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      }
+     ],
+     "frameMeta": {
+      "df:0": {
+       "anchors": {
+        "handR": {
+         "x": 0,
+         "y": -20.23,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.42,
+         "y": -23.05,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": true
+        }
+       }
+      },
+      "df:8": {
+       "anchors": {
+        "handR": {
+         "x": 2.83,
+         "y": -22.83,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.42,
+         "y": -24.46,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:16": {
+       "anchors": {
+        "handR": {
+         "x": 2.69,
+         "y": -22.62,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.57,
+         "y": -24.37,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:1": {
+       "anchors": {
+        "handR": {
+         "x": -5,
+         "y": -21.1,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        },
+        "handL": {
+         "x": 5,
+         "y": -20.89,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        }
+       }
+      },
+      "df:9": {
+       "anchors": {
+        "handR": {
+         "x": -3,
+         "y": -22.86,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        },
+        "handL": {
+         "x": 3,
+         "y": -22.65,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        }
+       }
+      },
+      "df:17": {
+       "anchors": {
+        "handR": {
+         "x": -3.2,
+         "y": -22.71,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        },
+        "handL": {
+         "x": 3.2,
+         "y": -22.5,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        }
+       }
+      },
+      "df:2": {
+       "anchors": {
+        "handR": {
+         "x": -7.07,
+         "y": -23.2,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": true
+        },
+        "handL": {
+         "x": -0.35,
+         "y": -20.08,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:10": {
+       "anchors": {
+        "handR": {
+         "x": -7.07,
+         "y": -24.61,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.18,
+         "y": -22.68,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:18": {
+       "anchors": {
+        "handR": {
+         "x": -7.21,
+         "y": -24.52,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.04,
+         "y": -22.47,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:3": {
+       "anchors": {
+        "handR": {
+         "x": -5,
+         "y": -25.3,
+         "angle": -20.4,
+         "len": 1,
+         "behind": true
+        },
+        "handL": {
+         "x": -5.5,
+         "y": -21.1,
+         "angle": -20.4,
+         "len": 1,
+         "behind": false
+        }
+       }
+      },
+      "df:11": {
+       "anchors": {
+        "handR": {
+         "x": -7,
+         "y": -27.06,
+         "angle": -20.4,
+         "len": 1,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.5,
+         "y": -24.54,
+         "angle": -20.4,
+         "len": 1,
+         "behind": false
+        }
+       }
+      },
+      "df:19": {
+       "anchors": {
+        "handR": {
+         "x": -7,
+         "y": -26.99,
+         "angle": -20.4,
+         "len": 1,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.5,
+         "y": -24.31,
+         "angle": -20.4,
+         "len": 1,
+         "behind": false
+        }
+       }
+      },
+      "df:4": {
+       "anchors": {
+        "handR": {
+         "x": 0,
+         "y": -26.17,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.42,
+         "y": -23.35,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:12": {
+       "anchors": {
+        "handR": {
+         "x": -2.83,
+         "y": -28.77,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.42,
+         "y": -27.14,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:20": {
+       "anchors": {
+        "handR": {
+         "x": -2.69,
+         "y": -28.68,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.57,
+         "y": -26.93,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:5": {
+       "anchors": {
+        "handR": {
+         "x": 5,
+         "y": -25.3,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        },
+        "handL": {
+         "x": -5,
+         "y": -25.51,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        }
+       }
+      },
+      "df:13": {
+       "anchors": {
+        "handR": {
+         "x": 3,
+         "y": -28.74,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        },
+        "handL": {
+         "x": -3,
+         "y": -28.95,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        }
+       }
+      },
+      "df:21": {
+       "anchors": {
+        "handR": {
+         "x": 3.2,
+         "y": -28.59,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        },
+        "handL": {
+         "x": -3.2,
+         "y": -28.8,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        }
+       }
+      },
+      "df:6": {
+       "anchors": {
+        "handR": {
+         "x": 7.07,
+         "y": -23.2,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": 0.35,
+         "y": -26.32,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:14": {
+       "anchors": {
+        "handR": {
+         "x": 7.07,
+         "y": -26.99,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.18,
+         "y": -28.92,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:22": {
+       "anchors": {
+        "handR": {
+         "x": 7.21,
+         "y": -26.78,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.04,
+         "y": -28.83,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:7": {
+       "anchors": {
+        "handR": {
+         "x": 5,
+         "y": -21.1,
+         "angle": 20.4,
+         "len": 1,
+         "behind": false
+        },
+        "handL": {
+         "x": 5.5,
+         "y": -25.3,
+         "angle": 20.4,
+         "len": 1,
+         "behind": true
+        }
+       }
+      },
+      "df:15": {
+       "anchors": {
+        "handR": {
+         "x": 7,
+         "y": -24.54,
+         "angle": 20.4,
+         "len": 1,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.5,
+         "y": -27.06,
+         "angle": 20.4,
+         "len": 1,
+         "behind": true
+        }
+       }
+      },
+      "df:23": {
+       "anchors": {
+        "handR": {
+         "x": 7,
+         "y": -24.31,
+         "angle": 20.4,
+         "len": 1,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.5,
+         "y": -26.99,
+         "angle": 20.4,
+         "len": 1,
+         "behind": true
+        }
+       }
+      }
+     }
+    },
+    "block_hit": {
+     "frames": [
+      0,
+      1
+     ],
+     "fps": 10,
+     "directions": 8,
+     "dirStride": 2,
+     "loop": false,
+     "dirFrames": [
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 64,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 66,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 68,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 70,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 72,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 74,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 76,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 78,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 65,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 67,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 69,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 71,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 73,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 75,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 77,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 79,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      }
+     ],
+     "frameMeta": {
+      "df:0": {
+       "anchors": {
+        "handR": {
+         "x": 0.85,
+         "y": -23.46,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": 6.29,
+         "y": -25.45,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:8": {
+       "anchors": {
+        "handR": {
+         "x": 2.4,
+         "y": -22.9,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.14,
+         "y": -24.59,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:1": {
+       "anchors": {
+        "handR": {
+         "x": -3.6,
+         "y": -23.93,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        },
+        "handL": {
+         "x": 3.6,
+         "y": -23.72,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        }
+       }
+      },
+      "df:9": {
+       "anchors": {
+        "handR": {
+         "x": -3.1,
+         "y": -23.02,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        },
+        "handL": {
+         "x": 3.1,
+         "y": -22.81,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        }
+       }
+      },
+      "df:2": {
+       "anchors": {
+        "handR": {
+         "x": -5.94,
+         "y": -25.59,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": -1.2,
+         "y": -23.31,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:10": {
+       "anchors": {
+        "handR": {
+         "x": -6.79,
+         "y": -24.74,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": -2.76,
+         "y": -22.75,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:3": {
+       "anchors": {
+        "handR": {
+         "x": -4.8,
+         "y": -27.46,
+         "angle": -20.4,
+         "len": 1,
+         "behind": true
+        },
+        "handL": {
+         "x": -5.3,
+         "y": -24.44,
+         "angle": -20.4,
+         "len": 1,
+         "behind": false
+        }
+       }
+      },
+      "df:11": {
+       "anchors": {
+        "handR": {
+         "x": -6.5,
+         "y": -27.05,
+         "angle": -20.4,
+         "len": 1,
+         "behind": true
+        },
+        "handL": {
+         "x": -7,
+         "y": -24.45,
+         "angle": -20.4,
+         "len": 1,
+         "behind": false
+        }
+       }
+      },
+      "df:4": {
+       "anchors": {
+        "handR": {
+         "x": -0.85,
+         "y": -28.44,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": -6.29,
+         "y": -26.45,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:12": {
+       "anchors": {
+        "handR": {
+         "x": -2.4,
+         "y": -28.6,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.14,
+         "y": -26.91,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:5": {
+       "anchors": {
+        "handR": {
+         "x": 3.6,
+         "y": -27.97,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        },
+        "handL": {
+         "x": -3.6,
+         "y": -28.18,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        }
+       }
+      },
+      "df:13": {
+       "anchors": {
+        "handR": {
+         "x": 3.1,
+         "y": -28.48,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        },
+        "handL": {
+         "x": -3.1,
+         "y": -28.69,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        }
+       }
+      },
+      "df:6": {
+       "anchors": {
+        "handR": {
+         "x": 5.94,
+         "y": -26.31,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": 1.2,
+         "y": -28.59,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:14": {
+       "anchors": {
+        "handR": {
+         "x": 6.79,
+         "y": -26.76,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": 2.76,
+         "y": -28.75,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:7": {
+       "anchors": {
+        "handR": {
+         "x": 4.8,
+         "y": -24.44,
+         "angle": 20.4,
+         "len": 1,
+         "behind": false
+        },
+        "handL": {
+         "x": 5.3,
+         "y": -27.46,
+         "angle": 20.4,
+         "len": 1,
+         "behind": true
+        }
+       }
+      },
+      "df:15": {
+       "anchors": {
+        "handR": {
+         "x": 6.5,
+         "y": -24.45,
+         "angle": 20.4,
+         "len": 1,
+         "behind": false
+        },
+        "handL": {
+         "x": 7,
+         "y": -27.05,
+         "angle": 20.4,
          "len": 1,
          "behind": true
         }
@@ -42769,6 +44663,1075 @@
          "x": 2,
          "y": -19.84,
          "angle": 11.3,
+         "len": 1,
+         "behind": true
+        }
+       }
+      }
+     }
+    },
+    "block": {
+     "frames": [
+      0,
+      1,
+      2
+     ],
+     "fps": 10,
+     "directions": 8,
+     "dirStride": 3,
+     "loop": false,
+     "dirFrames": [
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 0,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 3,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 6,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 9,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 12,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 15,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 18,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 21,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 1,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 4,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 7,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 10,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 13,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 16,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 19,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 22,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 2,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 5,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 8,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 11,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 14,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 17,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 20,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 23,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      }
+     ],
+     "frameMeta": {
+      "df:0": {
+       "anchors": {
+        "handR": {
+         "x": 0.43,
+         "y": -20.41,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": 6.99,
+         "y": -22.87,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:8": {
+       "anchors": {
+        "handR": {
+         "x": 3.09,
+         "y": -22.94,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.17,
+         "y": -24.35,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:16": {
+       "anchors": {
+        "handR": {
+         "x": 2.96,
+         "y": -22.74,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.29,
+         "y": -24.26,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:1": {
+       "anchors": {
+        "handR": {
+         "x": -4.39,
+         "y": -21.1,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        },
+        "handL": {
+         "x": 4.39,
+         "y": -20.89,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        }
+       }
+      },
+      "df:9": {
+       "anchors": {
+        "handR": {
+         "x": -2.63,
+         "y": -22.86,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.63,
+         "y": -22.65,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        }
+       }
+      },
+      "df:17": {
+       "anchors": {
+        "handR": {
+         "x": -2.81,
+         "y": -22.71,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.81,
+         "y": -22.5,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        }
+       }
+      },
+      "df:2": {
+       "anchors": {
+        "handR": {
+         "x": -6.64,
+         "y": -23.02,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": -0.78,
+         "y": -20.26,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:10": {
+       "anchors": {
+        "handR": {
+         "x": -6.81,
+         "y": -24.5,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.44,
+         "y": -22.79,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:18": {
+       "anchors": {
+        "handR": {
+         "x": -6.94,
+         "y": -24.41,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.32,
+         "y": -22.59,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:3": {
+       "anchors": {
+        "handR": {
+         "x": -5,
+         "y": -25.04,
+         "angle": -20.4,
+         "len": 1,
+         "behind": true
+        },
+        "handL": {
+         "x": -5.5,
+         "y": -21.36,
+         "angle": -20.4,
+         "len": 1,
+         "behind": false
+        }
+       }
+      },
+      "df:11": {
+       "anchors": {
+        "handR": {
+         "x": -7,
+         "y": -26.91,
+         "angle": -20.4,
+         "len": 1,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.5,
+         "y": -24.69,
+         "angle": -20.4,
+         "len": 1,
+         "behind": false
+        }
+       }
+      },
+      "df:19": {
+       "anchors": {
+        "handR": {
+         "x": -7,
+         "y": -26.83,
+         "angle": -20.4,
+         "len": 1,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.5,
+         "y": -24.47,
+         "angle": -20.4,
+         "len": 1,
+         "behind": false
+        }
+       }
+      },
+      "df:4": {
+       "anchors": {
+        "handR": {
+         "x": -0.43,
+         "y": -25.99,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": -6.99,
+         "y": -23.53,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:12": {
+       "anchors": {
+        "handR": {
+         "x": -3.09,
+         "y": -28.66,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.17,
+         "y": -27.25,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:20": {
+       "anchors": {
+        "handR": {
+         "x": -2.96,
+         "y": -28.56,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.29,
+         "y": -27.04,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:5": {
+       "anchors": {
+        "handR": {
+         "x": 4.39,
+         "y": -25.3,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        },
+        "handL": {
+         "x": -4.39,
+         "y": -25.51,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        }
+       }
+      },
+      "df:13": {
+       "anchors": {
+        "handR": {
+         "x": 2.63,
+         "y": -28.74,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.63,
+         "y": -28.95,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        }
+       }
+      },
+      "df:21": {
+       "anchors": {
+        "handR": {
+         "x": 2.81,
+         "y": -28.59,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.81,
+         "y": -28.8,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        }
+       }
+      },
+      "df:6": {
+       "anchors": {
+        "handR": {
+         "x": 6.64,
+         "y": -23.38,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": 0.78,
+         "y": -26.14,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:14": {
+       "anchors": {
+        "handR": {
+         "x": 6.81,
+         "y": -27.1,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.44,
+         "y": -28.81,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:22": {
+       "anchors": {
+        "handR": {
+         "x": 6.94,
+         "y": -26.89,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.32,
+         "y": -28.71,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:7": {
+       "anchors": {
+        "handR": {
+         "x": 5,
+         "y": -21.36,
+         "angle": 20.4,
+         "len": 1,
+         "behind": false
+        },
+        "handL": {
+         "x": 5.5,
+         "y": -25.04,
+         "angle": 20.4,
+         "len": 1,
+         "behind": true
+        }
+       }
+      },
+      "df:15": {
+       "anchors": {
+        "handR": {
+         "x": 7,
+         "y": -24.69,
+         "angle": 20.4,
+         "len": 1,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.5,
+         "y": -26.91,
+         "angle": 20.4,
+         "len": 1,
+         "behind": true
+        }
+       }
+      },
+      "df:23": {
+       "anchors": {
+        "handR": {
+         "x": 7,
+         "y": -24.47,
+         "angle": 20.4,
+         "len": 1,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.5,
+         "y": -26.83,
+         "angle": 20.4,
+         "len": 1,
+         "behind": true
+        }
+       }
+      }
+     }
+    },
+    "block_hit": {
+     "frames": [
+      0,
+      1
+     ],
+     "fps": 10,
+     "directions": 8,
+     "dirStride": 2,
+     "loop": false,
+     "dirFrames": [
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 24,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 26,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 28,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 30,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 32,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 34,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 36,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 38,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 25,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 27,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 29,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 31,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 33,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 35,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 37,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      },
+      {
+       "atlas": "cz_block_body_0",
+       "frame": 39,
+       "anchor": {
+        "x": 0.5,
+        "y": 0.9
+       }
+      }
+     ],
+     "frameMeta": {
+      "df:0": {
+       "anchors": {
+        "handR": {
+         "x": 1.16,
+         "y": -23.59,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": 5.98,
+         "y": -25.31,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:8": {
+       "anchors": {
+        "handR": {
+         "x": 2.67,
+         "y": -23.01,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": 6.87,
+         "y": -24.48,
+         "angle": 16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:1": {
+       "anchors": {
+        "handR": {
+         "x": -3.16,
+         "y": -23.93,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        },
+        "handL": {
+         "x": 3.16,
+         "y": -23.72,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        }
+       }
+      },
+      "df:9": {
+       "anchors": {
+        "handR": {
+         "x": -2.72,
+         "y": -23.02,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.72,
+         "y": -22.81,
+         "angle": 0,
+         "len": 0.791,
+         "behind": false
+        }
+       }
+      },
+      "df:2": {
+       "anchors": {
+        "handR": {
+         "x": -5.63,
+         "y": -25.46,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": -1.51,
+         "y": -23.44,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:10": {
+       "anchors": {
+        "handR": {
+         "x": -6.52,
+         "y": -24.63,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.03,
+         "y": -22.86,
+         "angle": -16.5,
+         "len": 0.869,
+         "behind": false
+        }
+       }
+      },
+      "df:3": {
+       "anchors": {
+        "handR": {
+         "x": -4.8,
+         "y": -27.28,
+         "angle": -20.4,
+         "len": 1,
+         "behind": true
+        },
+        "handL": {
+         "x": -5.3,
+         "y": -24.62,
+         "angle": -20.4,
+         "len": 1,
+         "behind": false
+        }
+       }
+      },
+      "df:11": {
+       "anchors": {
+        "handR": {
+         "x": -6.5,
+         "y": -26.89,
+         "angle": -20.4,
+         "len": 1,
+         "behind": true
+        },
+        "handL": {
+         "x": -7,
+         "y": -24.61,
+         "angle": -20.4,
+         "len": 1,
+         "behind": false
+        }
+       }
+      },
+      "df:4": {
+       "anchors": {
+        "handR": {
+         "x": -1.16,
+         "y": -28.31,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": -5.98,
+         "y": -26.59,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:12": {
+       "anchors": {
+        "handR": {
+         "x": -2.67,
+         "y": -28.49,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": -6.87,
+         "y": -27.02,
+         "angle": -13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:5": {
+       "anchors": {
+        "handR": {
+         "x": 3.16,
+         "y": -27.97,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        },
+        "handL": {
+         "x": -3.16,
+         "y": -28.18,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        }
+       }
+      },
+      "df:13": {
+       "anchors": {
+        "handR": {
+         "x": 2.72,
+         "y": -28.48,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.72,
+         "y": -28.69,
+         "angle": 0,
+         "len": 1.084,
+         "behind": true
+        }
+       }
+      },
+      "df:6": {
+       "anchors": {
+        "handR": {
+         "x": 5.63,
+         "y": -26.44,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": 1.51,
+         "y": -28.46,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:14": {
+       "anchors": {
+        "handR": {
+         "x": 6.52,
+         "y": -26.87,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.03,
+         "y": -28.64,
+         "angle": 13.3,
+         "len": 1.07,
+         "behind": true
+        }
+       }
+      },
+      "df:7": {
+       "anchors": {
+        "handR": {
+         "x": 4.8,
+         "y": -24.62,
+         "angle": 20.4,
+         "len": 1,
+         "behind": false
+        },
+        "handL": {
+         "x": 5.3,
+         "y": -27.28,
+         "angle": 20.4,
+         "len": 1,
+         "behind": true
+        }
+       }
+      },
+      "df:15": {
+       "anchors": {
+        "handR": {
+         "x": 6.5,
+         "y": -24.61,
+         "angle": 20.4,
+         "len": 1,
+         "behind": false
+        },
+        "handL": {
+         "x": 7,
+         "y": -26.89,
+         "angle": 20.4,
          "len": 1,
          "behind": true
         }

@@ -5,62 +5,62 @@
   {
    "category": "base",
    "file": "manifest.customization.base.json",
-   "bytes": 758216,
-   "sha": "832f312dff9e4127fc35d15fd25fa222dcaf95184fbf6c2f1e65054d3e2b0560"
+   "bytes": 815885,
+   "sha": "7a0a2d86284fc7d91723ee0fa6ce6378eee06f49881d334af5ca87264bf9823a"
   },
   {
    "category": "hair",
    "file": "manifest.customization.hair.json",
-   "bytes": 9702197,
-   "sha": "1c8f16712d85124b37b30c36e70e2ad19317860918e7b490a3fb0d9c2760da0c"
+   "bytes": 10139089,
+   "sha": "303eed627d42efecf94c3f8333dc94e86bb8dda29a85682fca30d27ed5cd6d06"
   },
   {
    "category": "hat",
    "file": "manifest.customization.hat.json",
-   "bytes": 7063174,
-   "sha": "dd07771442cce05ccc02b6c833d853646223e36876c99a5bffceaa1f8fbabb60"
+   "bytes": 7374606,
+   "sha": "bfd2362858a88c67068039ac45f9aab33c9422952c62f72962a314442e3a16fe"
   },
   {
    "category": "top",
    "file": "manifest.customization.top.json",
-   "bytes": 14917408,
-   "sha": "66c975ef39c06bdf2cb4451898c0d603a0254789c23158d73985b3711d79be3d"
+   "bytes": 15580336,
+   "sha": "9d0bfeb1c5e1167a9011360d4bbebfad3bd7525119b6fe024a00d0bf34ab70fa"
   },
   {
    "category": "bottom",
    "file": "manifest.customization.bottom.json",
-   "bytes": 6591450,
-   "sha": "6d05228b4a982e9dddf1ef3b81e4c0261b32356f873e8e95bf0fb17d56210598"
+   "bytes": 6890518,
+   "sha": "2bba5383ddba518087c4f99746a7f3f3bcfc7ab7fa8d161dff16bb4ccbf829bd"
   },
   {
    "category": "shoes",
    "file": "manifest.customization.shoes.json",
-   "bytes": 6573516,
-   "sha": "947fb26a947aea92b45e547f50cc6d1319d4b4a91268e89c608d099ffeae0906"
+   "bytes": 6872144,
+   "sha": "dbbafe423f017face56e4a6fc1ef2f64ed5714a387da79bac0cc955579cd0bd3"
   },
   {
    "category": "accessory",
    "file": "manifest.customization.accessory.json",
-   "bytes": 4563739,
-   "sha": "5dace87b4c6522bfeaad4db2ca73cb797127a6974a4e8bb5bdf1d08935425912"
+   "bytes": 4762561,
+   "sha": "413a488e9f229efb1e25106c646e4756f671241d33f1489185adf57c3bb7dff9"
   },
   {
    "category": "face",
    "file": "manifest.customization.face.json",
-   "bytes": 3712761,
-   "sha": "dd0ed988a1968ad7b8f61a69f622228c9defd55f9ab0238f721ab7d66ef1451f"
+   "bytes": 3865827,
+   "sha": "bcc714267ffd94472479b2a773cee7c09a75c9bad88e5fb1bd498f3ec4c7169b"
   },
   {
    "category": "eyes",
    "file": "manifest.customization.eyes.json",
-   "bytes": 2547044,
-   "sha": "e41d9d5025f3e8900a160a269a020412a241bf2b65748baf9b61f484e975bfd2"
+   "bytes": 2655362,
+   "sha": "08158b2248210431f27dc4eec369fb61979da583c94c7cd24600b6777a4da3ba"
   },
   {
    "category": "hands",
    "file": "manifest.customization.hands.json",
-   "bytes": 3603825,
-   "sha": "78fe76f5a57634aa0a47102e1d4dad261aa234f273e4cf660c03f3968d3be845"
+   "bytes": 3749259,
+   "sha": "3077f43db299faefa17aed3c58b90e00091a0c46b088334e7c07490ea0311c40"
   }
  ]
 }

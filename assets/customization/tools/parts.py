@@ -71,6 +71,8 @@ def body(c, spec):
     c.add(K["tv"], torso)
     for side in (-1, 1):
         a, b = K["sh"][side], K["hand"][side]; d = max(c.P(a)[1], c.P(b)[1]) - .5 + (.3 if side == 1 else 0)
+        # Guard arms recede behind the torso from N/NW/NE, rather than crossing the nape.
+        if K["anim"] in ("block", "block_hit") and not K["front"][side]: d = min(d, K["tv"] - .01)
         if K["front"][side]: d = max(d, K["tv"] + .01)
         def arm(a=a, b=b):
             cv.part(c.tube(a, b, B["arm"], B["arm"] * .9), "P", lw=1.0, shade=.25)
@@ -462,6 +464,7 @@ def tsurf(c, az, dz, k=1.0):
 def draw_top(c, spec):
     K = c.K; B = K["B"]; cv = c.cv; S = spec
     grow = S.get("grow", .9); hem = S.get("hem")  # hem: (dz below waist, flare radius)
+    if K["anim"] in ("block", "block_hit"): grow += .45  # cloth pulls across the raised shoulders
     sl = S.get("sleeve", "short"); sr = B["arm"] + S.get("sleeve_grow", 1.2)
     tl = {"none": 0, "short": .42, "long": .93}[sl]
     state = {}
@@ -605,15 +608,19 @@ def draw_bottom(c, spec):
         hc = K["hipc"]
         if skirt:
             dz, fr = skirt
-            m = cv.part(c.solid([(c.off(hc, 0, 0, 2.5), B["hipw"] + 3.2), (c.off(hc, 0, 0, -dz), fr)]), "P", lw=1.05, shade=.22, hl=.12)
+            # A planted guard spreads the cloth over the forward knee, rather than an idle cone.
+            guard = K["anim"] in ("block", "block_hit")
+            sway = 1.1 if guard else 0
+            if guard: fr += .65
+            m = cv.part(c.solid([(c.off(hc, 0, 0, 2.5), B["hipw"] + 3.2), (c.off(hc, 0, sway, -dz), fr)]), "P", lw=1.05, shade=.22, hl=.12)
             if S.get("plaid"):
                 for z in range(int(-dz), 3, 3): cv.part(hull(c.disc(c.off(hc, 0, 0, z), fr + 1, 30) + c.disc(c.off(hc, 0, 0, z + 1), fr + 1, 30)), "S", clip=m, outline=False, shade=.1, hl=0)
             for k in range(-3, 4):
                 a, v = c.P(c.off(hc, math.sin(k * .45) * (B["hipw"] + 2), math.cos(k * .45) * (B["hipw"] + 2), 0))
-                b, _ = c.P(c.off(hc, math.sin(k * .45) * fr, math.cos(k * .45) * fr, -dz + .5))
+                b, _ = c.P(c.off(hc, math.sin(k * .45) * fr, math.cos(k * .45) * fr + sway, -dz + .5))
                 if c.nv(math.sin(k * .45), math.cos(k * .45)) > 0: cv.line([a, b], "P2", .5, clip=m, alpha=200)
             if S.get("hemband"):
-                cv.part(hull(c.disc(c.off(hc, 0, 0, -dz), fr, 30) + c.disc(c.off(hc, 0, 0, -dz + 1.6), fr - .4, 30)), "S", clip=m, outline=False, shade=.1, hl=0)
+                cv.part(hull(c.disc(c.off(hc, 0, sway, -dz), fr, 30) + c.disc(c.off(hc, 0, sway, -dz + 1.6), fr - .4, 30)), "S", clip=m, outline=False, shade=.1, hl=0)
         else:
             m = cv.part(c.solid([(c.off(hc, 0, 0, 2.3), B["hipw"] + 3.3), (c.off(hc, 0, 0, -2.4), B["hipw"] + 2.6)]), "P", lw=1.05, shade=.22, hl=.12)
         if S.get("waist"):
@@ -716,7 +723,12 @@ def draw_acc(c, spec):
             if f < -.2: 
                 if st == "eyepatch" or True:
                     a, va = c.sph(-80, 2, 1.02); b, vb = c.sph(80, 2, 1.02); p0, _ = c.sph(180, 8, 1.02)
-                    cv.line([a, p0, b], "P2", .7)
+                    if K["anim"] in ("block", "block_hit"):
+                        # Tucked-head guard: bend the rear strap, not a static idle strap translated down.
+                        mid = (p0[0], p0[1] + 1.1)
+                        cv.line([a, ((a[0]+mid[0])/2, mid[1]-.6), mid,
+                                 ((b[0]+mid[0])/2, mid[1]-.6), b], "P2", .7)
+                    else: cv.line([a, p0, b], "P2", .7)
                 return
             eyes = []
             for az in (-30, 30):

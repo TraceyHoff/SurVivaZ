@@ -33,7 +33,13 @@ describe("ADR-269 cloth mask art contract", () => {
       for (const [name, an] of Object.entries<M>(s.animations)) {
         const want = name.startsWith("sleep_lie") ? "cz_sleep_acc_cloth_mask" : "cz_wr_acc_gear_cloth_mask";
         expect(an.dirFrames.length, name).toBe(an.frames.length * (an.directions ?? 1));
-        for (const d of an.dirFrames) expect(d.atlas, name).toBe(want);
+        for (const d of an.dirFrames) {
+          if (name === "block" || name === "block_hit") {
+            // New guard poses have their own cells on append-only block pages, not the old wear page.
+            expect(d.atlas, name).toMatch(/^cz_block_accessory_/);
+            expect(ref.animations[name].dirFrames.some((b: M) => b.atlas === d.atlas && b.frame === d.frame)).toBe(false);
+          } else expect(d.atlas, name).toBe(want);
+        }
       }
     }
   });

@@ -33,9 +33,12 @@ ANIM_START["punch"] = ANIM_START["swim"] + 8 * SWIM_N
 # ADR-128 gathering / consume (AnimState harvest 16, chop 17, mine 18, drink 19, eat 14): own blocks, dirFrames only
 GATHER = [("harvest", 6, 10, True), ("chop", 6, 12, True), ("mine", 6, 12, True), ("drink", 5, 8, False), ("eat", 5, 8, False)]
 GATHER_N = {g[0]: g[1] for g in GATHER}
+BLOCK_ANIMS = {"block": 3, "block_hit": 2}  # extra dirFrames; never part of the legacy 8x31 grid
 HIT_N = 3                                 # ADR-134 hurt (AnimState.Hurt -> "hit"): 3 frames, dirFrames only (legacy grid block keeps 2)
 _s, _n = ANIM_START["punch"], PUNCH_N
 for _g in GATHER: _s += 8 * _n; ANIM_START[_g[0]] = _s; _n = _g[1]
+for _name, _count in BLOCK_ANIMS.items():
+    _s += 8 * _n; ANIM_START[_name] = _s; _n = _count
 def rows_for(slot):
     n = 8 * NF + (8 * len(EXPR_EXTRA) if slot in EXPR_SLOTS else 0)
     return -(-n // COLS)
@@ -78,6 +81,17 @@ def pose(bt, d, anim, fi, n):
         bob = math.sin(ph) * .6; lean = 1.2; sw = 2.0
         legs = [(math.sin(ph) * sw, 1.5 + math.cos(ph)), (-math.sin(ph) * sw, 1.5 - math.cos(ph))]
     elif anim == "punch": crouch = [0, .4, .2, 0][fi % 4]; lean = [.5, -.4, 2.6, 1.0][fi % 4]; expr = ["focus", "focus", "yell", "focus"][fi % 4]
+    elif anim in BLOCK_ANIMS:
+        # Dedicated v1 raised guard: plant a staggered stance, then raise both fists.
+        # Only the timing/keypoint idea is shared with v2; every v1 layer is freshly painted.
+        if anim == "block":
+            crouch = [.8, 1.7, 1.35][fi]; back = [-.2, -.65, -.45][fi]
+            tilt = [.25, .5, .35][fi]
+        else:  # a blow compresses the guard, then it rebounds (not the hurt pose)
+            crouch = 2.25 if fi == 0 else 1.55
+            back = -2.0 if fi == 0 else -.8; tilt = -.8 if fi == 0 else -.25
+        legs = [(-1.8, 0), (2.1, 0)]
+        expr = "focus"
     elif anim == "sit": bob = [0, .35, .7, .35][fi % 4]
     elif anim == "harvest": crouch = [1, 3, 4.5, 4.5, 3, 1.5][fi % 6]; lean = [1, 2, 3, 3, 2, 1][fi % 6]; expr = "focus"
     elif anim == "chop": crouch = [0, -.5, -.5, 1.5, 1, .3][fi % 6]; lean = [-.6, -1, 0, 2.6, 2.2, .8][fi % 6]; expr = ["focus", "focus", "yell", "yell", "focus", "focus"][fi % 6]
@@ -97,7 +111,7 @@ def pose(bt, d, anim, fi, n):
     for i, side in enumerate((-1, 1)):
         fwd, lift = legs[i]
         hip = (side * B["hipw"], back * 0.3, hipz)
-        foot = (side * B["hipw"] * 1.05 + (side * 1.5 if ffwd else 0), fwd + back * 0.2 + ffwd, 2.2 + lift + (0.4 if ffwd > 5 else 0))
+        foot = (side * B["hipw"] * (1.28 if anim in BLOCK_ANIMS else 1.05) + (side * 1.5 if ffwd else 0), fwd + back * 0.2 + ffwd, 2.2 + lift + (0.4 if ffwd > 5 else 0))
         K["hips"][side] = hip; K["feet"][side] = foot
         K["knees"][side] = tuple((h + f) / 2 for h, f in zip(hip, foot))
         if sit:   # thigh forward along the seat, shin down to the floor (pivot stays the floor point under the seat)
@@ -122,6 +136,12 @@ def pose(bt, d, anim, fi, n):
         elif sit: hand3 = (side * (shw - 3.0), 7.0, bz - 5.5)
         elif anim == "swim":   # paddling circles just at the water surface, sides half a cycle apart
             a = ph + (0 if side > 0 else math.pi); hand3 = (side * (shw + .8), 6.0 + math.sin(a) * 3.5, SWIM_Z + 2.0 + bob + math.cos(a) * 2.6)
+        elif anim in BLOCK_ANIMS:
+            if anim == "block":
+                x, y, z = [(5, 5, 5), (3, 7, 8.5), (3.2, 7, 8)][fi]
+            else:
+                x, y, z = (3.6, 4.8, 9.2) if fi == 0 else (3.1, 6.5, 8.3)
+            hand3 = (side * x * shw / BODY["male"]["shw"], y + (.5 if side < 0 else 0), bz + z)
         elif anim == "punch":  # fists up in guard; right jab winds back, extends, recovers
             if side == 1: hand3 = [(shw - 2.5, 5, bz + 7), (shw - 1, 1, bz + 7.5), (shw - 3.5, 14, bz + 7), (shw - 2, 8, bz + 6.5)][fi % 4]
             else: hand3 = (side * (shw - 2.5), 6, bz + 7.5)       # both hands forward on the steering wheel
@@ -146,7 +166,7 @@ def pose(bt, d, anim, fi, n):
     K["front"] = {}
     for side in (-1, 1):
         _, va = P(*K["sh"][side]); _, vb = P(*K["hand"][side])
-        K["front"][side] = max(va, vb) - 0.5 + (0.3 if side == 1 else 0) >= tv
+        K["front"][side] = (vb if anim in BLOCK_ANIMS else max(va, vb)) - 0.5 + (0.3 if side == 1 else 0) >= tv
     # held-item hand anchor (right hand), same convention as tools/chars.py
     h = K["hand"][1]
     if anim == "attack": dv = [(0.1, -0.6, 0.8), (0.0, 0.7, 0.7), (0.0, 0.6, -0.8), (0.1, 0.9, -0.2)][fi]
@@ -154,6 +174,7 @@ def pose(bt, d, anim, fi, n):
     elif anim == "run": dv = (0.15, -0.45, 0.85)
     elif anim == "walk": dv = (0.15, 0.3 + 0.08 * math.sin(ph), 0.92)
     elif sit: dv = (0.0, 0.55, 0.8)
+    elif anim in BLOCK_ANIMS: dv = (0.0, .35, .94)
     elif anim == "punch": dv = (0.0, 0.95, 0.3)
     elif anim == "swim": dv = (0.15, 0.35, 0.92)
     elif anim in ("hit", "death"): dv = (0.4, -0.3, 0.85)
