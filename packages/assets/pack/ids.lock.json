@@ -5384,7 +5384,18 @@
     "build_shaft_hatch_t1": 5382,
     "build_shaft_hatch_t2": 5383,
     "build_shaft_hatch_t3": 5384,
-    "build_shaft_hatch_t4": 5385
+    "build_shaft_hatch_t4": 5385,
+    "bld_shaft_hatch_bottom": 5386,
+    "bld_shaft_hatch_bottom_t1": 5387,
+    "bld_shaft_hatch_bottom_t2": 5388,
+    "bld_shaft_hatch_bottom_t3": 5389,
+    "bld_shaft_hatch_bottom_t4": 5390,
+    "build_shaft_hatch_bottom_t0": 5391,
+    "build_shaft_hatch_bottom_t1": 5392,
+    "build_shaft_hatch_bottom_t2": 5393,
+    "build_shaft_hatch_bottom_t3": 5394,
+    "build_shaft_hatch_bottom_t4": 5395,
+    "build_shaft_hatch_t0": 5396
   },
   "sounds": {
     "amb_rain": 1,

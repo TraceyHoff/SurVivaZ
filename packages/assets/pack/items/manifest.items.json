@@ -17474,6 +17474,108 @@
      "fps": 1
     }
    }
+  },
+  {
+   "key": "build_shaft_hatch_t0",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      291
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_shaft_hatch_bottom_t0",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      292
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_shaft_hatch_bottom_t1",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      293
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_shaft_hatch_bottom_t2",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      294
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_shaft_hatch_bottom_t3",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      295
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_shaft_hatch_bottom_t4",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      296
+     ],
+     "fps": 1
+    }
+   }
   }
  ]
 }

@@ -18,7 +18,8 @@ This doc is the source of truth for gameplay building sprite keys (assets/buildi
 ## Keys (104 total, 26 pieces × 4 tiers; ❌ = not in manifest.building.json)
 | piece | keys |
 |---|---|
-| `shaft_hatch` | `shaft_hatch@tier1` `shaft_hatch@tier2` `shaft_hatch@tier3` `shaft_hatch@tier4` |
+| `shaft_hatch` | `shaft_hatch@tier1` `shaft_hatch@tier2` `shaft_hatch@tier3` `shaft_hatch@tier4` (bare key = twig art; `states.closed`/`states.open`, `animations.open`) |
+| `shaft_hatch_bottom` | `shaft_hatch_bottom@tier1` `shaft_hatch_bottom@tier2` `shaft_hatch_bottom@tier3` `shaft_hatch_bottom@tier4` (pit-floor landing; bare key = twig) |
 | `floor` | `floor@tier1` `floor@tier2` `floor@tier3` `floor@tier4` |
 | `floor_hatch_frame` | `floor_hatch_frame@tier1` `floor_hatch_frame@tier2` `floor_hatch_frame@tier3` `floor_hatch_frame@tier4` |
 | `floor_skylight` | `floor_skylight@tier1` `floor_skylight@tier2` `floor_skylight@tier3` `floor_skylight@tier4` |

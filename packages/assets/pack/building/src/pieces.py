@@ -176,12 +176,19 @@ def roof_chimney(tier):
 CHIMNEY_SMOKE_Z = 46
 
 
-def shaft_hatch(tier):
+SHAFT_S = 36.0   # px of z per tile unit, used to stand the lid up on its hinge
+
+
+def shaft_hatch(tier, pose="closed"):
     """Ground-rim trapdoor: solid walkable lid, recessed dark shaft seam.
 
     Authored independently of floor_hatch_frame/foundation. Hinges face -y;
     each quarter turn is rendered, never mirrored. All geometry stays in one cell.
+    pose: "closed" (placed default), "open" (lid swung up on the -y hinge over
+    the dark shaft) or "bottom" (pit-floor landing with the rope back up).
     """
+    if pose == "bottom":
+        return shaft_hatch_bottom(tier)
     bx = []
     def box(x0, x1, y0, y1, z0, z1, material, texture="flat"):
         bx.append(B(x0, x1, y0, y1, z0, z1, material,
@@ -189,14 +196,27 @@ def shaft_hatch(tier):
 
     # Dark earthen throat visible around, but not through, the closed lid.
     box(-.46, .46, -.46, .46, 0, 1, "ink")
-    rim, texture = {"wood": ("wood_dark", "planks"),
+    rim, texture = {"twig": ("bark", "logs"),
+                    "wood": ("wood_dark", "planks"),
                     "stone": ("stone", "ashlar"),
                     "metal": ("metal_teal", "flat"),
                     "reinforced": ("slate", "plates")}[tier]
     for a, b, c, d in [(-.5, .5, -.5, -.38), (-.5, .5, .38, .5),
                         (-.5, -.38, -.38, .38), (.38, .5, -.38, .38)]:
         box(a, b, c, d, 0, 4, rim, texture)
-    if tier == "wood":
+    if tier == "twig":
+        # Crude lid: six round bark poles with gaps, two cross sticks, twine knots.
+        for i in range(6):
+            x = -.33 + i * .113
+            box(x, x + .09, -.35, .35, 1.8, 4.4, "bark", "logs")
+        for y in (-.24, .15):
+            box(-.37, .37, y, y + .07, 4.4, 5.6, "wood_dark", "planksV")
+            for x in (-.30, -.03, .24):
+                box(x, x + .06, y - .01, y + .08, 5.6, 6.1, "thatch")
+        # Leather hinge thongs looping over the back rim.
+        for x in (-.22, .16):
+            box(x, x + .06, -.42, -.30, 4.4, 5.2, "leather")
+    elif tier == "wood":
         # Five individually edged boards, with two iron hinge straps.
         for i in range(5):
             x = -.345 + i * .138
@@ -237,9 +257,96 @@ def shaft_hatch(tier):
         for x in (-.25, .16):
             box(x, x + .09, -.42, -.25, 5.2, 6.5, "slate")
     # Small recessed pull at the front; no tall handle to trip over.
-    z = 6.5 if tier == "reinforced" else 6
-    box(-.10, .10, .18, .29, z, z + .25, "ink")
-    box(-.075, .075, .205, .24, z + .25, z + 1, "metal_teal" if tier == "metal" else "iron")
+    if tier == "twig":
+        box(-.09, .09, .22, .30, 4.4, 5.4, "thatch")   # twine pull loop
+        box(-.05, .05, .24, .28, 5.4, 6.2, "leather")
+    else:
+        z = 6.5 if tier == "reinforced" else 6
+        box(-.10, .10, .18, .29, z, z + .25, "ink")
+        box(-.075, .075, .205, .24, z + .25, z + 1, "metal_teal" if tier == "metal" else "iron")
+    if pose == "open":
+        bx = _swing_lid(bx, tier)
+    return bx, []
+
+
+def _swing_lid(bx, tier):
+    """Stand every lid box up around the -y hinge; rim and throat stay put."""
+    hy, zl = -.345, 1.8
+    out = []
+    for b in bx:
+        x0, x1, y0, y1, z0, z1 = b.v
+        lid = z0 >= 1.8 and x0 >= -.38 and x1 <= .38 and y0 >= -.43 and y1 <= .36
+        if not lid:
+            out.append(b)
+            continue
+        ny0, ny1 = hy - (z1 - zl) / SHAFT_S - .02, hy - (z0 - zl) / SHAFT_S - .02
+        nz0, nz1 = zl + 2.2 + max(0, y0 - hy) * SHAFT_S, zl + 2.2 + (y1 - hy) * SHAFT_S
+        out.append(B(x0, x1, max(ny0, -.5), ny1, nz0, nz1, b.rp,
+                     top=flat(), left=b.top or flat(), right=b.top or flat()))
+    # Open throat: earthen walls dropping into the dark, with a ladder rail top.
+    out.append(B(-.38, .38, .30, .38, 0, 3.2, "dirt", top=flat(), left=flat(), right=flat()))
+    out.append(B(.30, .38, -.30, .30, 0, 3.2, "dirt", top=flat(), left=flat(), right=flat()))
+    rail = {"twig": "bark", "wood": "wood_dark", "stone": "wood_dark",
+            "metal": "metal_teal", "reinforced": "iron"}[tier]
+    for x in (-.14, .10):
+        out.append(B(x, x + .04, -.30, -.25, 1, 6.5, rail, top=flat(), left=flat(), right=flat()))
+    return out
+
+
+def shaft_hatch_bottom(tier):
+    """Pit-floor landing under a shaft hatch: platform plus the rope back up.
+
+    The rope hangs on the -y side (the hatch hinge side at rot 0) so the way up
+    lines up with the hatch above.
+    """
+    bx = []
+    def box(x0, x1, y0, y1, z0, z1, material, texture="flat"):
+        bx.append(B(x0, x1, y0, y1, z0, z1, material,
+                    top=tx(texture), left=flat(), right=flat()))
+    box(-.48, .48, -.48, .48, 0, 1, "dirt")     # trodden pit floor
+    if tier == "twig":
+        for i in range(5):
+            x = -.36 + i * .15
+            box(x, x + .12, -.30, .36, 1, 3.4, "bark", "logs")
+        for y in (-.22, .22):
+            box(-.40, .40, y, y + .06, 3.4, 4.4, "thatch")
+        post, rope_top = "bark", "leather"
+    elif tier == "wood":
+        for y in (-.26, .24):
+            box(-.40, .40, y, y + .08, 1, 2.4, "wood_dark")
+        for i in range(4):
+            x = -.38 + i * .195
+            box(x, x + .18, -.32, .38, 2.4, 4.2, "wood", "deck")
+        post, rope_top = "wood_dark", "iron"
+    elif tier == "stone":
+        box(-.40, .40, -.32, .40, 1, 3.6, "slate")
+        box(-.34, .34, -.26, .34, 3.6, 4.6, "stone", "flag")
+        post, rope_top = "stone", "iron"
+    elif tier == "metal":
+        box(-.40, .40, -.32, .40, 1, 3.2, "metal_teal")
+        box(-.34, .34, -.26, .34, 3.2, 3.8, "iron", "diamond")
+        for x in (-.37, .33):
+            for y in (-.29, .35):
+                box(x, x + .04, y, y + .04, 3.2, 4.2, "metal_teal")
+        post, rope_top = "metal_teal", "iron"
+    else:
+        box(-.42, .42, -.32, .42, 1, 3.6, "iron", "plates")
+        for x in (-.40, .36):
+            for y in (-.20, .05, .30):
+                box(x, x + .04, y, y + .06, 3.6, 4.4, "gold")
+        box(-.30, .30, -.20, .30, 3.6, 4.2, "slate")
+        post, rope_top = "slate", "metal_teal"
+    # Anchor post against the -y wall with the climbing rope rising out of view.
+    box(-.20, -.10, -.44, -.36, 1, 18, post)
+    box(.08, .18, -.44, -.36, 1, 18, post)
+    box(-.22, .20, -.45, -.35, 16, 18.5, post)
+    box(-.03, .03, -.40, -.34, 2, 46, "thatch")          # rope
+    for z in (12, 22, 32):                               # knots for grip
+        box(-.05, .05, -.42, -.32, z, z + 2, "thatch")
+    box(-.06, .06, -.40, -.30, 46, 48, rope_top)        # cleat at the top
+    # Coiled spare rope on the landing.
+    box(.14, .30, .06, .22, 4, 5.6, "thatch")
+    box(.18, .26, .10, .18, 5.6, 6, "leather")
     return bx, []
 
 

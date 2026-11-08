@@ -8,7 +8,7 @@
    "frameW": 84,
    "frameH": 96,
    "columns": 24,
-   "rows": 16,
+   "rows": 17,
    "ktx2": "atlases/building_t1.ktx2"
   },
   {
@@ -17,7 +17,7 @@
    "frameW": 84,
    "frameH": 96,
    "columns": 24,
-   "rows": 16,
+   "rows": 17,
    "ktx2": "atlases/building_t2.ktx2"
   },
   {
@@ -26,7 +26,7 @@
    "frameW": 84,
    "frameH": 96,
    "columns": 24,
-   "rows": 16,
+   "rows": 17,
    "ktx2": "atlases/building_t3.ktx2"
   },
   {
@@ -35,7 +35,7 @@
    "frameW": 84,
    "frameH": 96,
    "columns": 24,
-   "rows": 16,
+   "rows": 17,
    "ktx2": "atlases/building_t4.ktx2"
   },
   {
@@ -836,7 +836,7 @@
    "frameW": 84,
    "frameH": 96,
    "columns": 16,
-   "rows": 3,
+   "rows": 6,
    "ktx2": "atlases/building_tw.ktx2"
   },
   {
@@ -50923,6 +50923,18 @@
       352
      ],
      "fps": 1
+    },
+    "closed": {
+     "frames": [
+      352
+     ],
+     "fps": 1
+    },
+    "open": {
+     "frames": [
+      368
+     ],
+     "fps": 1
     }
    },
    "building": {
@@ -50958,14 +50970,68 @@
       367
      ]
     ],
-    "crackOverlay": "bld_crack"
+    "crackOverlay": "bld_crack",
+    "states": {
+     "closed": [
+      [
+       352,
+       353,
+       354,
+       355
+      ],
+      [
+       356,
+       357,
+       358,
+       359
+      ],
+      [
+       360,
+       361,
+       362,
+       363
+      ],
+      [
+       364,
+       365,
+       366,
+       367
+      ]
+     ],
+     "open": [
+      [
+       368,
+       369,
+       370,
+       371
+      ],
+      [
+       372,
+       373,
+       374,
+       375
+      ],
+      [
+       376,
+       377,
+       378,
+       379
+      ],
+      [
+       380,
+       381,
+       382,
+       383
+      ]
+     ]
+    }
    },
    "rotationArt": "unique4"
   },
   {
    "key": "bld_shaft_hatch",
    "category": "building",
-   "atlas": "building_t1",
+   "atlas": "building_tw",
    "anchor": {
     "x": 0.5,
     "y": 0.75
@@ -50973,7 +51039,19 @@
    "animations": {
     "idle": {
      "frames": [
-      352
+      48
+     ],
+     "fps": 1
+    },
+    "closed": {
+     "frames": [
+      48
+     ],
+     "fps": 1
+    },
+    "open": {
+     "frames": [
+      64
      ],
      "fps": 1
     }
@@ -50987,31 +51065,85 @@
     "layer": 0,
     "frames": [
      [
-      352,
-      353,
-      354,
-      355
+      48,
+      49,
+      50,
+      51
      ],
      [
-      356,
-      357,
-      358,
-      359
+      52,
+      53,
+      54,
+      55
      ],
      [
-      360,
-      361,
-      362,
-      363
+      56,
+      57,
+      58,
+      59
      ],
      [
-      364,
-      365,
-      366,
-      367
+      60,
+      61,
+      62,
+      63
      ]
     ],
-    "crackOverlay": "bld_crack"
+    "crackOverlay": "bld_crack",
+    "states": {
+     "closed": [
+      [
+       48,
+       49,
+       50,
+       51
+      ],
+      [
+       52,
+       53,
+       54,
+       55
+      ],
+      [
+       56,
+       57,
+       58,
+       59
+      ],
+      [
+       60,
+       61,
+       62,
+       63
+      ]
+     ],
+     "open": [
+      [
+       64,
+       65,
+       66,
+       67
+      ],
+      [
+       68,
+       69,
+       70,
+       71
+      ],
+      [
+       72,
+       73,
+       74,
+       75
+      ],
+      [
+       76,
+       77,
+       78,
+       79
+      ]
+     ]
+    }
    },
    "rotationArt": "unique4"
   },
@@ -51027,6 +51159,18 @@
     "idle": {
      "frames": [
       352
+     ],
+     "fps": 1
+    },
+    "closed": {
+     "frames": [
+      352
+     ],
+     "fps": 1
+    },
+    "open": {
+     "frames": [
+      368
      ],
      "fps": 1
     }
@@ -51064,7 +51208,61 @@
       367
      ]
     ],
-    "crackOverlay": "bld_crack"
+    "crackOverlay": "bld_crack",
+    "states": {
+     "closed": [
+      [
+       352,
+       353,
+       354,
+       355
+      ],
+      [
+       356,
+       357,
+       358,
+       359
+      ],
+      [
+       360,
+       361,
+       362,
+       363
+      ],
+      [
+       364,
+       365,
+       366,
+       367
+      ]
+     ],
+     "open": [
+      [
+       368,
+       369,
+       370,
+       371
+      ],
+      [
+       372,
+       373,
+       374,
+       375
+      ],
+      [
+       376,
+       377,
+       378,
+       379
+      ],
+      [
+       380,
+       381,
+       382,
+       383
+      ]
+     ]
+    }
    },
    "rotationArt": "unique4"
   },
@@ -51080,6 +51278,18 @@
     "idle": {
      "frames": [
       352
+     ],
+     "fps": 1
+    },
+    "closed": {
+     "frames": [
+      352
+     ],
+     "fps": 1
+    },
+    "open": {
+     "frames": [
+      368
      ],
      "fps": 1
     }
@@ -51117,7 +51327,61 @@
       367
      ]
     ],
-    "crackOverlay": "bld_crack"
+    "crackOverlay": "bld_crack",
+    "states": {
+     "closed": [
+      [
+       352,
+       353,
+       354,
+       355
+      ],
+      [
+       356,
+       357,
+       358,
+       359
+      ],
+      [
+       360,
+       361,
+       362,
+       363
+      ],
+      [
+       364,
+       365,
+       366,
+       367
+      ]
+     ],
+     "open": [
+      [
+       368,
+       369,
+       370,
+       371
+      ],
+      [
+       372,
+       373,
+       374,
+       375
+      ],
+      [
+       376,
+       377,
+       378,
+       379
+      ],
+      [
+       380,
+       381,
+       382,
+       383
+      ]
+     ]
+    }
    },
    "rotationArt": "unique4"
   },
@@ -51133,6 +51397,18 @@
     "idle": {
      "frames": [
       352
+     ],
+     "fps": 1
+    },
+    "closed": {
+     "frames": [
+      352
+     ],
+     "fps": 1
+    },
+    "open": {
+     "frames": [
+      368
      ],
      "fps": 1
     }
@@ -51168,6 +51444,325 @@
       365,
       366,
       367
+     ]
+    ],
+    "crackOverlay": "bld_crack",
+    "states": {
+     "closed": [
+      [
+       352,
+       353,
+       354,
+       355
+      ],
+      [
+       356,
+       357,
+       358,
+       359
+      ],
+      [
+       360,
+       361,
+       362,
+       363
+      ],
+      [
+       364,
+       365,
+       366,
+       367
+      ]
+     ],
+     "open": [
+      [
+       368,
+       369,
+       370,
+       371
+      ],
+      [
+       372,
+       373,
+       374,
+       375
+      ],
+      [
+       376,
+       377,
+       378,
+       379
+      ],
+      [
+       380,
+       381,
+       382,
+       383
+      ]
+     ]
+    }
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_shaft_hatch_bottom",
+   "category": "building",
+   "atlas": "building_tw",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.75
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      80
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "shaft_hatch_bottom",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      80,
+      81,
+      82,
+      83
+     ],
+     [
+      84,
+      85,
+      86,
+      87
+     ],
+     [
+      88,
+      89,
+      90,
+      91
+     ],
+     [
+      92,
+      93,
+      94,
+      95
+     ]
+    ],
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_shaft_hatch_bottom_t1",
+   "category": "building",
+   "atlas": "building_t1",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.75
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      384
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "shaft_hatch_bottom@tier1",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      384,
+      385,
+      386,
+      387
+     ],
+     [
+      388,
+      389,
+      390,
+      391
+     ],
+     [
+      392,
+      393,
+      394,
+      395
+     ],
+     [
+      396,
+      397,
+      398,
+      399
+     ]
+    ],
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_shaft_hatch_bottom_t2",
+   "category": "building",
+   "atlas": "building_t2",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.75
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      384
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "shaft_hatch_bottom@tier2",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      384,
+      385,
+      386,
+      387
+     ],
+     [
+      388,
+      389,
+      390,
+      391
+     ],
+     [
+      392,
+      393,
+      394,
+      395
+     ],
+     [
+      396,
+      397,
+      398,
+      399
+     ]
+    ],
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_shaft_hatch_bottom_t3",
+   "category": "building",
+   "atlas": "building_t3",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.75
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      384
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "shaft_hatch_bottom@tier3",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      384,
+      385,
+      386,
+      387
+     ],
+     [
+      388,
+      389,
+      390,
+      391
+     ],
+     [
+      392,
+      393,
+      394,
+      395
+     ],
+     [
+      396,
+      397,
+      398,
+      399
+     ]
+    ],
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_shaft_hatch_bottom_t4",
+   "category": "building",
+   "atlas": "building_t4",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.75
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      384
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "shaft_hatch_bottom@tier4",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      384,
+      385,
+      386,
+      387
+     ],
+     [
+      388,
+      389,
+      390,
+      391
+     ],
+     [
+      392,
+      393,
+      394,
+      395
+     ],
+     [
+      396,
+      397,
+      398,
+      399
      ]
     ],
     "crackOverlay": "bld_crack"

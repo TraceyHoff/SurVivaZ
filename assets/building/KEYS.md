@@ -50,12 +50,22 @@ Corner stubs are 0.22 tile (edge walls already run vertex to vertex); angled = p
 One page per tier, `building_t1..t4`: 2016x1056, 84x96 cells, pivot (42,72) = anchor (0.5, 0.75), 1x only; ~8.1 MiB RGBA8 each (32.5 MiB all), KTX2 ETC1S twins ~2 MiB each (8.1 MiB all) via assets/tools/ktx2.py.
 
 ## Shaft Hatch (add-only art)
-`shaft_hatch` and `shaft_hatch@tier1..4`: dedicated closed ground trapdoors, not raised floor holes.
-Sprites `bld_shaft_hatch` (tier1 pixels) and `bld_shaft_hatch_t1..t4` use `building_t1..t4`.
-Each tier appends frames 352–367: rotation rows `[352..355]`, `[356..359]`, `[360..363]`, `[364..367]`;
-each row is damage stages 0–3. `idle` = 352. Anchor (0.5, 0.75), footprint 1×1, layer 0,
-`rotationArt: unique4`, `crackOverlay: bld_crack`. Closed is the only state; no open/bottom art yet.
-Tier pages are now 2016×1536 (24 columns × 16 rows), 1x only.
-Matching build-window keys: `build_shaft_hatch_t1..t4` in `items_build`, frames 287–290 (32px + 64px pages).
-Rebuild only this addition with `packages/assets/pack/building/src/add_shaft_hatch.py`;
+`shaft_hatch` (twig, bare key) and `shaft_hatch@tier1..4`: dedicated ground trapdoors, not raised floor holes.
+There is no `@tier0`: tier 0 resolves to the bare key, which is now TWIG art (it was tier-1 wood before).
+
+- `bld_shaft_hatch` (piece `shaft_hatch`, twig) on always-resident `building_tw`: closed `[48..51]`,`[52..55]`,`[56..59]`,`[60..63]`; open `[64..67]`..`[76..79]`. idle = 48.
+- `bld_shaft_hatch_t1..t4` on `building_t1..t4`: closed frames unchanged `[352..355]`,`[356..359]`,`[360..363]`,`[364..367]` (idle 352);
+  open appended `[368..371]`,`[372..375]`,`[376..379]`,`[380..383]`.
+- Each row = one rotation (unique4, hinge on -y at rot 0), columns = damage 0–3.
+- Open state: `building.states.open` (and `states.closed` = `building.frames`); `animations.open` = open intact frame
+  (64 twig / 368 tiers), `animations.closed` = `animations.idle` = closed intact. Closed stays the placed default.
+
+`shaft_hatch_bottom` (twig, bare) and `shaft_hatch_bottom@tier1..4`: pit-floor landing + rope back up (rope on the -y side, under the hinge).
+- `bld_shaft_hatch_bottom` on `building_tw` frames `[80..83]`..`[92..95]`; `bld_shaft_hatch_bottom_t1..t4` on `building_t1..t4` frames `[384..387]`..`[396..399]`.
+- No open state. Anchor (0.5, 0.75), footprint 1×1, layer 0, `rotationArt: unique4`, `crackOverlay: bld_crack` (same as the hatch).
+
+Pages: `building_t1..t4` 2016×1632 (24 × 17 rows); `building_tw` 1344×576 (16 × 6 rows; corner frames 0–47 unchanged).
+Build-window icons in `items_build` (32px + 64px pages): `build_shaft_hatch_t1..t4` 287–290, `build_shaft_hatch_t0` 291,
+`build_shaft_hatch_bottom_t0..t4` 292–296.
+Re-run only `packages/assets/pack/building/src/add_shaft_hatch.py` (append-only, reuses existing indices);
 it preserves all previously shipped sprite records and pixel cells. Never run the whole building pack for this addition.
