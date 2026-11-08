@@ -3492,3 +3492,13 @@ Each building type also rolls extra furnishings from a separate seed stream so e
 **Not changed.** Demolish / pickup commands, reach and targeting, piece ids, recipes, or networked component masks.
 
 **Validation.** Aimed pickup and demolish strings name the piece; the overlay helper returns a cell rectangle, an edge segment, or a free-placement rectangle; `claim_totem` is listed first under Hand Crafted and is absent from Furniture.
+
+## ADR-303: Open house doors from Use and stop floating upper floors (SurVivaZ)
+
+**Context.** Abandoned multi-story houses placed real floor pieces at level 1 (`Transform.z = levelHeight`, 3). The client lifts pieces onto terrain with `pieceGroundZ` and the renderer then adds story height again via `floorToTerrainZ(level, Transform.z)`. Because `pieceGroundZ` kept the full sim z when there was no extra lift, upper floors (and upstairs furniture) were drawn a whole story too high — they looked like unsupported platforms floating above the first-story walls. Separately, the Use / Interact button never sent `ToggleDoorCmd`: `interactPanel` ignored doors, so standing at a house door opened the nearest interior chest (or wardrobe) and no hand icon appeared on the door.
+
+**Decision.** Strip story height in `pieceGroundZ` (keep only terrain plus any extra lift such as decor on a table) so `floorToTerrainZ` restores exactly one story. The build ghost overlay uses that restored draw z; the ghost entity keeps the stripped base so the sprite path does not double-count. Interact / Use now treats doors and gates (`def.door`) as first-class targets that compete by distance with storage, loot bags, stations, wardrobes, pets, and workers. The closest target wins; a closer door opens with `ToggleDoorCmd` and does not open inventory. The ADR-212 hand symbol shows over that door (and tapping it on touch toggles the door). Use still opens inventory only when the winning target is a container, loot bag, death bag, or crafting station (etc.).
+
+**Not changed.** Placement support rules (upper decks still need a wall connection through their cluster), abandoned stamp layouts, piece ids, door attachments, or networked component masks. Multi-story houses stay; their floors sit on first-story walls that sit on foundations.
+
+**Validation.** `pieceGroundZ` plus `floorToTerrainZ` yields one story of height on flat ground and hill-plus-one-story on raised terrain. Interact at an abandoned shed door returns the door, not interior storage, and `ToggleDoorCmd` opens it. Interact next to a chest with no nearer door still opens storage. Two-story cottage floors sit at `levelHeight`. The door pick drives the existing hand-hint hold.

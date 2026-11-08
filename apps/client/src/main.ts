@@ -25,7 +25,7 @@ import { GameMenus, padMenuAction } from "./game-menus.js";
 import { BuildMode } from "./build-mode.js";
 import { mountBuildHud, onTouchControl } from "./build-hud.js";
 import { mountToolHint, toolIconFrame } from "./tool-hint.js";
-import { mountStationHint } from "./station-hint.js";
+import { DOOR_HINT_KIND, mountStationHint } from "./station-hint.js";
 import { mountWorldTools, type WorldToolsHandle } from "./world-tools.js";
 import { syncUnderground } from "./underground.js";
 import { mountVehicleControls, type VehicleControls } from "./vehicle-controls.js";
@@ -48,7 +48,7 @@ import { inventoryOpRejectText } from "./inventory-reject.js";
 import { netIdOf, ChatChannel, type ChatDelivered } from "@engine/net";
 import { WorldRules, worldRules, ROADS, holdsRangedWeapon, Sign, signText, Road, StallHeader, buildView, listItemIntents, setStallOpenIntent, stallView, nearestStall, inventoryView, selectHotbarIntent, equipIntent, useIntent, moveSlotIntent, hotbarConsumes, gameplayDefs, BuildPiece, compassOf } from "@engine/gameplay";
 import { replicaTerrain } from "./replica-terrain.js";
-import { SocialDirectory, hasCreatedLook, setAppearanceIntent, interactPanel, petEventText, workerEventText, petRenameIntent, readyIntent, UseCmd, GatherCmd, farmPrompt, TerrainRes, type MenuCtx, type MenuIntent } from "@engine/gameplay";
+import { SocialDirectory, hasCreatedLook, setAppearanceIntent, interactPanel, petEventText, workerEventText, petRenameIntent, readyIntent, toggleDoorIntent, UseCmd, GatherCmd, farmPrompt, TerrainRes, type MenuCtx, type MenuIntent } from "@engine/gameplay";
 import { ClientSession } from "./session.js";
 import { mountNetStatus, pingLabel } from "./net-status.js";
 import type { SessionInfo } from "./game-menus.js";
@@ -336,7 +336,7 @@ function onUiFrame(): void {
   { const id = padMenuAction(input); if (id) { menus?.open(id); return; } } // ADR-139: pad-only bindings: Select = inventory, LB+Select = crafting, RB+Select = chat
   if (input.pressed("QuickUse") && farm) { const p = session.player; if (p !== undefined && quickUseFires(safeFarmPrompt(p))) farm.trigger(); }
   if (vehicleCtl?.update()) return; // ADR-170: enter / exit (Interact), engine + headlights while driving
-  if (input.pressed("Interact") && !(session.player !== undefined && stanceMode(world, session.player) >= StanceMode.Carry && stanceMode(world, session.player) !== StanceMode.Aim)) { /* ADR-244: carrying → Interact drops; asleep → wakes */ const c = menuCtx(); const t = c && interactPanel(c); if (t?.panel === "trade") menus?.openStall(t.stall); else if (t?.panel === "station") menus?.openStation(t.station, t.kind); else if (t?.panel === "pet") menus?.openPet(t.pet); else if (t?.panel === "worker") menus?.openWorker(t.worker); else if (t?.panel === "loot") menus?.openLoot(t.bag); else if (t?.panel === "storage") menus?.openStorage(t.piece); else if (t?.panel === "lootLocked") farm?.toast("That death bag belongs to another player for 60 seconds"); else if (t?.panel === "wardrobe") menus?.open("wardrobe"); else if (t) menus?.open("character"); }
+  if (input.pressed("Interact") && !(session.player !== undefined && stanceMode(world, session.player) >= StanceMode.Carry && stanceMode(world, session.player) !== StanceMode.Aim)) { /* ADR-244: carrying → Interact drops; asleep → wakes */ const c = menuCtx(); const t = c && interactPanel(c); if (t?.panel === "trade") menus?.openStall(t.stall); else if (t?.panel === "station") menus?.openStation(t.station, t.kind); else if (t?.panel === "pet") menus?.openPet(t.pet); else if (t?.panel === "worker") menus?.openWorker(t.worker); else if (t?.panel === "loot") menus?.openLoot(t.bag); else if (t?.panel === "storage") menus?.openStorage(t.piece); else if (t?.panel === "lootLocked") farm?.toast("That death bag belongs to another player for 60 seconds"); else if (t?.panel === "wardrobe") menus?.open("wardrobe"); else if (t?.panel === "door") sendIntent(toggleDoorIntent(t.piece)); else if (t) menus?.open("character"); }
 }
 /** ADR-160: a loot bag the server opened for us (primary click / tap fallback) shows in the inventory panel once. */
 let lootShown: number | undefined;
@@ -742,8 +742,8 @@ mountLootLabels(root, { world: () => world, player: () => session.player, camera
 mountStationHint(root, { world: () => world, player: () => session.player, camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined),
   hidden: () => !!menus?.nav.isOpen || buildMode.active || !!vehicleCtl?.driving, device: promptDevice,
   key: () => controlLabel(input.bindings(promptDevice(), "Gameplay").find((b) => b.binding.action === "Interact")?.binding.control),
-  pick: () => { const c = menuCtx(); const t = c && interactPanel(c); return !t ? undefined : t.panel === "station" ? { station: t.station, kind: t.kind } : "other"; },
-  open: (st, kind) => menus?.openStation(st, kind),
+  pick: () => { const c = menuCtx(); const t = c && interactPanel(c); return !t ? undefined : t.panel === "station" ? { station: t.station, kind: t.kind } : t.panel === "door" ? { door: t.piece } : "other"; },
+  open: (st, kind) => { if (kind === DOOR_HINT_KIND) sendIntent(toggleDoorIntent(st)); else menus?.openStation(st, kind); },
   art: () => toolIconFrame(iso?.registry, "hand", Math.min(3, devicePixelRatio || 1) * (promptDevice() === "touch" ? 44 : 34) / 32) });
 // ADR-126: tool-needed symbol over the nearest resource node (Settings toggle, live)
 mountToolHint(root, { world: () => world, player: () => session.player, camera: () => iso?.renderer.camera, hidden: () => !!menus?.nav.isOpen || buildMode.active || !!vehicleCtl?.driving,

@@ -111,9 +111,13 @@ export function ladderFaceHeights(tiles: TileMap | undefined, x: number, y: numb
   return { low: Math.min(a, b), high: Math.max(a, b) };
 }
 
-/** ADR-162: groundZ for a build piece; a lift above its level floor (decor on a table) is kept on top of a terrain step. */
+/** ADR-162 / ADR-303: terrain lift for a build piece. Story height (`round(z / levelHeight) * levelHeight`) is stripped
+ *  so the renderer can add it back with `floorToTerrainZ(level, …)` — passing the full sim z here used to draw upper
+ *  floors a whole story too high (they looked like they were floating with no support). Extra lift above that floor
+ *  (decor on a table) is kept on top of the terrain step. */
 export function pieceGroundZ(tiles: TileMap | undefined, x: number, y: number, z: number, lh: number): number {
-  const off = z - Math.round(z / lh) * lh; return off > 1e-3 ? groundZ(tiles, x, y, z - off) + off : groundZ(tiles, x, y, z);
+  const step = lh || 1; const floor = Math.round(z / step) * step; const off = z - floor;
+  return groundZ(tiles, x, y, 0) + off;
 }
 /** ADR-299: pin a shaft hatch (and anyone standing on its lid) to the surrounding rim instead of the pit floor. */
 export function shaftRimGroundZ(tiles: TileMap | undefined, x: number, y: number, z: number): number {
@@ -388,11 +392,14 @@ export class IsoView {
     const names = gameplayDefs(net).pieces.get(p.piece)?.variantNames ?? [];
     const def = gameplayDefs(net).pieces.get(p.piece);
     // ADR-142: lifted onto the terrain step like the placed piece (view mirror `ground`); at z=0 it sank under raised ground
-    this.ghostZ = pieceGroundZ(this.lastTiles, p.x, p.y, p.z, gameplayDefs(net).building.levelHeight);
+    const baseZ = pieceGroundZ(this.lastTiles, p.x, p.y, p.z, gameplayDefs(net).building.levelHeight);
+    // Overlay uses the drawn world z (story restored); the ghost entity keeps the stripped base so sprites.ts
+    // `floorToTerrainZ(level, Transform.z)` does not double the story again.
+    this.ghostZ = floorToTerrainZ(p.level, baseZ);
     // ADR-268: the visible hologram is the exact snapped request that Build confirms.
     // Easing between cells showed a different location from the authoritative preview.
     const gx = p.x, gy = p.y;
-    this.ghost.sync({ pieceKey: this.pk(p.pieceKey) ?? p.pieceKey, x: gx, y: gy, rot: p.rot, valid: p.valid }, { z: this.ghostZ, level: p.level, tier: p.tier, rotSteps: p.rotSteps, rotFlags: pieceRotFlags(def), ...(names[p.variant] ? { variant: names[p.variant]! } : { variant: p.variant }) });
+    this.ghost.sync({ pieceKey: this.pk(p.pieceKey) ?? p.pieceKey, x: gx, y: gy, rot: p.rot, valid: p.valid }, { z: baseZ, level: p.level, tier: p.tier, rotSteps: p.rotSteps, rotFlags: pieceRotFlags(def), ...(names[p.variant] ? { variant: names[p.variant]! } : { variant: p.variant }) });
     { const ge = this.ghost.entity, sc = this.pieceArtScale(p.pieceKey); if (ge !== null) { if (sc !== 1) this.pieceScales.set(ge, sc); else this.pieceScales.delete(ge); } } // ADR-227
   }
   /** A ladder covers the whole terrain face with native-size painted sections, never a stretched sprite. */

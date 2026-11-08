@@ -26,7 +26,7 @@ import { pieceCost, pieceGates } from "../building/place.js";
 import { hasSkillUnlock, unlockRequirement, xpToNext } from "../skills/tree.js";
 import { activeDiseases, careStatus, diseasePresentation, CARE_DRY_MAX } from "../diseases.js";
 import { ambientTemperature, effectiveInsulation, heatAt, shelteredAirTemp, weatherDef, worldSeason } from "../systems/environment.js";
-import { BoilCmd, DepositCmd, EquipCmd, PaintCmd, PlaceCmd, ToggleFireCmd, UseCmd, WearCmd, WithdrawCmd } from "../input.js";
+import { BoilCmd, DepositCmd, EquipCmd, PaintCmd, PlaceCmd, ToggleDoorCmd, ToggleFireCmd, UseCmd, WearCmd, WithdrawCmd } from "../input.js";
 import { Equipment, Worn } from "../components.js";
 import { ItemCategory, WEAR_SLOTS, WeatherKind } from "../defs.js";
 import { entityIndex } from "@engine/core";
@@ -37,7 +37,7 @@ import { Fuel, Pet } from "../components.js";
 import { fuelSecondsLeft } from "../systems/fuel.js";
 import { KEY_ITEM, keyTooltip } from "../vehicle_keys.js";
 const itemDefKey = (w: World, item: number): string => gameplayDefs(w).items.get(item)?.key ?? "";
-import { COSMETICS, EquipCosmeticCmd, SetAppearanceCmd, canEditAppearance, hasCreatedLook, nearWardrobe, unlocksOf } from "../customization.js";
+import { COSMETICS, EquipCosmeticCmd, SetAppearanceCmd, canEditAppearance, hasCreatedLook, unlocksOf } from "../customization.js";
 import { canLootBagAt } from "../combat/pvp.js";
 import { isBaseStoragePiece } from "../ai/storage_api.js";
 import { PartyAcceptCmd, PartyDeclineCmd, PartyInviteCmd, PartyKickCmd, PartyLeaveCmd, PARTY_RULES } from "../party.js";
@@ -203,6 +203,7 @@ export function fuelView(c: MenuCtx, fire: Entity): FuelView | undefined {
   return { lit: (w.getField(fire, Fuel, "lit") ?? 0) > 0, secondsLeft: fuelSecondsLeft(w, fire, undefined, c.tick), fuels };
 }
 export const toggleFireIntent = (target: Entity): MenuIntent => intent(ToggleFireCmd, { target }, ["target"]);
+export const toggleDoorIntent = (target: Entity): MenuIntent => intent(ToggleDoorCmd, { target }, ["target"]);
 export const depositIntent = (target: Entity, item: number, count: number): MenuIntent => intent(DepositCmd, { target, item, count }, ["target"]);
 
 /** ADR-136: the personal menu (station 0) lists ONLY hand recipes; a station's panel lists ONLY that station's recipes. */
@@ -504,29 +505,66 @@ export function listItemIntents(stall: Entity, d: StallListDraft): MenuIntent[] 
 
 // ---- interact → panel -------------------------------------------------------------------------------
 export const STALL_INTERACT_RANGE = 2.5;
-/** What the Interact action should open: a nearby stall's trade panel, else the wardrobe panel. */
-export function interactPanel(c: MenuCtx): { panel: "trade"; stall: Entity } | { panel: "wardrobe" } | { panel: "station"; station: Entity; kind: number } | { panel: "pet"; pet: Entity } | { panel: "worker"; worker: Entity } | { panel: "loot"; bag: Entity } | { panel: "lootLocked"; bag: Entity } | { panel: "storage"; piece: Entity } | undefined {
+export type InteractPanel =
+  | { panel: "trade"; stall: Entity }
+  | { panel: "wardrobe" }
+  | { panel: "station"; station: Entity; kind: number }
+  | { panel: "pet"; pet: Entity }
+  | { panel: "worker"; worker: Entity }
+  | { panel: "loot"; bag: Entity }
+  | { panel: "lootLocked"; bag: Entity }
+  | { panel: "storage"; piece: Entity }
+  | { panel: "door"; piece: Entity };
+/** What Interact / Use should do: the closest eligible target. Doors compete by distance with storage, loot,
+ *  stations, wardrobes, pets and workers so standing at a house door opens the door instead of a chest through
+ *  the wall (ADR-303). Use never opens inventory unless that closest target is a container, loot bag, death bag,
+ *  or crafting station (etc.). */
+export function interactPanel(c: MenuCtx): InteractPanel | undefined {
   const s = nearestStall(c, STALL_INTERACT_RANGE); if (s !== undefined) return { panel: "trade", stall: s };
-  if (nearWardrobe(c.world, c.player)) return { panel: "wardrobe" };
+  const door = nearestDoor(c);
+  const wardrobe = nearestWardrobePiece(c);
   const st = nearestStation(c); const pet = nearestPet(c.world, c.player); const worker = nearestWorker(c.world, c.player);
-  // ADR-160: a loot bag (zombie / animal / death / dropped / crate) in reach opens by hand when it is the closest target
   const bag = nearestLootBag(c);
-  // Plain base storage (chests, boxes, shelves) had no Interact case at all, so a chest could never be opened
-  // from the world — the inventory panel only ever showed a container once it was already being viewed.
   const storage = nearestStoragePiece(c);
-  if (bag && (!st || bag.d <= stationDistance(c, st.station)) && (!pet || bag.d <= pet.d) && (!worker || bag.d <= worker.d) && (!storage || bag.d <= storage.d)) {
-    // A death bag inside its owner-only window must not open the bare player inventory: that is what made
-    // other players' / AI humans' bags look like "just the inventory, nothing to loot". Report it locked instead.
-    if (!canLootBagAt(c.world, c.player, bag.entity, ctxTick(c))) return { panel: "lootLocked", bag: bag.entity };
-    return { panel: "loot", bag: bag.entity }; // ADR-145: the pet / tameable animal wins when it is closer than the station
+  type Cand = { d: number; pri: number; pick: InteractPanel };
+  const cands: Cand[] = [];
+  if (door) cands.push({ d: door.d, pri: 0, pick: { panel: "door", piece: door.entity } });
+  if (bag) {
+    const locked = !canLootBagAt(c.world, c.player, bag.entity, ctxTick(c));
+    cands.push({ d: bag.d, pri: 1, pick: locked ? { panel: "lootLocked", bag: bag.entity } : { panel: "loot", bag: bag.entity } });
   }
-  if (storage && (!st || storage.d <= stationDistance(c, st.station)) && (!pet || storage.d <= pet.d) && (!worker || storage.d <= worker.d)) return { panel: "storage", piece: storage.entity };
-  // a loot bag / container (e.g. the sandbox pet-corner crate) closer than the pet keeps Interact: the server opens it
-  if (pet && (!st || pet.d < stationDistance(c, st.station)) && !(nearestOpenable(c, pet.d) < pet.d) && !(storage && storage.d < pet.d) && (!worker || pet.d <= worker.d)) return { panel: "pet", pet: pet.entity };
-  // Task 22: a recruitable / hired AI human wins Interact when it is the closest target (same rule as the pet)
-  if (worker && (!st || worker.d < stationDistance(c, st.station)) && !(nearestOpenable(c, worker.d) < worker.d) && !(storage && storage.d < worker.d)) return { panel: "worker", worker: worker.entity };
-  if (st) return { panel: "station", ...st };
-  return undefined;
+  if (storage) cands.push({ d: storage.d, pri: 2, pick: { panel: "storage", piece: storage.entity } });
+  if (wardrobe) cands.push({ d: wardrobe.d, pri: 3, pick: { panel: "wardrobe" } });
+  if (pet && !(nearestOpenable(c, pet.d) < pet.d)) cands.push({ d: pet.d, pri: 4, pick: { panel: "pet", pet: pet.entity } });
+  if (worker && !(nearestOpenable(c, worker.d) < worker.d)) cands.push({ d: worker.d, pri: 5, pick: { panel: "worker", worker: worker.entity } });
+  if (st) cands.push({ d: stationDistance(c, st.station), pri: 6, pick: { panel: "station", ...st } });
+  if (!cands.length) return undefined;
+  cands.sort((a, b) => a.d - b.d || a.pri - b.pri);
+  return cands[0]!.pick;
+}
+/** ADR-303: nearest door or gate (`def.door`) within build reach — the same range `doorSystem` accepts. */
+export function nearestDoor(c: MenuCtx, r = gameplayDefs(c.world).building.buildReach): { entity: Entity; d: number } | undefined {
+  const w = c.world; const me = w.get(c.player, Transform); if (!me || !w.isRegistered(BuildPiece)) return undefined;
+  const defs = gameplayDefs(w); let best: { entity: Entity; d: number } | undefined;
+  for (const e of w.query([BuildPiece, Transform])) {
+    if (w.has(e, Dead)) continue;
+    const def = defs.pieces.get(w.getField(e, BuildPiece, "type") ?? 0); if (!def?.door) continue;
+    const t = w.get(e, Transform)!; const d = Math.hypot(t.x - me.x, t.y - me.y);
+    if (d <= r && (!best || d < best.d)) best = { entity: e, d };
+  }
+  return best;
+}
+/** Nearest wardrobe / mirror piece within cosmetics.wardrobeRange, with its distance (so a closer door can win). */
+export function nearestWardrobePiece(c: MenuCtx, r = COSMETICS.wardrobeRange): { entity: Entity; d: number } | undefined {
+  const w = c.world; const me = w.get(c.player, Transform); if (!me || !w.isRegistered(BuildPiece)) return undefined;
+  const defs = gameplayDefs(w); let best: { entity: Entity; d: number } | undefined;
+  for (const e of w.query([BuildPiece, Transform])) {
+    if (w.has(e, Dead)) continue;
+    const def = defs.pieces.get(w.getField(e, BuildPiece, "type") ?? 0); if (!def?.features.wardrobe) continue;
+    const t = w.get(e, Transform)!; const d = Math.hypot(t.x - me.x, t.y - me.y);
+    if (d <= r && (!best || d < best.d)) best = { entity: e, d };
+  }
+  return best;
 }
 /** Nearest plain base-storage piece within container reach (same definition AI storage uses: container piece
  *  that is not a stall, fire, station, turret or trough). The piece entity is the OpenContainer target — the

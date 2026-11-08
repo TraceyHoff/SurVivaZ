@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Transform, World, type Entity } from "@engine/core";
 import { CraftingStation } from "@engine/gameplay";
-import { holdStation, mountStationHint, STATION_HINT, stationPrompt, type HintHold, type InteractPick } from "../src/station-hint.js";
+import { DOOR_HINT_KIND, holdStation, mountStationHint, STATION_HINT, stationPrompt, type HintHold, type InteractPick } from "../src/station-hint.js";
 
 const cam = { x: 0, y: 0, viewW: 800, viewH: 600, dpr: 1, drawZoom: 1, cssToWorld: () => ({ x: 0, y: 0 }) };
 let raf: FrameRequestCallback[] = [];
@@ -46,5 +46,12 @@ describe("ADR-212 station hand symbol", () => {
     pick = "other"; frame(3500); expect(el.dataset["show"]).toBe("false");
     muts += mo.takeRecords().length; mo.disconnect(); expect(muts).toBeLessThan(20);
     h.destroy(); expect(document.getElementById("station-hint")).toBeNull();
+  });
+  it("ADR-303: a door pick shows the hand on that door", () => {
+    const door = 99 as Entity;
+    let h: HintHold = { kind: 0, lostAt: 0 };
+    h = holdStation(h, { door }, () => true, 0);
+    expect(h.station).toBe(door);
+    expect(h.kind).toBe(DOOR_HINT_KIND);
   });
 });

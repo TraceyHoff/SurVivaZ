@@ -21,13 +21,15 @@ export const STATION_HINT = { exitSlack: 0.35, graceMs: 350, scanMs: 120 } as co
 /** Hand-icon lift (css px at zoom 1): above the node health bar (58 in gather-fx.ts), like the tool hint, so a
  * station's hand icon never sits over a nearby resource's bar; bars also draw above the icons (z-index). */
 export const STATION_HINT_LIFT = 64;
-/** What Interact would open now: a station, something else, or nothing. */
-export type InteractPick = { station: Entity; kind: number } | "other" | undefined;
+/** What Interact would open now: a station, a door, something else, or nothing. */
+export const DOOR_HINT_KIND = -1;
+export type InteractPick = { station: Entity; kind: number } | { door: Entity } | "other" | undefined;
 export interface HintHold { station?: Entity; kind: number; lostAt: number }
 
-/** Pure hysteresis step (tested). `near(e)`: the held station is still within range + exitSlack. */
+/** Pure hysteresis step (tested). `near(e)`: the held target is still within range + exitSlack. */
 export function holdStation(prev: HintHold, pick: InteractPick, near: (e: Entity) => boolean, now: number): HintHold {
   if (pick === "other") return { kind: 0, lostAt: 0 };
+  if (pick && "door" in pick) return { station: pick.door, kind: DOOR_HINT_KIND, lostAt: 0 };
   if (pick) return { station: pick.station, kind: pick.kind, lostAt: 0 };
   if (prev.station === undefined) return prev;
   if (!near(prev.station)) return { kind: 0, lostAt: 0 };
@@ -56,9 +58,11 @@ export function mountStationHint(root: HTMLElement, d: StationHintDeps): { destr
   el.append(cv, pill); root.append(el);
   let hold: HintHold = { kind: 0, lostAt: 0 }; let shown: HintHold | undefined; let lastScan = -1e9; let raf = 0; let lastTf = ""; let drawn = ""; let img: HTMLImageElement | null | undefined;
   const near = (e: Entity): boolean => { // getField: no per-scan object allocation (ADR-212 heap churn)
-    const w = d.world(); const p = d.player(); if (p === undefined || !w.isAlive(e) || !w.isRegistered(CraftingStation)) return false;
-    const r = w.getField(e, CraftingStation, "range"); const ax = w.getField(p, Transform, "x"), ay = w.getField(p, Transform, "y"), bx = w.getField(e, Transform, "x"), by = w.getField(e, Transform, "y");
-    return r !== undefined && ax !== undefined && ay !== undefined && bx !== undefined && by !== undefined && Math.hypot(ax - bx, ay - by) <= r + STATION_HINT.exitSlack;
+    const w = d.world(); const p = d.player(); if (p === undefined || !w.isAlive(e)) return false;
+    const ax = w.getField(p, Transform, "x"), ay = w.getField(p, Transform, "y"), bx = w.getField(e, Transform, "x"), by = w.getField(e, Transform, "y");
+    if (ax === undefined || ay === undefined || bx === undefined || by === undefined) return false;
+    const r = w.isRegistered(CraftingStation) ? w.getField(e, CraftingStation, "range") : undefined;
+    return Math.hypot(ax - bx, ay - by) <= (r ?? 4) + STATION_HINT.exitSlack;
   };
   const draw = (size: number): void => {
     const f = d.art?.();
@@ -84,7 +88,7 @@ export function mountStationHint(root: HTMLElement, d: StationHintDeps): { destr
       const w = d.world(); const tx = w.getField(shown.station, Transform, "x"), ty = w.getField(shown.station, Transform, "y"); if (tx === undefined || ty === undefined) return;
       const dev = d.device(); const size = dev === "touch" ? 44 : 34; draw(size);
       setData(el, "kind", String(shown.kind)); setData(el, "device", dev);
-      const name = STATION_NAMES[shown.kind] ?? "Station"; const txt = stationPrompt(dev, d.key());
+      const name = shown.kind === DOOR_HINT_KIND ? "Door" : (STATION_NAMES[shown.kind] ?? "Station"); const txt = stationPrompt(dev, d.key());
       if (pill.textContent !== txt) pill.textContent = txt;
       setAttr(el, "aria-label", `${txt} ${name}`); setAttr(el, "title", name);
       const s = worldToScreen(tx, ty, w.getField(shown.station, Transform, "z") ?? 0, camIso(cam)); const z = cam.drawZoom;
