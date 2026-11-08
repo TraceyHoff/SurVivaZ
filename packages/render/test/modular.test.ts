@@ -5,7 +5,7 @@ import { World, Transform, defineComponent } from "@engine/core";
 import { loadManifest, mergeManifests, type ManifestJson } from "@engine/assets";
 import { FLOOR_HEIGHT_LEVELS, DEFAULT_ISO } from "@engine/world";
 import {
-  attachToWorld, BuildGhost, chimneySmokePoint, crackAnim, isoZDepthFactor, pieceArtRow, PieceCoverIndex, pieceDepthKey,
+  attachToWorld, BuildGhost, chimneySmokePoint, crackAnim, isoZDepthFactor, isEnclosurePieceKey, pieceArtRow, PieceCoverIndex, pieceDepthKey, pieceShouldCutaway,
   ROT_EXACT_PIVOT, splitTierKey, streamingFallbackKeys, triArtRow, type BuildPieceDefT,
 } from "../src/index.js";
 
@@ -144,5 +144,33 @@ describe("triArtRow vs screen convention", () => {
       const want = new Set([0, 1, 2].map((k) => (rot + 4 * k) % 12)), got = new Set([0, 1, 2].map((k) => (3 * row + 4 * k) % 12));
       expect(got).toEqual(want);
     }
+  });
+});
+
+describe("ADR-304 indoor cutaway", () => {
+  it("classifies enclosure pieces and leaves furniture alone", () => {
+    expect(isEnclosurePieceKey("wall")).toBe(true);
+    expect(isEnclosurePieceKey("wall_doorway@tier2")).toBe(true);
+    expect(isEnclosurePieceKey("wall_window")).toBe(true);
+    expect(isEnclosurePieceKey("wall_corner_outer@tier1")).toBe(true);
+    expect(isEnclosurePieceKey("door_wood")).toBe(true);
+    expect(isEnclosurePieceKey("garden_gate")).toBe(true);
+    expect(isEnclosurePieceKey("floor")).toBe(false);
+    expect(isEnclosurePieceKey("roof_flat")).toBe(false);
+    expect(isEnclosurePieceKey("basic_storage_box")).toBe(false);
+    expect(isEnclosurePieceKey("bed")).toBe(false);
+    expect(isEnclosurePieceKey("wood_stove")).toBe(false);
+  });
+  it("fades roofs and stories above the player, plus camera-near walls in front", () => {
+    const front = 10, back = 6, player = 8;
+    expect(pieceShouldCutaway(true, 1, 0, false, false, 0, front, player)).toBe(true); // ceiling / upper floor
+    expect(pieceShouldCutaway(true, 0, 0, true, false, 0, front, player)).toBe(true); // roof this story
+    expect(pieceShouldCutaway(true, 0, 0, false, true, 2, front, player)).toBe(true); // south wall in front
+    expect(pieceShouldCutaway(true, 0, 0, false, true, 3, front, player)).toBe(true); // east wall in front
+    expect(pieceShouldCutaway(true, 0, 0, false, true, 2, back, player)).toBe(false); // south-facing wall behind the player
+    expect(pieceShouldCutaway(true, 0, 0, false, true, 0, back, player)).toBe(false); // north back wall
+    expect(pieceShouldCutaway(true, 0, 0, false, true, 1, back, player)).toBe(false); // west back wall
+    expect(pieceShouldCutaway(true, 0, 0, false, false, 2, front, player)).toBe(false); // furniture in front
+    expect(pieceShouldCutaway(false, 1, 0, true, true, 2, front, player)).toBe(false); // outside the region
   });
 });

@@ -2,7 +2,8 @@
  * Gameplay camera zoom (ADR-100). The default view shows ~30% more world area than the old fixed zoom 1.6
  * (1.6 / sqrt(1.3) ≈ 1.4) at 1920x1080; ADR-175 scales it with the viewport so phones see the same world, and the
  * player's own zoom multiplier (mouse wheel, two-finger pinch, +/- keys, gamepad hold RB + D-pad ↑/↓ — ADR-177) is clamped and persisted in "engine-settings".
- * ADR-206: default ~10% closer, max zoom-in closer, and a relative eased indoor zoom (x1.15 under a roof).
+ * ADR-206: default ~10% closer, max zoom-in closer, and a relative eased indoor zoom under a roof.
+ * ADR-304: indoor zoom is much closer (x1.55) so rooms and their contents are readable.
  */
 export const LEGACY_ZOOM = 1.6;
 export const AREA_GAIN = 1.3;
@@ -16,7 +17,7 @@ export const ZOOM_FLOOR = 0.3, ZOOM_CEIL = 4;
 /** ADR-206: max zoom-in raised (absolute 2.24 → 2.70 at 1080p); min lowered so the farthest view (≈1.05) is unchanged. */
 export const USER_ZOOM_MIN = 0.68, USER_ZOOM_MAX = 1.75;
 /** ADR-206 indoor zoom: extra relative zoom while under a roof (renderer cutaway), eased with time constant INDOOR_TAU_MS. */
-export const INDOOR_GAIN = 1.15, INDOOR_TAU_MS = 280, INDOOR_DEBOUNCE_MS = 180;
+export const INDOOR_GAIN = 1.55, INDOOR_TAU_MS = 280, INDOOR_DEBOUNCE_MS = 180;
 /** Building-mode zoom: even closer than indoor, so pieces can be placed precisely. Eased like the indoor factor. */
 export const BUILD_GAIN = 1.4;
 /** One frame of indoor-zoom easing: exponential approach (frame-rate independent, no pop). Returns the new factor. */

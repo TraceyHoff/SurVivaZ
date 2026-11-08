@@ -142,3 +142,35 @@ export function lCornerArmPivots(vx: number, vy: number, rot: number): { x: numb
 export function lCornerArmPiece(piece: string | undefined): string | undefined {
   const m = piece ? /^wall_corner_outer(@tier\d+)?$/.exec(piece) : null; return m ? `wall${m[1] ?? ""}` : undefined;
 }
+
+/** Walls, doors, and gates that enclose a room (not furniture). A `@tierN` suffix is ignored. */
+export function isEnclosurePieceKey(key: string): boolean {
+  const k = (key.split("@")[0] ?? key);
+  return k === "wall" || k.startsWith("wall_") || k === "door" || k.startsWith("door_") || k === "garden_gate";
+}
+
+/**
+ * ADR-304: a piece in the indoor cutaway region fades when it would hide the room.
+ * Everything above the player's story (ceilings, upper floors, roofs above) fades, as do roofs on
+ * the player's story. Camera-near enclosure (view-space south/east, rot 2 or 3) at the player's
+ * story that sits at or in front of the focus also fades, so walls and doors no longer hide
+ * furniture. Far/back walls stay solid so the room still reads as enclosed. Furniture never fades.
+ */
+export function pieceShouldCutaway(
+  inRegion: boolean,
+  level: number,
+  playerLevel: number,
+  roof: boolean,
+  enclosure: boolean,
+  viewRot: number,
+  pieceFront: number,
+  focusFront: number,
+): boolean {
+  if (!inRegion) return false;
+  if (level > playerLevel) return true;
+  if (level !== playerLevel) return false;
+  if (roof) return true;
+  if (!enclosure) return false;
+  const facing = (viewRot & 3) === 2 || (viewRot & 3) === 3;
+  return facing && pieceFront + 1e-3 >= focusFront - 0.5;
+}

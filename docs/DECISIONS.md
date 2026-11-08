@@ -3502,3 +3502,13 @@ Each building type also rolls extra furnishings from a separate seed stream so e
 **Not changed.** Placement support rules (upper decks still need a wall connection through their cluster), abandoned stamp layouts, piece ids, door attachments, or networked component masks. Multi-story houses stay; their floors sit on first-story walls that sit on foundations.
 
 **Validation.** `pieceGroundZ` plus `floorToTerrainZ` yields one story of height on flat ground and hill-plus-one-story on raised terrain. Interact at an abandoned shed door returns the door, not interior storage, and `ToggleDoorCmd` opens it. Interact next to a chest with no nearer door still opens storage. Two-story cottage floors sit at `levelHeight`. The door pick drives the existing hand-hint hold.
+
+## ADR-304: Much closer indoor camera and clearer room cutaway (SurVivaZ)
+
+**Context.** Indoor zoom (ADR-206) only pulled the camera 15% closer when the player stood under a roof. That was not enough to read furniture and loot inside houses. Cutaway also only faded roofs and stories above the player; walls and doors on the player's story stayed solid unless they overlapped the player sprite, so they hid beds, chests, and the rest of the room.
+
+**Decision.** Raise `INDOOR_GAIN` from 1.15 to 1.55 (same debounce and easing). The extra zoom is still a relative multiplier on the player's own zoom, so a phone shows the same closer indoor span as PC/console. When the player is inside, fade camera-near enclosure pieces (walls, doorways, windows, doors, and gates whose view-space rotation is south or east) that sit at or in front of the player, in addition to roofs on this story and everything above it (ceilings and upper floors). Back walls stay solid so the room still feels enclosed. Furniture never fades. Drop default `cutawayAlpha` from 0.18 to 0.10 so faded roofs and near walls are a hint rather than a veil.
+
+**Not changed.** Outdoor default zoom, user zoom range, build-mode zoom, cutaway region detection, piece ids, or networked component masks.
+
+**Validation.** Indoor easing still settles on `INDOOR_GAIN` and stacks with user zoom. Enclosure keys match walls/doors/gates and reject furniture. A south/east wall in front of the player fades; a back wall and furniture do not; roofs and upper stories still fade.

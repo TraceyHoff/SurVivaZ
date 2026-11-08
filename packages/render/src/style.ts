@@ -71,7 +71,7 @@ export const DEFAULT_STYLE: StyleConfig = {
   blobShadow: { alpha: 0.35, widthFactor: 0.55, aspect: 0.4 },
   emissiveStrength: 1,
   daylightLightScale: 0.2,
-  cutawayAlpha: 0.18,
+  cutawayAlpha: 0.10,
   occlusion: { enabled: true, mode: "fade", alpha: 0.35, radiusPx: 44, minHeightPx: 40, fadeSpeed: 8, silhouette: true, silhouetteColor: [0.85, 0.92, 1.0, 0.45] },
   bloom: { strength: 0.35, radiusPx: 6, nightBoost: 1 },
   gradingLut: { url: null, strength: 1, keyframes: null },

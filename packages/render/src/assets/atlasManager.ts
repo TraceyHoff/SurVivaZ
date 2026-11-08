@@ -36,7 +36,7 @@ import type { RectTable } from "./texturePacker.js";
 import { PageLRU, PRIO_NEAR, VramAccountant, rgbaBytes, type VramStats } from "../gl/vram.js";
 import { blockBytes, GL_FORMAT, ktx2Target, loadKtx2, loadKtx2Rgba, type Ktx2Target } from "./ktx2.js";
 import type { CompressedTextureSupport } from "../gl/capabilities.js";
-import { lCornerArmPiece, streamingFallbackKeys } from "../building/modular.js";
+import { isEnclosurePieceKey, lCornerArmPiece, streamingFallbackKeys } from "../building/modular.js";
 
 export const NO_HEAD_OFFSET: Readonly<{ x: number; y: number }> = Object.freeze({ x: 0, y: 0 });
 /** Held-item hand anchor of one character frame (Art hands.json). */
@@ -877,7 +877,7 @@ export class AtlasManager {
       sprites[id] = { atlasIdx: list.indexOf(at), anchorX: s.anchor.x, anchorY: s.anchor.y, anims: s.animList, dirAt, dirF, stateAnim, damage,
         ...(b ? { building: { fw: b.footprint.w, fh: b.footprint.h, layer: b.layer, frames: b.frames } } : {}) };
     }
-    this.usedMark = new Uint8Array(list.length); this.crispMark = []; this.atlases = list; this.atlasById = new Map(list.map((a) => [a.id, a])); this.sprites = sprites; this.registry = registry; this.headGroup.clear(); this.resolveSway(); this.resolveVariants(); this.resolveRoofs(); this.resolveHands();
+    this.usedMark = new Uint8Array(list.length); this.crispMark = []; this.atlases = list; this.atlasById = new Map(list.map((a) => [a.id, a])); this.sprites = sprites; this.registry = registry; this.headGroup.clear(); this.resolveSway(); this.resolveVariants(); this.resolveRoofs(); this.resolveEnclosures(); this.resolveHands();
     this.uploadTints();
     this.maskPixels.clear();
     // body pages: resident from the first frame (prio 0: no budget refusal; one slot each, so never evicted)
@@ -1769,6 +1769,7 @@ export class AtlasManager {
   }
   private variantById = new Map<number, number[]>();
   private roofById = new Set<number>();
+  private enclosureById = new Set<number>();
   private resolveVariants(): string[] {
     const issues: string[] = []; this.variantById.clear(); const reg = this.registry; if (!reg) return issues;
     for (const [base, keys] of Object.entries(this.variantKeys)) {
@@ -1786,6 +1787,12 @@ export class AtlasManager {
   private resolveRoofs(): void {
     this.roofById.clear(); if (!this.registry) return;
     for (const s of this.registry.allSprites()) if ((s.building?.piece ?? s.key).startsWith("roof")) this.roofById.add(s.id);
+  }
+  /** Walls, doors, and gates that enclose a room (ADR-304 indoor cutaway). */
+  isEnclosure(spriteId: number): boolean { return this.enclosureById.has(spriteId); }
+  private resolveEnclosures(): void {
+    this.enclosureById.clear(); if (!this.registry) return;
+    for (const s of this.registry.allSprites()) if (isEnclosurePieceKey(s.building?.piece ?? s.key)) this.enclosureById.add(s.id);
   }
 
   /**

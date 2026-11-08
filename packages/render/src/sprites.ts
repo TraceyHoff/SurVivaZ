@@ -32,7 +32,7 @@ import { LayerCache, activeExpression, readAppearanceSlot, type AppearanceBindin
 import { nearestCutoff } from "./gl/fallback.js";
 import { PRIO_NEAR } from "./gl/vram.js";
 import { DeckNeighbors, rotSideMask, deckTopPx, pieceTieBreak, exactTieBreak, vertexPostGlBias, DECK_EDGE_EPS, DECK_SEAM_BAND, DECK_SEAM_SHIFT } from "./building/deckFaces.js";
-import { crackAnim, lCornerArmPivots, PieceCoverIndex, ROT_EXACT_PIVOT, ROT_NO_OCCLUDE, ROT_DECK_LIFT, ROT_VERTEX_POST } from "./building/modular.js";
+import { crackAnim, lCornerArmPivots, PieceCoverIndex, pieceShouldCutaway, ROT_EXACT_PIVOT, ROT_NO_OCCLUDE, ROT_DECK_LIFT, ROT_VERTEX_POST } from "./building/modular.js";
 import { InteriorRoute, inInteriorRegion, interiorOrder, type InteriorRegion } from "./vehicles/interiorPass.js";
 
 export const INSTANCE_FLOATS = 40;
@@ -1098,6 +1098,7 @@ export class SpriteBatch {
       : this.cover.region(Math.floor(fwx), Math.floor(fwy), playerLevel);
     this.coverNext.clear(); this.tierFallbacks = 0; this.streamFallbacks = 0; this.crackOverlays = 0;
     this.cutawayActive = !!cut;
+    const focusFront = hasFocus ? (() => { const pr = viewRect(Math.floor(fwx), Math.floor(fwy), 1, 1, vq); return pr.x + pr.y + pr.w + pr.h; })() : 0;
     const scratch = this.staticScratch; for (const v of scratch.values()) v.length = 0;
     const checksums = this.pieceChecks; checksums.clear(); let lastCx = NaN, lastCy = NaN, lastVis = true; this.culledChunks = 0;
     // ADR-197: deck neighbour map (every non-ghost deck, not chunk-culled: a visible piece's neighbour may be off screen)
@@ -1151,7 +1152,8 @@ export class SpriteBatch {
         this.coverNext.add(ax, ay, fw, fh, level, layer === PIECE_LAYER_DECK, roof);
         // roofs are deck-layer (0) pieces placed on the level above the walls and drawn from that level's floor (= wall top)
         const z = floorToTerrainZ(level, tr.data.z[ts]!);
-        const cutaway = !!cut && (level > playerLevel || (roof && level === playerLevel)) && footprintHits(cut, ax, ay, fw, fh);
+        const inCut = !!cut && footprintHits(cut, ax, ay, fw, fh);
+        const cutaway = pieceShouldCutaway(inCut, level, playerLevel, roof, atlas.isEnclosure(vis), (rot + vq) & 3, vax + vay + vfw + vfh, focusFront);
         // occlusion (walls etc. not in cutaway): a hit, or a still-fading piece, is drawn dynamically this frame
         let occT = 0;
         if (!cutaway && !flatLayer(layer, roof) && !(rotRaw & ROT_NO_OCCLUDE) && this.occ.occOn) {
