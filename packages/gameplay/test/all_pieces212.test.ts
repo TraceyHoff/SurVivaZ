@@ -8,12 +8,13 @@ import { Transform, type Entity, type World } from "@engine/core";
 import {
   addItem, buildPreviewFor, defaultDefs, TerrainRes, Placement, placePiece, pieceCost, snapPlacement, spawnPlayer, tryPlace, validatePlacement, type PieceDef,
 } from "../src/index.js";
-import { makeWorld, steps, spawnLearned } from "./helpers.js";
+import { makeWorld, steps, spawnLearned, ensureClaim } from "./helpers.js";
 
 const d = defaultDefs();
 const tiersOf = (def: PieceDef): number[] => (def.tiered ? d.tiers.map((_, i) => i) : [0]).filter((t) => t >= (def.minTier ?? 0));
 function base(): { w: World; me: Entity } {
   const w = makeWorld(); const me = spawnLearned(w, { x: -3, y: -3, maxWeight: 0, clientId: 1 });
+  ensureClaim(w, me, 2, 2);
   const put = (key: string, x: number, y: number, level = 0, rot = 0): void => {
     const sn = snapPlacement(w, { piece: d.pieceId(key), x, y, level, rot, tier: 1, variant: 0 }); if (typeof sn === "number") throw new Error(`setup ${key} snap ${sn}`);
     const f = validatePlacement(w, me, sn, { ignoreCost: true, ignoreRange: true }); if (f) throw new Error(`setup ${key} @${x},${y},${level}: ${f}`);

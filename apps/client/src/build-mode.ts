@@ -142,9 +142,15 @@ export class BuildMode {
   /** Contextual Repair / Upgrade / Demolish on the targeted piece. Demolish needs a second press unless `confirmed`. */
   act(id: BuildActionId, confirmed = false): boolean {
     this.refresh(); const t = this.target; if (!t) return false;
-    if (id === "repair") { if (!t.canRepair) { this.toast = "Nothing to repair"; return false; } if (!t.canAfford.repair) { this.toast = "Can't afford repair"; return false; } this.toast = "Repairing…"; return this.o.send(repairIntent(t.entity)); }
-    if (id === "upgrade") { if (!t.canUpgrade || t.nextTier === undefined) { this.toast = "Already top tier"; return false; } if (!t.canAfford.upgrade) { this.toast = `Need materials for ${label(t.nextTierKey!)}`; return false; } this.toast = `Upgrading to ${label(t.nextTierKey!)}…`; return this.o.send(upgradeIntent(t.entity, t.nextTier)); }
-    if (id === "reclaim") { if (!t.canReclaim) { this.toast = "Nothing to reclaim"; return false; } this.toast = "Reclaiming…"; return this.o.send(reclaimIntent(t.entity)); }
+    if (id === "repair") {
+      if (t.hp >= t.maxHp) { this.toast = "Nothing to repair"; return false; }
+      if (!t.onClaim) { this.toast = "Place a Claim Flag first"; return false; }
+      if (!t.repairUnlocked) { this.toast = "Locked: learn it in the skill tree"; return false; }
+      if (!t.canAfford.repair) { this.toast = "Can't afford repair"; return false; }
+      this.toast = "Repairing…"; return this.o.send(repairIntent(t.entity));
+    }
+    if (id === "upgrade") { if (!t.canUpgrade || t.nextTier === undefined) { this.toast = !t.onClaim ? "Place a Claim Flag first" : "Already top tier"; return false; } if (!t.canAfford.upgrade) { this.toast = `Need materials for ${label(t.nextTierKey!)}`; return false; } this.toast = `Upgrading to ${label(t.nextTierKey!)}…`; return this.o.send(upgradeIntent(t.entity, t.nextTier)); }
+    if (id === "reclaim") { if (!t.canReclaim) { this.toast = t.onClaim ? "Nothing to reclaim" : "Place a Claim Flag first"; return false; } this.toast = "Reclaiming…"; return this.o.send(reclaimIntent(t.entity)); }
     const name = label(t.pieceKey);
     const verb = t.pickup ? "Pick up" : "Demolish"; // ADR-250: pickup pieces (basic_storage_box) refund in full
     if (!confirmed && !this.demolishArmed) { this.demolishArmedAt = this.now(); this.toast = `${verb} ${name}? Press again to confirm`; return false; }

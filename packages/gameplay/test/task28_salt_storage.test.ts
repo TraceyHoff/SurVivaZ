@@ -9,13 +9,14 @@ import ids from "../data/ids.lock.json";
 import * as G from "../src/index.js";
 import { SALT_CONSUME_TICKS, saltCount } from "../src/systems/spoilage.js";
 import { resolveSprite } from "../src/sprite-fallback.js";
-import { makeWorld, spawnLearned, steps } from "./helpers.js";
+import { makeWorld, spawnLearned, steps, ensureClaim } from "./helpers.js";
 
 const d = G.defaultDefs();
 const item = (k: string) => d.itemId(k);
 const piece = (k: string) => d.pieces.get(d.pieceId(k))!;
 
 const placeSalt = (w: World, p: Entity, key: string, x: number, y: number): Entity => {
+  ensureClaim(w, p, x - 3, y + 3);
   const def = piece(key);
   for (const c of G.pieceCost(d, def, def.fixedTier)) G.addItem(w, p, c.item, c.count);
   const r = G.tryPlace(w, p, { piece: def.id, x, y, level: 0, rot: 0, tier: def.fixedTier, variant: 0 });

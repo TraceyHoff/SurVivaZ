@@ -6,10 +6,12 @@ import * as G from "@engine/gameplay";
 import { InputSystem, KeyboardMouseDevice, GamepadDevice, DEFAULT_ACTIONS, DEFAULT_CONTEXTS, DEFAULT_PROFILES } from "@engine/input";
 import { BuildMode, type BuildDevice } from "../src/build-mode.js";
 import { renderBuildHud, onTouchControl, mountBuildHud, buildFailText } from "../src/build-hud.js";
+import { plantClaim } from "../../../packages/gameplay/test/helpers.js";
 
 function setup(device: BuildDevice, aimAt = { x: 2, y: 0, mode: 1 }) {
   const w = new World({ seed: 1, maxEntities: 1 << 12 }); G.installGameplay(w, {}); installPermissions(w);
   const me = G.spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 }); const d = G.gameplayDefs(w);
+  plantClaim(w, me, -2, 2);
   for (const k of ["sticks", "planks", "rope"]) G.addItem(w, me, d.itemId(k), 50);
   const clock = { t: 0, now: () => clock.t };
   const sys = new InputSystem(clock as never, { actions: DEFAULT_ACTIONS, contexts: DEFAULT_CONTEXTS, profiles: DEFAULT_PROFILES });

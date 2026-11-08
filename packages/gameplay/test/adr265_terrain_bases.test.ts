@@ -9,7 +9,7 @@ import { fillGoalSensors } from "../src/ai/autonomy.js";
 import { baseBehaviors, fillPlanSensors, goTo, lowFire } from "../src/ai/base_behaviors.js";
 import { walkerWaypoint } from "../src/systems/creature_nav.js";
 import { type AgentWorldView } from "../src/agents.js";
-import { makeWorld } from "./helpers.js";
+import { makeWorld, ensureClaim } from "./helpers.js";
 
 function setup() {
   const w = makeWorld(), map = new TileMap();
@@ -19,6 +19,7 @@ function setup() {
   G.grantSkillUnlocks(w,p);
   const d = G.gameplayDefs(w); G.addItem(w, p, d.itemId("stone_shovel"), 1);
   for (const k of ["wood", "sticks", "stone", "fiber"]) G.addItem(w, p, d.itemId(k), 50);
+  ensureClaim(w, p, 6, -4);
   return { w, map, p, d };
 }
 const req = (d: G.GameDefs, x = .5, y = 2) => ({ piece: d.pieceId("ladder"), x, y, level: 0, rot: 0, tier: 0, variant: 0 });

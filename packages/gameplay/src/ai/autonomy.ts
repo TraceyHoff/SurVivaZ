@@ -16,7 +16,7 @@ import { countItem, readSlots } from "../inventory.js";
 import { bareHandsCan, heldTool } from "../systems/gathering.js";
 import { nearWater } from "../systems/vitals.js";
 import { ToolKind, type GameDefs, type ItemDef, type PieceDef, type RecipeDef, type ResourceDef } from "../defs.js";
-import { pieceCost } from "../building/place.js";
+import { hasOwnClaim, pieceCost, pieceUnlocked } from "../building/place.js";
 import { StructureIndexRes } from "../building/structure.js";
 import { bumpStat } from "./planner.js";
 import { maxHpOf } from "../building/integrity.js";
@@ -205,17 +205,21 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
     if (bi >= 0) view.equipSlot = bi;
   }
   // repair: own-base pieces under 60% hp near home (gameplay.repair; the server charges the cost)
-  if (hs.repair !== undefined && world.isAlive(hs.repair)) { const p = world.get(hs.repair, Transform); if (p) view.repairTarget = { id: hs.repair, x: p.x, y: p.y }; }
+  const canFix = (e: Entity): boolean => {
+    const bp = world.get(e, BuildPiece); const tf = world.get(e, Transform); if (!bp || !tf) return false;
+    const def = defs.pieces.get(bp.type); return !!def && hasOwnClaim(world, self, tf.x, tf.y) && pieceUnlocked(world, self, def, bp.tier);
+  };
+  if (hs.repair !== undefined && world.isAlive(hs.repair) && canFix(hs.repair)) { const p = world.get(hs.repair, Transform); if (p) view.repairTarget = { id: hs.repair, x: p.x, y: p.y }; }
   const selfT = world.get(self, Transform);
   if (selfT) {
     const work = nearbyAbandonedWork(world, selfT.x, selfT.y);
     if (work) {
       // Unclaimed ruins: reclaim after the bot has a tool or a base so day-one gather/craft still runs.
-      if (work.repair !== undefined && !view.repairTarget && !work.reclaim && world.isAlive(work.repair)) {
+      if (work.repair !== undefined && !view.repairTarget && !work.reclaim && world.isAlive(work.repair) && canFix(work.repair)) {
         const p = world.get(work.repair, Transform);
         if (p) view.repairTarget = { id: work.repair, x: p.x, y: p.y };
       }
-      if (work.reclaim && GOAL_CRAFTS.some((k) => { const it = item(k); return !!it && have(it.id) > 0; })) {
+      if (work.reclaim && hasOwnClaim(world, self, work.x, work.y) && GOAL_CRAFTS.some((k) => { const it = item(k); return !!it && have(it.id) > 0; })) {
         view.reclaimTarget = { id: work.marker, x: work.x, y: work.y };
       }
     }

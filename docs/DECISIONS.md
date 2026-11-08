@@ -3562,3 +3562,20 @@ Each building type also rolls extra furnishings from a separate seed stream so e
 **Not changed.** Indoor zoom gain, debounce, easing, or how roofs and near walls fade on the occupied story.
 
 **Validation.** Standing on a floor tile whose ceiling is missing, with roofs on the neighboring tiles, yields the full building region. An outdoor 2×2 deck with no roof returns no region. Existing fully-roofed and outside cases are unchanged.
+
+## ADR-310: Claim Flag required before building, and skill-gated repairs (SurVivaZ)
+
+**Context.** Wilderness building used `hasPrivilege` as "no foreign zone," so players and AI humans could raise bases, repair damaged pieces, and reclaim abandoned sites without ever planting a Claim Flag. Repair also skipped the skill-tree unlocks that already gated placement and upgrade (ADR-221). Solo players with no clan `Tribe` could not plant `claim_totem` at all (`privilegeRadius > 0 && tribe === 0` returned `NoPrivilege`).
+
+**Decision.** Players and AI humans must craft and place a Claim Flag (`claim_totem`) and then act inside its radius (12 tiles) before placing other base-building structures or claiming and repairing existing ones.
+
+- `hasOwnClaim` is true when a `PrivilegeZone` covering the point belongs to the builder (matching `Tribe`, or `PieceOwner.player` matching their `PlayerId` so a later clan join does not lock them out of their own flag). A hired worker also matches their employer's `PieceOwner.player`, so they can build and repair on the owner's claim.
+- `validatePlacement` still allows the flag itself in wilderness. Market stalls keep their own land rules (`def.stall`). Every other piece returns `BuildFail.NeedClaim` (26, "Place a Claim Flag first") after structural checks and before `CannotAfford`. `opts.ignoreClaim` lets the AI preview a hut footprint when picking a base site so it is not deadlocked before planting the flag.
+- A tribe-less builder receives a personal tribe (`0x8000 | (playerId or entity index)`) when the flag is placed, not during ghost validation. `hasPrivilege` uses `zoneOwnedBy` so personal claims stay valid after a clan join.
+- Repair and Upgrade require `hasOwnClaim`; Repair also requires `pieceUnlocked` (same tokens as placing that piece and tier). Reclaim (command and `reclaimAbandonedSite`) requires `hasOwnClaim` at the target or site center.
+- AI `obtainPiece` plants `claim_totem` first when the base is unclaimed. Autonomy only aims repair or reclaim at pieces the server would accept. Hire relocation rebuilds an existing homestead with `ignoreClaim` so the move is not blocked while the worker's flag is being demolished and rebuilt. Vehicle repair uses the same unlock style (`item:<kit>` and `piece:<vehicle>`); ungated tokens still pass. There is no separate inventory-item repair command.
+
+**Not changed.** Farming, digging, filling, and roads still use empty-zone `hasPrivilege`. Skill trees, piece costs, abandoned-site layouts, and stall/market claims are unchanged. No new facing art.
+
+**Validation.** A learned player cannot place a foundation until a covering Claim Flag is planted; a flag outside radius 12 does not count; a foreign flag returns `NoPrivilege`. Repair without a covering flag returns `NeedClaim`; repair inside a claim without the piece unlock returns `SkillLocked`; both present repairs the piece. Reclaim without a covering flag returns `NeedClaim`. An AI `obtainPiece("foundation")` with no flag emits a `claim_totem` build step. Shaft-hatch `NoShaft` still fires before `NeedClaim`.
+

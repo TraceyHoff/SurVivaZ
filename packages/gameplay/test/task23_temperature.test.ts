@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { installPermissions, Membership, PlayerId, seasonFromDays, setSeason, setTimeOfDay, Weather, type Entity, type World } from "@engine/core";
 import * as G from "../src/index.js";
-import { makeWorld, spawnLearned, steps, DT } from "./helpers.js";
+import { makeWorld, spawnLearned, steps, DT, ensureClaim } from "./helpers.js";
 import { ambientTemperature, seasonalBaseTemp, seasonalTemperature, shelteredAirTemp, snowAllowed } from "../src/systems/environment.js";
 
 const d = G.defaultDefs();
@@ -257,6 +257,7 @@ describe("Task 23 farm-worker tilling", () => {
     give(w, bot, "wheat_seeds", 3);
     // place a basic storage box near the anchor with a hoe inside it
     const boxDef = d.pieces.get(d.pieceId("basic_storage_box"))!;
+    ensureClaim(w, p, 0, 4);
     for (const c of G.pieceCost(d, boxDef, boxDef.fixedTier)) G.addItem(w, p, c.item, c.count);
     const placed = G.tryPlace(w, p, { piece: boxDef.id, x: 3.5, y: 0.5, level: 0, rot: 0, tier: boxDef.fixedTier, variant: 0 });
     expect(placed.ok).toBe(true);

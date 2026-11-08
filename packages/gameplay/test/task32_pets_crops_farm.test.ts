@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { PlayerId, Season, setSeason, Transform, type Entity, type World } from "@engine/core";
 import * as G from "../src/index.js";
-import { makeWorld, spawnLearned, steps } from "./helpers.js";
+import { makeWorld, spawnLearned, steps, ensureClaim } from "./helpers.js";
 import { resolveIcon, resolveSprite } from "../src/sprite-fallback.js";
 import ids from "../data/ids.lock.json";
 
@@ -26,7 +26,7 @@ const pid = (k: string) => d.pieceId(k);
 const BASE = { x: 10, y: 10 };
 const STAND = { x: BASE.x + G.BUILD_STAND.x, y: BASE.y + G.BUILD_STAND.y };
 function fresh(): { w: World; p: Entity } {
-  const w = makeWorld(); const p = spawnLearned(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 1 }); steps(w, 1); return { w, p };
+  const w = makeWorld(); const p = spawnLearned(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 1 }); steps(w, 1); ensureClaim(w, p, BASE.x + 4, BASE.y + 4); return { w, p };
 }
 const give = (w: World, e: Entity, key: string, tier = 0): void => { const def = d.pieces.get(pid(key))!; for (const c of G.pieceCost(d, def, def.tiered ? tier : def.fixedTier)) G.addItem(w, e, c.item, c.count); };
 const put = (w: World, e: Entity, key: string, x: number, y: number, level = 0, rot = 0, tier?: number, stand?: { x: number; y: number }) => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Transform } from "@engine/core";
 import { TileMap } from "@engine/world";
 import * as G from "../src/index.js";
-import { makeWorld, steps } from "./helpers.js";
+import { makeWorld, plantClaim, steps } from "./helpers.js";
 
 function setup(hole = -8, extra?: (w: ReturnType<typeof makeWorld>) => void) {
   const w = makeWorld({ role: "server" }); const map = new TileMap();
@@ -11,6 +11,7 @@ function setup(hole = -8, extra?: (w: ReturnType<typeof makeWorld>) => void) {
   if (hole) G.setTerrainDig(w, 1, 0, hole);
   extra?.(w);
   const p = G.spawnPlayer(w, { x: .9, y: .5, maxWeight: 0 });
+  plantClaim(w, p, -2, 2);
   return { w, p };
 }
 function placeHatch(w: ReturnType<typeof makeWorld>, p: number, tier = 1, x = 1.5, y = .5) {

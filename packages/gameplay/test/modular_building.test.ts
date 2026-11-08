@@ -6,7 +6,7 @@ import {
   modularArtKeys, pieceCost, pieceVariantKey, pieceVariantKeyChain, PlayerIntent, placePiece, raidMul, RaidDamage, RaidRuleRes, rotationSteps,
   snapPlacement, spawnPlayer, structures, TRI_INRADIUS, triEdges, validatePlacement, variantKeyFor,
 } from "../src/index.js";
-import { makeWorld, steps, spawnLearned } from "./helpers.js";
+import { makeWorld, plantClaim, steps, spawnLearned } from "./helpers.js";
 
 const d = defaultDefs();
 const id = (k: string) => d.pieceId(k);
@@ -80,7 +80,7 @@ describe("modular building set (ADR-104)", () => {
     const s = snap(w, "wall_corner_outer", 6.1, 5.9, { rot: 2 }); // ADR-211: the L wraps the deck (rot 2 = -x/-y)
     if (typeof s === "number") throw new Error(String(s));
     expect([s.pos.x, s.pos.y]).toEqual([6, 6]); const c = spawnLearned(w, { x: 7.5, y: 7.5 }); // ADR-211: off the L arms
-    for (const k of d.tiers[1]!.cost) addItem(w, c, k.item, 100); expect(validatePlacement(w, c, s)).toBe(0);
+    for (const k of d.tiers[1]!.cost) addItem(w, c, k.item, 100); plantClaim(w, c, 8, 8); expect(validatePlacement(w, c, s)).toBe(0);
   });
   it("new pieces reject twig and add extra recipe items per tier", () => {
     const w = makeWorld(); const b = spawnLearned(w, { x: 0, y: 0 });
@@ -94,7 +94,7 @@ describe("modular building set (ADR-104)", () => {
     expect(items.size).toBeGreaterThanOrEqual(10);
   });
   it("upgrade wood -> stone -> metal -> reinforced scales hp; repair restores it", () => {
-    const w = makeWorld(); const p = spawnLearned(w, { x: 5, y: 5 });
+    const w = makeWorld(); const p = spawnLearned(w, { x: 5, y: 5 }); plantClaim(w, p, 5, 5);
     place(w, p, "foundation", 5.5, 5.5); const wall = place(w, p, "wall_fortified", 6, 5.5);
     const fort = d.pieces.get(id("wall_fortified"))!;
     const hps = [maxHpOf(w, wall)];
@@ -136,7 +136,7 @@ describe("modular building set (ADR-104)", () => {
     expect(encodeStructures(w2, 0, 0)).toEqual(blob);
   });
   it("touch snap assist moves an invalid aim to a nearby valid snap", () => {
-    const w = makeWorld(); const p = spawnLearned(w, { x: 5.5, y: 5.5 });
+    const w = makeWorld(); const p = spawnLearned(w, { x: 5.5, y: 5.5 }); plantClaim(w, p, 5, 8);
     for (const x of [6.5, 7.5, 8.5]) place(w, p, "foundation", x, 5.5); for (const k of d.tiers[1]!.cost) addItem(w, p, k.item, 100);
     const sel = { piece: id("wall"), tier: 1, variant: 0, paint: 0 };
     const off = buildPreviewFor(w, p, sel, 0, { mode: 1, x: 7.5, y: 4.4 }, 0, false)!;

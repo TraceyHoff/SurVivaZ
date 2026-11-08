@@ -170,7 +170,7 @@ Read it with `docs/ARCHITECTURE.md` (core batches 2 and 3), `docs/DECISIONS.md` 
   - `CloseContainer` reverses that. Viewers are also removed automatically when they leave `containerReach + slack`, die, or the container is destroyed.
   - `Deposit` and `Withdraw {target, item, count}` require an open view.
   - Net uses `containerViewersScope` (`(world, e, clientId) → bool`) as the `viewers` scope for `Container`.
-- **Privilege.** `claim_totem` adds `PrivilegeZone {radius 12, tribe}`. Inside a zone, only that tribe may build, upgrade, demolish, lock, or open containers. Players and pieces carry `Tribe`.
+- **Privilege.** `claim_totem` (the Claim Flag) adds `PrivilegeZone {radius 12, tribe}`. Solo builders get a personal tribe when they plant one. Wilderness with no zone still allows farming and terrain work (`hasPrivilege`), but placing, repairing, upgrading, or reclaiming base structures requires one of the builder's own flags covering the tile (`hasOwnClaim`, `BuildFail.NeedClaim`). The flag itself and market stalls are the exceptions. Repair also needs the piece unlocked in the skill trees, the same tokens used to place it. Inside a foreign zone only the owning tribe (or the player who owns the flag) may build, upgrade, demolish, lock, or open containers. Players and pieces carry `Tribe`.
 
 ### 3.6 Persistence
 - `encodeStructures(world, chunkKey)` / `decodeStructures(world, bytes)` (`src/building/persist.ts`). This is gameplay's versioned, deterministic codec.

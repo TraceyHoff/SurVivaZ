@@ -8,7 +8,7 @@ import { type Entity, type World } from "@engine/core";
 import xp from "../data/xp.json";
 import * as G from "../src/index.js";
 import { BuildFail, BuildPiece, CraftFail, PlayerIntent, defaultDefs, pieceCost, addItem, snapPlacement, spawnPlayer, tryPlace, type PieceDef } from "../src/index.js";
-import { makeWorld, steps, spawnLearned } from "./helpers.js";
+import { makeWorld, plantClaim, steps, spawnLearned } from "./helpers.js";
 import { walk } from "./progression212.test.js";
 
 const d = defaultDefs();
@@ -17,7 +17,7 @@ const tierKey = (t: number): string => d.tiers.find((x) => x.id === t)!.key;
 const pieceKey = (p: PieceDef): string => (p as { key?: string }).key!;
 function give(w: World, e: Entity, key: string, tier: number): void { for (const c of pieceCost(d, d.pieces.get(d.pieceId(key))!, tier)) addItem(w, e, c.item, c.count); }
 const place = (w: World, e: Entity, key: string, x: number, tier: number, y = 0) => tryPlace(w, e, { piece: d.pieceId(key), x, y, level: 0, rot: 0, tier, variant: 0 });
-function fresh(): { w: World; p: Entity } { const w = makeWorld(); G.installCraftQueue(w); const p = spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 }); steps(w, 1); return { w, p }; }
+function fresh(): { w: World; p: Entity } { const w = makeWorld(); G.installCraftQueue(w); const p = spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 }); steps(w, 1); plantClaim(w, p, 4, 4); return { w, p }; }
 const learn = (w: World, p: Entity, key: string): void => { const n = node(key); G.grantTreePoints(w, p, G.TREE_KEYS[G.SKILL_NODE_TREE[n]!]!, G.skillNode(n)!.cost); expect(G.unlockSkill(w, p, n)).toBeUndefined(); };
 
 describe("ADR-221 unlock data", () => {

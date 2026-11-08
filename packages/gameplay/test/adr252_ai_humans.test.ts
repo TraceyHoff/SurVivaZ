@@ -6,14 +6,14 @@
 import { describe, expect, it } from "vitest";
 import { Transform, setSeason, setTimeOfDay, type AgentOutput, type Entity, type World } from "@engine/core";
 import * as G from "../src/index.js";
-import { makeWorld, spawnLearned, steps } from "./helpers.js";
+import { makeWorld, plantClaim, spawnLearned, steps } from "./helpers.js";
 
 const d = G.defaultDefs();
 const pid = (k: string) => d.pieceId(k);
 const iid = (k: string) => d.itemId(k);
 const BASE = { x: 10, y: 10 };
 function fresh(learned = true): { w: World; p: Entity } {
-  const w = makeWorld(); const p = learned ? spawnLearned(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 1 }) : G.spawnPlayer(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 1 }); steps(w, 1); return { w, p };
+  const w = makeWorld(); const p = learned ? spawnLearned(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 1 }) : G.spawnPlayer(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 1 }); steps(w, 1); plantClaim(w, p, BASE.x - 2, BASE.y - 2); return { w, p };
 }
 const give = (w: World, e: Entity, key: string, tier = 0): void => { const def = d.pieces.get(pid(key))!; for (const c of G.pieceCost(d, def, def.tiered ? tier : def.fixedTier)) G.addItem(w, e, c.item, c.count); };
 const put = (w: World, e: Entity, key: string, x: number, y: number, level = 0, rot = 0, tier?: number, stand?: { x: number; y: number }) => {
@@ -175,7 +175,7 @@ describe("ADR-252 ADR-239 winter, ADR-217 held light, ADR-247 seeds", () => {
 
 describe("ADR-252 base site claims (two bots picking in the same window)", () => {
   it("a second agent never settles within SITE_SPACING of a site another agent claimed (no pieces down yet)", () => {
-    const { w, p } = fresh(); const q = spawnLearned(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 2 }); steps(w, 1);
+    const w = makeWorld(); const p = spawnLearned(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 1 }); const q = spawnLearned(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 2 }); steps(w, 1);
     const near = { x: BASE.x + 1, y: BASE.y + 3.3 };
     const a = G.pickBaseSite(w, p, near, 0.25)!; expect(a).toBeDefined();
     expect(G.pickBaseSite(w, q, near, 0.25)).toEqual(a); // unclaimed: the same empty spot looks fine to both

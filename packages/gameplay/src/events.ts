@@ -32,6 +32,8 @@ export const enum BuildFail {
   NoTerrainFace = 24,
   /** ADR-299: a shaft hatch needs a dug hole below the surrounding rim. */
   NoShaft = 25,
+  /** ADR-310: base pieces, repairs, and reclaim need a placed Claim Flag covering the spot. */
+  NeedClaim = 26,
 }
 export const enum DestroyCause { Damage = 1, Collapse = 2, Demolish = 3 }
 

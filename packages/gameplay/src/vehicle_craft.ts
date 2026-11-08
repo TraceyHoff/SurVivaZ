@@ -21,7 +21,8 @@ import { gameplayDefs } from "./config.js";
 import { lockAndIssueKey } from "./vehicle_keys.js";
 import { StationKind } from "./defs.js";
 import { emit, ev } from "./events.js";
-import { skillMul } from "./skills/tree.js";
+import { hasSkillUnlock, skillMul } from "./skills/tree.js";
+import { itemRepairUnlocked } from "./building/place.js";
 import { readSlots, writeSlots } from "./inventory.js";
 import { addStationProvider, stationInRange } from "./systems/crafting.js";
 import { addVehicleStationHook, isParked, nearbyVehicleStationKinds, spawnVehicle, vehicleDefId, vehicleDefOf, VEHICLE_DEFS, type VehicleClass } from "./vehicles.js";
@@ -157,6 +158,7 @@ export function validateRepair(world: World, actor: Entity, v: Entity, slot: num
   const s = slotOf(world, actor, slot); if (!s) return "empty_slot";
   const r = VEHICLE_CRAFT.repair.items[keyOf(world, s.item) ?? ""]; if (!r) return "not_repair_item";
   const d = vehicleDefOf(world, v)!; if (r.classes.length && !r.classes.includes(d.class as VehicleClass)) return "wrong_part";
+  if (!itemRepairUnlocked(world, actor, s.item) || !hasSkillUnlock(world, actor, `piece:${d.id}`)) return "skill_locked";
   const garage = atGarage(world, actor); const amt = garage ? r.garage : r.field; if (amt <= 0) return "needs_garage";
   const hp = world.getField(v, Vehicle, "health")!;
   if (hp <= 0 && !(r.wreckOk && garage)) return "wrecked";

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { Blackboard, Rng, idleOutput, installPermissions, Membership, PlayerId, Transform, scoreBehavior, setSeason, setTimeOfDay, type AgentContext, type Entity, type World } from "@engine/core";
 import * as G from "../src/index.js";
 import { SALT_CONSUME_TICKS, saltCount } from "../src/systems/spoilage.js";
-import { collect, makeWorld, spawnLearned, steps } from "./helpers.js";
+import { collect, makeWorld, spawnLearned, steps, ensureClaim } from "./helpers.js";
 
 const d = G.defaultDefs();
 const item = (k: string) => d.itemId(k);
@@ -20,6 +20,7 @@ function place(w: World, key: string, x: number, y: number, level = 0, rot = 0, 
 }
 /** Place with a real player paying (tryPlace path, server validation). */
 function placeAs(w: World, p: Entity, key: string, x: number, y: number, level = 0, rot = 0, tier?: number): Entity {
+  ensureClaim(w, p, x - 4, y + 4);
   const def = piece(key); const t = tier ?? (def.tiered ? 0 : def.fixedTier);
   for (const c of G.pieceCost(d, def, t)) G.addItem(w, p, c.item, c.count);
   const r = G.tryPlace(w, p, { piece: def.id, x, y, level, rot, tier: t, variant: 0 });

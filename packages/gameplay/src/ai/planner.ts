@@ -17,7 +17,7 @@ import { AttachKind, BuildPiece, Container, DoorState, Fuel, ResourceNode, Worn 
 import { resolveAttachment } from "../building/links.js";
 import { countItem, readSlots } from "../inventory.js";
 import { maxHpOf } from "../building/integrity.js";
-import { pieceCost, pieceUnlocked, snapPlacement, validatePlacement } from "../building/place.js";
+import { hasOwnClaim, pieceCost, pieceUnlocked, snapPlacement, validatePlacement } from "../building/place.js";
 import { isBaseStoragePiece, STARTER_STORAGE_PIECE } from "./storage_api.js";
 import { bedSpots } from "../stance.js";
 import { StationKind, ToolKind, type GameDefs, type ItemDef, type PieceDef, type RecipeDef, type ResourceDef } from "../defs.js";
@@ -83,6 +83,7 @@ export const BASE_SLOTS: readonly BaseSlot[] = [
 ];
 /** Station spots outside the walls (2 candidates each; a slot failing 4 times moves to the next). */
 export const STATION_SLOTS: Readonly<Record<string, readonly { x: number; y: number }[]>> = {
+  claim_totem: [{ x: -1.5, y: 0.5 }, { x: 2.5, y: 3.8 }, { x: 1, y: -1.7 }], // ADR-310: flag first, covering the hut (radius 12)
   campfire: [{ x: 2.6, y: 2.9 }, { x: 1.6, y: 3.4 }], workbench: [{ x: 3.5, y: 0.5 }, { x: 0.5, y: -1.5 }], storage_box: [{ x: 3.5, y: 1.6 }, { x: 1.5, y: -1.5 }], basic_storage_box: [{ x: 3.5, y: 1.6 }, { x: 1.5, y: -1.5 }], // ADR-250 starter box: same spots (one base box)
   furnace: [{ x: -1.5, y: 0.5 }, { x: 3.5, y: -1.2 }], anvil: [{ x: -1.5, y: 1.6 }, { x: -1.2, y: -1.2 }],
   // Task 28: furnishing — table inside the hut (SE tile), light by the door, shelf + trough + salt barrel in the yard
@@ -216,7 +217,7 @@ export function pickBaseSite(world: World, self: Entity, near: { x: number; y: n
     for (const e of sp.queryRadius(bx + 1, by + 1, 9)) if (world.has(e, BuildPiece)) { ok = false; break; }
     if (!ok) continue;
     for (const [x, y] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { const sn = snapPlacement(world, { piece: f.id, x: bx + x! + 0.5, y: by + y! + 0.5, level: 0, rot: 0, tier: 0, variant: 0 });
-      if (typeof sn === "number" || validatePlacement(world, self, sn, { ignoreCost: true, ignoreRange: true }) !== 0) { ok = false; break; } }
+      if (typeof sn === "number" || validatePlacement(world, self, sn, { ignoreCost: true, ignoreRange: true, ignoreClaim: true }) !== 0) { ok = false; break; } }
     if (ok) return { x: bx, y: by };
   }
   return undefined;
@@ -329,6 +330,7 @@ class Resolver {
   }
   obtainPiece(key: string, slot?: BaseSlot): boolean {
     const def = this.ix.piece.get(key); const b = this.p.base; if (!def || !b) { this.stuck = true; return false; }
+    if (key !== "claim_totem" && !hasOwnClaim(this.p.world, this.p.self, b.x + 1, b.y + 1)) return this.obtainPiece("claim_totem");
     if (!this.unlocked(def, slot?.tier ?? 0)) return false;
     let ok = true; for (const c of pieceCost(this.p.defs, def, slot?.tier ?? 0)) ok = this.obtain(c.item, c.count) && ok;
     if (def.station !== StationKind.None) for (const sk of [StationKind.None]) void sk;

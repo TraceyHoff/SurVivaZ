@@ -8,13 +8,13 @@ import { describe, expect, it } from "vitest";
 import { CommandRegistry, Transform, type Entity, type InputFrame, type World } from "@engine/core";
 import ids from "../data/ids.lock.json";
 import * as G from "../src/index.js";
-import { makeWorld, steps } from "./helpers.js";
+import { makeWorld, steps, ensureClaim } from "./helpers.js";
 
 const d = G.defaultDefs();
 const KEY = "basic_storage_box";
 const def = d.pieces.get(d.pieceId(KEY))!;
 const item = (k: string) => d.itemId(k);
-function fresh(): { w: World; p: Entity } { const w = makeWorld(); const p = G.spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 }); steps(w, 1); return { w, p }; }
+function fresh(): { w: World; p: Entity } { const w = makeWorld(); const p = G.spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 }); steps(w, 1); ensureClaim(w, p, -2, 2); return { w, p }; }
 const give = (w: World, e: Entity, key = KEY, n = 1): void => { for (const c of G.pieceCost(d, d.pieces.get(d.pieceId(key))!, 1)) G.addItem(w, e, c.item, c.count * n); };
 const place = (w: World, e: Entity, x = 1.5, y = 0.5, key = KEY) => G.tryPlace(w, e, { piece: d.pieceId(key), x, y, level: 0, rot: 0, tier: def.fixedTier, variant: 0 });
 const storageOf = (w: World, piece: Entity): Entity => G.resolveAttachment(w, piece, G.AttachKind.Storage)!;

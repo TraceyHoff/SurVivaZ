@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import { installPermissions, Transform, World } from "@engine/core";
 import * as G from "@engine/gameplay";
 import { BuildMode } from "../src/build-mode.js";
+import { plantClaim } from "../../../packages/gameplay/test/helpers.js";
 import { InputSystem, KeyboardMouseDevice, AimResolver, DEFAULT_ACTIONS, DEFAULT_CONTEXTS, DEFAULT_PROFILES } from "@engine/input";
 
 describe("ADR-268 Build confirms the visible snapped hologram",()=>{
   it.each(["keyboardMouse","gamepad","touch"] as const)("%s: stationary player, move ghost, confirm at THAT cell; report occupied cell rather than silently dropping",device=>{
     const w=new World({seed:1,maxEntities:4096});G.installGameplay(w,{});installPermissions(w);
     const p=G.spawnPlayer(w,{x:0,y:0,clientId:1,maxWeight:0}),d=G.gameplayDefs(w);
+    plantClaim(w,p,-2,2);
     for(const k of ["sticks","planks","rope","stone"])G.addItem(w,p,d.itemId(k),99);
     let aim={mode:1,x:1.5,y:.5};const buttons=new Set<string>(),sent:G.MenuIntent[]=[];
     const bm=new BuildMode({input:{pressed:a=>buttons.has(a),down:a=>buttons.has(a),push:()=>{},pop:()=>{}},ctx:()=>({world:w,player:p,names:new Map()}),device:()=>device,aim:()=>aim,send:i=>{sent.push(i);return true;}});

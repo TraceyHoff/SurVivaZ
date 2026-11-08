@@ -20,7 +20,7 @@ import { distance } from "../systems/fuel.js";
 import { destroyPiece, maxHpOf } from "./integrity.js";
 import { isShaftHatchPiece, useShaftHatch } from "./terrain-hatch.js";
 import { pieceOf, resolveAttachment } from "./links.js";
-import { hasPrivilege, pieceCost, pieceUnlocked, tribeOf, tryPlace } from "./place.js";
+import { hasOwnClaim, hasPrivilege, pieceCost, pieceUnlocked, tribeOf, tryPlace } from "./place.js";
 import { reclaimAbandonedSite } from "./abandoned.js";
 import { structures } from "./structure.js";
 
@@ -46,6 +46,7 @@ export function buildActionSystem(world: World, dt: number): void {
       if (!inReach(world, e, target, b.buildReach)) { fail(BuildFail.OutOfRange); continue; }
       const tf = world.get(target, Transform);
       if (tf && !hasPrivilege(world, e, tf.x, tf.y)) { fail(BuildFail.NoPrivilege); continue; }
+      if (tf && !hasOwnClaim(world, e, tf.x, tf.y)) { fail(BuildFail.NeedClaim); continue; }
       const reason = reclaimAbandonedSite(world, e, target);
       if (reason) fail(reason);
       continue;
@@ -62,6 +63,7 @@ export function buildActionSystem(world: World, dt: number): void {
     const pt = world.get(p, Transform)!;
     const bp = world.get(p, BuildPiece)!; const def = defs.pieces.get(bp.type)!;
     if (!hasPrivilege(world, e, pt.x, pt.y)) { fail(BuildFail.NoPrivilege); continue; } // ADR-207: repair too (outsiders may not touch a claimed base)
+    if ((action === IntentAction.Repair || action === IntentAction.Upgrade) && !hasOwnClaim(world, e, pt.x, pt.y)) { fail(BuildFail.NeedClaim); continue; }
     switch (action) {
       case IntentAction.Upgrade: {
         const tier = it.data.tier[s]!;
@@ -74,6 +76,7 @@ export function buildActionSystem(world: World, dt: number): void {
         break;
       }
       case IntentAction.Repair: {
+        if (!pieceUnlocked(world, e, def, bp.tier)) { fail(BuildFail.SkillLocked); continue; } // ADR-310
         const max = maxHpOf(world, p); if (bp.hp >= max) { fail(BuildFail.NothingToRepair); continue; }
         const last = world.getField(p, PieceStability, "lastDamagedTick") ?? 0;
         if (last > 0 && world.tick < last + secondsToTicks(b.repairBlockedSeconds, dt)) { fail(BuildFail.RepairBlocked); continue; }

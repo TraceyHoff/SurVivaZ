@@ -7,11 +7,12 @@ import { describe, it, expect } from "vitest";
 import { Transform, type Entity, type World } from "@engine/core";
 import { applyMovementInput, defaultDefs, DoorState, placePiece, PieceLink, snapPlacement, spawnPlayer, spawnZombie, validatePlacement, AttachKind, structures } from "../src/index.js";
 import { resolveAttachment } from "../src/building/links.js";
-import { makeWorld, steps, spawnLearned } from "./helpers.js";
+import { makeWorld, steps, spawnLearned, ensureClaim } from "./helpers.js";
 
 const d = defaultDefs(); const DT = 1 / 20; const R = d.movement.bodyRadius;
 function base(): { w: World; me: Entity; put: (key: string, x: number, y: number, level?: number, rot?: number) => Entity } {
   const w = makeWorld(); const me = spawnLearned(w, { x: -6, y: -6, maxWeight: 0, clientId: 1 });
+  ensureClaim(w, me, 8, 2);
   const put = (key: string, x: number, y: number, level = 0, rot = 0): Entity => {
     const sn = snapPlacement(w, { piece: d.pieceId(key), x, y, level, rot, tier: 1, variant: 0 }); if (typeof sn === "number") throw new Error(`setup ${key} snap ${sn}`);
     const f = validatePlacement(w, me, sn, { ignoreCost: true, ignoreRange: true }); if (f) throw new Error(`setup ${key} @${x},${y}: ${f}`);

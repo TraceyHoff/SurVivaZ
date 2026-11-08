@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { Blackboard, Rng, scoreBehavior, installPermissions, Membership, PlayerId, Transform, type Entity, type World } from "@engine/core";
 import * as G from "../src/index.js";
-import { collect, makeWorld, spawnLearned, steps } from "./helpers.js";
+import { collect, makeWorld, spawnLearned, steps, ensureClaim } from "./helpers.js";
 
 const d = G.defaultDefs();
 const pid = (k: string) => d.pieceId(k);
@@ -13,7 +13,7 @@ const iid = (k: string) => d.itemId(k);
 const BASE = { x: 10, y: 10 };
 const STAND = { x: BASE.x + G.BUILD_STAND.x, y: BASE.y + G.BUILD_STAND.y };
 function fresh(): { w: World; p: Entity } {
-  const w = makeWorld(); const p = spawnLearned(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 1 }); steps(w, 1); return { w, p };
+  const w = makeWorld(); const p = spawnLearned(w, { x: BASE.x + 1, y: BASE.y + 3.3, maxWeight: 0, clientId: 1 }); steps(w, 1); ensureClaim(w, p, BASE.x + 4, BASE.y + 4); return { w, p };
 }
 const give = (w: World, e: Entity, key: string, tier = 0): void => { const def = d.pieces.get(pid(key))!; for (const c of G.pieceCost(d, def, def.tiered ? tier : def.fixedTier)) G.addItem(w, e, c.item, c.count); };
 const put = (w: World, e: Entity, key: string, x: number, y: number, level = 0, rot = 0, tier?: number, stand?: { x: number; y: number }) => {
@@ -144,10 +144,9 @@ const botPieces = (w: World, bot: Entity): Entity[] => { const pid = w.getField(
 const botBase = (w: World, bot: Entity): { box: Entity; barrel: Entity } => {
   const place = (key: string, x: number, y: number): Entity => {
     const def = d.pieces.get(pid(key))!;
-    for (const c of G.pieceCost(d, def, def.fixedTier)) G.addItem(w, bot, c.item, c.count);
-    const r = G.tryPlace(w, bot, { piece: def.id, x, y, level: 0, rot: 0, tier: def.fixedTier, variant: 0 });
-    expect(r.ok, `${key}: ${JSON.stringify(r)}`).toBe(true);
-    return (r as { piece: Entity }).piece;
+    const sn = G.snapPlacement(w, { piece: def.id, x, y, level: 0, rot: 0, tier: def.fixedTier, variant: 0 });
+    if (typeof sn === "number") throw new Error(`${key} snap ${sn}`);
+    return G.placePiece(w, bot, sn, { pay: false });
   };
   const box = place("basic_storage_box", 13.5, 10.5);
   const barrel = place("salt_barrel", 14.5, 10.5);
@@ -211,7 +210,9 @@ describe("Task 28: hire relocation", () => {
       const def = d.pieces.get(pid("basic_storage_box"))!;
       for (const c of G.pieceCost(d, def, def.fixedTier)) G.addItem(w, p, c.item, c.count);
       w.set(p, Transform, { x: rx, y: ry + 1.2 });
-      expect(G.tryPlace(w, p, { piece: def.id, x: rx, y: ry, level: 0, rot: 0, tier: def.fixedTier, variant: 0 }).ok, `ring ${i}`).toBe(true);
+      const sn = G.snapPlacement(w, { piece: def.id, x: rx, y: ry, level: 0, rot: 0, tier: def.fixedTier, variant: 0 });
+      if (typeof sn === "number") throw new Error(`ring ${i} snap ${sn}`);
+      G.placePiece(w, p, sn, { pay: false });
     }
     w.set(p, Transform, { x: 10, y: 10 });
     const { box, barrel } = botBase(w, bot);

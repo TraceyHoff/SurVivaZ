@@ -5,10 +5,12 @@ import { installPermissions, World } from "@engine/core";
 import * as G from "@engine/gameplay";
 import { InputSystem, KeyboardMouseDevice, GamepadDevice, DEFAULT_ACTIONS, DEFAULT_CONTEXTS, DEFAULT_PROFILES } from "@engine/input";
 import { BuildMode } from "../src/build-mode.js";
+import { plantClaim } from "../../../packages/gameplay/test/helpers.js";
 
 function setup() {
   const w = new World({ seed: 1, maxEntities: 1 << 12 }); G.installGameplay(w, {}); installPermissions(w);
   const me = G.spawnPlayer(w, { x: 0.5, y: 2.5, maxWeight: 0, clientId: 1 }); const d = G.gameplayDefs(w);
+  plantClaim(w, me, -2, 2);
   for (const r of d.items.values()) G.addItem(w, me, r.id, 200);
   const clock = { t: 0, now: () => clock.t };
   const sys = new InputSystem(clock as never, { actions: DEFAULT_ACTIONS, contexts: DEFAULT_CONTEXTS, profiles: DEFAULT_PROFILES });

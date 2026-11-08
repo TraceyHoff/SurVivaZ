@@ -3,8 +3,8 @@
  * validation in a fixed order (first failure wins, BuildFail), and the authoritative place. The same snap + validate
  * runs on the client for the ghost preview (client mode skips server-only stability values and uses "has support").
  *
- * Validation order: UnknownPiece, BadTier, LevelLimit, OutOfRange, NoPrivilege, ZoneFull, Terrain, Occupied,
- * NoSocket, Blocked, NoSupport, CannotAfford. ADR-211: CornerSlot (straight wall in an outer corner slot) follows Occupied.
+ * Validation order: UnknownPiece, BadTier, LevelLimit, SkillLocked, OutOfRange, NoPrivilege, ZoneFull, Terrain, Occupied,
+ * NoSocket, Blocked, NoSupport, NeedClaim, CannotAfford. ADR-211: CornerSlot (straight wall in an outer corner slot) follows Occupied.
  */
 import { entityIndex, Membership, Transform, type Entity, type World } from "@engine/core";
 /** ADR-230: number of clan palettes Art ships (assets clanPalettes 1..16); clan ids wrap onto them. */
@@ -15,7 +15,7 @@ export const clanTintIndex = (clanId: number): number => clanId > 0 ? 1 + ((clan
 import { isWaterId, installSpatialIndex, SUBTILE, WaterDepth, waterDepthAt } from "@engine/world";
 import {
   AttachKind, BuildPiece, Container, ContainerViewers, CraftingStation, DoorState, EdgeSide, Emitter, Fuel, Health,
-  PieceLink, PieceStability, PrivilegeZone, Tribe, Zombie,
+  PieceLink, PieceStability, PrivilegeZone, Tribe, Worker, Zombie,
 } from "../components.js";
 import { gameplayDefs, isAuthority, rangeSlack } from "../config.js";
 import { Placement, SocketKind, StationKind, type GameDefs, type ItemCount, type PieceDef } from "../defs.js";
@@ -211,11 +211,42 @@ export function zonesAt(world: World, x: number, y: number, extra = 0): Entity[]
   }
   return out.sort((a, b) => a - b);
 }
-/** Builder may modify at (x,y): no foreign zone covers it. */
-export function hasPrivilege(world: World, builder: Entity, x: number, y: number): boolean {
+/** A privilege zone belongs to `builder`: matching tribe, or the builder owns the claim piece. */
+export function zoneOwnedBy(world: World, zone: Entity, builder: Entity): boolean {
+  if (!builder) return false;
   const tribe = tribeOf(world, builder);
-  return zonesAt(world, x, y).every((z) => world.getField(z, PrivilegeZone, "tribe") === tribe && tribe !== 0);
+  const zt = world.getField(zone, PrivilegeZone, "tribe") ?? 0;
+  if (tribe && zt === tribe) return true;
+  const pid = world.isRegistered(PlayerId) ? world.getField(builder, PlayerId, "id") ?? 0 : 0;
+  const ownerPid = world.isRegistered(PieceOwner) ? world.getField(zone, PieceOwner, "player") ?? 0 : 0;
+  if (pid && world.isRegistered(PieceOwner) && ownerPid === pid) return true;
+  const hireOwner = world.isRegistered(Worker) ? world.getField(builder, Worker, "owner") ?? 0 : 0;
+  return !!hireOwner && world.isRegistered(PieceOwner) && ownerPid === hireOwner;
 }
+/** Builder may modify at (x,y): no foreign zone covers it (wilderness with no zone is allowed). */
+export function hasPrivilege(world: World, builder: Entity, x: number, y: number): boolean {
+  return zonesAt(world, x, y).every((z) => zoneOwnedBy(world, z, builder));
+}
+/** True when one of the builder's own Claim Flags covers (x,y). */
+export function hasOwnClaim(world: World, builder: Entity, x: number, y: number): boolean {
+  return !!builder && zonesAt(world, x, y).some((z) => zoneOwnedBy(world, z, builder));
+}
+/** Personal tribes live in 0x8000..0xFFFF so they stay clear of typical clan ids. */
+const PERSONAL_TRIBE_BIT = 0x8000;
+/** Give a solo builder a stable personal tribe so they can plant a Claim Flag (ADR-310). */
+export function ensurePersonalTribe(world: World, e: Entity): number {
+  if (!e) return 0;
+  const existing = tribeOf(world, e);
+  if (existing) return existing;
+  const pid = world.isRegistered(PlayerId) ? world.getField(e, PlayerId, "id") ?? 0 : 0;
+  const seed = pid || (entityIndex(e) + 1);
+  const tribe = PERSONAL_TRIBE_BIT | (seed & 0x7fff);
+  if (world.has(e, Tribe)) world.setField(e, Tribe, "id", tribe);
+  else world.add(e, Tribe, { id: tribe });
+  return tribe;
+}
+/** Base-building pieces (not the Claim Flag itself, and not market stalls with their own land rules). */
+export const needsClaim = (def: PieceDef): boolean => def.privilegeRadius <= 0 && !def.stall;
 
 /** A wall piece for ceiling support: wall-family or corner wall, not a wall-mounted decor piece. */
 const isWallDef = (def: PieceDef | undefined): boolean =>
@@ -267,16 +298,21 @@ export function pieceGates(defs: GameDefs, def: PieceDef, tier: number): string[
   const out = [pieceToken((def as { key?: string }).key ?? "")]; const tk = defs.tiers[tier]?.key; if (def.tiered && tk) out.push(tierToken(tk)); return out;
 }
 export const pieceUnlocked = (world: World, e: Entity, def: PieceDef, tier: number): boolean => pieceGates(gameplayDefs(world), def, tier).every((t) => hasSkillUnlock(world, e, t));
-export function validatePlacement(world: World, builder: Entity, sn: Snapped, opts: { ignoreCost?: boolean; ignoreRange?: boolean } = {}): BuildFail | 0 {
+/** Repair an inventory item or kit: ungated `item:<key>` tokens pass (ADR-310; no dedicated item-repair command yet). */
+export const itemRepairUnlocked = (world: World, e: Entity, itemId: number): boolean => {
+  const key = gameplayDefs(world).items.get(itemId)?.key;
+  return !key || hasSkillUnlock(world, e, `item:${key}`);
+};
+export function validatePlacement(world: World, builder: Entity, sn: Snapped, opts: { ignoreCost?: boolean; ignoreRange?: boolean; ignoreClaim?: boolean } = {}): BuildFail | 0 {
   const defs = gameplayDefs(world); const b = defs.building; const idx = structures(world); const { def, slot } = sn;
   if (slot.z > b.maxLevel || slot.z < def.minLevel || (def.groundOnly && slot.z !== 0)) return BuildFail.LevelLimit;
   if (!pieceUnlocked(world, builder, def, sn.tier)) return BuildFail.SkillLocked;
   const bt = world.get(builder, Transform);
   if (!opts.ignoreRange && bt && Math.hypot(bt.x - sn.pos.x, bt.y - sn.pos.y) > b.buildReach + rangeSlack(world, builder)) return BuildFail.OutOfRange;
-  // privilege: foreign zones block; a claim also may not overlap a foreign zone and needs a tribe
-  const tribe = tribeOf(world, builder);
+  // privilege: foreign zones block; planting a Claim Flag is allowed in wilderness (a personal tribe is assigned on place)
   const zones = zonesAt(world, sn.pos.x, sn.pos.y, def.privilegeRadius);
-  if (zones.some((z) => world.getField(z, PrivilegeZone, "tribe") !== tribe) || (def.privilegeRadius > 0 && tribe === 0)) return BuildFail.NoPrivilege;
+  if (zones.some((z) => !zoneOwnedBy(world, z, builder))) return BuildFail.NoPrivilege;
+  if (def.privilegeRadius > 0 && !builder) return BuildFail.NoPrivilege;
   // stalls: clanOnly needs a clan; core land claims (economy.claims) via the stall place permission rule
   if (def.stall && !canPlaceStall(world, builder, sn.pos.x, sn.pos.y, def.stall.clanOnly)) return BuildFail.NoPrivilege;
   const own = zonesAt(world, sn.pos.x, sn.pos.y)[0];
@@ -350,6 +386,8 @@ export function validatePlacement(world: World, builder: Entity, sn: Snapped, op
     }
   }
   if (candidateStability(world, sn) < b.minStability) return BuildFail.NoSupport;
+  // ADR-310: after structural checks, base pieces need one of the builder's Claim Flags covering the spot
+  if (builder && needsClaim(def) && !opts.ignoreClaim && !hasOwnClaim(world, builder, sn.pos.x, sn.pos.y)) return BuildFail.NeedClaim;
   if (!opts.ignoreCost) for (const c of pieceCost(defs, def, sn.tier)) if (countItem(world, builder, c.item) < c.count) return BuildFail.CannotAfford;
   return 0;
 }
@@ -364,6 +402,7 @@ function onSurface(world: World, def: PieceDef, tiles: readonly (readonly [numbe
 }
 export function placePiece(world: World, builder: Entity | 0, sn: Snapped, opts: { pay?: boolean; hp?: number; paint?: number; tribe?: number } = {}): Entity {
   const defs = gameplayDefs(world); const idx = structures(world); const { def, slot } = sn;
+  if (builder && def.privilegeRadius > 0) ensurePersonalTribe(world, builder);
   if (builder && opts.pay !== false) exchangeItems(world, builder, pieceCost(defs, def, sn.tier), []);
   if (def.small && def.placement === Placement.Free) sn = { ...sn, pos: { ...sn.pos, z: smallPieceZ(world, sn.pos.x, sn.pos.y, slot.z) } }; // ADR-162 (also persistence load)
   const e = world.create();

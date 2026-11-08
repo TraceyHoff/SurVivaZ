@@ -237,7 +237,7 @@ export function relocateWorkerBase(world: World, worker: Entity, actor: Entity):
     for (const o of rebuildOrder) {
       const sn = snapPlacement(world, { piece: o.def.id, x: site.x + (o.x - ox), y: site.y + (o.y - oy), level: o.level, rot: o.rot, tier: o.tier, variant: o.variant });
       if (typeof sn === "number") continue; // cannot snap here: its salvage is already in the manifest
-      if (validatePlacement(world, worker, sn, { ignoreCost: true, ignoreRange: true }) !== 0) continue;
+      if (validatePlacement(world, worker, sn, { ignoreCost: true, ignoreRange: true, ignoreClaim: true }) !== 0) continue;
       const np = placePiece(world, worker, sn, { pay: false });
       const att = resolveAttachment(world, np, AttachKind.Storage);
       if (att) { newStorage.push(att); const l = newStorageByKey.get(o.def.key) ?? []; l.push(att); newStorageByKey.set(o.def.key, l); }

@@ -5,10 +5,12 @@ import { installPermissions, Transform, World } from "@engine/core";
 import * as G from "@engine/gameplay";
 import { InputSystem, KeyboardMouseDevice, DEFAULT_ACTIONS, DEFAULT_CONTEXTS, DEFAULT_PROFILES } from "@engine/input";
 import { BuildMode, REFRESH_MAX_MS, REFRESH_STEP } from "../src/build-mode.js";
+import { plantClaim } from "../../../packages/gameplay/test/helpers.js";
 
 function setup() {
   const w = new World({ seed: 1, maxEntities: 1 << 12 }); G.installGameplay(w, {}); installPermissions(w);
   const me = G.spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 }); const d = G.gameplayDefs(w);
+  plantClaim(w, me, -2, 2);
   for (const k of ["sticks", "planks", "rope", "stone"]) G.addItem(w, me, d.itemId(k), 50);
   const clock = { t: 0, now: () => clock.t };
   const sys = new InputSystem(clock as never, { actions: DEFAULT_ACTIONS, contexts: DEFAULT_CONTEXTS, profiles: DEFAULT_PROFILES });
@@ -35,7 +37,7 @@ describe("ADR-228 build placement smoothness", () => {
   test("one preview pass validates each distinct snapped slot once and gives the same answer every time", () => {
     const s = setup(); const sel = { piece: s.d.pieceId("foundation"), tier: 0, variant: 0, paint: 0, autoRot: true };
     for (let y = -1; y <= 1; y++) for (let x = 1; x <= 3; x++) { const sn = G.snapPlacement(s.w, { piece: sel.piece, x: x + 0.5, y: y + 0.5, level: 0, rot: 0, tier: 0, variant: 0 }); if (typeof sn !== "number") G.placePiece(s.w, s.me, sn, { pay: false }); }
-    expect(G.structures(s.w).count).toBe(9);
+    expect(G.structures(s.w).count).toBe(10);
     const before = { ...G.previewStats };
     // gamepad-style assist pass on an occupied cell: magnet + 16-offset ring
     const a = G.buildPreviewFor(s.w, s.me, sel, 0, { mode: 1, x: 2.6, y: 0.4 }, 0, true);

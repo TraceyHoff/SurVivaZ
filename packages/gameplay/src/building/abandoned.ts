@@ -13,7 +13,7 @@ import { TerrainRes, addChunkLoadHook } from "../world.js";
 import { AttachKind } from "../components.js";
 import { resolveAttachment } from "./links.js";
 import { damageStageFor, maxHpOf } from "./integrity.js";
-import { placePiece, snapPlacement, tribeOf, validatePlacement } from "./place.js";
+import { hasOwnClaim, placePiece, snapPlacement, tribeOf, validatePlacement } from "./place.js";
 
 export const SITE_CHANCE = 0.12;
 export const ABANDONED_SCAN_RADIUS = 24;
@@ -521,6 +521,9 @@ export function reclaimAbandonedSite(world: World, actor: Entity, target: Entity
   const tribe = tribeOf(world, actor);
   const ox = world.getField(marker, AbandonedSite, "originX")!, oy = world.getField(marker, AbandonedSite, "originY")!;
   const w = world.getField(marker, AbandonedSite, "width") ?? 8, h = world.getField(marker, AbandonedSite, "height") ?? 8;
+  const at = world.get(target, Transform);
+  const covered = (at && hasOwnClaim(world, actor, at.x, at.y)) || hasOwnClaim(world, actor, ox + w / 2, oy + h / 2);
+  if (!covered) return BuildFail.NeedClaim;
   for (const e of world.query([BuildPiece, Transform])) {
     const x = world.getField(e, Transform, "x")!, y = world.getField(e, Transform, "y")!;
     if (x < ox - 0.6 || x > ox + w + 0.6 || y < oy - 0.6 || y > oy + h + 0.6) continue;

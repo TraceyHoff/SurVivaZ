@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PlayerId, Transform } from "@engine/core";
 import * as G from "../src/index.js";
-import { collect, makeWorld, spawnLearned, steps } from "./helpers.js";
+import { collect, makeWorld, plantClaim, spawnLearned, steps } from "./helpers.js";
 
 function keys(w: ReturnType<typeof makeWorld>, ents: readonly number[]) {
   const d = G.gameplayDefs(w);
@@ -132,6 +132,7 @@ describe("ADR-300 abandoned structures", () => {
     const missing = 1 - bp.hp / max;
     const mul = (d.tiers[bp.tier]?.repairMul ?? 0.3) * missing;
     for (const c of G.pieceCost(d, def, bp.tier, mul)) G.addItem(w, p, c.item, c.count + 8);
+    plantClaim(w, p, 5, 5);
     const before = w.getField(damaged!, G.BuildPiece, "hp")!;
     G.setIntent(w, p, { action: G.IntentAction.Repair, target: damaged! });
     steps(w, 2);
@@ -149,6 +150,7 @@ describe("ADR-300 abandoned structures", () => {
     if (w.has(a, PlayerId)) w.set(a, PlayerId, { id: 1 }); else w.add(a, PlayerId, { id: 1 });
     if (w.has(b, PlayerId)) w.set(b, PlayerId, { id: 2 }); else w.add(b, PlayerId, { id: 2 });
     const pid = 1;
+    plantClaim(w, a, 5, 5);
     expect(G.reclaimAbandonedSite(w, a, piece)).toBe(0);
     expect(w.getField(r.marker, G.AbandonedSite, "claimed")).toBe(1);
     expect(w.getField(r.marker, G.AbandonedSite, "claimedBy")).toBe(pid);

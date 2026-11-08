@@ -5,7 +5,7 @@ import {
   addItem, BuildFail, defaultDefs, Exposure, exposureSystem, placePiece, snapPlacement, spawnPlayer,
   validatePlacement, wallInsulationAt, wallInsulationOf, WALL_INSULATION_PER_TIER, WeatherKind,
 } from "../src/index.js";
-import { makeWorld, steps, spawnLearned, DT } from "./helpers.js";
+import { makeWorld, steps, spawnLearned, DT, ensureClaim } from "./helpers.js";
 import { ambientTemperature } from "../src/systems/environment.js";
 
 const d = defaultDefs();
@@ -47,7 +47,7 @@ describe("heat waves: frequency and timing", () => {
 
 describe("ceilings require a wall connection", () => {
   it("a roof on a pillar alone is rejected, a roof on walls is accepted, and a roof joined to a wall-backed roof is accepted", () => {
-    const w = makeWorld(); const b = spawnLearned(w, { x: 5, y: 5 });
+    const w = makeWorld(); const b = spawnLearned(w, { x: 5, y: 5 }); ensureClaim(w, b, 3, 8);
     // Pillar-only roof: foundation + pillar, no wall.
     place(w, b, "foundation", 5.5, 5.5);
     place(w, b, "pillar", 5.5, 5.5);
