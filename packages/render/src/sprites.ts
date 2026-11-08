@@ -1420,10 +1420,11 @@ export function visibleChunkKeys(rect: Rect, hw: number, hh: number, zs: number,
   return out;
 }
 
-/** Set of packed tile keys ("x,y") forming the building the focus stands in, or null when not under a roof/upper floor. */
+/** Set of packed tile keys ("x,y") forming the building the focus stands in, or null when not in a roofed building. */
 export function cutawayRegion(grid: BuildingGrid, tx: number, ty: number, level: number, maxTiles = 600, isRoofSprite: (spriteId: number) => boolean = () => false): Set<string> | null {
   // anything on a higher level (roofs included: deck pieces of level+1) covers the tile; isRoofSprite is kept for
-  // roof pieces gameplay places on the walls' own level
+  // roof pieces gameplay places on the walls' own level. ADR-309: a floor under a missing ceiling still counts if
+  // this connected footprint has cover somewhere (so indoor zoom does not pop in roof holes).
   const roofAt = (x: number, y: number): boolean => {
     const id = grid.at(x, y, level, PIECE_LAYER_DECK); if (!id) return false;
     const inst = grid.get(id); if (!inst) return false; const sp = grid.pieces.get(inst.piece).sprite;
@@ -1433,17 +1434,18 @@ export function cutawayRegion(grid: BuildingGrid, tx: number, ty: number, level:
     for (let lv = level + 1; lv < 16; lv++) if (grid.at(x, y, lv) !== 0) return true;
     return roofAt(x, y);
   };
-  if (!covered(tx, ty)) return null;
   const inside = (x: number, y: number): boolean => covered(x, y) || grid.at(x, y, level, PIECE_LAYER_DECK) !== 0;
+  if (!inside(tx, ty)) return null;
   const seen = new Set<string>(); const q: [number, number][] = [[tx, ty]]; seen.add(`${tx},${ty}`);
+  let anyCover = covered(tx, ty);
   while (q.length && seen.size < maxTiles) {
     const [x, y] = q.shift()!;
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
       const nx = x + dx, ny = y + dy, k = `${nx},${ny}`;
-      if (!seen.has(k) && inside(nx, ny)) { seen.add(k); q.push([nx, ny]); }
+      if (!seen.has(k) && inside(nx, ny)) { seen.add(k); q.push([nx, ny]); if (covered(nx, ny)) anyCover = true; }
     }
   }
-  return seen;
+  return anyCover ? seen : null;
 }
 
 function footprintHits(region: Set<string>, ax: number, ay: number, fw: number, fh: number): boolean {

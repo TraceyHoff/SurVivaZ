@@ -101,6 +101,22 @@ describe("gridless cutaway (client has no BuildingGrid)", () => {
   });
   it("on the upper floor under the roof: still cut (roof covers)", () => { expect(house().region(2, 2, 1)?.size).toBe(16); });
   it("outside / on top: no cutaway", () => { expect(house().region(6, 6, 0)).toBeNull(); expect(house().region(1, 1, 3)).toBeNull(); });
+  it("ADR-309: a missing ceiling tile still cutaways when the rest of the building is roofed", () => {
+    const c = new PieceCoverIndex();
+    for (let y = 0; y < 4; y++) for (let x = 0; x < 4; x++) {
+      c.add(x, y, 1, 1, 0, true, false);
+      if (!(x === 1 && y === 1)) c.add(x, y, 1, 1, 1, false, true);
+    }
+    const r = c.region(1, 1, 0)!;
+    expect(r.has("1,1")).toBe(true);
+    expect(r.size).toBe(16);
+    expect(c.region(2, 2, 0)?.size).toBe(16);
+  });
+  it("ADR-309: an outdoor deck with no roof anywhere is not indoor", () => {
+    const c = new PieceCoverIndex();
+    for (let y = 0; y < 2; y++) for (let x = 0; x < 2; x++) c.add(x, y, 1, 1, 0, true, false);
+    expect(c.region(0, 0, 0)).toBeNull();
+  });
 });
 
 describe("chimney smoke attach", () => {

@@ -118,4 +118,16 @@ describe("culling + cutaway", () => {
     expect(reg.has("10,10")).toBe(true); expect(reg.has("13,13")).toBe(true); expect(reg.has("20,20")).toBe(false);
     expect(cutawayRegion(g, 30, 30, 0)).toBeNull();
   });
+  it("ADR-309: a floor under a missing roof stays in the cutaway when neighbors are roofed", () => {
+    const { registry } = loadBuildPieces([{ key: "floor", footprint: { w: 1, h: 1 }, layer: 0, hp: 1 }, { key: "roof", footprint: { w: 1, h: 1 }, layer: 3, hp: 1 }]);
+    const g = new BuildingGrid(registry); const f = registry.byKey("floor").id, r = registry.byKey("roof").id;
+    for (let y = 10; y < 14; y++) for (let x = 10; x < 14; x++) {
+      g.place(f, x, y, 0);
+      if (!(x === 11 && y === 11)) g.place(r, x, y, 1);
+    }
+    const hole = cutawayRegion(g, 11, 11, 0)!;
+    expect(hole.has("11,11")).toBe(true);
+    expect(hole.has("10,10")).toBe(true);
+    expect(cutawayRegion(g, 30, 30, 0)).toBeNull();
+  });
 });

@@ -3552,3 +3552,13 @@ Each building type also rolls extra furnishings from a separate seed stream so e
 **Not changed.** Cutaway region detection, indoor zoom, piece ids, or networked component masks.
 
 **Validation.** `pieceHiddenByStory` is true for stories above and below the player inside the region, false for the occupied story and for pieces outside the region. Existing ADR-304 tests still fade this-story roofs and camera-near walls and leave back walls and furniture solid.
+
+## ADR-309: Keep indoor zoom under missing ceilings (SurVivaZ)
+
+**Context.** Indoor zoom (ADR-206 / ADR-304) follows the renderer cutaway region, which only started when the player's own tile had a roof or another story above it. Abandoned and damaged buildings omit some roof tiles, so walking under a hole dropped `cutawayActive`, the camera zoomed back out, and stepping under the next intact ceiling zoomed in again.
+
+**Decision.** `cutawayRegion` and the gridless `PieceCoverIndex.region` start from a tile that is covered *or* has a floor/deck at the player's story. The flood fill is unchanged. After the fill, the region is kept only if at least one tile in it is still covered, so a hole in an otherwise roofed building stays indoor (zoom and story isolation hold steady) while a freestanding outdoor deck with no roof anywhere does not count as inside.
+
+**Not changed.** Indoor zoom gain, debounce, easing, or how roofs and near walls fade on the occupied story.
+
+**Validation.** Standing on a floor tile whose ceiling is missing, with roofs on the neighboring tiles, yields the full building region. An outdoor 2×2 deck with no roof returns no region. Existing fully-roofed and outside cases are unchanged.

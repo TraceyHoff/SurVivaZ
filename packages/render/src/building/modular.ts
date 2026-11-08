@@ -110,21 +110,22 @@ export class PieceCoverIndex {
       if (roof) this.roof.set(k, (this.roof.get(k) ?? 0) | bit);
     }
   }
-  /** Same semantics as cutawayRegion(grid): tiles of the building around (tx,ty) when covered above `level`. */
+  /** Same semantics as cutawayRegion(grid): tiles of the building around (tx,ty) when that building has cover above `level`. */
   region(tx: number, ty: number, level: number, maxTiles = 600): Set<string> | null {
     const above = ~((2 << Math.min(30, level)) - 1); const bit = 1 << Math.min(30, level);
     const covered = (k: string): boolean => (((this.any.get(k) ?? 0) & above) !== 0) || (((this.roof.get(k) ?? 0) & (bit | above)) !== 0);
-    const k0 = `${tx},${ty}`; if (!covered(k0)) return null;
     const inside = (k: string): boolean => covered(k) || ((this.deck.get(k) ?? 0) & bit) !== 0;
+    const k0 = `${tx},${ty}`; if (!inside(k0)) return null;
     const seen = new Set<string>([k0]); const q: [number, number][] = [[tx, ty]];
+    let anyCover = covered(k0);
     while (q.length && seen.size < maxTiles) {
       const [x, y] = q.shift()!;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         const nx = x + dx, ny = y + dy, k = `${nx},${ny}`;
-        if (!seen.has(k) && inside(k)) { seen.add(k); q.push([nx, ny]); }
+        if (!seen.has(k) && inside(k)) { seen.add(k); q.push([nx, ny]); if (covered(k)) anyCover = true; }
       }
     }
-    return seen;
+    return anyCover ? seen : null;
   }
 }
 
