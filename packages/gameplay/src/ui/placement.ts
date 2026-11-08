@@ -330,3 +330,25 @@ export const repairIntent = (target: Entity): MenuIntent => ({ cmd: RepairCmd, a
 export const reclaimIntent = (target: Entity): MenuIntent => ({ cmd: ReclaimCmd, args: { target }, entities: ["target"] });
 export const upgradeIntent = (target: Entity, tier: number): MenuIntent => ({ cmd: UpgradeCmd, args: { target, tier }, entities: ["target"] });
 export const demolishIntent = (target: Entity): MenuIntent => ({ cmd: DemolishCmd, args: { target }, entities: ["target"] });
+
+/** World-tile outline of a placed piece, for highlighting the demolish / repair / upgrade target. */
+export function pieceFootprintOutline(world: World, e: Entity): { segments: SnapSegment[]; z: number } | undefined {
+  const bp = world.get(e, BuildPiece); const tr = world.get(e, Transform); if (!bp || !tr) return undefined;
+  const def = gameplayDefs(world).pieces.get(bp.type); if (!def) return undefined;
+  const slot = world.has(e, PieceSlot) ? world.get(e, PieceSlot) : undefined;
+  if (def.placement === Placement.Edge || def.placement === Placement.Opening) {
+    if (slot && (slot.side === EdgeSide.North || slot.side === EdgeSide.West)) return { segments: [edgeSeg(slot.tx, slot.ty, slot.side)], z: tr.z };
+    const north = Math.abs(tr.y - Math.round(tr.y)) <= Math.abs(tr.x - Math.round(tr.x));
+    const seg = north
+      ? { x0: Math.floor(tr.x), y0: Math.round(tr.y), x1: Math.floor(tr.x) + 1, y1: Math.round(tr.y) }
+      : { x0: Math.round(tr.x), y0: Math.floor(tr.y), x1: Math.round(tr.x), y1: Math.floor(tr.y) + 1 };
+    return { segments: [seg], z: tr.z };
+  }
+  const [w, h] = rotatedSize(def, bp.rot & 3);
+  const x0 = slot && def.placement === Placement.Cell ? slot.tx : Math.round(tr.x - w / 2);
+  const y0 = slot && def.placement === Placement.Cell ? slot.ty : Math.round(tr.y - h / 2);
+  return { segments: [
+    { x0, y0, x1: x0 + w, y1: y0 }, { x0: x0 + w, y0, x1: x0 + w, y1: y0 + h },
+    { x0, y0: y0 + h, x1: x0 + w, y1: y0 + h }, { x0, y0, x1: x0, y1: y0 + h },
+  ], z: tr.z };
+}

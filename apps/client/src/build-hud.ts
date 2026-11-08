@@ -36,7 +36,7 @@ export const BUILD_FAIL_TEXT: Readonly<Record<number, string>> = {
 };
 export const buildFailText = (reason: number | undefined): string => (reason && BUILD_FAIL_TEXT[reason]) || "Can't place here";
 const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
-const label = (k: string): string => k.replace(/_/g, " ").replace(/^\w/, (m) => m.toUpperCase());
+const label = (k: string): string => k.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 
 const TOOL_HINT: Record<BuildDevice, { road: string; sign: string }> = { keyboardMouse: { road: "T", sign: "N" }, gamepad: { road: "LT+X", sign: "LT+Y" }, touch: { road: "", sign: "" } };
 const SNAP_HINT: Record<BuildDevice, string> = { keyboardMouse: "G", gamepad: "R3", touch: "" };
@@ -52,7 +52,7 @@ export function renderBuildHud(bm: BuildMode, device: BuildDevice): string {
     + `<span data-role="bh-level">Floor ${bm.level}</span>`
     + `<button data-bh="level-down" aria-label="Floor down">▼</button><button data-bh="level-up" aria-label="Floor up">▲</button>`
     + `<button data-bh="snap" data-snap="${bm.snap ? "on" : "off"}" aria-pressed="${bm.snap}" aria-label="Grid snap">${bm.snap ? "▦ Snap" : bm.freePlacing ? `▢ Free <span data-bh="angle">${bm.fineRot * 15}°</span>` : "▢ Free · grid piece"}${SNAP_HINT[device] ? ` <kbd>${SNAP_HINT[device]}</kbd>` : ""}</button></div>`;
-  const strip = ctx ? `<div class="bh-ctx" role="menu" aria-label="${esc(ctx.title)}"><div class="bh-title">${esc(ctx.title)}</div>`
+  const strip = ctx ? `<div class="bh-ctx${ctx.actions.some((a) => a.armed) ? " warn" : ""}" role="menu" aria-label="${esc(ctx.title)}"><div class="bh-title">${esc(ctx.title)}</div>`
     + ctx.actions.map((a) => `<button role="menuitem" data-bh="${a.id}" class="${a.armed ? "armed" : ""}"${a.enabled ? "" : " disabled"}>${esc(a.label)}${a.hint ? ` <kbd>${esc(a.hint)}</kbd>` : ""}</button>`).join("")
     + `</div>` : "";
   // ADR-171: road + sign tools while building (touch / pad / mouse), with the device's shortcut
@@ -70,7 +70,7 @@ export function mountBuildHud(root: HTMLElement, o: BuildHudOptions): { update()
 .build-hud .bh-chip,.build-hud .bh-ctx,.build-hud .bh-tools{display:flex;gap:6px;align-items:center;background:rgba(15,18,22,.82);border:1px solid rgba(255,255,255,.15);border-radius:10px;padding:4px 8px;pointer-events:auto}
 .build-hud button{min-width:36px;min-height:32px;border-radius:8px;border:1px solid rgba(255,255,255,.25);background:#2a3038;color:#eee;font:inherit;cursor:pointer}
 .build-hud button:disabled{opacity:.45}.build-hud button[data-snap=on]{background:#2f5a3a}.build-hud button.armed{background:#8a2020}.build-hud kbd{font-size:11px;opacity:.75;margin-left:4px}
-.build-hud .bh-title{opacity:.85;margin-right:4px}.bh-dot.ok{color:#6d6}.bh-dot.bad{color:#e66}.bh-why{color:#f99;font-size:12px}.bh-hint,.bh-toast{background:rgba(15,18,22,.7);border-radius:8px;padding:2px 8px}
+.build-hud .bh-title{opacity:1;font-weight:650;margin-right:6px;color:#fff}.build-hud .bh-ctx.warn{border-color:#e8c44a}.build-hud .bh-ctx.warn .bh-title{color:#ffe27a}.bh-dot.ok{color:#6d6}.bh-dot.bad{color:#e66}.bh-why{color:#f99;font-size:12px}.bh-hint,.bh-toast{background:rgba(15,18,22,.7);border-radius:8px;padding:2px 8px}
 .build-hud .bh-tools{background:transparent;border:0;padding:0}.build-hud .bh-tools button{background:rgba(42,48,56,.9)}
 .build-hud .bh-chip,.build-hud .bh-ctx{max-width:calc(100vw - 16px);flex-wrap:wrap;justify-content:center}
 @media (max-width:640px){.build-hud{top:calc(${NARROW_TOP_PX}px + env(safe-area-inset-top))}}`;

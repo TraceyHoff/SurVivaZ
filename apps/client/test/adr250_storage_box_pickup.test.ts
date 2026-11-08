@@ -26,9 +26,10 @@ describe("ADR-250 storage box in the client", () => {
   test("aimed box: action reads Pick up, needs a second press, then sends the demolish intent", () => {
     const { bm, sent, at } = setup(); at(2.5, 1.5); bm.update();
     expect(bm.context?.actions.find((a) => a.id === "demolish")?.label).toBe("Pick up");
-    expect(bm.act("demolish")).toBe(false); expect(bm.toast).toBe("Pick up? Press again to confirm");
-    expect(bm.context?.actions.find((a) => a.id === "demolish")?.label).toBe("Confirm pick up");
-    expect(bm.act("demolish")).toBe(true); expect(bm.toast).toBe("Picking up…"); expect(sent).toHaveLength(1);
+    expect(bm.act("demolish")).toBe(false); expect(bm.toast).toBe("Pick up Basic Storage Box? Press again to confirm");
+    expect(bm.context?.actions.find((a) => a.id === "demolish")?.label).toBe("Confirm pick up Basic Storage Box");
+    expect(bm.context?.title).toMatch(/Basic Storage Box/);
+    expect(bm.act("demolish")).toBe(true); expect(bm.toast).toBe("Picking up Basic Storage Box…"); expect(sent).toHaveLength(1);
   });
   test("ordinary storage keeps Demolish", () => {
     const { bm, at } = setup(); at(4.5, 1.5); bm.update();

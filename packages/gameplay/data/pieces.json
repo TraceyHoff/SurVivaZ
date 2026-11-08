@@ -567,6 +567,7 @@
     },
     {
       "key": "claim_totem",
+      "category": "crafting",
       "placement": "free",
       "layer": 2,
       "tier": 2,

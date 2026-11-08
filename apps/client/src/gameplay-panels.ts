@@ -562,9 +562,12 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
         };
         v.sort((a, b) => rank(a) - rank(b));
       }
+      // ADR-302: property claim flag lives with the stations; keep it first so it is easy to find.
+      if (buildCat === "crafting") v.sort((a, b) => Number(b.key === "claim_totem") - Number(a.key === "claim_totem"));
       if (!v.some((p) => p.id === buildSel.piece) && v[0]) { buildSel.piece = v[0].id; buildSel.variant = 0; }
       const out: Node[] = []; const cg0 = grid(); cg0.dataset["role"] = "build-cats"; cg0.dataset["tabs"] = "tab";
-      for (const k of cats) cg0.append(btn(k[0]!.toUpperCase() + k.slice(1), `bcat-${k}`, () => { buildCat = k; kit.rerender(); }, { pressed: k === buildCat, alt: k !== buildCat }));
+      const BUILD_CAT_LABEL: Record<string, string> = { crafting: "Hand Crafted" };
+      for (const k of cats) cg0.append(btn(BUILD_CAT_LABEL[k] ?? (k[0]!.toUpperCase() + k.slice(1)), `bcat-${k}`, () => { buildCat = k; kit.rerender(); }, { pressed: k === buildCat, alt: k !== buildCat }));
       out.push(cg0);
       if (buildCat === "roads" && wt) {
         // ADR-224: roads & signs are a tab of their own (keeps the piece view short)

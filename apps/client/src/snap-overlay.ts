@@ -7,7 +7,7 @@ import { worldToScreen } from "@engine/world";
 import type { BuildPreview, SnapSegment } from "@engine/gameplay";
 import { camIso, type CameraLike } from "./world-tools.js";
 
-export const SNAP_COLORS = { valid: "rgba(80,255,120,.95)", invalid: "rgba(255,70,70,.95)", edge: "rgba(255,230,60,1)" } as const;
+export const SNAP_COLORS = { valid: "rgba(80,255,120,.95)", invalid: "rgba(255,70,70,.95)", edge: "rgba(255,230,60,1)", target: "rgba(255,196,48,.98)" } as const;
 export interface OverlayLine { x0: number; y0: number; x1: number; y1: number; color: string; width: number }
 /** Pure: CSS-px lines for a preview (outline first, snap edge last so it sits on top). */
 export function snapOverlayLines(p: BuildPreview | undefined, cam: CameraLike, groundZ?: number): OverlayLine[] {
@@ -20,14 +20,22 @@ export function snapOverlayLines(p: BuildPreview | undefined, cam: CameraLike, g
   if (p.snapEdge && p.valid) out.push(seg(p.snapEdge, SNAP_COLORS.edge, 5));
   return out;
 }
-export interface SnapOverlayDeps { preview(): BuildPreview | undefined; camera(): CameraLike | undefined; hidden(): boolean; groundZ?(): number | undefined }
+/** Amber footprint of the aimed placed piece (demolish / repair / upgrade target). Uses that piece's own z. */
+export function targetOverlayLines(t: { segments: SnapSegment[]; z: number } | undefined, cam: CameraLike): OverlayLine[] {
+  if (!t?.segments.length) return [];
+  const z = cam.drawZoom, hw = cam.viewW / cam.dpr / 2, hh = cam.viewH / cam.dpr / 2;
+  const iso = camIso(cam); const css = (x: number, y: number) => { const s = worldToScreen(x, y, t.z, iso); return { x: (s.sx - cam.x) * z + hw, y: (s.sy - cam.y) * z + hh }; };
+  return t.segments.map((s) => { const a = css(s.x0, s.y0), b = css(s.x1, s.y1); return { x0: a.x, y0: a.y, x1: b.x, y1: b.y, color: SNAP_COLORS.target, width: 4 }; });
+}
+export interface SnapOverlayDeps { preview(): BuildPreview | undefined; target?(): { segments: SnapSegment[]; z: number } | undefined; camera(): CameraLike | undefined; hidden(): boolean; groundZ?(): number | undefined }
 export function mountSnapOverlay(root: HTMLElement, d: SnapOverlayDeps): { destroy(): void } {
   const cv = document.createElement("canvas"); cv.id = "snap-overlay"; cv.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:3"; root.append(cv);
   let raf = 0, drew = false, sig = "", lineSig = "", redraws = 0;
   const tick = (): void => {
     raf = requestAnimationFrame(tick);
     try {
-      const cam = d.camera(); const p = d.preview(); const lines = !cam || d.hidden() ? [] : snapOverlayLines(p, cam, d.groundZ?.());
+      const cam = d.camera(); const p = d.preview();
+      const lines = !cam || d.hidden() ? [] : [...snapOverlayLines(p, cam, d.groundZ?.()), ...targetOverlayLines(d.target?.(), cam)];
       const s = p ? `${lines.length}:${p.valid ? 1 : 0}:${p.magnet ? 1 : 0}:${p.snapEdge ? 1 : 0}` : ""; if (s !== sig) { sig = s; cv.dataset["state"] = s; }
       if (!lines.length && !drew) return;
       // ADR-228: a still ghost under a still camera draws identical lines; skip the full-canvas clear + blurred strokes

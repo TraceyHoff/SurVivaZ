@@ -3482,3 +3482,13 @@ Each building type also rolls extra furnishings from a separate seed stream so e
 **Not changed.** Piece ids, container UI, privilege/reclaim rules, streaming budgets, or networked component masks.
 
 **Validation.** A ruin-0 shed's storage has items a player can open and withdraw. The same seed reprints the same container contents; a different seed does not. A workshop always includes a usable workbench. Across origins, workshops sometimes roll an anvil or furnace, cottages a stove or workbench, and homesteads a well; stamped chance stations carry `CraftingStation`.
+
+## ADR-302: Clearer demolish targets and Hand Crafted claim flag (SurVivaZ)
+
+**Context.** Overlapping isometric pieces made it hard to tell which wall, floor, or furniture piece Demolish (or Pick up) would hit: the HUD title used a weakly capitalized key, the confirm toast and armed button were generic, and nothing outlined the aimed piece in the world. The property claim flag (`claim_totem`) also sat in Furniture because it has layer 2 and no explicit category, while players expected it in the Hand Crafted section with the stations.
+
+**Decision.** Title-case the aimed piece name and include it in the context title, the confirm toast, the armed Demolish / Pick up button, and the completion toast (`Demolishing Foundation…` / `Picking up Basic Storage Box…`). Draw an amber footprint of that piece on the existing ADR-196 snap overlay, using the piece's own height so a wall or furniture piece is distinct from the green/red placement ghost. Move `claim_totem` to the build menu's `crafting` tab, display that tab as "Hand Crafted", and sort the flag first in the tab. The decorative `clan_flag` stays in Decor.
+
+**Not changed.** Demolish / pickup commands, reach and targeting, piece ids, recipes, or networked component masks.
+
+**Validation.** Aimed pickup and demolish strings name the piece; the overlay helper returns a cell rectangle, an edge segment, or a free-placement rectangle; `claim_totem` is listed first under Hand Crafted and is absent from Furniture.

@@ -105,6 +105,17 @@ describe("ADR-224 build window", () => {
     const t = q("[data-role=piece-grid] [data-role=piece][data-short]"); t.click(); expect(placing).toHaveLength(0); expect(menus.nav.isOpen).toBe(true);
     expect(document.querySelector("[data-role=build-cost] [data-have='0']")).not.toBeNull(); menus.destroy();
   });
+  test("ADR-302: claim totem is in Hand Crafted, not Furniture", () => {
+    const { menus } = setup(); menus.open("build");
+    expect(q("[data-key=bcat-crafting]").textContent).toBe("Hand Crafted");
+    const tile = (key: string) => `[data-role=piece-grid] [data-key=piece-${d.pieceId(key)}]`;
+    q("[data-key=bcat-furniture]").click();
+    expect(document.querySelector(tile("claim_totem"))).toBeNull();
+    q("[data-key=bcat-crafting]").click();
+    expect(document.querySelector(tile("claim_totem"))).not.toBeNull();
+    expect(q("[data-role=piece-grid] button .nm").textContent).toBe("claim totem");
+    menus.destroy();
+  });
   test("pieceGlyph maps keys to a preview symbol", () => {
     expect(pieceGlyph("foundation_triangle")).toBe("▦"); expect(pieceGlyph("door_wood")).toBe("🚪"); expect(pieceGlyph("campfire")).toBe("🔥"); expect(pieceGlyph("zzz")).toBe("◼");
   });

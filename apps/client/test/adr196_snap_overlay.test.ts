@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { snapOverlayLines, SNAP_COLORS } from "../src/snap-overlay.js";
+import { snapOverlayLines, targetOverlayLines, SNAP_COLORS } from "../src/snap-overlay.js";
 
 const cam = { x: 0, y: 0, viewW: 800, viewH: 600, dpr: 1, drawZoom: 1, cssToWorld: (x: number, y: number) => ({ x, y }) };
 const base = { pieceKey: "foundation", piece: 1, tier: 1, variant: 0, paint: 0, x: 7.5, y: 5.5, level: 0, z: 0, rot: 0, rotSteps: 4, reason: 0, request: { x: 7.5, y: 5.5, rot: 0 } };
@@ -16,4 +16,10 @@ describe("ADR-196 snap overlay", () => {
     expect(l).toHaveLength(4); expect(l.every((q) => q.color === SNAP_COLORS.invalid)).toBe(true);
   });
   it("nothing without a preview", () => { expect(snapOverlayLines(undefined, cam)).toEqual([]); });
+  it("ADR-302: aimed piece outline is amber and thicker than the ghost", () => {
+    const l = targetOverlayLines({ segments: outline, z: 0 }, cam);
+    expect(l).toHaveLength(4); expect(l.every((q) => q.color === SNAP_COLORS.target)).toBe(true);
+    expect(l[0]!.width).toBeGreaterThan(2);
+    expect(targetOverlayLines(undefined, cam)).toEqual([]);
+  });
 });

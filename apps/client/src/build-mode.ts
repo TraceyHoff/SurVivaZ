@@ -14,8 +14,8 @@ import { buildFailText } from "./build-hud.js";
  *    the compact HUD carries floor ▲▼ and the contextual Repair / Upgrade / Demolish buttons.
  *  - a placed piece under the aim is the `target`; `context` lists its labelled actions (shown only when targeted).
  */
-import { BuildPiece, snapPlacement, validatePlacement, buildPreviewFor, fineEligible, FINE_ROT, FINE_ROT_STEPS, rotationSteps, buildView, demolishIntent, gameplayDefs, moveVector, pieceTargetAt, placementTarget, placePreviewIntent, reclaimIntent, repairIntent, rotateStep, structures, upgradeIntent,
-  type BuildPreview, type BuildSelection, type MenuCtx, type MenuIntent, type PieceTarget, type PlacementAim } from "@engine/gameplay";
+import { BuildPiece, snapPlacement, validatePlacement, buildPreviewFor, fineEligible, FINE_ROT, FINE_ROT_STEPS, rotationSteps, buildView, demolishIntent, gameplayDefs, moveVector, pieceFootprintOutline, pieceTargetAt, placementTarget, placePreviewIntent, reclaimIntent, repairIntent, rotateStep, structures, upgradeIntent,
+  type BuildPreview, type BuildSelection, type MenuCtx, type MenuIntent, type PieceTarget, type PlacementAim, type SnapSegment } from "@engine/gameplay";
 import { Transform } from "@engine/core";
 import { rotateScreenVec } from "@engine/input";
 
@@ -53,7 +53,7 @@ const HINTS: Record<BuildDevice, Record<BuildActionId, string>> = {
   gamepad: { repair: "X", upgrade: "Y", demolish: "hold X", reclaim: "" },
   touch: { repair: "", upgrade: "", demolish: "", reclaim: "" },
 };
-const label = (k: string): string => k.replace(/_/g, " ").replace(/^\w/, (m) => m.toUpperCase());
+const label = (k: string): string => k.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
 
 export class BuildMode {
   private sel: BuildSelection | undefined; rot = 0; level = 0;
@@ -145,17 +145,24 @@ export class BuildMode {
     if (id === "repair") { if (!t.canRepair) { this.toast = "Nothing to repair"; return false; } if (!t.canAfford.repair) { this.toast = "Can't afford repair"; return false; } this.toast = "Repairing…"; return this.o.send(repairIntent(t.entity)); }
     if (id === "upgrade") { if (!t.canUpgrade || t.nextTier === undefined) { this.toast = "Already top tier"; return false; } if (!t.canAfford.upgrade) { this.toast = `Need materials for ${label(t.nextTierKey!)}`; return false; } this.toast = `Upgrading to ${label(t.nextTierKey!)}…`; return this.o.send(upgradeIntent(t.entity, t.nextTier)); }
     if (id === "reclaim") { if (!t.canReclaim) { this.toast = "Nothing to reclaim"; return false; } this.toast = "Reclaiming…"; return this.o.send(reclaimIntent(t.entity)); }
+    const name = label(t.pieceKey);
     const verb = t.pickup ? "Pick up" : "Demolish"; // ADR-250: pickup pieces (basic_storage_box) refund in full
-    if (!confirmed && !this.demolishArmed) { this.demolishArmedAt = this.now(); this.toast = `${verb}? Press again to confirm`; return false; }
-    this.disarm(); this.toast = t.pickup ? "Picking up…" : "Demolishing…"; return this.o.send(demolishIntent(t.entity));
+    if (!confirmed && !this.demolishArmed) { this.demolishArmedAt = this.now(); this.toast = `${verb} ${name}? Press again to confirm`; return false; }
+    this.disarm(); this.toast = t.pickup ? `Picking up ${name}…` : `Demolishing ${name}…`; return this.o.send(demolishIntent(t.entity));
+  }
+  /** World-tile outline of the aimed piece so the HUD can show exactly what Demolish / Repair / Upgrade will hit. */
+  get targetOutline(): { segments: SnapSegment[]; z: number } | undefined {
+    const c = this.o.ctx(); return c && this.target ? pieceFootprintOutline(c.world, this.target.entity) : undefined;
   }
   get context(): BuildContextView | undefined {
     const t = this.target; if (!t) return undefined; const h = HINTS[this.device()]; const armed = this.demolishArmed;
-    return { target: t, title: `${label(t.pieceKey)} · ${label(t.tierKey)} · ${Math.round((100 * t.hp) / Math.max(1, t.maxHp))}%`, actions: [
+    const name = label(t.pieceKey); const hp = Math.round((100 * t.hp) / Math.max(1, t.maxHp));
+    const title = armed ? `${t.pickup ? "Pick up" : "Demolish"} ${name}? · ${label(t.tierKey)} · ${hp}%` : `${name} · ${label(t.tierKey)} · ${hp}%`;
+    return { target: t, title, actions: [
       { id: "repair", label: "Repair", hint: h.repair, enabled: t.canRepair && t.canAfford.repair },
       { id: "upgrade", label: t.nextTierKey ? `Upgrade → ${label(t.nextTierKey)}` : "Upgrade", hint: h.upgrade, enabled: t.canUpgrade && t.canAfford.upgrade },
       ...(t.canReclaim ? [{ id: "reclaim" as const, label: "Reclaim", hint: h.reclaim, enabled: true }] : []),
-      { id: "demolish", label: t.pickup ? (armed ? "Confirm pick up" : "Pick up") : armed ? "Confirm demolish" : "Demolish", hint: h.demolish, enabled: true, armed },
+      { id: "demolish", label: t.pickup ? (armed ? `Confirm pick up ${name}` : "Pick up") : armed ? `Confirm demolish ${name}` : "Demolish", hint: h.demolish, enabled: true, armed },
     ] };
   }
   /** Aim actually used: touch point / gamepad cursor override the resolver's aim. */

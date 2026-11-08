@@ -727,7 +727,7 @@ mountGuardOverlay(root, { world: () => world, alpha: () => renderAlpha,
   camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined),
   hidden: () => !!menus?.nav.isOpen, ground: (x, y, z) => groundZ(session.client?.tiles.tiles, x, y, z) });
 // ADR-196: build ghost validity outline + magnet snap-edge highlight (WebGL2 and Canvas2D)
-mountSnapOverlay(root, { preview: () => (buildMode.active ? buildMode.preview : undefined), camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined), hidden: () => !!menus?.nav.isOpen, groundZ: () => iso?.ghostZ });
+mountSnapOverlay(root, { preview: () => (buildMode.active ? buildMode.preview : undefined), target: () => (buildMode.active ? buildMode.targetOutline : undefined), camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined), hidden: () => !!menus?.nav.isOpen, groundZ: () => iso?.ghostZ });
 // ADR-161: floating loot-bag / dropped-item labels with the Interact prompt
 let nameTagsOn = true, nameTagsAt = 0; // settings read at most once a second (no per-frame JSON parse)
 mountNameTags(root, { artBase: `${import.meta.env.BASE_URL}art/`, world: () => world, player: () => session.player, alpha: () => renderAlpha, enabled: () => { const n = performance.now(); if (n >= nameTagsAt) { nameTagsAt = n + 1000; nameTagsOn = loadSettings().nameTags !== false; } return nameTagsOn; },
