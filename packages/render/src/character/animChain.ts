@@ -37,6 +37,7 @@ const ATTACK_ANY = c("attack", "idle");
 const PUNCH = ATTACK.unarmed!;
 const AIM_BOW_DRAW = c("bow_draw", "bow_hold", "idle"), AIM_BOW_HOLD = c("bow_hold", "bow_draw", "idle"), AIM_GUN = c("gun_aim", "idle");
 const BLOCK = c("block", "idle");
+const BLOCK_HIT = c("block_hit", "block", "idle");
 const CROUCH_IDLE = c("crouch_idle", "idle"), CROUCH_WALK = c("crouch_walk", "crouch_idle", "walk", "idle");
 const CARRY_IDLE = c("carry_idle", "idle"), CARRY_WALK = c("carry_walk", "carry_idle", "walk", "idle");
 const SLEEP = c("sleep", "sit", "idle"), SLEEP_LIE = c("sleep_lie", "sleep", "sit", "idle"), SLEEP_LIE_UNDER = c("sleep_lie_under", "sleep_lie", "sleep", "sit", "idle");
@@ -55,6 +56,7 @@ export function animChainFor(state: number, ctx: AnimChainCtx): readonly string[
     case AnimState.Attack: return ATTACK[attackClassOf(ctx)] ?? ATTACK_ANY;
     case AnimState.Punch: return PUNCH;
     case AnimState.Block: return BLOCK;
+    case AnimState.BlockHit: return BLOCK_HIT;
     case AnimState.Aim: { const w = ctx.weaponClass; if (w === "crossbow" || w === "firearm") return AIM_GUN;
       return (ctx.elapsed ?? 0) < BOW_DRAW_S ? AIM_BOW_DRAW : AIM_BOW_HOLD; }
     case AnimState.Crouch: return ctx.moving ? CROUCH_WALK : CROUCH_IDLE;

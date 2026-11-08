@@ -306,7 +306,7 @@ const SWIM_OVER: ReadonlySet<number> = new Set([Anim.Idle, Anim.Walk, Anim.Run, 
 export const PLAYER_ONE_SHOT_TICKS = 8;
 /** ADR-151: Punch/Attack settle sooner so the swing fits the fastest melee cooldown (0.3 s = 6 ticks). */
 export const PLAYER_SWING_TICKS = 6;
-const ONE_SHOT: ReadonlySet<number> = new Set([Anim.Attack, Anim.Punch, Anim.Hurt, Anim.Gather, Anim.Build, Anim.Eat, Anim.Harvest, Anim.Chop, Anim.Mine, Anim.Drink]);
+const ONE_SHOT: ReadonlySet<number> = new Set([Anim.Attack, Anim.Punch, Anim.Hurt, Anim.Gather, Anim.Build, Anim.Eat, Anim.Harvest, Anim.Chop, Anim.Mine, Anim.Drink, Anim.BlockHit]);
 /**
  * gameplay.animSettle (authority, ADR-107): locomotion anims become Swim on a swim tile at ground level and Swim reverts
  * to Idle on land; players' one-shot anims revert to Idle after PLAYER_ONE_SHOT_TICKS.

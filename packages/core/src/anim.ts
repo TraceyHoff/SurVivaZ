@@ -16,8 +16,9 @@ export const enum AnimState {
   /** ADR-241: crouched (walking = Crouch + moving); falls back to idle / walk. */ Crouch = 22,
   /** ADR-241: carrying a crate/log/body in both arms (walking = Carry + moving); falls back to idle / walk. */ Carry = 23,
   /** ADR-241: asleep (in a bed: sleep_lie, else the curled seated sleep); falls back to sit, idle. */ Sleep = 24,
+  /** ADR-298 (append-only): guard compression/rebound when a melee blow lands on a held block; falls back to block, idle. */ BlockHit = 25,
   Hit = Hurt, Death = Die,
 }
 /** Canonical name per AnimState value (index = value). Append in step with the enum. */
-export const ANIM_STATE_NAMES: readonly string[] = Object.freeze(["idle", "walk", "run", "attack", "hurt", "die", "gather", "build", "eat", "graze", "shamble", "crawl", "feed", "sit", "swim", "punch", "harvest", "chop", "mine", "drink", "block", "aim", "crouch", "carry", "sleep"]);
+export const ANIM_STATE_NAMES: readonly string[] = Object.freeze(["idle", "walk", "run", "attack", "hurt", "die", "gather", "build", "eat", "graze", "shamble", "crawl", "feed", "sit", "swim", "punch", "harvest", "chop", "mine", "drink", "block", "aim", "crouch", "carry", "sleep", "block_hit"]);
 export const animStateName = (s: number): string | undefined => ANIM_STATE_NAMES[s];

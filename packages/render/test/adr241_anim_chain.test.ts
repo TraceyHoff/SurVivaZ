@@ -27,9 +27,9 @@ const CTXS: AnimChainCtx[] = [{}, { moving: true }, { driver: true }, { bed: "li
 
 describe("ADR-241 anim states + per-entity chains", () => {
   it("core states are appended (wire-stable) and named in step", () => {
-    expect([AnimState.Block, AnimState.Aim, AnimState.Crouch, AnimState.Carry, AnimState.Sleep]).toEqual([20, 21, 22, 23, 24]);
-    expect(ANIM_STATE_NAMES.slice(20)).toEqual(["block", "aim", "crouch", "carry", "sleep"]);
-    for (let s = 20; s <= 24; s++) expect(STATE_ANIMS[s]!.at(-1)).toBe("idle");
+    expect([AnimState.Block, AnimState.Aim, AnimState.Crouch, AnimState.Carry, AnimState.Sleep, AnimState.BlockHit]).toEqual([20, 21, 22, 23, 24, 25]);
+    expect(ANIM_STATE_NAMES.slice(20)).toEqual(["block", "aim", "crouch", "carry", "sleep", "block_hit"]);
+    for (let s = 20; s <= 25; s++) expect(STATE_ANIMS[s]!.at(-1)).toBe("idle");
   });
   it("attack picks attack_<weapon class>; throwing_* / sling throw; bows release, crossbows and guns fire", () => {
     const a = (ctx: AnimChainCtx) => animChainFor(AnimState.Attack, ctx)![0];
@@ -63,6 +63,7 @@ describe("ADR-241 anim states + per-entity chains", () => {
     expect(name(v2, AnimState.Attack, { weaponClass: "axe" })).toBe("attack_axe"); expect(name(v1, AnimState.Attack, { weaponClass: "axe" })).toBe("attack");
     expect(name(v2, AnimState.Crouch, { moving: true })).toBe("crouch_walk"); expect(name(v1, AnimState.Crouch, { moving: true })).toBe("walk");
     expect(name(v2, AnimState.Sit, { driver: true })).toBe("vehicle"); expect(name(v2, AnimState.Block, {})).toBe("block"); expect(name(v1, AnimState.Block, {})).toBe("block");
+    expect(name(v1, AnimState.BlockHit, {})).toBe("block_hit");
     const hasLie = am.findAnim(v2, "sleep_lie") >= 0; expect(name(v2, AnimState.Sleep, { bed: "lie" })).toBe(hasLie ? "sleep_lie" : "sleep");
     for (let s = 0; s < ANIM_STATE_NAMES.length; s++) for (const c of CTXS) expect(am.animName(v1, am.chainAnim(v1, animChainFor(s, c), s))).toBeDefined();
     // paper doll: a wear layer without crouch_walk pulls the whole doll down the chain together
@@ -77,6 +78,8 @@ describe("ADR-241 anim states + per-entity chains", () => {
       const layers = wear.map((key, i) => ({ sprite: id(r, `cz_${key}_${bt}${i === 5 ? "_sleeves" : ""}`) }));
       expect(am.animName(body, am.sharedChainAnim(body, [{ sprite: body }, ...layers],
         animChainFor(AnimState.Block, {})!, AnimState.Block))).toBe("block");
+      expect(am.animName(body, am.sharedChainAnim(body, [{ sprite: body }, ...layers],
+        animChainFor(AnimState.BlockHit, {})!, AnimState.BlockHit))).toBe("block_hit");
     }
   });
   it("carry / seat sockets are read off the v2 frames (pivot-relative; seat above the feet)", () => {

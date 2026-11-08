@@ -74,6 +74,7 @@ const STATE_ANIM_TABLE: Record<CoreAnimState, readonly string[]> = {
   // ADR-241 v2 player states (default chains; character/animChain.ts picks walk / weapon / bed variants per entity)
   [CoreAnimState.Block]: ["block", "idle"], [CoreAnimState.Aim]: ["bow_draw", "gun_aim", "idle"],
   [CoreAnimState.Crouch]: ["crouch_idle", "idle"], [CoreAnimState.Carry]: ["carry_idle", "idle"], [CoreAnimState.Sleep]: ["sleep", "sit", "idle"],
+  [CoreAnimState.BlockHit]: ["block_hit", "block", "idle"],
 };
 export const STATE_ANIMS: readonly (readonly string[])[] = ANIM_STATE_NAMES.map((_, i) => STATE_ANIM_TABLE[i as CoreAnimState] ?? ["idle"]);
 /** @deprecated use core `AnimState` (ADR-093); kept as an alias so render callers read one numbering. */

@@ -11,7 +11,7 @@ const car = (w: World, id: string, x = 0, y = 0, h = 0): Entity => net(w, G.spaw
 
 describe("ADR-101 vehicle follow-ups", () => {
   it("AnimState.Sit = 13 appended; riders sit, exit restores idle", () => {
-    expect(CoreAnim.Sit).toBe(13); expect(ANIM_STATE_NAMES[13]).toBe("sit"); expect(ANIM_STATE_NAMES.length).toBe(25);
+    expect(CoreAnim.Sit).toBe(13); expect(ANIM_STATE_NAMES[13]).toBe("sit"); expect(ANIM_STATE_NAMES.length).toBe(26);
     const w = makeWorld(); const p = player(w); const v = car(w, "car_sedan", 1, 0);
     if (!w.has(p, G.AnimState)) w.add(p, G.AnimState, { anim: CoreAnim.Idle, startTick: 0 });
     expect(G.enterVehicle(w, p, v)).toBeUndefined(); w.step(1 / 20);

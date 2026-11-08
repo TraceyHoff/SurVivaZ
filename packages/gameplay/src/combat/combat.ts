@@ -73,7 +73,10 @@ export function applyDamage(world: World, target: Entity, amount: number, source
   const hp = world.getField(target, Health, "hp"); if (hp === undefined || world.has(target, Dead)) return;
   if (cause === DamageCause.Combat || cause === DamageCause.Explosion) amount = armorReduce(world, target, amount, pierce);
   if (stanceMode(world, target) === StanceMode.Sleep) wake(world, target); // ADR-244: damage wakes a sleeper
-  if (cause === DamageCause.Combat && source !== 0 && source !== target && isMeleeRange(world, target, source)) amount *= blockMul(world, target, source); // ADR-244 block
+  let blocked = false;
+  if (cause === DamageCause.Combat && source !== 0 && source !== target && isMeleeRange(world, target, source)) {
+    const mul = blockMul(world, target, source); if (mul < 1) blocked = true; amount *= mul; // ADR-244 / ADR-298
+  }
   world.setField(target, Health, "hp", Math.max(0, hp - amount));
   if (world.has(target, VitalsState)) world.setField(target, VitalsState, "lastDamageCause", cause);
   emit(world, Damaged, { target, source, amount, cause });
@@ -81,8 +84,12 @@ export function applyDamage(world: World, target: Entity, amount: number, source
   if (cause === DamageCause.Combat || cause === DamageCause.Explosion) tagCombat(world, source, target);
   // ADR-193: sourceless hits (sunlight, a creature's own fire) carry no attacker: no Hurt anim / knockback flinch,
   // which read as being struck by an invisible force. The HitReact still goes out (hp bar + cause-coloured sizzle).
+  // ADR-298: a blow that lands on a held guard plays block_hit instead of Hurt.
   const directed = source !== 0 && source !== target && world.isAlive(source);
-  if (directed && world.has(target, AnimState) && hp - amount > 0) setAnim(world, target, Anim.Hurt);
+  if (directed && hp - amount > 0) {
+    if (blocked) setAnim(world, target, Anim.BlockHit);
+    else if (world.has(target, AnimState)) setAnim(world, target, Anim.Hurt);
+  }
   if (hp - amount > 0) markHit(world, target, source, amount, cause);
 }
 
