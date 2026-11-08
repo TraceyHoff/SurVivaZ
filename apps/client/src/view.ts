@@ -31,7 +31,7 @@ import { netIdOf } from "@engine/net";
 import { roadSpriteKeys, ROAD_FLAGS, signFrameId } from "./road-sign-view.js";
 import { Road, Sign, surfaceDef, signDef, walkAnimRate, petSits } from "@engine/gameplay";
 import { HitReact, NodeRegrow, hitDirRad, Equipment, Worn, SlotDye, INVENTORY_SLOTS, wornCosmetics } from "@engine/gameplay";
-import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, type ResolvedSprite } from "@engine/gameplay";
+import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, type ResolvedSprite } from "@engine/gameplay";
 
 /** Render-side schemas the renderer's bindings expect (view World only). */
 const VAnim = defineComponent("ViewAnimState", { state: "u8", startTick: "u32" });
@@ -114,6 +114,12 @@ export function ladderFaceHeights(tiles: TileMap | undefined, x: number, y: numb
 /** ADR-162: groundZ for a build piece; a lift above its level floor (decor on a table) is kept on top of a terrain step. */
 export function pieceGroundZ(tiles: TileMap | undefined, x: number, y: number, z: number, lh: number): number {
   const off = z - Math.round(z / lh) * lh; return off > 1e-3 ? groundZ(tiles, x, y, z - off) + off : groundZ(tiles, x, y, z);
+}
+/** ADR-299: pin a shaft hatch (and anyone standing on its lid) to the surrounding rim instead of the pit floor. */
+export function shaftRimGroundZ(tiles: TileMap | undefined, x: number, y: number, z: number): number {
+  const tx = Math.floor(x), ty = Math.floor(y);
+  const h = Math.max(groundZ(tiles, tx + 1.5, ty + .5, 0), groundZ(tiles, tx - .5, ty + .5, 0), groundZ(tiles, tx + .5, ty + 1.5, 0), groundZ(tiles, tx + .5, ty - .5, 0));
+  return h < 0 ? z + h : Math.max(z, h);
 }
 /** ADR-155 camera z easing: time constant (s) and the jump (world z) beyond which it snaps (teleport / respawn). */
 /** ADR-157: Transform-shaped read straight from the typed arrays into a scratch object (no allocation, no keyed stores). */
@@ -460,6 +466,19 @@ export class IsoView {
     const lhv = (defs as unknown as { building?: { levelHeight?: number } } | undefined)?.building?.levelHeight ?? 3;
     // ADR-162: a piece raised above its level floor (decor on a table) keeps that lift over terrain steps
     const groundPiece = (x: number, y: number, z: number): number => pieceGroundZ(tiles, x, y, z, lhv);
+    const hatchTiles = new Set<string>();
+    if (defs && net.isRegistered(GPiece)) {
+      for (const pe of net.query([GPiece, Transform])) {
+        const pd = defs.pieces.get(net.getField(pe, GPiece, "type")!);
+        if (!pd?.features.shaftHatch) continue;
+        const pt = net.get(pe, Transform)!;
+        hatchTiles.add(`${Math.floor(pt.x)},${Math.floor(pt.y)}`);
+      }
+    }
+    const rimPiece = (x: number, y: number, z: number): number => {
+      const off = z - Math.round(z / lhv) * lhv;
+      return off > 1e-3 ? shaftRimGroundZ(tiles, x, y, z - off) + off : shaftRimGroundZ(tiles, x, y, z);
+    };
     let dressed: Set<Entity> | undefined;
     if (lowendDress && this.appearanceEnabled && net.isRegistered(Appearance)) { // nearest N to the camera keep their layers
       const cx = this.renderer.camera.x, cy = this.renderer.camera.y;
@@ -469,7 +488,10 @@ export class IsoView {
     this.carriedNet.clear(); if (net.isRegistered(Stance)) for (const p of net.query([Stance])) { const id = net.getField(p, Stance, "carriedNetId"); const b = id ? netIdEntity(net, id) : undefined; if (b !== undefined) this.carriedNet.add(b); }
     for (const e of net.query([Transform])) {
       if (e === net.environment) continue;
-      const gr = net.has(e, GPiece) || net.has(e, GAnim) ? groundPiece : ground; // ADR-212: walkers on a deck keep their stand height over terrain steps
+      const tf = net.get(e, Transform)!;
+      const grBase = net.has(e, GPiece) || net.has(e, GAnim) ? groundPiece : ground; // ADR-212: walkers on a deck keep their stand height over terrain steps
+      const pinToRim = hatchTiles.has(`${Math.floor(tf.x)},${Math.floor(tf.y)}`) && (net.has(e, GPiece) || !(net.isRegistered(InShaft) && net.getField(e, InShaft, "down")));
+      const gr = pinToRim ? (net.has(e, GPiece) || net.has(e, GAnim) ? rimPiece : shaftRimGroundZ.bind(null, tiles)) : grBase;
       const cur = readXform(net, e, Transform, this.sCur)!; let prev = readXform(net, e, PrevTransform, this.sPrev) ?? cur; // ADR-157: scratch, no per-entity allocation
       if (this.corrections && net.predicted.has(e)) prev = this.corrSampler.apply(this.corrections, e, net.tick, cur, prev, this.sPrev);
       let ve = this.map.get(e);

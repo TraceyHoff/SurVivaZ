@@ -11,7 +11,7 @@ import { HOTBAR_OFFSET, Buffs, Equipment, GAMEPLAY_COMPONENTS, IntentAction, Inv
 import { GameplayConfig, type GameplayRole } from "./config.js";
 import { defaultDefs } from "./data.js";
 import { WeatherKind, type GameDefs } from "./defs.js";
-import { commandIntentSystem } from "./input.js";
+import { commandIntentSystem, queueCommand, ToggleDoorCmd } from "./input.js";
 import { setHotbarSelection, slotItem } from "./inventory.js";
 import { applyReplication, type NetReplicationHooks } from "./replication.js";
 import { chunkSurfaceSystem, clockSystem, exposureSystem, EXPOSURE_EVERY, gameplayClimateModel, SURFACE_EVERY, weatherSystem } from "./systems/environment.js";
@@ -25,6 +25,7 @@ import { diseaseSystem } from "./systems/diseases.js";
 import { installDiseases } from "./diseases.js";
 import { recruitmentSystem } from "./recruitment.js";
 import { animSettleSystem } from "./systems/movement.js";
+import { installShaftHatchInput } from "./building/terrain-hatch.js";
 import { stanceSystem } from "./stance.js";
 import { installBuildingSystems, BUILDING_SYSTEMS } from "./building/install.js";
 import { installCombatSystems, COMBAT_SYSTEMS } from "./combat/install.js";
@@ -145,6 +146,7 @@ export function installGameplay(world: World, options: GameplayOptions | number 
     const fn = sys[name]; if (!fn) throw new Error(`no system ${name}`);
     world.addSystem(phase, name, fn, every ? { every } : {});
   }
+  installShaftHatchInput(world, queueCommand, ToggleDoorCmd);
 }
 
 /** One-shot actions are consumed at the end of the simulation phase (so simulate() replays are correct). */

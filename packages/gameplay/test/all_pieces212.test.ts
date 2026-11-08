@@ -24,7 +24,7 @@ function base(): { w: World; me: Entity } {
   put("wall_doorway", 2.5, 2); put("wall_window", 2.5, 3); put("wall", 2, 2.5, 0, 1); put("wall", 3, 2.5, 0, 1);
   put("floor_hatch_frame", 2.5, 2.5, 1);
   // ADR-265: a dedicated dry terrain face outside the flat base, for the physical ladder.
-  const terrain = w.getResource(TerrainRes) ?? { tileAt: () => 4, heightAt: () => 0 }; w.setResource(TerrainRes, { tileAt: (x, y) => terrain.tileAt(x, y), heightAt: (x, y) => x === 0 && y === -1 ? -3 : terrain.heightAt(x, y) });
+  const terrain = w.getResource(TerrainRes) ?? { tileAt: () => 4, heightAt: () => 0 }; w.setResource(TerrainRes, { tileAt: (x, y) => (x === 5 && y === 0) || (x === 0 && y === -1) ? (terrain.tileAt(x, y) || 4) : terrain.tileAt(x, y), heightAt: (x, y) => x === 0 && y === -1 ? -3 : x === 5 && y === 0 ? -8 : terrain.heightAt(x, y), loaded: () => true });
   steps(w, 2);
   return { w, me };
 }

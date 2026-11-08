@@ -120,7 +120,7 @@ describe("Task 25: dye system", () => {
     const d = G.gameplayDefs(makeWorld());
     let flagged = 0, tiered = 0, total = 0;
     for (const p of d.pieces.values()) { total++; if (p.paintable) flagged++; if (p.tiered) tiered++; }
-    expect(total).toBe(187); expect(flagged).toBe(158); expect(tiered).toBeGreaterThan(0); // Task 28: +3 salt-storage pieces, all paintable; Task 34: +1 Apiary, paintable; ADR-265: +1 unpaintable terrain Ladder
+    expect(total).toBe(188); expect(flagged).toBe(159); expect(tiered).toBeGreaterThan(0); // Task 28: +3 salt-storage pieces, all paintable; Task 34: +1 Apiary, paintable; ADR-265: +1 unpaintable terrain Ladder
     expect(d.pieces.get(d.pieceId("claim_totem"))!.paintable).toBe(false);
     expect(d.pieces.get(d.pieceId("rug"))!.paintable).toBe(true);
     for (const k of ["salt_barrel", "curing_box", "cold_store"]) expect(d.pieces.get(d.pieceId(k))!.paintable).toBe(true);

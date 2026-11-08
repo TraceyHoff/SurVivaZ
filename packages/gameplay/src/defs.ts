@@ -207,6 +207,8 @@ export interface PieceFeatures {
   readonly mount?: boolean;
   /** Terrain face traversal, independent of a wall mounted at this edge. */
   readonly terrainLadder?: boolean;
+  /** ADR-299: ground hatch over a dug shaft; use rides between the live rim and bottom. */
+  readonly shaftHatch?: boolean;
   /** ADR-112 planter: placing spawns tilled soil (Crop kind 0) on the piece; crops planted there ignore the terrain tile rule. */
   readonly planter?: boolean;
   readonly contact?: { readonly dps: number; readonly radius: number; readonly slowMul: number; readonly slowSeconds: number };

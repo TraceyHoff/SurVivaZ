@@ -446,6 +446,9 @@ export const AutoSprint = defineComponent("AutoSprint", {
 
 export const HotbarSelection = defineComponent("HotbarSelection", { slot: { type: "u8", default: NO_SLOT } }, { networked: true });
 
+/** ADR-299: the player/AI human is at the bottom of a shaft hatch on their current tile (otherwise they stand on the lid). */
+export const InShaft = defineComponent("InShaft", { down: "u8" }, { networked: true, persistent: true });
+
 export const GAMEPLAY_COMPONENTS = [
   Emitter, Buffs,
   Health, ResourceNode, Survival, VitalsState, Exposure, Dead,
@@ -494,4 +497,5 @@ export const GAMEPLAY_COMPONENTS = [
   TerrainEdit, // append-only (ADR-263: shovel terrain edits)
   GrownPlant, // append-only (ADR-287)
   AutoSprint, HotbarSelection, // append-only (ADR-289)
+  InShaft, // append-only (ADR-299)
 ] as const;

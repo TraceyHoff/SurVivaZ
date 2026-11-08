@@ -1,6 +1,7 @@
 import { autoSprintReady } from "./auto-sprint.js";
 import { applyDamage } from "../combat/combat.js";
 import { ladderBetween, terrainMoveBlocked } from "../building/terrain-ladder.js";
+import { shaftAwareHeight, updateShaftOccupancy } from "../building/terrain-hatch.js";
 /**
  * Player movement (moved from apps/server protocol.ts). Same function on the server and in client prediction:
  * screen-aligned iso directions from action bits (GameplayActions MoveUp/Down/Left/Right/Sprint occupy bits 0..4,
@@ -55,11 +56,11 @@ export function speedMultiplier(world: World, e: Entity, sprint: boolean): numbe
 }
 
 /** Movement collision query (terrain, edge walls/doors, solid cells); vehicles reuse it per footprint corner. */
-export function movementBlocked(world: World, x0: number, y0: number, x1: number, y1: number, level: number, swim = false): boolean {
+export function movementBlocked(world: World, x0: number, y0: number, x1: number, y1: number, level: number, swim = false, traveler?: Entity): boolean {
   const defs = gameplayDefs(world); const terrain = world.getResource(TerrainRes);
   const tx0 = Math.floor(x0), ty0 = Math.floor(y0), tx1 = Math.floor(x1), ty1 = Math.floor(y1);
   if (terrain) { const tile = terrain.tileAt(tx1, ty1); if (defs.worldgen.unwalkableTiles.has(tile) && !(swim && defs.movement.swimTiles.has(tile)) && waterDepthAt(terrain.tileAt, tx1, ty1, defs.movement.shallowRadius) !== WaterDepth.Shallow) return true; }
-  if (level === 0 && terrainMoveBlocked(world, tx0, ty0, tx1, ty1)) return true;
+  if (level === 0 && terrainMoveBlocked(world, tx0, ty0, tx1, ty1, false, traveler)) return true;
   const idx = world.getResource(StructureIndexRes); if (!idx || idx.count === 0) return false;
   if (tx1 !== tx0 && idx.edgeBlocker(Math.max(tx0, tx1), ty0, level, EdgeSide.West)) return true;
   if (ty1 !== ty0 && idx.edgeBlocker(tx1, Math.max(ty0, ty1), level, EdgeSide.North)) return true;
@@ -89,9 +90,9 @@ export const solidCell = (idx: StructureIndex, tx: number, ty: number, level: nu
  * past a doorway jamb) and against solid cell pieces (stations, furniture, pillars...) it would newly overlap.
  * Terrain keeps the centre-point test (shorelines). Returns the allowed coordinate along the axis.
  */
-export function bodyAxisMove(world: World, x: number, y: number, n: number, axis: 0 | 1, level: number, swim: boolean, radius?: number): number {
+export function bodyAxisMove(world: World, x: number, y: number, n: number, axis: 0 | 1, level: number, swim: boolean, radius?: number, traveler?: Entity): number {
   const nx = axis === 0 ? n : x, ny = axis === 0 ? y : n;
-  if (movementBlocked(world, x, y, nx, ny, level, swim)) return axis === 0 ? x : y; // centre point (terrain + legacy rules)
+  if (movementBlocked(world, x, y, nx, ny, level, swim, traveler)) return axis === 0 ? x : y; // centre point (terrain + legacy rules)
   const idx = world.getResource(StructureIndexRes); if (!idx || idx.count === 0) return n;
   const r = radius ?? gameplayDefs(world).movement.bodyRadius; if (!(r > 0)) return n;
   const m = edgeAxisMove(idx, x, y, n, axis, level, r);
@@ -196,7 +197,7 @@ export function applyTerrainFall(world: World, e: Entity, x: number, y: number, 
   const idx = world.getResource(StructureIndexRes);
   const cross = (bx: number, by: number): void => {
     if (!ladderBetween(idx, tx, ty, bx, by)) {
-      const drop = terrain.heightAt(tx, ty) - terrain.heightAt(bx, by);
+      const drop = shaftAwareHeight(world, terrain, tx, ty, e, bx, by) - shaftAwareHeight(world, terrain, bx, by, e, tx, ty);
       const damage = terrainFallDamage(drop);
       if (damage > 0) {
         const before = world.getField(e, Health, "hp") ?? 0;
@@ -241,28 +242,31 @@ export function applyMovementInput(world: World, e: Entity, actions: number, dt:
     const swim = level === 0; // ground level only: no swimming off a deck
     const sp = gameplayDefs(world).movement.walkSpeed * speedMultiplier(world, e, sprint === 1) * (swim ? swimSpeedMulAt(world, t.x, t.y) : 1) * dt;
     let x = t.x, y = t.y;
-    x = bodyAxisMove(world, x, y, x + dx * sp, 0, level, swim);
+    x = bodyAxisMove(world, x, y, x + dx * sp, 0, level, swim, undefined, e);
     if (level === 0) applyTerrainFall(world, e, t.x, t.y, x, y, dt);
     const beforeY = y;
-    y = bodyAxisMove(world, x, y, y + dy * sp, 1, level, swim);
+    y = bodyAxisMove(world, x, y, y + dy * sp, 1, level, swim, undefined, e);
     if (level === 0) applyTerrainFall(world, e, x, beforeY, x, y, dt);
     // ADR-212 doorway assist: pushing straight into a wall beside an opening slides the body toward the opening's centre
     const assistX = x, assistY = y;
-    if (x === t.x && dx && !dy) y = doorAssist(world, x, y, dx, 0, sp, level, swim);
-    else if (y === t.y && dy && !dx) x = doorAssist(world, x, y, dy, 1, sp, level, swim);
+    if (x === t.x && dx && !dy) y = doorAssist(world, x, y, dx, 0, sp, level, swim, e);
+    else if (y === t.y && dy && !dx) x = doorAssist(world, x, y, dy, 1, sp, level, swim, e);
     if (level === 0) applyTerrainFall(world, e, assistX, assistY, x, y, dt);
-    if (x !== t.x || y !== t.y) world.set(e, Transform, { x, y, facing: turnFacing(t.facing ?? 0, Math.atan2(dy, dx), dt) });
+    if (x !== t.x || y !== t.y) {
+      world.set(e, Transform, { x, y, facing: turnFacing(t.facing ?? 0, Math.atan2(dy, dx), dt) });
+      updateShaftOccupancy(world, e, t.x, t.y, x, y);
+    }
   }
   settleStandZ(world, e, dt); // ADR-212: decks are walked on at deck-top height
 }
 /** Lateral nudge (up to `sp`) toward the centre of the neighbouring row whose centre line is free along `axis`. */
-function doorAssist(world: World, x: number, y: number, d: number, axis: 0 | 1, sp: number, level: number, swim: boolean): number {
+function doorAssist(world: World, x: number, y: number, d: number, axis: 0 | 1, sp: number, level: number, swim: boolean, traveler?: Entity): number {
   const lat = axis === 0 ? y : x; const c = Math.floor(lat) + 0.5; if (Math.abs(c - lat) < 1e-6) return lat;
   const probe = Math.sign(d) * (gameplayDefs(world).movement.bodyRadius + sp + 0.05);
-  const free = axis === 0 ? bodyAxisMove(world, x, c, x + probe, 0, level, swim) !== x : bodyAxisMove(world, c, y, y + probe, 1, level, swim) !== y;
+  const free = axis === 0 ? bodyAxisMove(world, x, c, x + probe, 0, level, swim, undefined, traveler) !== x : bodyAxisMove(world, c, y, y + probe, 1, level, swim, undefined, traveler) !== y;
   if (!free) return lat;
   const nl = lat + Math.sign(c - lat) * Math.min(sp, Math.abs(c - lat));
-  return bodyAxisMove(world, axis === 0 ? x : lat, axis === 0 ? lat : y, nl, axis === 0 ? 1 : 0, level, swim);
+  return bodyAxisMove(world, axis === 0 ? x : lat, axis === 0 ? lat : y, nl, axis === 0 ? 1 : 0, level, swim, undefined, traveler);
 }
 
 /** Player turn rate (rad/s): facing eases toward the move direction instead of snapping to it in one tick, so

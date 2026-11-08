@@ -163,6 +163,10 @@ export class StructureIndex {
   readonly ladders = new Map<number, Entity>();
   ladder(tx: number, ty: number, side: EdgeSide): Entity | 0 { return this.ladders.get(edgeKey(tx, ty, 0, side)) ?? 0; }
 
+  /** ADR-299: ground shaft hatches keyed by their cell (level 0). */
+  readonly hatches = new Map<number, Entity>();
+  hatch(tx: number, ty: number): Entity | 0 { return this.hatches.get(edgeKey(tx, ty, 0, EdgeSide.North)) ?? 0; }
+
   // ---- add / remove ----
   /** Indexes a piece entity at a slot (no rule checks). Returns false if occupied. */
   addPiece(e: Entity, slot: Slot, parent: Entity | 0 = 0): boolean {
@@ -198,6 +202,7 @@ export class StructureIndex {
     const ck = this.chunkOf(e); this.info.set(e, { slot: { ...slot }, gridId, parent, def, ck });
     let set = this.chunkPieces.get(ck); if (!set) this.chunkPieces.set(ck, (set = new Set()));
     set.add(e); this.bump(ck); this.coarse(slot.tx, slot.ty, def, 1);
+    if (def.features.shaftHatch) this.hatches.set(edgeKey(slot.tx, slot.ty, 0, EdgeSide.North), e);
     return true;
   }
   removePiece(e: Entity): void {
@@ -205,6 +210,7 @@ export class StructureIndex {
     this.info.delete(e);
     const { slot: s, def } = inf; this.coarse(s.tx, s.ty, def, -1);
     if (def.features.terrainLadder) this.ladders.delete(edgeKey(s.tx, s.ty, 0, s.side));
+    if (def.features.shaftHatch) this.hatches.delete(edgeKey(s.tx, s.ty, 0, EdgeSide.North));
     else if (inf.parent && this.openings.get(inf.parent) === e) this.openings.delete(inf.parent);
     else if (def.placement === Placement.Edge && def.features.mount) { const k = `${edgeKey(s.tx, s.ty, s.z, s.side)}:${s.rot & 2}`; if (this.mounts.get(k) === e) this.mounts.delete(k); }
     else if (def.placement === Placement.Edge) { const k = edgeKey(s.tx, s.ty, s.z, s.side); if (this.edges.get(k) === e) this.edges.delete(k); }
@@ -294,6 +300,7 @@ export class StructureIndex {
   supportsAt(def: PieceDef, s: Slot, parent: Entity | 0, self: Entity | 0 = 0, out: [Entity, number][] = []): { root: boolean; list: [Entity, number][] } {
     out.length = 0; const z = s.z;
     if (def.features.terrainLadder) return { root: z === 0, list: out };
+    if (def.features.shaftHatch) return { root: z === 0, list: out };
     if (def.placement === Placement.Opening || def.features.mount) { if (parent) out.push([parent, 0]); return { root: false, list: out }; }
     if (def.placement === Placement.Edge) {
       for (const [x, y] of StructureIndex.edgeTiles(s.tx, s.ty, s.side)) { const d = this.deck(x, y, z); if (this.isDeck(d)) out.push([d, 1]); }

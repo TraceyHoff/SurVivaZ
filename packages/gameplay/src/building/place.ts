@@ -25,6 +25,7 @@ import { emitterSpecs } from "../realism.js";
 import { makeNoise } from "../systems/noise.js";
 import { recordRecentBuild } from "../recent.js";
 import { TerrainRes } from "../world.js";
+import { MIN_SHAFT_DROP, shaftDrop, shaftSidesLevel } from "./terrain-hatch.js";
 import { linkAttachment } from "./links.js";
 import { reseatSmallOn, smallPieceZ, surfaceHeightAt } from "./surface.js";
 import { TRI_INRADIUS, triEdges } from "./modular.js";
@@ -304,6 +305,16 @@ export function validatePlacement(world: World, builder: Entity, sn: Snapped, op
     if (terrain.heightAt(...pair[0]) === terrain.heightAt(...pair[1])) return BuildFail.NoTerrainFace;
     if (idx.ladder(slot.tx, slot.ty, slot.side)) return BuildFail.Occupied;
     if (idx.edgeBlocker(slot.tx, slot.ty, 0, slot.side)) return BuildFail.Blocked;
+  }
+  // ADR-299: a shaft hatch covers a dug column and sits at the surrounding rim.
+  if (def.features.shaftHatch) {
+    if (!terrain || slot.z !== 0) return BuildFail.Terrain;
+    for (const [x, y] of tiles) {
+      if (!terrain.tileAt(x, y) || terrain.loaded?.(x, y) === false || isWaterId(terrain.tileAt(x, y))) return BuildFail.Terrain;
+      if (!hasPrivilege(world, builder, x + 0.5, y + 0.5)) return BuildFail.NoPrivilege;
+      if (!shaftSidesLevel(terrain, x, y) || shaftDrop(terrain, x, y) < MIN_SHAFT_DROP) return BuildFail.NoShaft;
+      if (idx.hatch(x, y)) return BuildFail.Occupied;
+    }
   }
   // occupancy
   if (def.features.terrainLadder) { /* its independent face slot was checked above */ }

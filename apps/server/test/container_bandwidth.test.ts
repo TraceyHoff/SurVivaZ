@@ -27,8 +27,9 @@ describe("96-slot Container replication bandwidth", () => {
     // record over a byte boundary. Task 22: 26, not 25 — the new networked Worker component adds one
     // more bit. Task 33: 27, not 26 — the two new networked RecentCrafts / RecentBuilds components
     // add two more bits. ADR-263: 28 — WorkerOrder / WorkerTarget / TerrainEdit push the masks over another byte.
-    // The assertion's point stands: 28 B vs the ~1344 B whole array.
-    expect(deltaBytes).toBeLessThanOrEqual(28); // mostly the per-record component masks
+    // ADR-299: InShaft adds one networked-component mask bit and pushes the record to 29 B.
+    // The assertion's point stands: 29 B vs the ~1344 B whole array.
+    expect(deltaBytes).toBeLessThanOrEqual(29); // mostly the per-record component masks
 
     // a full stack move (item+count+tick+durability+crafter in 2 slots) is still well under 5% of the array
     for (const f of ["items", "counts", "createdTick", "durability", "crafterId"] as const) { st.data[f][slot * N + 10] = 0; st.data[f][slot * N + 95] = 3; }

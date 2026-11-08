@@ -30,6 +30,8 @@ export const enum BuildFail {
   NoBrush = 23,
   /** ADR-265: a terrain ladder needs two different-height dry landings. */
   NoTerrainFace = 24,
+  /** ADR-299: a shaft hatch needs a dug hole below the surrounding rim. */
+  NoShaft = 25,
 }
 export const enum DestroyCause { Damage = 1, Collapse = 2, Demolish = 3 }
 

@@ -5253,6 +5253,32 @@
         "terrainLadder": true
       },
       "$comment": "ADR-265: a complete terrain-face connection, any depth; no wall/deck needed."
+    },
+    {
+      "key": "shaft_hatch",
+      "placement": "cell",
+      "tiered": true,
+      "minTier": 1,
+      "hp": 180,
+      "costScale": 0.75,
+      "ground": true,
+      "groundOnly": true,
+      "starter": true,
+      "solid": false,
+      "blocksPath": false,
+      "layer": 1,
+      "category": "structure",
+      "paintable": true,
+      "extraCost": [
+        {
+          "item": "rope",
+          "count": 2
+        }
+      ],
+      "features": {
+        "shaftHatch": true
+      },
+      "$comment": "ADR-299: ground hatch over a dug shaft; use rides between the live rim and the live bottom at any depth."
     }
   ]
 }

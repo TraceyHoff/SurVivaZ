@@ -18,6 +18,7 @@ import { makeNoise } from "../systems/noise.js";
 import { clearBreach, DOOR_BREACHED } from "../combat/pvp_pieces.js";
 import { distance } from "../systems/fuel.js";
 import { destroyPiece, maxHpOf } from "./integrity.js";
+import { isShaftHatchPiece, useShaftHatch } from "./terrain-hatch.js";
 import { pieceOf, resolveAttachment } from "./links.js";
 import { hasPrivilege, pieceCost, pieceUnlocked, tribeOf, tryPlace } from "./place.js";
 import { structures } from "./structure.js";
@@ -99,7 +100,13 @@ export function doorSystem(world: World): void {
     const s = it.slot(entityIndex(e)); const action = it.data.action[s]!;
     if (action !== IntentAction.ToggleDoor && action !== IntentAction.LockDoor) continue;
     const fail: Fail = (reason) => emit(world, BuildFailed, { entity: e, action, reason });
-    const d = resolveAttachment(world, it.data.target[s]!, AttachKind.Door);
+    const target = it.data.target[s]!;
+    if (action === IntentAction.ToggleDoor && isShaftHatchPiece(world, target)) {
+      if (!inReach(world, e, target, defs.building.buildReach)) { fail(BuildFail.OutOfRange); continue; }
+      useShaftHatch(world, e, target);
+      continue;
+    }
+    const d = resolveAttachment(world, target, AttachKind.Door);
     if (d === undefined) { fail(BuildFail.InvalidTarget); continue; }
     if (!inReach(world, e, d, defs.building.buildReach)) { fail(BuildFail.OutOfRange); continue; }
     const st = world.get(d, DoorState)!; const tribe = tribeOf(world, e);
