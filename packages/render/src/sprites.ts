@@ -32,7 +32,7 @@ import { LayerCache, activeExpression, readAppearanceSlot, type AppearanceBindin
 import { nearestCutoff } from "./gl/fallback.js";
 import { PRIO_NEAR } from "./gl/vram.js";
 import { DeckNeighbors, rotSideMask, deckTopPx, pieceTieBreak, exactTieBreak, vertexPostGlBias, DECK_EDGE_EPS, DECK_SEAM_BAND, DECK_SEAM_SHIFT } from "./building/deckFaces.js";
-import { crackAnim, lCornerArmPivots, PieceCoverIndex, pieceShouldCutaway, ROT_EXACT_PIVOT, ROT_NO_OCCLUDE, ROT_DECK_LIFT, ROT_VERTEX_POST } from "./building/modular.js";
+import { crackAnim, lCornerArmPivots, PieceCoverIndex, pieceHiddenByStory, pieceShouldCutaway, ROT_EXACT_PIVOT, ROT_NO_OCCLUDE, ROT_DECK_LIFT, ROT_VERTEX_POST } from "./building/modular.js";
 import { InteriorRoute, inInteriorRegion, interiorOrder, type InteriorRegion } from "./vehicles/interiorPass.js";
 
 export const INSTANCE_FLOATS = 40;
@@ -739,6 +739,16 @@ export class SpriteBatch {
         fx = (fu - fv) * hw; fy = (fu + fv) * hh - fwz * zs - 20; fk = fu + fv + fwz * zf; hasFocus = true;
       }
     }
+    const playerLevel = hasFocus ? terrainZToFloor(fwz, Math.max(0, cx.groundZAt?.(Math.floor(fwx), Math.floor(fwy)) ?? 0)) : 0;
+    const cut = !hasFocus ? null : cx.grid ? cutawayRegion(cx.grid, Math.floor(fwx), Math.floor(fwy), playerLevel, 600, (sid) => atlas.isRoof(sid))
+      : this.cover.region(Math.floor(fwx), Math.floor(fwy), playerLevel);
+    this.cutawayActive = !!cut;
+    const hideOtherStory = (x: number, y: number, z: number): boolean => {
+      if (!cut) return false;
+      const tx = Math.floor(x), ty = Math.floor(y);
+      if (!cut.has(`${tx},${ty}`)) return false;
+      return terrainZToFloor(z, Math.max(0, cx.groundZAt?.(tx, ty) ?? 0)) !== playerLevel;
+    };
     // focus screen rect (from its current frame; fallback 32x56) for the occlusion test
     const occ = cx.style.occlusion; const occOn = occ.enabled && hasFocus;
     let fl = 0, fr = 0, ft = 0, fb = 0;
@@ -772,6 +782,7 @@ export class SpriteBatch {
       let x = tx[ts]!, y = ty[ts]!, z = tz[ts]!, f = tf[ts]!;
       if (src && src.entities.has(e) && src.sample(world, e, alpha, xf)) { x = xf[0]!; y = xf[1]!; z = xf[2]!; f = xf[3]!; }
       else if (ps >= 0) { x = px[ps]! + (x - px[ps]!) * alpha; y = py[ps]! + (y - py[ps]!) * alpha; z = pz[ps]! + (z - pz[ps]!) * alpha; f = lerpAngle(pf[ps]!, f, alpha); }
+      if (e !== this.focusEntity && hideOtherStory(x, y, z)) return;
       const vu = vc * x - vs * y, vv = vs * x + vc * y; f += vFace; // ADR-253: view position + art facing
       const sx = (vu - vv) * hw, sy = (vu + vv) * hh - z * zs;
       let sid = sp.data.spriteId[k]!;
@@ -1011,6 +1022,7 @@ export class SpriteBatch {
 
     // ---- VFX (render-side, short-lived) ----
     if (cx.vfx) for (const v of cx.vfx.active) {
+      if (hideOtherStory(v.x, v.y, v.z)) continue;
       const xu = vc * v.x - vs * v.y, xv = vs * v.x + vc * v.y;
       const sx = (xu - xv) * hw, sy = (xu + xv) * hh - v.z * zs;
       if (sx < r0x || sx > r1x || sy < r0y || sy > r1y) continue;
@@ -1023,7 +1035,7 @@ export class SpriteBatch {
     // ---- build pieces ----
     this.staticInstances = 0;
     const bpDef = cx.bindings.buildPiece;
-    if (bpDef) this.gatherPieces(cx, world.store(bpDef), hasFocus, fwx, fwy, fwz);
+    if (bpDef) this.gatherPieces(cx, world.store(bpDef), hasFocus, fwx, fwy, playerLevel, cut);
 
     // ---- sort ----
     const n = this.n; const sorted = this.sortKeys.subarray(0, n);
@@ -1083,7 +1095,7 @@ export class SpriteBatch {
     let key: string | undefined; try { key = atlas.registry?.sprite(vis).key; } catch { key = undefined; }
     const t = deckTopPx(key); if (atlas.registry) this.deckTops.set(vis, t); return t;
   }
-  private gatherPieces(cx: PrepareContext, bp: ReturnType<World["store"]>, hasFocus: boolean, fwx: number, fwy: number, fwz: number): void {
+  private gatherPieces(cx: PrepareContext, bp: ReturnType<World["store"]>, hasFocus: boolean, fwx: number, fwy: number, playerLevel: number, cut: Set<string> | null): void {
     const { world, atlas, rect } = cx; const tr = world.store(Transform);
     const pieceLit = cx.bindings.pieceLit, pieceScale = cx.bindings.pieceScale;
     const d = bp.data as Record<string, ArrayLike<number>>;
@@ -1092,12 +1104,7 @@ export class SpriteBatch {
     // keys use the view footprint (viewRect) and pivot; art resolves at rotation (rot + q) & 3 (+ mirror fallback)
     const vq = (this.iso.view ?? 0) & 3, vc = VIEW_COS[vq]!, vs = VIEW_SIN[vq]!;
     const res = this.res;
-    // cutaway region from BuildingGrid: tiles of the building the focus entity stands in
-    const playerLevel = hasFocus ? terrainZToFloor(fwz, Math.max(0, cx.groundZAt?.(Math.floor(fwx), Math.floor(fwy)) ?? 0)) : 0;
-    const cut = !hasFocus ? null : cx.grid ? cutawayRegion(cx.grid, Math.floor(fwx), Math.floor(fwy), playerLevel, 600, (sid) => atlas.isRoof(sid))
-      : this.cover.region(Math.floor(fwx), Math.floor(fwy), playerLevel);
     this.coverNext.clear(); this.tierFallbacks = 0; this.streamFallbacks = 0; this.crackOverlays = 0;
-    this.cutawayActive = !!cut;
     const focusFront = hasFocus ? (() => { const pr = viewRect(Math.floor(fwx), Math.floor(fwy), 1, 1, vq); return pr.x + pr.y + pr.w + pr.h; })() : 0;
     const scratch = this.staticScratch; for (const v of scratch.values()) v.length = 0;
     const checksums = this.pieceChecks; checksums.clear(); let lastCx = NaN, lastCy = NaN, lastVis = true; this.culledChunks = 0;
@@ -1153,6 +1160,7 @@ export class SpriteBatch {
         // roofs are deck-layer (0) pieces placed on the level above the walls and drawn from that level's floor (= wall top)
         const z = floorToTerrainZ(level, tr.data.z[ts]!);
         const inCut = !!cut && footprintHits(cut, ax, ay, fw, fh);
+        if (pieceHiddenByStory(inCut, level, playerLevel)) continue;
         const cutaway = pieceShouldCutaway(inCut, level, playerLevel, roof, atlas.isEnclosure(vis), (rot + vq) & 3, vax + vay + vfw + vfh, focusFront);
         // occlusion (walls etc. not in cutaway): a hit, or a still-fading piece, is drawn dynamically this frame
         let occT = 0;

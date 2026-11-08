@@ -3542,3 +3542,13 @@ Each building type also rolls extra furnishings from a separate seed stream so e
 **Not changed.** Atlas residency / streaming pools, KTX2 quality choices (character bodies stay lossless PNG), texture budgets, or graphics quality. This is a load-path upgrade only.
 
 **Validation.** Parallel `assetFetch` of one URL hits the network once and serves the second caller (and a later call) from Cache Storage. `shouldPrefetchAtlas` keeps characters and body sheets and skips vehicles, `building_t*`, wearable cosmetics, and other stream sheets. Changing the build hash drops the previous cache bucket.
+
+## ADR-308: Show only the current building story (SurVivaZ)
+
+**Context.** Indoor cutaway (ADR-206 / ADR-304) faded roofs and stories above the player to `cutawayAlpha` (0.10) and left every story below fully drawn. Inside a multi-story house that meant furniture, walls, characters, and loot on other floors stayed visible through the room.
+
+**Decision.** While the local player is inside a building (the existing roof/upper-level cutaway region), pieces on any other story are not drawn at all. Characters, dropped items, and VFX whose tile is in that region and whose height maps to another story are skipped too, so nothing above or below the occupied floor remains in view. The player's own story is unchanged: its roof and camera-near enclosure still fade (ADR-304) so the room and its contents stay readable, back walls stay solid, and furniture on this floor never fades. Outdoor pieces and buildings the player is not standing in are unchanged.
+
+**Not changed.** Cutaway region detection, indoor zoom, piece ids, or networked component masks.
+
+**Validation.** `pieceHiddenByStory` is true for stories above and below the player inside the region, false for the occupied story and for pieces outside the region. Existing ADR-304 tests still fade this-story roofs and camera-near walls and leave back walls and furniture solid.

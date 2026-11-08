@@ -156,6 +156,11 @@ export function isEnclosurePieceKey(key: string): boolean {
  * story that sits at or in front of the focus also fades, so walls and doors no longer hide
  * furniture. Far/back walls stay solid so the room still reads as enclosed. Furniture never fades.
  */
+/** ADR-308: other stories inside the building are not drawn (above or below the player). */
+export function pieceHiddenByStory(inRegion: boolean, level: number, playerLevel: number): boolean {
+  return inRegion && level !== playerLevel;
+}
+
 export function pieceShouldCutaway(
   inRegion: boolean,
   level: number,

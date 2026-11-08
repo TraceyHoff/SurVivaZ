@@ -5,7 +5,7 @@ import { World, Transform, defineComponent } from "@engine/core";
 import { loadManifest, mergeManifests, type ManifestJson } from "@engine/assets";
 import { FLOOR_HEIGHT_LEVELS, DEFAULT_ISO } from "@engine/world";
 import {
-  attachToWorld, BuildGhost, chimneySmokePoint, crackAnim, isoZDepthFactor, isEnclosurePieceKey, pieceArtRow, PieceCoverIndex, pieceDepthKey, pieceShouldCutaway,
+  attachToWorld, BuildGhost, chimneySmokePoint, crackAnim, isoZDepthFactor, isEnclosurePieceKey, pieceArtRow, PieceCoverIndex, pieceDepthKey, pieceHiddenByStory, pieceShouldCutaway,
   ROT_EXACT_PIVOT, splitTierKey, streamingFallbackKeys, triArtRow, type BuildPieceDefT,
 } from "../src/index.js";
 
@@ -172,5 +172,17 @@ describe("ADR-304 indoor cutaway", () => {
     expect(pieceShouldCutaway(true, 0, 0, false, true, 1, back, player)).toBe(false); // west back wall
     expect(pieceShouldCutaway(true, 0, 0, false, false, 2, front, player)).toBe(false); // furniture in front
     expect(pieceShouldCutaway(false, 1, 0, true, true, 2, front, player)).toBe(false); // outside the region
+  });
+});
+
+describe("ADR-308 story isolation", () => {
+  it("hides other stories inside the building and leaves this story and outdoor pieces", () => {
+    expect(pieceHiddenByStory(true, 1, 0)).toBe(true); // floor above
+    expect(pieceHiddenByStory(true, 2, 0)).toBe(true);
+    expect(pieceHiddenByStory(true, 0, 1)).toBe(true); // floor below
+    expect(pieceHiddenByStory(true, 0, 0)).toBe(false);
+    expect(pieceHiddenByStory(true, 1, 1)).toBe(false);
+    expect(pieceHiddenByStory(false, 1, 0)).toBe(false); // outside the building
+    expect(pieceHiddenByStory(false, 0, 1)).toBe(false);
   });
 });
