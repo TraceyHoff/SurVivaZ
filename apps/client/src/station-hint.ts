@@ -23,13 +23,16 @@ export const STATION_HINT = { exitSlack: 0.35, graceMs: 350, scanMs: 120 } as co
 export const STATION_HINT_LIFT = 64;
 /** What Interact would open now: a station, a door, something else, or nothing. */
 export const DOOR_HINT_KIND = -1;
-export type InteractPick = { station: Entity; kind: number } | { door: Entity } | "other" | undefined;
+/** ADR-315: the hand over a Claim Flag (Use toggles its claim border). */
+export const CLAIM_HINT_KIND = -2;
+export type InteractPick = { station: Entity; kind: number } | { door: Entity } | { claim: Entity } | "other" | undefined;
 export interface HintHold { station?: Entity; kind: number; lostAt: number }
 
 /** Pure hysteresis step (tested). `near(e)`: the held target is still within range + exitSlack. */
 export function holdStation(prev: HintHold, pick: InteractPick, near: (e: Entity) => boolean, now: number): HintHold {
   if (pick === "other") return { kind: 0, lostAt: 0 };
   if (pick && "door" in pick) return { station: pick.door, kind: DOOR_HINT_KIND, lostAt: 0 };
+  if (pick && "claim" in pick) return { station: pick.claim, kind: CLAIM_HINT_KIND, lostAt: 0 };
   if (pick) return { station: pick.station, kind: pick.kind, lostAt: 0 };
   if (prev.station === undefined) return prev;
   if (!near(prev.station)) return { kind: 0, lostAt: 0 };
@@ -88,7 +91,7 @@ export function mountStationHint(root: HTMLElement, d: StationHintDeps): { destr
       const w = d.world(); const tx = w.getField(shown.station, Transform, "x"), ty = w.getField(shown.station, Transform, "y"); if (tx === undefined || ty === undefined) return;
       const dev = d.device(); const size = dev === "touch" ? 44 : 34; draw(size);
       setData(el, "kind", String(shown.kind)); setData(el, "device", dev);
-      const name = shown.kind === DOOR_HINT_KIND ? "Door" : (STATION_NAMES[shown.kind] ?? "Station"); const txt = stationPrompt(dev, d.key());
+      const name = shown.kind === DOOR_HINT_KIND ? "Door" : shown.kind === CLAIM_HINT_KIND ? "Claim border" : (STATION_NAMES[shown.kind] ?? "Station"); const txt = stationPrompt(dev, d.key());
       if (pill.textContent !== txt) pill.textContent = txt;
       setAttr(el, "aria-label", `${txt} ${name}`); setAttr(el, "title", name);
       const s = worldToScreen(tx, ty, w.getField(shown.station, Transform, "z") ?? 0, camIso(cam)); const z = cam.drawZoom;

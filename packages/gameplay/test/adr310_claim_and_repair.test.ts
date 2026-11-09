@@ -45,18 +45,18 @@ describe("ADR-310 claim flag before building", () => {
     const p = spawnLearned(w, { x: 2, y: 2, maxWeight: 0, clientId: 1 });
     expect(ghost(w, p, "foundation", 2.5, 2.5)).toBe(G.BuildFail.NeedClaim);
     const flag = plantClaim(w, p, 2, 2);
-    expect(w.getField(flag, G.PrivilegeZone, "radius")).toBe(12);
+    expect(w.getField(flag, G.PrivilegeZone, "radius")).toBe(32); // ADR-315 (was 12)
     expect(w.getField(p, G.Tribe, "id") ?? 0).toBeGreaterThan(0);
     expect(G.hasOwnClaim(w, p, 2.5, 2.5)).toBe(true);
     expect(ghost(w, p, "foundation", 2.5, 2.5)).toBe(0);
   });
 
-  it("a flag beyond radius 12 does not authorize a build", () => {
+  it("a flag beyond its radius (32 since ADR-315) does not authorize a build", () => {
     const w = makeWorld();
-    const p = spawnLearned(w, { x: 14, y: 0, maxWeight: 0, clientId: 1 });
+    const p = spawnLearned(w, { x: 34, y: 0, maxWeight: 0, clientId: 1 });
     plantClaim(w, p, 0, 0);
-    expect(G.hasOwnClaim(w, p, 14.5, 0.5)).toBe(false);
-    const sn = snap(w, "foundation", 14.5, 0.5);
+    expect(G.hasOwnClaim(w, p, 34.5, 0.5)).toBe(false);
+    const sn = snap(w, "foundation", 34.5, 0.5);
     expect(typeof sn).toBe("object");
     if (typeof sn === "number") return;
     expect(G.validatePlacement(w, p, sn, { ignoreCost: true, ignoreRange: true })).toBe(G.BuildFail.NeedClaim);

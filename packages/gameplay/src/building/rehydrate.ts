@@ -11,7 +11,7 @@
  */
 import { type Entity, type World } from "@engine/core";
 import { Falloff } from "@engine/world";
-import { AttachKind, BuildPiece, Container, ContainerViewers, CraftingStation, Emitter, Fuel, PieceLink, PieceStability, StallHeader, StallSign } from "../components.js";
+import { AttachKind, BuildPiece, Container, ContainerViewers, CraftingStation, Emitter, Fuel, PieceLink, PieceStability, PrivilegeZone, StallHeader, StallSign } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { StationKind } from "../defs.js";
 import { emitterSpecs } from "../realism.js";
@@ -19,19 +19,23 @@ import { setEmittersLit } from "../systems/fuel.js";
 import { recomputeRegion } from "./integrity.js";
 import { pieceOf } from "./links.js";
 import { LoadedQueueRes, structures } from "./structure.js";
+import { Transform } from "@engine/core";
+import { invalidateZoneGrid, zonesNear, zonesShareOwner } from "./zones.js";
 
 export function rehydrateLoadedStructures(world: World): void {
   const q = world.getResource(LoadedQueueRes); if (!q || (!q.pieces.length && !q.atts.length)) return;
   const pieces = q.pieces.splice(0), atts = q.atts.splice(0);
   if (!isAuthority(world)) return;
-  const defs = gameplayDefs(world); const idx = structures(world); const loaded = new Set<Entity>();
+  const defs = gameplayDefs(world); const idx = structures(world); const loaded = new Set<Entity>(); const legacy: [Entity, number][] = [];
   for (const e of pieces) {
     if (!world.isAlive(e) || world.has(e, PieceStability)) continue;
     const def = defs.pieces.get(world.getField(e, BuildPiece, "type") ?? 0); if (!def) continue;
+    if (def.privilegeRadius > 0 && (world.getField(e, PrivilegeZone, "radius") ?? def.privilegeRadius) < def.privilegeRadius) legacy.push([e, def.privilegeRadius]);
     world.add(e, PieceStability, { value: 0, placedTick: world.tick });
     if (def.station !== StationKind.None && !def.fired && !world.has(e, CraftingStation)) world.add(e, CraftingStation, { kind: def.station });
     loaded.add(e);
   }
+  if (legacy.length) growLegacyClaims(world, legacy);
   if (loaded.size) { recomputeRegion(world, idx, loaded); for (const e of loaded) idx.dirty.add(e); } // dirty: raise anything resting on them (propagateUp)
   for (const a of atts) {
     if (!world.isAlive(a)) continue; const p = pieceOf(world, a); if (p === undefined) continue;
@@ -49,4 +53,24 @@ export function rehydrateLoadedStructures(world: World): void {
     } else if (kind === AttachKind.Storage && world.has(a, StallHeader) && !world.has(a, StallSign)) world.add(a, StallSign, { soldOut: 1 });
   }
   for (const a of atts) if (world.isAlive(a) && world.getField(a, Fuel, "lit")) setEmittersLit(world, a, 1);
+}
+
+/**
+ * ADR-315: saved Claim Flags keep the radius they were placed with (12 before ADR-315). Grow each to the current
+ * privilegeRadius, but never into another party's claim: a flag stops where its rim would meet a foreign claim's rim
+ * (and never shrinks below its saved radius), so a reload cannot lock anyone out of land they built on. Same-owner /
+ * same-clan flags grow freely (their overlap only ever widens their own land). Deterministic: ascending entity order.
+ */
+export function growLegacyClaims(world: World, legacy: readonly (readonly [Entity, number])[]): void {
+  for (const [e, target] of [...legacy].sort((a, b) => a[0] - b[0])) {
+    const r0 = world.getField(e, PrivilegeZone, "radius") ?? 0; const t = world.get(e, Transform); if (!t) continue;
+    let r = target;
+    for (const z of zonesNear(world, t.x, t.y, target)) {
+      if (z === e || zonesShareOwner(world, z, e)) continue;
+      const zt = world.get(z, Transform)!; const d = Math.hypot(zt.x - t.x, zt.y - t.y); const rz = world.getField(z, PrivilegeZone, "radius") ?? 0;
+      r = Math.min(r, Math.max(r0, d - rz));
+    }
+    if (r > r0) world.setField(e, PrivilegeZone, "radius", r);
+  }
+  invalidateZoneGrid(world);
 }

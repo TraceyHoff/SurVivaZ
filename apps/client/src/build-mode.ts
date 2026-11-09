@@ -35,6 +35,8 @@ export interface BuildModeOptions {
   onActiveChange?(active: boolean): void;
   /** ToggleBuild while placing (pad LB+Y): back to the piece picker. */
   onPickPiece?(): void;
+  /** ADR-315: a placement was sent (the ghost it confirmed): e.g. briefly show a new Claim Flag's border. */
+  onPlaced?(p: BuildPreview): void;
   /** ADR-224: Cancel (B / Esc) after a menu-started placement goes back to the build menu (once Cancel is released). */
   onBack?(): void;
   /** ADR-171: road tool / sign placing from inside build mode (HUD 🛣 / 🪧, KBM T / N, pad LT+X / LT+Y). Build mode stops first. */
@@ -135,7 +137,7 @@ export class BuildMode {
     const reason = typeof sn === "number" ? sn : validatePlacement(c.world, c.player, sn);
     p.reason = reason; p.valid = reason === 0;
     if (reason) { this.toast = buildFailText(reason); return false; }
-    const sent = this.o.send(placePreviewIntent(p)); this.toast = sent ? "Building…" : "Not connected"; return sent;
+    const sent = this.o.send(placePreviewIntent(p)); this.toast = sent ? "Building…" : "Not connected"; if (sent) this.o.onPlaced?.(p); return sent;
   }
   private disarm(): void { this.demolishArmedAt = -Infinity; }
   get demolishArmed(): boolean { return this.now() - this.demolishArmedAt < DEMOLISH_CONFIRM_MS; }

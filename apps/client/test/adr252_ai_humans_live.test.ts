@@ -118,7 +118,12 @@ describe("ADR-252 AI humans live: base, bed sleep (ADR-244), defence with block"
           setSpawnPoints(W, []);
           // Isolate defence from navigation around the just-built stations: use an
           // unoccupied clear spawn patch, keeping the sleeper's stance until threatened.
-          const fighter = bots[0]!; const arena = l.game.spawnPoints[2]!;
+          const fighter = bots[0]!;
+          // ADR-315: bases now sit a whole claim apart, so a base can land beside any fixed spawn point; use the
+          // spawn point farthest from every bot base (the clear patch this fixture always meant).
+          const homes = l.bots.map((b) => aiMemoryOf(b.agent).base).filter((b): b is { x: number; y: number } => !!b);
+          const clear = (p: { x: number; y: number }) => Math.min(Infinity, ...homes.map((h) => Math.hypot(h.x - p.x, h.y - p.y)));
+          const arena = [...l.game.spawnPoints].sort((a, b) => clear(b) - clear(a))[0]!;
           prev.delete(fighter); // the fixture teleport is not motion while asleep
           W.set(fighter, Transform, { x: arena.x, y: arena.y, z: 0 });
           W.setField(fighter, Stance, "bedNetId", 0);

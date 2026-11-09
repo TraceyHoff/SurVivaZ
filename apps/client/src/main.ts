@@ -26,7 +26,8 @@ import { GameMenus, padMenuAction } from "./game-menus.js";
 import { BuildMode } from "./build-mode.js";
 import { mountBuildHud, onTouchControl } from "./build-hud.js";
 import { mountToolHint, toolIconFrame } from "./tool-hint.js";
-import { DOOR_HINT_KIND, mountStationHint } from "./station-hint.js";
+import { CLAIM_HINT_KIND, DOOR_HINT_KIND, mountStationHint } from "./station-hint.js";
+import { ClaimView, mountClaimOverlay } from "./claim-overlay.js";
 import { mountWorldTools, type WorldToolsHandle } from "./world-tools.js";
 import { syncUnderground } from "./underground.js";
 import { mountVehicleControls, type VehicleControls } from "./vehicle-controls.js";
@@ -293,7 +294,10 @@ const colors = ["#000", "#3a5", "#495", "#874"];
 let worldTools: WorldToolsHandle | undefined;
 const worldToolsApi = { road: (n: number) => worldTools?.road(n), roadSurface: () => worldTools?.roadSurface() ?? 0, placeSign: () => worldTools?.placeSign() ?? false, editNearestSign: () => worldTools?.editNearestSign() ?? false, surfaces: ROADS.surfaces.map((x) => x.name) };
 /** Build mode (aim-point placement); `buildMode.preview` is the Renderer's buildPreview. */
-const buildMode = new BuildMode({ input, ctx: () => menuCtx(), send: (i) => sendIntent(i), device: () => promptDevice(), onPickPiece: () => menus?.open("build"), onBack: () => menus?.open("build"),
+// ADR-315: client-local claim border view (Use / hand on a Claim Flag toggles it; a just-placed flag shows it briefly)
+const claimView = new ClaimView();
+function toggleClaimView(flag: Entity): void { const on = claimView.toggle(flag); farm?.toast(on ? "Claim border shown" : "Claim border hidden"); }
+const buildMode = new BuildMode({ input, ctx: () => menuCtx(), send: (i) => sendIntent(i), onPlaced: (p) => { if (p.claim) claimView.placed(p.x, p.y, p.claim.radius, performance.now()); }, device: () => promptDevice(), onPickPiece: () => menus?.open("build"), onBack: () => menus?.open("build"),
   tools: { road: () => worldTools?.road(), sign: () => { if (!worldTools?.editNearestSign()) worldTools?.placeSign(); } },
   aim: () => { const p = session.player; const pt = p !== undefined ? world.get(p, Transform) : undefined; return p !== undefined && pt ? aim.resolve(world, p, pt) : undefined; },
   onActiveChange: (on) => { const c = browserInput.controls; if (c) c.layout = on ? buildTouchLayout : gameplayTouchLayout(); } });
@@ -338,7 +342,7 @@ function onUiFrame(): void {
   { const id = padMenuAction(input); if (id) { menus?.open(id); return; } } // ADR-139: pad-only bindings: Select = inventory, LB+Select = crafting, RB+Select = chat
   if (input.pressed("QuickUse") && farm) { const p = session.player; if (p !== undefined && quickUseFires(safeFarmPrompt(p))) farm.trigger(); }
   if (vehicleCtl?.update()) return; // ADR-170: enter / exit (Interact), engine + headlights while driving
-  if (input.pressed("Interact") && !(session.player !== undefined && stanceMode(world, session.player) >= StanceMode.Carry && stanceMode(world, session.player) !== StanceMode.Aim)) { /* ADR-244: carrying → Interact drops; asleep → wakes */ const c = menuCtx(); const t = c && interactPanel(c); if (t?.panel === "trade") menus?.openStall(t.stall); else if (t?.panel === "station") menus?.openStation(t.station, t.kind); else if (t?.panel === "pet") menus?.openPet(t.pet); else if (t?.panel === "worker") menus?.openWorker(t.worker); else if (t?.panel === "loot") menus?.openLoot(t.bag); else if (t?.panel === "storage") menus?.openStorage(t.piece); else if (t?.panel === "lootLocked") farm?.toast("That death bag belongs to another player for 60 seconds"); else if (t?.panel === "wardrobe") menus?.open("wardrobe"); else if (t?.panel === "door") sendIntent(toggleDoorIntent(t.piece)); else if (t) menus?.open("character"); }
+  if (input.pressed("Interact") && !(session.player !== undefined && stanceMode(world, session.player) >= StanceMode.Carry && stanceMode(world, session.player) !== StanceMode.Aim)) { /* ADR-244: carrying → Interact drops; asleep → wakes */ const c = menuCtx(); const t = c && interactPanel(c); if (t?.panel === "trade") menus?.openStall(t.stall); else if (t?.panel === "station") menus?.openStation(t.station, t.kind); else if (t?.panel === "pet") menus?.openPet(t.pet); else if (t?.panel === "worker") menus?.openWorker(t.worker); else if (t?.panel === "loot") menus?.openLoot(t.bag); else if (t?.panel === "storage") menus?.openStorage(t.piece); else if (t?.panel === "lootLocked") farm?.toast("That death bag belongs to another player for 60 seconds"); else if (t?.panel === "wardrobe") menus?.open("wardrobe"); else if (t?.panel === "door") sendIntent(toggleDoorIntent(t.piece)); else if (t?.panel === "claim") toggleClaimView(t.piece); else if (t) menus?.open("character"); }
 }
 /** ADR-160: a loot bag the server opened for us (primary click / tap fallback) shows in the inventory panel once. */
 let lootShown: number | undefined;
@@ -736,6 +740,9 @@ mountLedgeWarning(root, { world: () => world, player: () => session.player, alph
   enabled: () => { const n = performance.now(); if (n >= ledgeWarnAt) { ledgeWarnAt = n + 1000; ledgeWarnOn = loadSettings().ledgeWarnings !== false; } return ledgeWarnOn; },
   ground: (x, y, z) => groundZ(session.client?.tiles.tiles, x, y, z) });
 // ADR-196: build ghost validity outline + magnet snap-edge highlight (WebGL2 and Canvas2D)
+mountClaimOverlay(root, { world: () => world, player: () => session.player, view: claimView, preview: () => (buildMode.active ? buildMode.preview : undefined),
+  camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined), hidden: () => !!menus?.nav.isOpen,
+  ground: (x, y) => groundZ(session.client?.tiles.tiles, x, y, 0) });
 mountSnapOverlay(root, { preview: () => (buildMode.active ? buildMode.preview : undefined), target: () => (buildMode.active ? buildMode.targetOutline : undefined), camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined), hidden: () => !!menus?.nav.isOpen, groundZ: () => iso?.ghostZ });
 // ADR-161: floating loot-bag / dropped-item labels with the Interact prompt
 let nameTagsOn = true, nameTagsAt = 0; // settings read at most once a second (no per-frame JSON parse)
@@ -751,8 +758,8 @@ mountLootLabels(root, { world: () => world, player: () => session.player, camera
 mountStationHint(root, { world: () => world, player: () => session.player, camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined),
   hidden: () => !!menus?.nav.isOpen || buildMode.active || !!vehicleCtl?.driving, device: promptDevice,
   key: () => controlLabel(input.bindings(promptDevice(), "Gameplay").find((b) => b.binding.action === "Interact")?.binding.control),
-  pick: () => { const c = menuCtx(); const t = c && interactPanel(c); return !t ? undefined : t.panel === "station" ? { station: t.station, kind: t.kind } : t.panel === "door" ? { door: t.piece } : "other"; },
-  open: (st, kind) => { if (kind === DOOR_HINT_KIND) sendIntent(toggleDoorIntent(st)); else menus?.openStation(st, kind); },
+  pick: () => { const c = menuCtx(); const t = c && interactPanel(c); return !t ? undefined : t.panel === "station" ? { station: t.station, kind: t.kind } : t.panel === "door" ? { door: t.piece } : t.panel === "claim" ? { claim: t.piece } : "other"; },
+  open: (st, kind) => { if (kind === DOOR_HINT_KIND) sendIntent(toggleDoorIntent(st)); else if (kind === CLAIM_HINT_KIND) toggleClaimView(st); else menus?.openStation(st, kind); },
   art: () => toolIconFrame(iso?.registry, "hand", Math.min(3, devicePixelRatio || 1) * (promptDevice() === "touch" ? 44 : 34) / 32) });
 // ADR-126: tool-needed symbol over the nearest resource node (Settings toggle, live)
 mountToolHint(root, { world: () => world, player: () => session.player, camera: () => iso?.renderer.camera, hidden: () => !!menus?.nav.isOpen || buildMode.active || !!vehicleCtl?.driving,

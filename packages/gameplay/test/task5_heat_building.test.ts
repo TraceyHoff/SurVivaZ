@@ -63,9 +63,9 @@ describe("ceilings require a wall connection", () => {
     // Interior roof tile: no wall below its own edges, but it joins the wall-backed roof cluster.
     const innerRoof = snap(w, "roof_flat", 5.5, 5.5, { level: 1 });
     expect(typeof innerRoof === "number" ? innerRoof : validatePlacement(w, b, innerRoof)).toBe(0);
-    // An upper floor follows the same rule.
-    const loneFloor = snap(w, "floor", 20.5, 20.5, { level: 1 });
-    expect(typeof loneFloor === "number" ? loneFloor : validatePlacement(w, spawnLearned(w, { x: 20, y: 20 }), loneFloor)).toBe(BuildFail.NoSupport);
+    // An upper floor follows the same rule (ADR-315: away from b's now radius-32 claim, which would answer NoPrivilege first).
+    const loneFloor = snap(w, "floor", 60.5, 60.5, { level: 1 });
+    expect(typeof loneFloor === "number" ? loneFloor : validatePlacement(w, spawnLearned(w, { x: 60, y: 60 }), loneFloor)).toBe(BuildFail.NoSupport);
   });
 });
 

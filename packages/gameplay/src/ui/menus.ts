@@ -22,7 +22,7 @@ import { itemInfo, type NameLookup } from "../economy/provenance.js";
 import { BuyFromStallCmd, OpenStallCmd, CollectTillCmd, SetListingCmd, SetStallNameCmd, SetStallOpenCmd, StockStallCmd, UnstockStallCmd, listingRevision, stallListings, stallName, tillOf } from "../economy/stall.js";
 import { holdingTorch } from "../systems/crafting.js";
 import { CancelQueuedCraftCmd, MAX_CRAFT_COUNT, QueueCraftCmd, craftQueueReason, owedOf } from "../systems/craft_queue.js";
-import { pieceCost, pieceGates } from "../building/place.js";
+import { pieceCost, pieceGates, zonesAt } from "../building/place.js";
 import { hasSkillUnlock, unlockRequirement, xpToNext } from "../skills/tree.js";
 import { activeDiseases, careStatus, diseasePresentation, CARE_DRY_MAX } from "../diseases.js";
 import { ambientTemperature, effectiveInsulation, heatAt, shelteredAirTemp, weatherDef, worldSeason } from "../systems/environment.js";
@@ -514,7 +514,9 @@ export type InteractPanel =
   | { panel: "loot"; bag: Entity }
   | { panel: "lootLocked"; bag: Entity }
   | { panel: "storage"; piece: Entity }
-  | { panel: "door"; piece: Entity };
+  | { panel: "door"; piece: Entity }
+  /** ADR-315: Use on a Claim Flag toggles this player's view of its claim radius (client-local; never a panel). */
+  | { panel: "claim"; piece: Entity };
 /** What Interact / Use should do: the closest eligible target. Doors compete by distance with storage, loot,
  *  stations, wardrobes, pets and workers so standing at a house door opens the door instead of a chest through
  *  the wall (ADR-303). Use never opens inventory unless that closest target is a container, loot bag, death bag,
@@ -522,6 +524,7 @@ export type InteractPanel =
 export function interactPanel(c: MenuCtx): InteractPanel | undefined {
   const s = nearestStall(c, STALL_INTERACT_RANGE); if (s !== undefined) return { panel: "trade", stall: s };
   const door = nearestDoor(c);
+  const flag = nearestClaimFlag(c);
   const wardrobe = nearestWardrobePiece(c);
   const st = nearestStation(c); const pet = nearestPet(c.world, c.player); const worker = nearestWorker(c.world, c.player);
   const bag = nearestLootBag(c);
@@ -529,6 +532,7 @@ export function interactPanel(c: MenuCtx): InteractPanel | undefined {
   type Cand = { d: number; pri: number; pick: InteractPanel };
   const cands: Cand[] = [];
   if (door) cands.push({ d: door.d, pri: 0, pick: { panel: "door", piece: door.entity } });
+  if (flag) cands.push({ d: flag.d, pri: 0.5, pick: { panel: "claim", piece: flag.entity } });
   if (bag) {
     const locked = !canLootBagAt(c.world, c.player, bag.entity, ctxTick(c));
     cands.push({ d: bag.d, pri: 1, pick: locked ? { panel: "lootLocked", bag: bag.entity } : { panel: "loot", bag: bag.entity } });
@@ -549,6 +553,19 @@ export function nearestDoor(c: MenuCtx, r = gameplayDefs(c.world).building.build
   for (const e of w.query([BuildPiece, Transform])) {
     if (w.has(e, Dead)) continue;
     const def = defs.pieces.get(w.getField(e, BuildPiece, "type") ?? 0); if (!def?.door) continue;
+    const t = w.get(e, Transform)!; const d = Math.hypot(t.x - me.x, t.y - me.y);
+    if (d <= r && (!best || d < best.d)) best = { entity: e, d };
+  }
+  return best;
+}
+/** ADR-315: nearest Claim Flag (a piece with a privilege radius) within build reach, any owner — viewing a claim's
+ *  border is harmless, and seeing a neighbour's helps plan a flag that only touches it. */
+export function nearestClaimFlag(c: MenuCtx, r = gameplayDefs(c.world).building.buildReach): { entity: Entity; d: number } | undefined {
+  const w = c.world; const me = w.get(c.player, Transform); if (!me || !w.isRegistered(BuildPiece)) return undefined;
+  const defs = gameplayDefs(w); let best: { entity: Entity; d: number } | undefined;
+  for (const e of zonesAt(w, me.x, me.y, r)) { // every zone whose disk comes within reach (flag d <= reach is a subset)
+    if (w.has(e, Dead) || !w.has(e, BuildPiece)) continue;
+    const def = defs.pieces.get(w.getField(e, BuildPiece, "type") ?? 0); if (!def || def.privilegeRadius <= 0) continue;
     const t = w.get(e, Transform)!; const d = Math.hypot(t.x - me.x, t.y - me.y);
     if (d <= r && (!best || d < best.d)) best = { entity: e, d };
   }

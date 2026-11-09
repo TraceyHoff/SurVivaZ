@@ -9,10 +9,12 @@
 import { Transform, type Entity, type World } from "@engine/core";
 import { gameplayDefs } from "../config.js";
 import { Placement } from "../defs.js";
+import { claimOverlap } from "../building/zones.js";
+import { BuildFail } from "../events.js";
 import { hasOwnClaim, outerCornerRots, pieceCost, pieceUnlocked, snapPlacement, validatePlacement, type Snapped } from "../building/place.js";
 import { isFineRot, isLCorner, rotParts, rotatedSize, structures, type StructureIndex } from "../building/structure.js";
 import { maxHpOf } from "../building/integrity.js";
-import { BuildPiece, Dead, EdgeSide, PieceSlot } from "../components.js";
+import { BuildPiece, Dead, EdgeSide, PieceSlot, PrivilegeZone } from "../components.js";
 import { DemolishCmd, ReclaimCmd, RepairCmd, UpgradeCmd } from "../input.js";
 import { siteOf, siteUnclaimed } from "../building/abandoned.js";
 import { countItem } from "../inventory.js";
@@ -44,6 +46,11 @@ export interface BuildPreview {
   snapEdge?: SnapSegment;
   /** ADR-196: ghost footprint outline (world tiles; a segment for wall-like pieces) for the validity overlay. */
   outline?: SnapSegment[];
+  /** ADR-315: the piece is a claim (Claim Flag): its radius for the area preview, and the claim it would overlap
+   *  (ClaimOverlap) so the overlay can mark it. */
+  claim?: { radius: number; overlap?: Entity };
+  /** ADR-315: an overlapping Claim Flag ghost was pushed out onto the overlapped claim's rim (touching is allowed). */
+  bumped?: boolean;
 }
 export interface SnapSegment { x0: number; y0: number; x1: number; y1: number }
 export interface PlacementAim { x: number; y: number; mode: number }
@@ -98,6 +105,7 @@ const slotKey = (sn: Snapped): string => {
 function buildPreviewPass(world: World, player: Entity, sel: BuildSelection, rot: number, aim: PlacementAim | undefined, level: number, assist?: boolean): BuildPreview | undefined {
   const p0 = rawPreview(world, player, sel, rot, aim, level);
   const p = p0 && assist !== false ? magnetize(world, player, sel, rot, aim, level, p0) : p0;
+  if (p && !p.valid && p.claim && p.reason === BuildFail.ClaimOverlap && assist !== false) { const b = bumpClaim(world, player, sel, rot, level, p); if (b) return b; }
   if (!p || p.valid || !(assist ?? (aim !== undefined && aim.mode !== 1))) return p;
   if (p.magnet && isLCorner(gameplayDefs(world).pieces.get(sel.piece))) return p; // ADR-211: the L's red corner is final (no hop to another vertex)
   const at = placementTarget(world, player, aim)!;
@@ -116,7 +124,25 @@ function rawPreview(world: World, player: Entity, sel: BuildSelection, rot: numb
   const key = validateMemo ? slotKey(sn) : ""; let reason = validateMemo?.get(key);
   if (reason === undefined) { reason = validatePlacement(world, player, sn); previewStats.validated++; validateMemo?.set(key, reason); } else previewStats.reused++;
   const r = rotParts(def, sn.slot.rot); // ADR-174: an off-grid piece's ghost turns in its 15° steps, like the placed piece
-  return { ...base, tier: sn.tier, variant: sn.variant, x: sn.pos.x, y: sn.pos.y, z: sn.pos.z, rot: r.rot, rotSteps: r.steps, fine: isFineRot(def, sn.slot.rot), facing: sn.pos.facing, valid: reason === 0, reason };
+  const overlap = def.privilegeRadius > 0 && reason === BuildFail.ClaimOverlap ? claimOverlap(world, sn.pos.x, sn.pos.y, def.privilegeRadius) : undefined;
+  const claim: BuildPreview["claim"] = def.privilegeRadius > 0 ? (overlap !== undefined ? { radius: def.privilegeRadius, overlap } : { radius: def.privilegeRadius }) : undefined;
+  return { ...base, tier: sn.tier, variant: sn.variant, x: sn.pos.x, y: sn.pos.y, z: sn.pos.z, rot: r.rot, rotSteps: r.steps, fine: isFineRot(def, sn.slot.rot), facing: sn.pos.facing, valid: reason === 0, reason, ...(claim ? { claim } : {}) };
+}
+/** ADR-315: farthest (tiles) an overlapping Claim Flag ghost is pushed out to touch the claim it overlaps. */
+export const CLAIM_BUMP_MAX = 4;
+/** ADR-315: push an overlapping claim ghost radially out of the claim it overlaps until the rims touch (clanmates
+ *  "bump up" to each other's land); undefined when that is more than CLAIM_BUMP_MAX away or the spot is not valid. */
+function bumpClaim(world: World, player: Entity, sel: BuildSelection, rot: number, level: number, p: BuildPreview): BuildPreview | undefined {
+  const z = p.claim?.overlap; if (z === undefined || !p.claim) return undefined;
+  const zt = world.get(z, Transform); const rz = world.getField(z, PrivilegeZone, "radius"); if (!zt || rz === undefined) return undefined;
+  let dx = p.x - zt.x, dy = p.y - zt.y; const d = Math.hypot(dx, dy); if (d < 1e-6) return undefined;
+  const need = rz + p.claim.radius; if (need - d > CLAIM_BUMP_MAX) return undefined;
+  dx /= d; dy /= d;
+  for (const extra of [0.01, 0.26, 0.51, 1.01]) {
+    const q = rawPreview(world, player, sel, rot, { mode: 1, x: zt.x + dx * (need + extra), y: zt.y + dy * (need + extra) }, level);
+    if (q?.valid) return { ...q, assisted: true, bumped: true };
+  }
+  return undefined;
 }
 // ---- ADR-196: structural magnet --------------------------------------------------------------------------------
 /** Aim distance (tiles) within which a structural ghost is pulled onto a neighbour: the aim may be up to ~0.5 tile

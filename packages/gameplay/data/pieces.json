@@ -573,7 +573,7 @@
       "tier": 2,
       "hp": 1000,
       "ground": true,
-      "privilegeRadius": 12,
+      "privilegeRadius": 32,
       "cost": [
         {
           "resource": "wood",

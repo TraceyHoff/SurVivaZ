@@ -17,7 +17,7 @@ export function steps(w: World, n: number): void { for (let i = 0; i < n; i++) w
 /** Collects delivered events of one type. */
 export function collect<T>(w: World, type: GEvent<T>): (T & { tick: number })[] { const out: (T & { tick: number })[] = []; w.events.on(type as EventType<T & { tick: number }>, (p) => out.push(p)); return out; }
 
-/** ADR-310: plant a Claim Flag covering nearby tiles (radius 12) so tests can place, repair, or reclaim. */
+/** ADR-310: plant a Claim Flag covering nearby tiles (claim_totem privilegeRadius, 32 since ADR-315) so tests can place, repair, or reclaim. */
 export function plantClaim(world: World, builder: Entity, x = 0, y = 0): Entity {
   const sn = snapPlacement(world, { piece: gameplayDefs(world).pieceId("claim_totem"), x, y, level: 0, rot: 0, tier: 0, variant: 0 });
   if (typeof sn === "number") throw new Error(`plantClaim snap failed: ${sn}`);

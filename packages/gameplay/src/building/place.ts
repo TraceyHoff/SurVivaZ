@@ -4,7 +4,7 @@
  * runs on the client for the ghost preview (client mode skips server-only stability values and uses "has support").
  *
  * Validation order: UnknownPiece, BadTier, LevelLimit, SkillLocked, OutOfRange, NoPrivilege, ZoneFull, Terrain, Occupied,
- * NoSocket, Blocked, NoSupport, NeedClaim, CannotAfford. ADR-211: CornerSlot (straight wall in an outer corner slot) follows Occupied.
+ * NoSocket, Blocked, NoSupport, NeedClaim, CannotAfford. ADR-315: ClaimOverlap (a flag's disk over another claim) follows NoPrivilege. ADR-211: CornerSlot (straight wall in an outer corner slot) follows Occupied.
  */
 import { entityIndex, Membership, Transform, type Entity, type World } from "@engine/core";
 /** ADR-230: number of clan palettes Art ships (assets clanPalettes 1..16); clan ids wrap onto them. */
@@ -32,6 +32,7 @@ import { TRI_INRADIUS, triEdges } from "./modular.js";
 import { anchorFor, edgeKey, isLCorner, lCornerArms, lCornerTile, StructureIndex as SIdx, FINE_POS_STEP, FINE_ROT, FINE_ROT_STEPS, gridRot, LAYER_DECK, LAYER_OPENING, markLinked, slotTransform, structures, type Slot } from "./structure.js";
 type StructureIndex = SIdx;
 import { Falloff } from "@engine/world";
+import { claimOverlap, zonesNear } from "./zones.js";
 import { indexEntity } from "../spawn.js";
 import { tillSlots } from "../economy/config.js";
 import { initDefense } from "../combat/defenses.js";
@@ -201,16 +202,9 @@ export const isStraightWall = (def: PieceDef | undefined): boolean => !!def && d
 export const vertexTiles = (tx: number, ty: number): [number, number][] => [[tx, ty], [tx - 1, ty], [tx, ty - 1], [tx - 1, ty - 1]];
 
 export const tribeOf = (world: World, e: Entity): number => world.getField(e, Tribe, "id") ?? 0;
-export const MAX_PRIVILEGE_RADIUS = 16;
-/** Privilege zones (claim pieces) covering (x,y). */
-export function zonesAt(world: World, x: number, y: number, extra = 0): Entity[] {
-  const out: Entity[] = [];
-  for (const z of installSpatialIndex(world).queryRadius(x, y, MAX_PRIVILEGE_RADIUS + extra)) {
-    const r = world.getField(z, PrivilegeZone, "radius"); if (r === undefined) continue;
-    const t = world.get(z, Transform)!; if (Math.hypot(t.x - x, t.y - y) <= r + extra) out.push(z);
-  }
-  return out.sort((a, b) => a - b);
-}
+/** Privilege zones (claim pieces) whose disk comes within `extra` of (x,y) — covering it when extra = 0. ADR-315: a
+ *  zone grid lookup (building/zones.ts), not a scan of every zone or the entity hash out to the max radius. */
+export function zonesAt(world: World, x: number, y: number, extra = 0): Entity[] { return zonesNear(world, x, y, extra); }
 /** A privilege zone belongs to `builder`: matching tribe, or the builder owns the claim piece. */
 export function zoneOwnedBy(world: World, zone: Entity, builder: Entity): boolean {
   if (!builder) return false;
@@ -310,9 +304,12 @@ export function validatePlacement(world: World, builder: Entity, sn: Snapped, op
   const bt = world.get(builder, Transform);
   if (!opts.ignoreRange && bt && Math.hypot(bt.x - sn.pos.x, bt.y - sn.pos.y) > b.buildReach + rangeSlack(world, builder)) return BuildFail.OutOfRange;
   // privilege: foreign zones block; planting a Claim Flag is allowed in wilderness (a personal tribe is assigned on place)
-  const zones = zonesAt(world, sn.pos.x, sn.pos.y, def.privilegeRadius);
+  // ADR-315: a flag may stand in no foreign claim; its whole disk may overlap no claim at all (own, clan or foreign)
+  // — rims may touch, so clanmates bump claims edge to edge — instead of the old "no foreign zone within r + R".
+  const zones = zonesAt(world, sn.pos.x, sn.pos.y);
   if (zones.some((z) => !zoneOwnedBy(world, z, builder))) return BuildFail.NoPrivilege;
   if (def.privilegeRadius > 0 && !builder) return BuildFail.NoPrivilege;
+  if (def.privilegeRadius > 0 && claimOverlap(world, sn.pos.x, sn.pos.y, def.privilegeRadius) !== undefined) return BuildFail.ClaimOverlap;
   // stalls: clanOnly needs a clan; core land claims (economy.claims) via the stall place permission rule
   if (def.stall && !canPlaceStall(world, builder, sn.pos.x, sn.pos.y, def.stall.clanOnly)) return BuildFail.NoPrivilege;
   const own = zonesAt(world, sn.pos.x, sn.pos.y)[0];

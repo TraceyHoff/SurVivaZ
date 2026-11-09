@@ -35,6 +35,7 @@ export const BUILD_FAIL_TEXT: Readonly<Record<number, string>> = {
   23: "Needs a paint brush in the hotbar", // Task 25 BuildFail.NoBrush
   25: "Needs a dug hole with level sides",
   26: "Place a Claim Flag first", // ADR-310 BuildFail.NeedClaim
+  27: "Claim would overlap another claim", // ADR-315 BuildFail.ClaimOverlap
 };
 export const buildFailText = (reason: number | undefined): string => (reason && BUILD_FAIL_TEXT[reason]) || "Can't place here";
 const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);

@@ -34,6 +34,8 @@ export const enum BuildFail {
   NoShaft = 25,
   /** ADR-310: base pieces, repairs, and reclaim need a placed Claim Flag covering the spot. */
   NeedClaim = 26,
+  /** ADR-315: a Claim Flag's area would overlap another claim (own, clan or foreign; rims may touch). */
+  ClaimOverlap = 27,
 }
 export const enum DestroyCause { Damage = 1, Collapse = 2, Demolish = 3 }
 

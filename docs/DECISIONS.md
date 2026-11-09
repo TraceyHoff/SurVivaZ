@@ -3657,3 +3657,49 @@ Speed and heading come from a frame-to-frame `LedgeMotionTracker` (EMA, ~0.15 s;
 **Not changed.** Door gameplay (toggle, lock, breach, collision, ADR-312 shelter weights), replication (no new networked fields), compass, graphics quality, and art (no sprite reused or recoloured; `add_door_swing.py` was not re-run).
 
 **Validation.** Every `door: true` piece resolves closed and open state art plus its own 4-step swing sprite (variant-matched) at its class rate, and open draws a different frame from closed in every rotation. The step sequence is 1, 2, 3, 4, then end art for opening and 4, 3, 2, 1, then end art for closing, with 62.5 ms frames (16 fps) and about 91 ms frames (11 fps) checked at the boundaries. First sight, breach, and repair snap; a re-entered door is a first sight; a mid-swing reversal continues from the current step. The Canvas2D renderer draws closed, then the swing frames from the render clock, then open. The sound key is chosen per piece class and exists in `bank.json`; toggling a placed garden gate's attachment plays `door.open.gate` / `door.close.gate`, and the initial snapshot is silent. `splitStreamPages` keeps the 1024 pages at 4 per layer and moves the 2048 swing sheets to their own pool.
+
+## ADR-315: Bigger claim areas with a radius preview, a per-player border toggle, and no overlapping claims (SurVivaZ)
+
+**Context.** A Claim Flag (ADR-310) claimed radius 12, too small for a homestead with a garden, pens and outbuildings. Players could not see a claim's extent before or after placing. A new flag was only refused when a *foreign* zone came within r + R, so own and clan claims could overlap freely, and every zone lookup queried the shared entity hash out to the maximum radius.
+
+**Decision.**
+- **Radius 32** (`claim_totem.privilegeRadius`, was 12). That is one world chunk (`CHUNK_SIZE` 32), so one flag covers a 64-tile-wide homestead. That is ~7× the old area and roughly a screen at default build zoom. It is still small enough for several neighbours to fit side by side within a short walk. 40 would make one claim wider than the view and leave little room between non-overlapping claims. `MAX_PRIVILEGE_RADIUS` (zone-grid bound) is 40, and a test asserts every piece stays within it.
+- **Zone grid** (`building/zones.ts`). Every zone is bucketed into 32-tile cells covering its largest possible disk. `zonesAt` reads one cell for a point and a few for a disk, then re-checks live radius and position. The grid rebuilds only when zone membership changes: the new `ComponentStore.membership` counter is bumped on add-new and remove, never on field writes. A zone found away from its bucketed spot forces a rebuild, so answers always match a full scan (tested).
+- **No overlap, touching allowed.** A flag's disk may overlap no claim of any owner (own, clan, or foreign): `distance < r1 + r2 − 0.001` fails with the new `BuildFail.ClaimOverlap = 27`, HUD text "Claim would overlap another claim". Rims may touch, so clanmates can bump their land edge to edge. A flag *centre* inside a foreign claim stays `NoPrivilege`. `zoneOwnedBy` is unchanged, so clan members still build inside each other's claims.
+- **Multiple flags per player are allowed.** Under the no-overlap rule, extra flags only add disjoint land, each costing a flag's materials and carrying its own `maxPiecesPerZone`. Tests cover this.
+- **Ghost preview.** A Claim Flag hologram carries `preview.claim = { radius, overlap? }`. The new claim overlay (`apps/client/src/claim-overlay.ts`, a pointer-events-none canvas under the ADR-196 snap overlay) draws the claim at the ghost. It is green when valid and red on overlap, and the overlapped claim's border turns red too. Nearby borders (rim within 24 tiles) show own and clan claims in cyan and foreign claims in dashed amber. For readability on any ground, each line has a dark halo under a bright stroke, a faint fill, and rim points lifted to the terrain height under them. A ghost that overlaps by ≤ 4 tiles is pushed out to touch the claim (`bumped`).
+- **Placed flags: default off, with a 6 s fade after your own placement** (`CLAIM_FLASH_MS`). Permanent borders around every flag would clutter the screen. The brief fade confirms what you just claimed.
+- **Use / hand toggles a flag's border.** `interactPanel` adds `{ panel: "claim" }` for the nearest flag in build reach (any owner, so you can plan against a neighbour), competing by distance like doors (ADR-303). The ADR-212 hand icon shows over the flag (`CLAIM_HINT_KIND`). Keyboard and gamepad Interact and a touch tap on the hand all toggle `ClaimView`, which is client-local and per player: never sent or replicated. Use on a flag never opens inventory.
+- **AI humans.** `pickBaseSite` accepts a site only if an own or clan claim already covers it, or if a new flag beside the hut (4-tile slack) overlaps no claim and no other agent's planned site (2R + 4 apart unless same tribe). When the local ring is all claimed, it tries tangent spots just outside the blocking claims, nearest first. The flag slot is chosen by the same `validatePlacement`, so it cannot overlap. Hire relocation (ignoreClaim) still rebuilds under the owner's claim. A worker's own flag that would overlap it is now skipped (its salvage stays in the manifest). Abandoned-site reclaim keeps `hasOwnClaim`.
+- **Saved claims.** Loaded flags with the old radius grow to 32 on load (`growLegacyClaims`). Each stops where its rim meets another party's claim and never shrinks, so a reload cannot lock anyone out of land they built on.
+
+**Not changed.** ADR-310 claim requirement, `zoneOwnedBy` / `hasPrivilege` semantics, ZoneFull, flag cost, compass, graphics, art.
+
+**Validation.** `packages/gameplay/test/adr315_claims.test.ts` covers the following:
+- the radius value and bound;
+- clanmates touching (allowed);
+- overlap rejected for clan, own, and foreign claims;
+- foreign centre → NoPrivilege;
+- multiple own flags;
+- clan building inside;
+- hologram radius, ClaimOverlap with the overlapped zone, and the bump;
+- grid = scan over 3000 random claims, add and remove tracking, and 40k lookups with no rebuild (perf sanity);
+- legacy growth;
+- AI site and flag slot clear of a foreign claim;
+- two agents' sites a claim apart.
+
+`apps/client/test/adr315_claim_view.test.ts` covers the following:
+- ghost ring green with own and foreign neighbours;
+- red ghost and red overlapped border;
+- nothing drawn by default;
+- terrain-lifted rim;
+- Use at a flag picks the claim toggle (hand icon) and never a panel;
+- a closer box still wins;
+- the toggle is local and forgets destroyed flags;
+- the post-placement fade;
+- main.ts wiring.
+
+Updated tests (deliberate changes):
+- ADR-310: radius 12 → 32.
+- task5: the lone-floor probe moved out of the bigger claim.
+- adr252 live fight fixture: the arena is now the spawn point farthest from both bot bases, because bases sit a claim apart and one can land beside the fixed spawn point the fixture assumed was clear.

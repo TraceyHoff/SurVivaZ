@@ -34,6 +34,7 @@ export * from "./systems/creature_nav.js";
 export * from "./building/structure.js";
 export * from "./building/links.js";
 export * from "./building/place.js";
+export * from "./building/zones.js";
 export * from "./building/surface.js"; // ADR-162
 export * from "./building/integrity.js";
 export * from "./building/actions.js";

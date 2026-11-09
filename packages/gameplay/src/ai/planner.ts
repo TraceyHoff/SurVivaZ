@@ -17,7 +17,8 @@ import { AttachKind, BuildPiece, Container, DoorState, Fuel, ResourceNode, Worn 
 import { resolveAttachment } from "../building/links.js";
 import { countItem, readSlots } from "../inventory.js";
 import { maxHpOf } from "../building/integrity.js";
-import { hasOwnClaim, pieceCost, pieceUnlocked, snapPlacement, validatePlacement } from "../building/place.js";
+import { hasOwnClaim, pieceCost, pieceUnlocked, snapPlacement, tribeOf, validatePlacement, zoneOwnedBy, zonesAt } from "../building/place.js";
+import { PrivilegeZone } from "../components.js";
 import { isBaseStoragePiece, STARTER_STORAGE_PIECE } from "./storage_api.js";
 import { bedSpots } from "../stance.js";
 import { StationKind, ToolKind, type GameDefs, type ItemDef, type PieceDef, type RecipeDef, type ResourceDef } from "../defs.js";
@@ -83,7 +84,7 @@ export const BASE_SLOTS: readonly BaseSlot[] = [
 ];
 /** Station spots outside the walls (2 candidates each; a slot failing 4 times moves to the next). */
 export const STATION_SLOTS: Readonly<Record<string, readonly { x: number; y: number }[]>> = {
-  claim_totem: [{ x: -1.5, y: 0.5 }, { x: 2.5, y: 3.8 }, { x: 1, y: -1.7 }], // ADR-310: flag first, covering the hut (radius 12)
+  claim_totem: [{ x: -1.5, y: 0.5 }, { x: 2.5, y: 3.8 }, { x: 1, y: -1.7 }], // ADR-310: flag first, covering the hut (ADR-315: radius 32; the slot must also clear every other claim)
   campfire: [{ x: 2.6, y: 2.9 }, { x: 1.6, y: 3.4 }], workbench: [{ x: 3.5, y: 0.5 }, { x: 0.5, y: -1.5 }], storage_box: [{ x: 3.5, y: 1.6 }, { x: 1.5, y: -1.5 }], basic_storage_box: [{ x: 3.5, y: 1.6 }, { x: 1.5, y: -1.5 }], // ADR-250 starter box: same spots (one base box)
   furnace: [{ x: -1.5, y: 0.5 }, { x: 3.5, y: -1.2 }], anvil: [{ x: -1.5, y: 1.6 }, { x: -1.2, y: -1.2 }],
   // Task 28: furnishing — table inside the hut (SE tile), light by the door, shelf + trough + salt barrel in the yard
@@ -196,30 +197,68 @@ export function claimBaseSite(world: World, self: Entity, b: { x: number; y: num
   let m = siteClaims.get(world); if (!m) siteClaims.set(world, (m = new Map()));
   if (b) m.set(self, { x: b.x, y: b.y }); else m.delete(self);
 }
-const claimedNear = (world: World, self: Entity, bx: number, by: number): boolean => {
+const claimedNear = (world: World, self: Entity, bx: number, by: number, spacing = SITE_SPACING): boolean => {
   const m = siteClaims.get(world); if (!m) return false;
-  for (const [e, c] of m) { if (e === self) continue; if (!world.has(e, Transform)) { m.delete(e); continue; } if (Math.hypot(c.x - bx, c.y - by) < SITE_SPACING) return true; }
+  for (const [e, c] of m) {
+    if (e === self) continue; if (!world.has(e, Transform)) { m.delete(e); continue; }
+    const d = Math.hypot(c.x - bx, c.y - by); if (d < SITE_SPACING) return true;
+    if (d < spacing) { const ta = tribeOf(world, self), tb = tribeOf(world, e); if (!(ta && ta === tb)) return true; } // ADR-315: a clanmate's site may sit closer
+  }
   return false;
 };
-/** Pick a base anchor 5..9 tiles from `near`: all four foundations must preview as placeable (the green ghost a player sees), no water / nodes / pieces around, and no other agent's claimed site within SITE_SPACING. */
+/** ADR-315: slack (tiles) between a site's centre and its flag slot (STATION_SLOTS.claim_totem sit within ~3 of the hut centre). */
+export const SITE_FLAG_PAD = 4;
+/** An own / clan claim covering the hut with room to spare: the base needs no new flag there. */
+const OWN_CLAIM_MARGIN = 6;
+/**
+ * ADR-315 claim check for a base site (hut centre bx+1, by+1): either an own / clan claim already covers it, or a new
+ * flag of `flagR` planted beside the hut overlaps no claim (any owner) and no other agent's planned site.
+ */
+export function siteClaimOk(world: World, self: Entity, bx: number, by: number, flagR: number): boolean {
+  if (flagR <= 0) return !claimedNear(world, self, bx, by);
+  const cx = bx + 1, cy = by + 1; let covered = false; let blocked = false;
+  for (const z of zonesAt(world, cx, cy, flagR + SITE_FLAG_PAD)) {
+    const t = world.get(z, Transform)!; const r = world.getField(z, PrivilegeZone, "radius") ?? 0; const d = Math.hypot(t.x - cx, t.y - cy);
+    if (zoneOwnedBy(world, z, self)) { if (d <= r - OWN_CLAIM_MARGIN) covered = true; else blocked = true; }
+    else if (d <= r + flagR + SITE_FLAG_PAD) blocked = true;
+  }
+  if (covered) return !claimedNear(world, self, bx, by);
+  return !blocked && !claimedNear(world, self, bx, by, 2 * flagR + SITE_FLAG_PAD);
+}
+/** Pick a base anchor 5..9 tiles from `near`: all four foundations must preview as placeable (the green ghost a player sees), no water / nodes / pieces around, and no other agent's claimed site within SITE_SPACING.
+ *  ADR-315: the site's Claim Flag must fit without overlapping any claim (siteClaimOk); when the ring around `near` is all
+ *  claimed, candidates just outside the blocking claims' rims (tangent spots, nearest first) are tried next. */
 export function pickBaseSite(world: World, self: Entity, near: { x: number; y: number }, salt: number): { x: number; y: number } | undefined {
   const defs = gameplayDefsOf(world); if (!defs) return undefined; const ix = plannerIndex(defs); const f = ix.piece.get("foundation"); if (!f) return undefined;
+  const flagR = ix.piece.get("claim_totem")?.privilegeRadius ?? 0;
   const sp = installSpatialIndex(world);
+  const ok = (bx: number, by: number): boolean => {
+    if (!siteClaimOk(world, self, bx, by, flagR)) return false;
+    for (let y = -1; y <= 4; y++) for (let x = -2; x <= 4; x++) if (nearWater(world, bx + x + 0.5, by + y + 0.5)) return false;
+    for (const e of sp.queryRect(bx - 3, by - 2, bx + 5, by + 5)) if (world.has(e, ResourceNode) || world.has(e, BuildPiece)) return false;
+    for (const e of sp.queryRadius(bx + 1, by + 1, 9)) if (world.has(e, BuildPiece)) return false;
+    for (const [x, y] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { const sn = snapPlacement(world, { piece: f.id, x: bx + x! + 0.5, y: by + y! + 0.5, level: 0, rot: 0, tier: 0, variant: 0 });
+      if (typeof sn === "number" || validatePlacement(world, self, sn, { ignoreCost: true, ignoreRange: true, ignoreClaim: true }) !== 0) return false; }
+    return true;
+  };
   for (let i = 0; i < 24; i++) {
     const a = ((salt * 0.6180339887 + i * 0.2618) % 1) * Math.PI * 2, r = 5 + (i % 3) * 2;
     const bx = Math.floor(near.x + Math.cos(a) * r), by = Math.floor(near.y + Math.sin(a) * r);
-    if (claimedNear(world, self, bx, by)) continue;
-    let ok = true;
-    for (let y = -1; y <= 4 && ok; y++) for (let x = -2; x <= 4 && ok; x++) if (nearWater(world, bx + x + 0.5, by + y + 0.5)) ok = false;
-    if (!ok) continue;
-    for (const e of sp.queryRect(bx - 3, by - 2, bx + 5, by + 5)) if (world.has(e, ResourceNode) || world.has(e, BuildPiece)) { ok = false; break; }
-    if (!ok) continue;
-    for (const e of sp.queryRadius(bx + 1, by + 1, 9)) if (world.has(e, BuildPiece)) { ok = false; break; }
-    if (!ok) continue;
-    for (const [x, y] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { const sn = snapPlacement(world, { piece: f.id, x: bx + x! + 0.5, y: by + y! + 0.5, level: 0, rot: 0, tier: 0, variant: 0 });
-      if (typeof sn === "number" || validatePlacement(world, self, sn, { ignoreCost: true, ignoreRange: true, ignoreClaim: true }) !== 0) { ok = false; break; } }
-    if (ok) return { x: bx, y: by };
+    if (ok(bx, by)) return { x: bx, y: by };
   }
+  if (flagR <= 0) return undefined;
+  // ADR-315: everything near is claimed — try the rims of the blocking claims / planned sites, nearest to `near` first
+  const blockers: { x: number; y: number; r: number }[] = [];
+  for (const z of zonesAt(world, near.x, near.y, flagR * 2)) { const t = world.get(z, Transform)!; blockers.push({ x: t.x, y: t.y, r: world.getField(z, PrivilegeZone, "radius") ?? 0 }); }
+  for (const [e, c] of siteClaims.get(world) ?? []) if (e !== self && Math.hypot(c.x - near.x, c.y - near.y) < flagR * 3) blockers.push({ x: c.x + 1, y: c.y + 1, r: flagR });
+  const cands: { x: number; y: number; d: number }[] = [];
+  for (const b of blockers) for (let k = 0; k < 16; k++) {
+    const a = (k / 16 + salt * 0.0625) * Math.PI * 2, rr = b.r + flagR + SITE_FLAG_PAD + 1;
+    const bx = Math.floor(b.x + Math.cos(a) * rr) - 1, by = Math.floor(b.y + Math.sin(a) * rr) - 1;
+    cands.push({ x: bx, y: by, d: Math.hypot(bx - near.x, by - near.y) });
+  }
+  cands.sort((p, q) => p.d - q.d || p.x - q.x || p.y - q.y);
+  for (const c of cands.slice(0, 48)) if (ok(c.x, c.y)) return { x: c.x, y: c.y };
   return undefined;
 }
 import { GameplayConfig } from "../config.js";

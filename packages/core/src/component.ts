@@ -30,6 +30,9 @@ export class ComponentStore<S extends Schema = Schema> {
   readonly dirty: Uint32Array;
   /** Entity ids (with generation at removal time) that lost this component this tick; insertion-ordered, deduped. */
   readonly removedThisTick = new Set<number>();
+  /** Bumped whenever an entity gains or loses this component (not on field writes): lets derived indexes
+   *  (e.g. the ADR-315 claim-zone grid) rebuild exactly when membership changes, without a per-tick scan. */
+  membership = 0;
   private cap: number;
   constructor(readonly id: number, readonly def: ComponentDef<S>, maxEntities: number, initialCap = 64) {
     this.fields = schemaFields(def.schema);
@@ -66,7 +69,7 @@ export class ComponentStore<S extends Schema = Schema> {
     if (s < 0) {
       if (this.size === this.cap) this.grow();
       s = this.size++;
-      this.sparse[index] = s; this.dense[s] = entity;
+      this.sparse[index] = s; this.dense[s] = entity; this.membership++;
       for (const f of this.fields) this.writeSlot(s, f, fieldDefault(this.def.schema[f]!));
     }
     this.markChanged(index);
@@ -122,7 +125,7 @@ export class ComponentStore<S extends Schema = Schema> {
   }
   remove(index: number): void {
     const s = this.sparse[index]!; if (s < 0) return;
-    this.removedThisTick.add(this.dense[s]!);
+    this.removedThisTick.add(this.dense[s]!); this.membership++;
     const last = --this.size;
     if (s !== last) {
       const moved = this.dense[last]!;
