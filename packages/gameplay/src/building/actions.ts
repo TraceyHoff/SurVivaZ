@@ -23,6 +23,7 @@ import { pieceOf, resolveAttachment } from "./links.js";
 import { hasOwnClaim, hasPrivilege, pieceCost, pieceUnlocked, tribeOf, tryPlace } from "./place.js";
 import { reclaimAbandonedSite } from "./abandoned.js";
 import { structures } from "./structure.js";
+import { demolishPermission, demolishRefund, movePiece } from "./edit.js";
 
 type Fail = (reason: BuildFail) => void;
 
@@ -51,6 +52,14 @@ export function buildActionSystem(world: World, dt: number): void {
       if (reason) fail(reason);
       continue;
     }
+    if (action === IntentAction.Move) { // ADR-318: one command re-slots the piece (nothing changes on failure)
+      const p = pieceTarget(world, it.data.target[s]! as Entity);
+      if (p === undefined) { fail(BuildFail.InvalidTarget); continue; }
+      if (!inReach(world, e, p, b.buildReach)) { fail(BuildFail.OutOfRange); continue; }
+      const why = movePiece(world, e, p, { x: it.data.x[s]!, y: it.data.y[s]!, level: it.data.level[s]!, rot: it.data.rot[s]! });
+      if (why) fail(why); else makeNoise(world, e, defs.noise.build);
+      continue;
+    }
     if (action < IntentAction.Place || action > IntentAction.Paint) continue;
     if (action === IntentAction.Place) {
       const r = tryPlace(world, e, { piece: it.data.piece[s]!, x: it.data.x[s]!, y: it.data.y[s]!, level: it.data.level[s]!, rot: it.data.rot[s]!, tier: it.data.tier[s]!, variant: it.data.variant[s]! });
@@ -62,6 +71,12 @@ export function buildActionSystem(world: World, dt: number): void {
     if (!inReach(world, e, p, b.buildReach)) { fail(BuildFail.OutOfRange); continue; }
     const pt = world.get(p, Transform)!;
     const bp = world.get(p, BuildPiece)!; const def = defs.pieces.get(bp.type)!;
+    if (action === IntentAction.Demolish) { // ADR-317: permission gate + 100% (own build) / 50% (anything else) refund
+      const why = demolishPermission(world, e, p); if (why) { fail(why); continue; }
+      for (const c of demolishRefund(world, e, p).items) addItem(world, e, c.item, c.count);
+      destroyPiece(world, p, DestroyCause.Demolish);
+      continue;
+    }
     if (!hasPrivilege(world, e, pt.x, pt.y)) { fail(BuildFail.NoPrivilege); continue; } // ADR-207: repair too (outsiders may not touch a claimed base)
     if ((action === IntentAction.Repair || action === IntentAction.Upgrade) && !hasOwnClaim(world, e, pt.x, pt.y)) { fail(BuildFail.NeedClaim); continue; }
     switch (action) {
@@ -83,14 +98,6 @@ export function buildActionSystem(world: World, dt: number): void {
         const missing = 1 - bp.hp / max; const mul = defs.tiers[bp.tier]?.repairMul ?? 0.3;
         if (!exchangeItems(world, e, pieceCost(defs, def, bp.tier, mul * missing), [])) { fail(BuildFail.CannotAfford); continue; }
         world.set(p, BuildPiece, { hp: max, damageStage: 0 }); emit(world, PieceRepaired, { piece: p, hp: max }); clearBreach(world, p);
-        break;
-      }
-      case IntentAction.Demolish: {
-        const owner = world.getField(p, Tribe, "id") ?? 0;
-        if (owner !== 0 && owner !== tribeOf(world, e)) { fail(BuildFail.NoPrivilege); continue; }
-        const frac = bp.hp / Math.max(1, maxHpOf(world, p));
-        for (const c of pieceCost(defs, def, bp.tier)) { const n = Math.floor(c.count * (def.pickup ? 1 : b.demolishRefund) * frac); /* ADR-250: pickup = full refund */ if (n > 0) addItem(world, e, c.item, n); }
-        destroyPiece(world, p, DestroyCause.Demolish);
         break;
       }
       case IntentAction.Paint: {

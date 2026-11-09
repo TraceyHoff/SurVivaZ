@@ -3703,3 +3703,43 @@ Updated tests (deliberate changes):
 - ADR-310: radius 12 → 32.
 - task5: the lone-floor probe moved out of the bigger claim.
 - adr252 live fight fixture: the arena is now the spawn point farthest from both bot bases, because bases sit a claim apart and one can land beside the fixed spawn point the fixture assumed was clear.
+
+## ADR-316: Demolish mode without a hologram, touch select + confirm (SurVivaZ)
+
+**Context.** Demolish (ADR-136 / ADR-302) only existed inside placement: a player had to pick a piece, carry its ghost, then aim at the piece to remove and press X twice. On touch the contextual Demolish button acted on whatever the ghost-lifted touch point happened to hit, with no way to pick a piece directly.
+
+**Decision.**
+- **`BuildMode.startDemolish()`** opens a Building session with no selection: no hologram, no preview queries, only the target under the aim. The aimed (KBM / pad cursor) or tapped (touch) piece gets the ADR-302 amber footprint outline (`targetOutline`), and the HUD strip shows its name · tier · hp, the refund ("Refund: 10 Sticks, 6 Fiber (100%)", ADR-317) and, when it can't be demolished, the reason ("You don't have permission to demolish here") with Demolish disabled. Exiting returns to normal play.
+- **Entry points.** New append-only action `ToggleDemolish`: KBM `Delete` / `Backspace` (every letter key is already a gameplay, build or UINav hotkey: K = Character, L = Clan), gamepad `LB+B` (free in Gameplay and Building; shadows QuickUse / Build.Cancel through modifier shadowing, like LB+Y), and on touch the Build menu's new "Demolish / Move" entry (pad-navigable like every menu button) plus a "Demolish" button on the placement chip. Pressing it while placing switches to demolish mode; pressing it in demolish mode exits. `Build.Cancel` (Esc / B / ✕) also exits.
+- **Desktop and gamepad keep the armed step**: `mouse.left` / `pad.a` (and `X`) arm, a second press within 3 s demolishes; hold `pad.x` confirms at once (ADR-136). Floor PgUp/PgDn / LT+D-pad work as in placement.
+- **Touch.** A tap on the world selects the piece under the finger (no ADR-136 finger lift, no drag), another tap on another piece changes the selection, a tap on empty ground clears it. The strip sits at the HUD's fixed top-centre spot and shows "Confirm demolish" (one tap demolishes, as does the layout's ✓), "Deselect", and the chip's "Exit".
+- Repair / Upgrade / Reclaim / Move stay available on the selected piece in demolish mode.
+
+**Not changed.** Placement flows, ADR-302 outline art, compass, graphics, art. No new glyph art (the generated glyph map is not extended).
+
+**Validation.** `apps/client/test/adr316_demolish_mode.test.ts`: Delete / Backspace / Esc on KBM (no preview, outline, refund text, arm + confirm), switching from placing, a foreign-claim piece (highlighted, reason, disabled, nothing sent), LB+B on gamepad with QuickUse shadowed (A arm/confirm, hold X, B exit), touch select / change / deselect / empty-ground clear / one-tap confirm / Exit, touch bindings. `build_platforms.test.ts` gains the Move action in the strip.
+
+## ADR-317: Demolish refunds by builder, and a claim-permission gate for players and AI humans (SurVivaZ)
+
+**Context.** Demolish refunded `demolishRefund` (50%) × hp fraction for everyone (pickup pieces 100% × hp fraction), so tearing down your own fresh wall lost half of it. Permission was the generic `hasPrivilege` on the tile.
+
+**Decision.**
+- **`PieceBuilder {player}`** (networked, persistent, appended component) records the PlayerId that placed the piece (0 = worldgen). A builder entity without a PlayerId records nothing (unknown). Reclaim (ADR-300) changes owner and tribe but never the builder, so reclaimed ruins are not the reclaimer's build. STRC v6 saves `PieceOwner` and `PieceBuilder` (flag 64); v5 saves load with the builder unknown. Unknown builders count as the actor's when the piece carries the actor's tribe, so pre-ADR-317 bases still refund in full to their tribe.
+- **Refund** (`demolishRefund`, `building/edit.ts`): your own build (or your hired worker's, or for a hired worker its employer's) refunds 100% of the *current* tier's cost regardless of damage; anything else refunds 50%, floored per resource with a minimum of 1. Pickup pieces (ADR-250) follow the same rule (contents still drop as a loot bag).
+- **Permission** (`demolishPermission`): every claim covering the piece must pass `zoneOwnedBy`: own claim, clan claim (clan ranks gate through the existing "base" rank permission, which is what gives a member the clan Tribe), or a hired worker's employer's claim. In the wilderness, worldgen ruins (tribe 0) and your own pieces may go; another tribe's piece may not. Failure is `BuildFail.NoDemolishPermission = 28`, "You don't have permission to demolish here". Claim Flags sit inside their own zone, so only the owner or clan can take one down.
+- The check runs on the server for every Demolish intent, so AI humans (which use the same intent) can never demolish a foreign piece; the client mirrors it to disable the button and explain why.
+
+**Validation.** `packages/gameplay/test/adr317_318_demolish_move.test.ts`: own build 100% when damaged, upgraded tier, clanmate 50% (min 1), reclaimed 50%, hired worker both ways, STRC round-trip + legacy fallback, outsider refused (28) / clanmate allowed, claim flags, wilderness ruins vs foreign piece, unhired vs hired AI. `apps/server/test/adr318_mp_move.test.ts`: over the network an outsider's Demolish is refused, a clanmate gets 50%, the builder 100%. Updated: `adr250_basic_storage_box` (own damaged box now refunds in full).
+
+## ADR-318: Moving placed pieces (SurVivaZ)
+
+**Context.** Re-arranging a base meant demolishing (losing materials and contents) and rebuilding.
+
+**Decision.**
+- **`MoveCmd {target, x, y, level, rot}`** (append-only, after ReclaimCmd; `IntentAction.Move = 16`) re-slots the *same entity* in one server step (`movePiece`): validated with the piece lifted out of the structure index (`StructureIndex.lifted`), then committed. Identity and all state stay: BuildPiece (hp, tier, paint, tint), Tribe, PieceOwner / PieceBuilder, and every attachment (storage contents, fuel, door state, lights) whose Transform / PieceLink follow. Small decor on a moved surface is re-seated. No cost, no refund. Emits `PieceMoved`.
+- **Allowed** only when the piece is fully repaired (`NeedsRepair` 29, "Repair it first"), belongs to the mover (same tribe: own personal tribe or clan; owner / builder pid; a hired worker's employer — else `NotYours` 30, "Not yours"), the mover has privilege at the source and the destination (`NoMovePermission` 33, "No permission here"), the piece type is movable (stalls, planters, terrain ladders, shaft hatches: `NotMovable` 31) and nothing rests on it (`HasDependents` 32: structural dependents or decor on a surface). The destination goes through `validatePlacement` (reach, support, overlap, claim) with `ignoreCost`; a moved Claim Flag ignores its own zone (`ignoreZone`) but still respects ADR-315 no-overlap.
+- **Atomic / cancel.** The client never removes anything: Move lifts the piece into the normal hologram (`BuildSelection.moving`; the ghost preview lifts it the same way so its own cell doesn't block), the amber outline stays on the original, piece / tier cycling is off. Confirm sends one MoveCmd and returns to demolish mode; Cancel (Esc / B / ✕ / "Cancel move") just drops the hologram — the piece never left.
+- **Controls.** `Build.Move` (append-only): KBM `F`, gamepad hold `Y` (tap Y stays Upgrade), touch the strip's "Move" button; available on the targeted piece in demolish mode and while placing.
+- **Replicas.** Pieces replicate their Transform; on non-authority peers `structureIndexSystem` re-indexes a piece whose Transform changed to a different slot, so the client's index (targets, previews, outlines) follows a server move.
+
+**Validation.** `adr317_318_demolish_move.test.ts`: move keeps entity / hp / tier / tribe / builder / contents and re-slots the index; damaged, foreign and no-permission refusals; clanmate allowed; validateMove leaves everything unchanged; occupied destination; structural dependents refused; flag move ignores its own zone and fails ClaimOverlap. `adr316_demolish_mode.test.ts`: F lifts, wheel can't change the piece, Esc restores with nothing sent, click sends MoveCmd; damaged → "Repair it first"; pad hold Y / B. `adr318_mp_move.test.ts`: a stocked box moved over the network keeps its contents and moves on every client's replica and structure index; an outsider's MoveCmd changes nothing. Server command tail tests list `MOVE_COMMANDS`.

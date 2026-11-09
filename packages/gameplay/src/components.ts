@@ -87,6 +87,8 @@ export const enum IntentAction {
   None = 0, Gather = 1, Craft = 2, Use = 3, CancelCraft = 4, Equip = 5, SelectHotbar = 6,
   Place = 10, Upgrade = 11, Repair = 12, Demolish = 13, Paint = 14,
   Reclaim = 15,
+  /** ADR-318: move a placed piece (target) to a new slot (x, y, level, rot). */
+  Move = 16,
   ToggleDoor = 20, LockDoor = 21, OpenContainer = 22, CloseContainer = 23, Deposit = 24, Withdraw = 25, ToggleFire = 26,
   Attack = 30, Reload = 31, Wear = 32, Boil = 33,
 }
@@ -357,6 +359,10 @@ export const enum HordePhase { Idle = 0, Warning = 1, Active = 2 }
 export const HordeStatus = defineComponent("HordeStatus", { phase: "u8", seq: "u16", kind: "u8", size: "u16", alive: "u16", x: "f32", y: "f32", owner: "u32", nextTick: "u32" }, { networked: true });
 /** ADR-119 server-only runtime builder of a piece (PlayerId), for settlement classification + solo horde owners. */
 export const PieceOwner = defineComponent("PieceOwner", { player: "u32" }, { persistent: true }); // ADR-212: survives restarts (respawn at base, horde groups)
+/** ADR-317: PlayerId of whoever originally built the piece (0 = worldgen / unknown builder). Unlike PieceOwner it never
+ *  changes on reclaim, so Demolish can refund 100% only to the real builder. Networked so the client can show the
+ *  refund; saved in STRC v6 (pieces loaded from older blobs have no PieceBuilder: see builtBy fallback). */
+export const PieceBuilder = defineComponent("PieceBuilder", { player: "u32" }, { networked: true, persistent: true });
 
 /**
  * ADR-134 hit reaction (authority writes on creature damage; broadcast, NOT persisted). startTick = tick of the hit,
@@ -506,4 +512,5 @@ export const GAMEPLAY_COMPONENTS = [
   AutoSprint, HotbarSelection, // append-only (ADR-289)
   InShaft, // append-only (ADR-299)
   AbandonedSite, // append-only (ADR-300)
+  PieceBuilder, // append-only (ADR-317)
 ] as const;

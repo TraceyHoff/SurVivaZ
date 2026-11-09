@@ -160,7 +160,8 @@ Read it with `docs/ARCHITECTURE.md` (core batches 2 and 3), `docs/DECISIONS.md` 
 - **Damage is batched.** `damagePiece()` adds to a per-tick pending map, and `gameplay.structureDamage` writes `BuildPiece.hp` at most once per piece per tick. It then emits one `PieceDamaged` per piece and destroys pieces at 0.
 - **`Upgrade {target, tier}`** needs privilege and a higher allowed tier. It pays the new tier's cost and keeps the hp fraction.
 - **`Repair {target}`** costs ceil(missing fraction × tier cost × `repairMul`). It is blocked for `repairBlockedSeconds` after damage.
-- **`Demolish {target}`** needs privilege and refunds `demolishRefund` × hp fraction of the cost. Dependents re-evaluate stability.
+- **`Demolish {target}`** (ADR-317) needs demolish permission: every claim covering the piece must pass `zoneOwnedBy` (own, clan, or a hired worker's employer); in the wilderness only worldgen ruins (tribe 0) and your own pieces. Otherwise `BuildFail.NoDemolishPermission` (28). Your own build (`PieceBuilder`, or your hired worker's) refunds 100% of its current-tier cost regardless of damage; anything else refunds `demolishRefund` (50%), floored, at least 1 of each resource. Dependents re-evaluate stability.
+- **`Move {target, x, y, level, rot}`** (ADR-318) re-slots the same entity (state and attachments kept) when it is fully repaired, belongs to the mover (tribe / owner / employer), nothing rests on it, and the destination passes `validatePlacement` (no cost). Refusals: `NeedsRepair` 29, `NotYours` 30, `NotMovable` 31, `HasDependents` 32, `NoMovePermission` 33.
 - **`Paint {target, paint}`** needs a `paintable` piece and costs 1 dye. `variant` is chosen at placement (cycled by command).
 
 ### 3.5 Doors, containers, privilege

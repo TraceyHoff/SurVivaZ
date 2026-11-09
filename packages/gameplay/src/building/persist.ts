@@ -13,6 +13,8 @@
  *            u8 head, u32 total, LEDGER_SIZE x (u32 age, u16 item, u16 count, u16 priceItem, u32 priceCount, u32 buyerId, u32 crafterId), till container]
  *            [v3: u8 nameLen, nameLen x u8 sign text (StallSign)]
  * ADR-259 v5: flag 32 adds an f64 persistent worker-target identity after exact position.
+ * ADR-317 v6: flag 64 adds u32 owner (PieceOwner) + u32 builder (PieceBuilder) after the worker target. Pieces from
+ * older blobs load without a PieceBuilder (builder unknown: Demolish falls back to the piece's tribe, see building/edit.ts).
  * v1 blobs (no crafterId, no stall block) and v2 blobs (no sign text) still decode.
  * Records are sorted (decks, structure cells, edges, furniture, openings; then level, y, x, type, rot) so hosts
  * decode before openings and re-encoding a decoded chunk is byte-identical. Times are relative to the save tick.
@@ -20,7 +22,7 @@
 import { BinaryReader, BinaryWriter, entityIndex, Transform, type Entity, type World } from "@engine/core";
 import { refreshSoldOut, stallName, writeStallName } from "../economy/stall.js";
 import { CHUNK_SIZE, chunkKey, type ChunkKey } from "@engine/world";
-import { AttachKind, BuildPiece, Container, DoorState, Fuel, LEDGER_SIZE, Listings, PieceLink, PieceSlot, PieceStability, StallHeader, StallLedger, Tribe, WorkerTarget } from "../components.js";
+import { AttachKind, BuildPiece, Container, DoorState, Fuel, LEDGER_SIZE, Listings, PieceBuilder, PieceLink, PieceOwner, PieceSlot, PieceStability, StallHeader, StallLedger, Tribe, WorkerTarget } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { Placement, type PieceDef } from "../defs.js";
 import { attachmentsOf, unlinkPiece } from "./links.js";
@@ -30,7 +32,7 @@ import { edgeKey, isFineRot, lCornerArms, openingParent, slotFromPos, slotTransf
 import { setEmittersLit } from "../systems/fuel.js";
 import { setStallOwnership } from "../economy/stall.js";
 
-export const STRC_VERSION = 5;
+export const STRC_VERSION = 6;
 const MAGIC = [0x53, 0x54, 0x52, 0x43];
 export class StructureCodecError extends Error {}
 
@@ -60,9 +62,11 @@ export function encodeStructures(world: World, cx: number, cy: number): Uint8Arr
     const store = atts.find((a) => world.has(a, Container) && !world.has(a, Fuel));
     const stall = store !== undefined && world.has(store, StallHeader) ? store : undefined;
     const exact = r.def.placement === Placement.Tri || isFineRot(r.def, bp.rot); // ADR-174: off-grid free pieces keep their exact x/y too
-    w.write("u8", (door !== undefined ? 1 : 0) | (fire !== undefined ? 2 : 0) | (store !== undefined ? 4 : 0) | (stall !== undefined ? 8 : 0) | (exact ? 16 : 0) | (world.has(r.e, WorkerTarget) ? 32 : 0));
+    const owner = world.isRegistered(PieceOwner) ? world.getField(r.e, PieceOwner, "player") ?? 0 : 0, builder = world.isRegistered(PieceBuilder) ? world.getField(r.e, PieceBuilder, "player") ?? 0 : 0;
+    w.write("u8", (door !== undefined ? 1 : 0) | (fire !== undefined ? 2 : 0) | (store !== undefined ? 4 : 0) | (stall !== undefined ? 8 : 0) | (exact ? 16 : 0) | (world.has(r.e, WorkerTarget) ? 32 : 0) | (owner || builder ? 64 : 0));
     if (exact) { const s = idx.slotOf(r.e); const t = world.get(r.e, Transform)!; w.write("f64", s?.fx ?? t.x); w.write("f64", s?.fy ?? t.y); }
     if (world.has(r.e, WorkerTarget)) w.write("f64", world.getField(r.e, WorkerTarget, "id")!);
+    if (owner || builder) { w.write("u32", owner); w.write("u32", builder); } // ADR-317 (v6)
     if (door !== undefined) { const d = world.get(door, DoorState)!; w.write("u8", d.open); w.write("u16", d.lockTribe); }
     if (fire !== undefined) { const f = world.get(fire, Fuel)!; w.write("u8", f.lit); w.write("u32", Math.max(0, f.burnUntilTick - world.tick)); }
     for (const c of [fire, store]) if (c !== undefined) writeContainer(world, w, c);
@@ -124,7 +128,7 @@ export interface DecodedStructures { cx: number; cy: number; pieces: Entity[]; h
 export function decodeStructures(world: World, bytes: Uint8Array, opts: { strictHashes?: boolean } = {}): DecodedStructures {
   const defs = gameplayDefs(world); const idx = structures(world); const r = new BinaryReader(bytes); const lh = defs.building.levelHeight;
   for (const m of MAGIC) if (r.read("u8") !== m) throw new StructureCodecError("not a structure blob (bad magic)");
-  const version = r.read("u16"); if (version !== STRC_VERSION && version !== 1 && version !== 2 && version !== 3 && version !== 4) throw new StructureCodecError(`unsupported structure blob version ${version} (expected ${STRC_VERSION})`);
+  const version = r.read("u16"); if (version !== STRC_VERSION && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) throw new StructureCodecError(`unsupported structure blob version ${version} (expected ${STRC_VERSION})`);
   const cx = r.read("i32"), cy = r.read("i32"); const ph = r.read("u32"), ih = r.read("u32");
   const hashMismatch = ph !== defs.hashes.pieces || ih !== defs.hashes.items;
   if (hashMismatch && opts.strictHashes) throw new StructureCodecError("structure blob was written with different piece/item ids");
@@ -134,6 +138,7 @@ export function decodeStructures(world: World, bytes: Uint8Array, opts: { strict
     const level = r.read("u8"), qx = r.read("i16"), qy = r.read("i16"), tribe = r.read("u16"), flags = r.read("u8");
     const triPos = flags & 16 ? { x: r.read("f64"), y: r.read("f64") } : undefined;
     const workerTarget = flags & 32 ? r.read("f64") : 0;
+    const who = flags & 64 ? { owner: r.read("u32"), builder: r.read("u32") } : undefined; // ADR-317 (v6)
     const door = flags & 1 ? { open: r.read("u8"), lockTribe: r.read("u16") } : undefined;
     const fire = flags & 2 ? { lit: r.read("u8"), rem: r.read("u32") } : undefined;
     const def = defs.pieces.get(type);
@@ -145,6 +150,8 @@ export function decodeStructures(world: World, bytes: Uint8Array, opts: { strict
       if (def.placement !== Placement.Opening || parent) {
         e = placePiece(world, 0, { def, slot, parent, pos: slotTransform(def, slot, lh, x, y), tier, variant }, { pay: false, hp, paint, tribe });
         if (workerTarget) world.add(e, WorkerTarget, { id: workerTarget });
+        if (who?.owner && world.isRegistered(PieceOwner)) world.add(e, PieceOwner, { player: who.owner });
+        if (world.isRegistered(PieceBuilder) && world.has(e, PieceBuilder)) { if (who) world.setField(e, PieceBuilder, "player", who.builder); else if (version < 6) world.remove(e, PieceBuilder); } // legacy: builder unknown
         pieces.push(e);
       }
     }

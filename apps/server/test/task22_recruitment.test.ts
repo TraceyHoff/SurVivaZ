@@ -21,8 +21,8 @@ describe("Task 22: AI-human recruitment (server)", () => {
     expect(GAMEPLAY_NET_COMMANDS.find((x) => x.core === G.DismissWorkerCmd)!.net.entityFields).toEqual(["worker"]);
     // worker commands sit just before the dye commands at the tail (append-only, wire indices stable);
     // Task 25 appended DyeCmd after them, so the tail is worker + dye, in that order.
-    const tail = GAMEPLAY_NET_COMMANDS.slice(-(G.WORKER_COMMANDS.length + G.DYE_COMMANDS.length + G.TERRAIN_COMMANDS.length + G.HOTBAR_COMMANDS.length + G.RECLAIM_COMMANDS.length));
-    expect(tail.map((x) => x.core)).toEqual([...G.WORKER_COMMANDS, ...G.DYE_COMMANDS, ...G.TERRAIN_COMMANDS, ...G.HOTBAR_COMMANDS.map(([d]) => d), ...G.RECLAIM_COMMANDS.map(([d]) => d)]);
+    const tail = GAMEPLAY_NET_COMMANDS.slice(-(G.WORKER_COMMANDS.length + G.DYE_COMMANDS.length + G.TERRAIN_COMMANDS.length + G.HOTBAR_COMMANDS.length + G.RECLAIM_COMMANDS.length + G.MOVE_COMMANDS.length));
+    expect(tail.map((x) => x.core)).toEqual([...G.WORKER_COMMANDS, ...G.DYE_COMMANDS, ...G.TERRAIN_COMMANDS, ...G.HOTBAR_COMMANDS.map(([d]) => d), ...G.RECLAIM_COMMANDS.map(([d]) => d), ...G.MOVE_COMMANDS.map(([d]) => d)]);
   });
   it("gameModeConfig: human bots in singleplayer, and in multiplayer only when AI humans are on", () => {
     expect(gameModeConfig("singleplayer", true, true).humanBots).toBe(true);

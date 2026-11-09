@@ -267,6 +267,13 @@
     "modifiers": [
      "pad.lt"
     ]
+   },
+   {
+    "action": "ToggleDemolish",
+    "control": "pad.b",
+    "modifiers": [
+     "pad.lb"
+    ]
    }
   ],
   "Building": [
@@ -395,6 +402,21 @@
     "modifiers": [
      "pad.lt"
     ]
+   },
+   {
+    "action": "ToggleDemolish",
+    "control": "pad.b",
+    "modifiers": [
+     "pad.lb"
+    ]
+   },
+   {
+    "action": "Build.Move",
+    "control": "pad.y",
+    "interaction": {
+     "type": "longPress",
+     "ms": 500
+    }
    }
   ],
   "Inventory": [

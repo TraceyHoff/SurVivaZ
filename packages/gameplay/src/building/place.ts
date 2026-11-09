@@ -37,7 +37,7 @@ import { indexEntity } from "../spawn.js";
 import { tillSlots } from "../economy/config.js";
 import { initDefense } from "../combat/defenses.js";
 import { assignStallOwner, canPlaceStall } from "../economy/stall.js";
-import { Listings, PieceOwner, StallHeader, StallLedger, StallSign } from "../components.js";
+import { Listings, PieceBuilder, PieceOwner, StallHeader, StallLedger, StallSign } from "../components.js";
 import { PlayerId } from "@engine/core";
 import { hasSkillUnlock, pieceToken, tierToken } from "../skills/tree.js";
 
@@ -297,7 +297,8 @@ export const itemRepairUnlocked = (world: World, e: Entity, itemId: number): boo
   const key = gameplayDefs(world).items.get(itemId)?.key;
   return !key || hasSkillUnlock(world, e, `item:${key}`);
 };
-export function validatePlacement(world: World, builder: Entity, sn: Snapped, opts: { ignoreCost?: boolean; ignoreRange?: boolean; ignoreClaim?: boolean } = {}): BuildFail | 0 {
+/** ADR-318: `ignoreZone` = the Claim Flag being moved (its own zone neither blocks nor overlaps its new spot). */
+export function validatePlacement(world: World, builder: Entity, sn: Snapped, opts: { ignoreCost?: boolean; ignoreRange?: boolean; ignoreClaim?: boolean; ignoreZone?: Entity } = {}): BuildFail | 0 {
   const defs = gameplayDefs(world); const b = defs.building; const idx = structures(world); const { def, slot } = sn;
   if (slot.z > b.maxLevel || slot.z < def.minLevel || (def.groundOnly && slot.z !== 0)) return BuildFail.LevelLimit;
   if (!pieceUnlocked(world, builder, def, sn.tier)) return BuildFail.SkillLocked;
@@ -306,13 +307,13 @@ export function validatePlacement(world: World, builder: Entity, sn: Snapped, op
   // privilege: foreign zones block; planting a Claim Flag is allowed in wilderness (a personal tribe is assigned on place)
   // ADR-315: a flag may stand in no foreign claim; its whole disk may overlap no claim at all (own, clan or foreign)
   // — rims may touch, so clanmates bump claims edge to edge — instead of the old "no foreign zone within r + R".
-  const zones = zonesAt(world, sn.pos.x, sn.pos.y);
+  const zones = zonesAt(world, sn.pos.x, sn.pos.y).filter((z) => z !== opts.ignoreZone);
   if (zones.some((z) => !zoneOwnedBy(world, z, builder))) return BuildFail.NoPrivilege;
   if (def.privilegeRadius > 0 && !builder) return BuildFail.NoPrivilege;
-  if (def.privilegeRadius > 0 && claimOverlap(world, sn.pos.x, sn.pos.y, def.privilegeRadius) !== undefined) return BuildFail.ClaimOverlap;
+  if (def.privilegeRadius > 0 && claimOverlap(world, sn.pos.x, sn.pos.y, def.privilegeRadius, opts.ignoreZone) !== undefined) return BuildFail.ClaimOverlap;
   // stalls: clanOnly needs a clan; core land claims (economy.claims) via the stall place permission rule
   if (def.stall && !canPlaceStall(world, builder, sn.pos.x, sn.pos.y, def.stall.clanOnly)) return BuildFail.NoPrivilege;
-  const own = zonesAt(world, sn.pos.x, sn.pos.y)[0];
+  const own = zones[0];
   if (own !== undefined && (idx.zoneCounts.get(own) ?? 0) >= b.maxPiecesPerZone) return BuildFail.ZoneFull;
   // terrain for ground-level pieces
   const tiles = def.placement === Placement.Cell || def.placement === Placement.Free ? idx.grid.footprintTiles(def.id, slot.tx, slot.ty, gridRot(def, slot.rot)) : def.placement === Placement.Tri ? [[slot.tx, slot.ty] as [number, number]] : [];
@@ -409,6 +410,9 @@ export function placePiece(world: World, builder: Entity | 0, sn: Snapped, opts:
   if (tribe) world.add(e, Tribe, { id: tribe });
   const builderId = builder && world.isRegistered(PlayerId) ? world.getField(builder, PlayerId, "id") ?? 0 : 0;
   if (builderId && isAuthority(world)) world.add(e, PieceOwner, { player: builderId }); // ADR-119 settlements / ADR-121 solo hordes
+  // ADR-317: original builder (0 = worldgen / load, which persist then restores). A builder entity without a PlayerId
+  // records nothing: "unknown", so Demolish falls back to the piece's tribe (building/edit.ts builtByActor).
+  if (isAuthority(world) && world.isRegistered(PieceBuilder) && (!builder || builderId)) world.add(e, PieceBuilder, { player: builderId });
   // clan tint: u8 index into the assets manifest clanPalettes (0 = no clan; clanTintIndex wraps ids onto the 16 palettes, ADR-230)
   const clan = builder && world.isRegistered(Membership) ? world.getField(builder, Membership, "clanId") ?? 0 : 0;
   if (clan) world.setField(e, BuildPiece, "tint", clanTintIndex(clan));

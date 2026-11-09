@@ -15,7 +15,9 @@ import { hasOwnClaim, outerCornerRots, pieceCost, pieceUnlocked, snapPlacement, 
 import { isFineRot, isLCorner, rotParts, rotatedSize, structures, type StructureIndex } from "../building/structure.js";
 import { maxHpOf } from "../building/integrity.js";
 import { BuildPiece, Dead, EdgeSide, PieceSlot, PrivilegeZone } from "../components.js";
-import { DemolishCmd, ReclaimCmd, RepairCmd, UpgradeCmd } from "../input.js";
+import { DemolishCmd, MoveCmd, ReclaimCmd, RepairCmd, UpgradeCmd } from "../input.js";
+import { demolishPermission, demolishRefund, moveBlocker, validateLiftedMove } from "../building/edit.js";
+import type { ItemCount } from "../defs.js";
 import { siteOf, siteUnclaimed } from "../building/abandoned.js";
 import { countItem } from "../inventory.js";
 import { placeIntent, type BuildSelection, type MenuIntent } from "./menus.js";
@@ -116,15 +118,21 @@ function buildPreviewPass(world: World, player: Entity, sel: BuildSelection, rot
   return p;
 }
 function rawPreview(world: World, player: Entity, sel: BuildSelection, rot: number, aim: PlacementAim | undefined, level: number): BuildPreview | undefined {
+  // ADR-318: a move ghost snaps and validates with the moved piece lifted out of the index (it may overlap its old spot)
+  const mv = sel.moving;
+  if (mv !== undefined && world.isAlive(mv)) { const pre = moveBlocker(world, player, mv); return structures(world).lifted(mv, () => rawPreviewAt(world, player, sel, rot, aim, level, pre)); }
+  return rawPreviewAt(world, player, sel, rot, aim, level, undefined);
+}
+function rawPreviewAt(world: World, player: Entity, sel: BuildSelection, rot: number, aim: PlacementAim | undefined, level: number, movePre: number | undefined): BuildPreview | undefined {
   const d = gameplayDefs(world); const def = d.pieces.get(sel.piece); const at0 = placementTarget(world, player, aim); if (!def || !at0) return undefined;
   const at = withinSnapReach(world, player, at0);
   const sn = snapPlacement(world, { piece: sel.piece, x: at.x, y: at.y, level, rot, tier: sel.tier, variant: sel.variant });
   const base = { pieceKey: def.key, piece: def.id, tier: sel.tier, variant: sel.variant, paint: sel.paint, level, rotSteps: rotationSteps(world, sel.piece), request: { x: at.x, y: at.y, rot } };
   if (typeof sn === "number") return { ...base, x: at.x, y: at.y, z: level * d.building.levelHeight, rot, valid: false, reason: sn };
-  const key = validateMemo ? slotKey(sn) : ""; let reason = validateMemo?.get(key);
-  if (reason === undefined) { reason = validatePlacement(world, player, sn); previewStats.validated++; validateMemo?.set(key, reason); } else previewStats.reused++;
+  const key = validateMemo ? slotKey(sn) + (sel.moving !== undefined ? `|m${sel.moving}` : "") : ""; let reason = validateMemo?.get(key);
+  if (reason === undefined) { reason = movePre !== undefined ? movePre || validateLiftedMove(world, player, sel.moving!, sn) : validatePlacement(world, player, sn); previewStats.validated++; validateMemo?.set(key, reason); } else previewStats.reused++;
   const r = rotParts(def, sn.slot.rot); // ADR-174: an off-grid piece's ghost turns in its 15° steps, like the placed piece
-  const overlap = def.privilegeRadius > 0 && reason === BuildFail.ClaimOverlap ? claimOverlap(world, sn.pos.x, sn.pos.y, def.privilegeRadius) : undefined;
+  const overlap = def.privilegeRadius > 0 && reason === BuildFail.ClaimOverlap ? claimOverlap(world, sn.pos.x, sn.pos.y, def.privilegeRadius, sel.moving) : undefined;
   const claim: BuildPreview["claim"] = def.privilegeRadius > 0 ? (overlap !== undefined ? { radius: def.privilegeRadius, overlap } : { radius: def.privilegeRadius }) : undefined;
   return { ...base, tier: sn.tier, variant: sn.variant, x: sn.pos.x, y: sn.pos.y, z: sn.pos.z, rot: r.rot, rotSteps: r.steps, fine: isFineRot(def, sn.slot.rot), facing: sn.pos.facing, valid: reason === 0, reason, ...(claim ? { claim } : {}) };
 }
@@ -326,8 +334,15 @@ export interface PieceTarget {
   canRepair: boolean; canUpgrade: boolean; canReclaim: boolean; canAfford: { repair: boolean; upgrade: boolean };
   /** ADR-310: the player's Claim Flag covers this piece; they have unlocked its current tier. */
   onClaim: boolean; repairUnlocked: boolean;
-  /** ADR-250: Demolish is a "Pick up" (full refund x hp fraction, contents drop as a bag). */
+  /** ADR-250: Demolish is a "Pick up" (contents drop as a bag). */
   pickup: boolean;
+  /** ADR-317: Demolish permission (0 = allowed, else BuildFail.NoDemolishPermission) and what it would refund
+   *  (`full` = your own build: 100%; else 50%, min 1 each). */
+  demolishReason: number; refund: ItemCount[]; refundFull: boolean;
+  /** ADR-318: 0 when the piece may be picked up and moved, else the BuildFail (NotYours, NeedsRepair, ...). */
+  moveReason: number;
+  /** Rotation (BuildPiece.rot), variant and paint, so a move ghost starts as the placed piece. */
+  rot: number; variant: number; paint: number;
 }
 /** Placed piece nearest the aim point (within `radius` tiles, same level preferred) that is in build reach; undefined if none. */
 export function pieceTargetAt(world: World, player: Entity, at: { x: number; y: number } | undefined, level = 0, radius = 0.9): PieceTarget | undefined {
@@ -358,12 +373,16 @@ export function pieceTargetAt(world: World, player: Entity, at: { x: number; y: 
     canRepair: bp.hp < maxHp && onClaim && repairUnlocked, canUpgrade: next !== undefined && onClaim,
     canReclaim: (() => { const site = siteOf(world, best); return !!site && siteUnclaimed(world, site) && onClaim; })(), pickup: def.pickup,
     onClaim, repairUnlocked,
-    canAfford: { repair: has(pieceCost(d, def, bp.tier, mul * missing)), upgrade: next !== undefined && has(pieceCost(d, def, next)) } };
+    canAfford: { repair: has(pieceCost(d, def, bp.tier, mul * missing)), upgrade: next !== undefined && has(pieceCost(d, def, next)) },
+    demolishReason: demolishPermission(world, player, best), ...(() => { const r = demolishRefund(world, player, best); return { refund: r.items, refundFull: r.full }; })(),
+    moveReason: moveBlocker(world, player, best), rot: bp.rot, variant: bp.variant, paint: bp.paint };
 }
 export const repairIntent = (target: Entity): MenuIntent => ({ cmd: RepairCmd, args: { target }, entities: ["target"] });
 export const reclaimIntent = (target: Entity): MenuIntent => ({ cmd: ReclaimCmd, args: { target }, entities: ["target"] });
 export const upgradeIntent = (target: Entity, tier: number): MenuIntent => ({ cmd: UpgradeCmd, args: { target, tier }, entities: ["target"] });
 export const demolishIntent = (target: Entity): MenuIntent => ({ cmd: DemolishCmd, args: { target }, entities: ["target"] });
+/** ADR-318: MoveCmd for a move ghost (same raw request a PlaceCmd would send; the server re-snaps it). */
+export const moveIntent = (target: Entity, p: BuildPreview): MenuIntent => ({ cmd: MoveCmd, args: { target, x: p.request.x, y: p.request.y, level: p.level, rot: p.request.rot }, entities: ["target"] });
 
 /** World-tile outline of a placed piece, for highlighting the demolish / repair / upgrade target. */
 export function pieceFootprintOutline(world: World, e: Entity): { segments: SnapSegment[]; z: number } | undefined {

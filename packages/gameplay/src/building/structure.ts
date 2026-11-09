@@ -10,7 +10,7 @@
 import { defineResource, entityIndex, Transform, type Entity, type World } from "@engine/core";
 import { BuildingGrid, chunkKeyOf, type ChunkKey } from "@engine/world";
 import { BuildPiece, EdgeSide, PieceLink, PieceSlot, PieceStability, type AttachKind } from "../components.js";
-import { gameplayDefs } from "../config.js";
+import { gameplayDefs, isAuthority } from "../config.js";
 import { Placement, type GameDefs, type PieceDef } from "../defs.js";
 import { linkAttachment } from "./links.js";
 import { TRI_INRADIUS, triEdges, triGridEdge, triKey } from "./modular.js";
@@ -205,7 +205,7 @@ export class StructureIndex {
     if (def.features.shaftHatch) this.hatches.set(edgeKey(slot.tx, slot.ty, 0, EdgeSide.North), e);
     return true;
   }
-  removePiece(e: Entity): void {
+  removePiece(e: Entity, keepSlot = false): void {
     const inf = this.info.get(e); if (!inf) return;
     this.info.delete(e);
     const { slot: s, def } = inf; this.coarse(s.tx, s.ty, def, -1);
@@ -224,8 +224,27 @@ export class StructureIndex {
     const set = this.chunkPieces.get(inf.ck); if (set?.delete(e)) { this.bump(inf.ck); if (!set.size) this.chunkPieces.delete(inf.ck); }
     const z = this.zoneOf.get(e); if (z !== undefined) { this.zoneOf.delete(e); this.zoneCounts.set(z, (this.zoneCounts.get(z) ?? 1) - 1); }
     this.dirty.delete(e); this.pendingDamage.delete(e);
-    if (this.world.isAlive(e) && this.world.has(e, PieceSlot)) this.world.remove(e, PieceSlot);
+    if (!keepSlot && this.world.isAlive(e) && this.world.has(e, PieceSlot)) this.world.remove(e, PieceSlot);
   }
+  /**
+   * ADR-318: run `fn` with piece `e` out of every lookup (a move is validated as if the piece were not there, so it
+   * may land on or overlap its own old footprint), then index it back exactly where it was: same slot, parent, zone
+   * count, dirty / damage state and chunk / structure version counters, so a client preview causes no rebuild churn.
+   */
+  lifted<T>(e: Entity, fn: () => T): T {
+    const inf = this.info.get(e); if (!inf) return fn();
+    const zone = this.zoneOf.get(e); const ver = this.version; const cv = this.chunkVersions.get(inf.ck);
+    const wasDirty = this.dirty.has(e); const dmg = this.pendingDamage.get(e);
+    this.removePiece(e, true);
+    try { return fn(); } finally {
+      this.addPiece(e, inf.slot, inf.parent);
+      if (zone !== undefined) { this.zoneOf.set(e, zone); this.zoneCounts.set(zone, (this.zoneCounts.get(zone) ?? 0) + 1); }
+      if (wasDirty) this.dirty.add(e); if (dmg !== undefined) this.pendingDamage.set(e, dmg);
+      this.version = ver; if (cv === undefined) this.chunkVersions.delete(inf.ck); else this.chunkVersions.set(inf.ck, cv);
+    }
+  }
+  /** ADR-318: where a piece is indexed now (slot + parent), or undefined. */
+  indexedAt(e: Entity): { slot: Slot; parent: Entity | 0 } | undefined { const i = this.info.get(e); return i ? { slot: { ...i.slot }, parent: i.parent } : undefined; }
   removePieceByEntity(e: Entity): void { this.removePiece(e); }
   chunkOf(e: Entity): ChunkKey { const tf = this.world.get(e, Transform)!; return chunkKeyOf(tf.x, tf.y); }
   bump(ck: ChunkKey): void { this.chunkVersions.set(ck, (this.chunkVersions.get(ck) ?? 0) + 1); this.version++; }
@@ -419,6 +438,15 @@ export function openingParent(idx: StructureIndex, def: PieceDef, slot: Slot): E
 export function structureIndexSystem(world: World): void {
   const idx = structures(world);
   for (const e of world.removed(BuildPiece)) idx.removePieceByEntity(e);
+  // ADR-318: a replicated piece the server moved (Move keeps the entity) re-indexes at its new Transform. The authority
+  // re-indexes its own moves directly (movePiece); a replica sees the position change and drops the stale slot so the
+  // query below indexes it again.
+  if (!isAuthority(world) && idx.count) for (const e of world.changed(Transform)) {
+    if (!world.has(e, BuildPiece) || !world.has(e, PieceSlot)) continue;
+    const inf = idx.info.get(e); if (!inf) continue;
+    const s = deriveSlot(world, e, inf.def); const o = inf.slot;
+    if (s.tx !== o.tx || s.ty !== o.ty || s.z !== o.z || s.side !== o.side || s.rot !== o.rot || (s.fx !== undefined && (s.fx !== o.fx || s.fy !== o.fy))) idx.removePiece(e);
+  }
   for (const e of world.query([BuildPiece, Transform], [PieceSlot])) {
     const def = idx.def(e); if (!def) continue;
     const slot = deriveSlot(world, e, def);

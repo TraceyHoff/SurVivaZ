@@ -215,6 +215,14 @@
    {
     "action": "Terrain.Lower",
     "control": "key.KeyH"
+   },
+   {
+    "action": "ToggleDemolish",
+    "control": "key.Delete"
+   },
+   {
+    "action": "ToggleDemolish",
+    "control": "key.Backspace"
    }
   ],
   "Building": [
@@ -309,6 +317,18 @@
    {
     "action": "ToggleBuild",
     "control": "key.KeyB"
+   },
+   {
+    "action": "ToggleDemolish",
+    "control": "key.Delete"
+   },
+   {
+    "action": "ToggleDemolish",
+    "control": "key.Backspace"
+   },
+   {
+    "action": "Build.Move",
+    "control": "key.KeyF"
    }
   ],
   "Inventory": [

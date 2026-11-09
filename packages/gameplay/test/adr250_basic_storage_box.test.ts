@@ -86,7 +86,7 @@ describe("ADR-250 basic storage box: storing", () => {
 });
 
 describe("ADR-250 basic storage box: pick up / destroy", () => {
-  it("Demolish = Pick up: full refund (x hp fraction) and the contents drop as a loot bag", () => {
+  it("Demolish = Pick up: full refund and the contents drop as a loot bag", () => {
     const { w, p } = fresh(); give(w, p); const box = (place(w, p) as { piece: Entity }).piece; const st = storageOf(w, box);
     G.addItem(w, st, item("stone"), 6); G.addItem(w, st, item("fiber"), 2);
     intent(w, p, G.IntentAction.OpenContainer, box); // a viewer is closed out cleanly
@@ -97,10 +97,10 @@ describe("ADR-250 basic storage box: pick up / destroy", () => {
     expect([G.countItem(w, bag!, item("stone")), G.countItem(w, bag!, item("fiber"))]).toEqual([6, 2]);
     expect(w.getField(bag!, G.LootBag, "kind")).toBe(G.LootSource.Dropped);
   });
-  it("a damaged box refunds proportionally; the ordinary storage_box keeps the 50% demolish refund", () => {
+  it("ADR-317: your own damaged box still refunds in full (own builds are never scaled by damage)", () => {
     const { w, p } = fresh(); give(w, p); const box = (place(w, p) as { piece: Entity }).piece;
     w.setField(box, G.BuildPiece, "hp", Math.floor(G.maxHpOf(w, box) / 2)); intent(w, p, G.IntentAction.Demolish, box);
-    expect(G.countItem(w, p, item("sticks"))).toBe(5);
+    expect(G.countItem(w, p, item("sticks"))).toBe(10);
     expect(d.pieces.get(d.pieceId("storage_box"))!.pickup).toBe(false);
   });
   it("destroyed (raid / decay) boxes spill their contents too; empty boxes leave nothing", () => {

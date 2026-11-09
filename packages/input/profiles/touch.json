@@ -170,6 +170,10 @@
    {
     "action": "Camera.RotateCW",
     "control": "touch.btn.camcw"
+   },
+   {
+    "action": "ToggleDemolish",
+    "control": "touch.btn.demolishmode"
    }
   ],
   "Building": [
@@ -243,6 +247,14 @@
    {
     "action": "ToggleBuild",
     "control": "touch.btn.build"
+   },
+   {
+    "action": "ToggleDemolish",
+    "control": "touch.btn.demolishmode"
+   },
+   {
+    "action": "Build.Move",
+    "control": "touch.btn.move"
    }
   ],
   "Inventory": [

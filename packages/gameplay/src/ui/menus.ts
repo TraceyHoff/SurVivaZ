@@ -255,7 +255,8 @@ export const cancelQueuedCraftIntent = (slot: number): MenuIntent => intent(Canc
 
 // ---- build ------------------------------------------------------------------------------------------
 export interface BuildPieceView { id: number; key: string; tiers: { tier: number; key: string; cost: { item: number; name: string; count: number; have: number }[]; affordable: boolean; /** ADR-221: not yet learned in the skill tree */ locked: boolean; /** ADR-221: "Requires Stonework (Crafting & Building)" when locked */ requirement?: string }[]; variants: string[]; paintable: boolean; category: string }
-export interface BuildSelection { piece: number; tier: number; variant: number; paint: number; /** ADR-211: false = the player rotated by hand (RB / R): a corner keeps that rotation instead of auto-fitting its junction */ autoRot?: boolean }
+export interface BuildSelection { piece: number; tier: number; variant: number; paint: number; /** ADR-211: false = the player rotated by hand (RB / R): a corner keeps that rotation instead of auto-fitting its junction */ autoRot?: boolean;
+  /** ADR-318: the placed piece being moved (the ghost validates as a move: no cost, the piece itself does not block). */ moving?: Entity }
 export function buildView(c: MenuCtx): BuildPieceView[] {
   const w = c.world; const defs = gameplayDefs(w);
   return [...defs.pieces.values()].map((p) => {

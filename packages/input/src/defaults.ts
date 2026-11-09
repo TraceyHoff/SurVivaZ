@@ -38,6 +38,9 @@ export const DEFAULT_ACTIONS: readonly ActionDef[] = [
   /** ADR-263 (Task 36) shovel terrain edit (Gameplay, only while a shovel is in the main hand): KBM Y raise / H lower,
    * pad LT + D-pad ↑ raise / LT + D-pad ↓ lower, touch the HUD ⬆ Raise / ⬇ Dig buttons. Appended. */
   btn("Terrain.Raise"), btn("Terrain.Lower"),
+  /** ADR-316 demolish mode without a ghost (KBM Delete / Backspace / pad LB+B / touch build menu + HUD) and ADR-318 move a placed piece
+   * (KBM F / pad hold Y / touch HUD "Move"). Appended. */
+  btn("ToggleDemolish"), btn("Build.Move"),
 ];
 /** Context stack defaults. Building keeps movement (non-consuming); menus block movement; chat blocks gameplay except movement on gamepad. */
 export const DEFAULT_CONTEXTS: readonly ContextDef[] = [

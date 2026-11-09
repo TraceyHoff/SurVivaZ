@@ -36,6 +36,18 @@ export const enum BuildFail {
   NeedClaim = 26,
   /** ADR-315: a Claim Flag's area would overlap another claim (own, clan or foreign; rims may touch). */
   ClaimOverlap = 27,
+  /** ADR-317: demolishing on someone else's claim (or another tribe's piece) without permission. */
+  NoDemolishPermission = 28,
+  /** ADR-318: Move needs the piece at full hp. */
+  NeedsRepair = 29,
+  /** ADR-318: Move needs a piece owned by the actor, their clan, or their employer. */
+  NotYours = 30,
+  /** ADR-318: this kind of piece never moves (stall, planter, terrain ladder, shaft hatch). */
+  NotMovable = 31,
+  /** ADR-318: something rests on / hangs from this piece (remove it first). */
+  HasDependents = 32,
+  /** ADR-318: the move's source or destination is on a claim the actor has no permission on. */
+  NoMovePermission = 33,
 }
 export const enum DestroyCause { Damage = 1, Collapse = 2, Demolish = 3 }
 
@@ -71,6 +83,8 @@ export const PieceDamaged = ev<{ piece: Entity; hp: number; amount: number; atta
 export const PieceDestroyed = ev<{ piece: Entity; type: number; cause: DestroyCause }>("gameplay.PieceDestroyed");
 export const PieceUpgraded = ev<{ piece: Entity; tier: number }>("gameplay.PieceUpgraded");
 export const PieceRepaired = ev<{ piece: Entity; hp: number }>("gameplay.PieceRepaired");
+/** ADR-318: a piece moved (same entity, new slot). */
+export const PieceMoved = ev<{ piece: Entity; type: number; mover: Entity }>("gameplay.PieceMoved");
 export const PiecePainted = ev<{ piece: Entity; paint: number }>("gameplay.PiecePainted");
 export const DoorToggled = ev<{ door: Entity; open: number }>("gameplay.DoorToggled");
 export const ContainerOpened = ev<{ container: Entity; entity: Entity; clientId: number }>("gameplay.ContainerOpened");

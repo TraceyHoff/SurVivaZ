@@ -414,6 +414,7 @@ flowchart LR
 | OpenSocial | `P` | `pad.start (longPress 500ms)` | `btn:social` |
 | Cancel | `Escape` | `pad.start (tap 250ms)` | `btn:back` |
 | ToggleBuild | `B` | `pad.lb+pad.y` | `btn:build` |
+| ToggleDemolish (ADR-316: demolish mode, no hologram) | `Delete`, `Backspace` | `pad.lb+pad.b` | Build menu "Demolish / Move" |
 | Camera.Zoom | `AltLeft+mouse.wheelDown/mouse.wheelUp`, `Minus/Equal` | `pad.rb+pad.ddown/pad.dup` | `touch.pinch.in/touch.pinch.out` |
 | Camera.RotateCCW / Camera.RotateCW (ADR-253) | `BracketLeft` / `BracketRight` | `pad.rb+pad.dleft` / `pad.rb+pad.dright` | `btn:camccw` / `btn:camcw` (⟲ ⟳ HUD) |
 | Aim | — | `pad.rx/pad.ry` | `touch.aim.x/touch.aim.y` |
@@ -439,6 +440,10 @@ flowchart LR
 | Build.RepairMode | `H` | `pad.x (tap 250ms)` | `btn:repair` |
 | Build.Nudge | `ArrowUp/ArrowDown/ArrowLeft/ArrowRight` | `pad.rx/pad.ry` | `touch.ghost.x/touch.ghost.y` |
 | ToggleBuild | `B` | `pad.lb+pad.y` | `btn:build` |
+| ToggleDemolish (ADR-316: placing ↔ demolish mode; in demolish mode: exit) | `Delete`, `Backspace` | `pad.lb+pad.b` | HUD "Demolish" / "Exit" |
+| Build.Move (ADR-318: lift the targeted piece into the hologram) | `F` | `pad.y (longPress 500ms)` | HUD "Move" |
+
+ADR-316 demolish mode: confirm (`mouse.left` / `pad.a`) arms and a second press demolishes; `X` / hold `pad.x` act as before; touch taps select a piece and the HUD strip's "Confirm demolish" (or ✓) demolishes it. `Build.Cancel` cancels a move, else exits.
 
 **Inventory**
 

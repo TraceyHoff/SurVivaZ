@@ -39,7 +39,7 @@ describe("keyboard + mouse", () => {
     tap("mouse.wheelUp", ["key.ShiftLeft"]); expect(s.bm.selection!.tier).toBe(0);
     tap("key.PageUp"); expect(s.bm.level).toBe(1); expect(s.bm.preview?.level).toBe(1); tap("key.PageDown"); expect(s.bm.level).toBe(0);
     const e = s.placeAt(2, 0); s.sent.length = 0; s.tick();
-    expect(s.bm.target?.entity).toBe(e); const ctx = s.bm.context!; expect(ctx.actions.map((a) => a.hint)).toEqual(["H", "U", "X"]);
+    expect(s.bm.target?.entity).toBe(e); const ctx = s.bm.context!; expect(ctx.actions.map((a) => a.hint)).toEqual(["H", "U", "X", "F"]); // ADR-318: Move appended
     expect(ctx.actions[1]!.label).toMatch(/Upgrade → /);
     tap("key.KeyU"); expect(names(s.sent)).toEqual(["gameplay.upgrade"]); expect(s.sent[0]!.entities).toEqual(["target"]);
     tap("key.KeyX"); expect(s.sent.length).toBe(1); expect(s.bm.context!.actions[2]!.armed).toBe(true);
@@ -68,7 +68,7 @@ describe("gamepad (Xbox)", () => {
     s.pad.set("pad.lt", 1); s.tick(); btn("pad.ddown"); s.pad.set("pad.lt", 0); s.tick(); expect(s.bm.level).toBe(0);
     s.bm.padOffset = { x: 2, y: 0 }; btn("pad.a"); expect(names(s.sent)).toEqual(["gameplay.place"]);
     const e = s.placeAt(2, 0); s.sent.length = 0; s.tick(); expect(s.bm.target?.entity).toBe(e);
-    expect(s.bm.context!.actions.map((a) => a.hint)).toEqual(["X", "Y", "hold X"]);
+    expect(s.bm.context!.actions.map((a) => a.hint)).toEqual(["X", "Y", "hold X", "hold Y"]); // ADR-318: Move appended
     btn("pad.y"); expect(names(s.sent)).toEqual(["gameplay.upgrade"]);
     btn("pad.x", 600); expect(names(s.sent)).toEqual(["gameplay.upgrade", "gameplay.demolish"]); // hold = confirmed
     s.pad.set("pad.lb", 1); s.tick(); btn("pad.y"); s.pad.set("pad.lb", 0); s.tick(); expect(s.picked()).toBe(1); expect(s.bm.active).toBe(true); // ADR-279: picker suspends placement without leaving Building
@@ -97,7 +97,7 @@ describe("touch (Android)", () => {
     root.querySelector<HTMLButtonElement>("[data-bh=level-down]")!.click(); expect(s.bm.level).toBe(0);
     expect(root.querySelector("[data-bh=repair]")).toBeNull(); // no strip without a target
     s.placeAt(2, 0); s.sent.length = 0; s.tick(); hud.update();
-    const strip = root.querySelector(".bh-ctx")!; expect(strip.getAttribute("role")).toBe("menu"); expect(strip.querySelectorAll("button").length).toBe(3);
+    const strip = root.querySelector(".bh-ctx")!; expect(strip.getAttribute("role")).toBe("menu"); expect(strip.querySelectorAll("button").length).toBe(4); // Repair / Upgrade / Demolish / Move (ADR-318)
     root.querySelector<HTMLButtonElement>("[data-bh=demolish]")!.click(); expect(s.sent.length).toBe(0); expect(root.querySelector("[data-bh=demolish]")!.textContent).toContain("Confirm");
     root.querySelector<HTMLButtonElement>("[data-bh=demolish]")!.click(); expect(names(s.sent)).toEqual(["gameplay.demolish"]);
     hud.destroy(); world = () => ({ x: 0, y: 0 });

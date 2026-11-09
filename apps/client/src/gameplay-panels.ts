@@ -44,6 +44,8 @@ export interface GameplaySource {
   onBuildSelect?(s: BuildSelection): void;
   /** Enter build mode with this selection (aim-point placement, see build-mode.ts). */
   startPlacing?(s: BuildSelection): void;
+  /** ADR-316: enter demolish mode without a hologram (the Build menu's "Demolish / Move" entry). */
+  startDemolish?(): void;
   /** ADR-229: clan palette primary (0xRRGGBB) for a BuildPiece tint index (registry.clanPaletteForTint); tints the white cloth icons. */
   clanTint?(tint: number): number | undefined;
   /** Task 25: clan palette secondary (0xRRGGBB) for a BuildPiece tint index — the tint swatch's second half. */
@@ -569,6 +571,10 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
       const BUILD_CAT_LABEL: Record<string, string> = { crafting: "Hand Crafted" };
       for (const k of cats) cg0.append(btn(BUILD_CAT_LABEL[k] ?? (k[0]!.toUpperCase() + k.slice(1)), `bcat-${k}`, () => { buildCat = k; kit.rerender(); }, { pressed: k === buildCat, alt: k !== buildCat }));
       out.push(cg0);
+      if (src.startDemolish) { // ADR-316: demolish / move placed pieces without picking a piece first (no hologram)
+        const dg = grid(); dg.dataset["role"] = "build-edit"; const start = src.startDemolish;
+        dg.append(btn("Demolish / Move", "build-demolish", () => { start(); kit.close(); }, { alt: true })); out.push(dg);
+      }
       if (buildCat === "roads" && wt) {
         // ADR-224: roads & signs are a tab of their own (keeps the piece view short)
         const rg = grid(); rg.dataset["role"] = "world-tools"; const signIcon = hasIcon(SIGN_TOOL_ICON) ? SIGN_TOOL_ICON : undefined;
