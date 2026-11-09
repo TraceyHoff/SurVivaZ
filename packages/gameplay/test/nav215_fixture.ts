@@ -10,7 +10,7 @@ export function world215(): { w: World; me: Entity; put: Put } {
   const w = makeWorld(); const me = spawnLearned(w, { x: -40, y: -40, maxWeight: 0, clientId: 1 });
   const put: Put = (key, x, y, level = 0, rot = 0) => {
     const sn = snapPlacement(w, { piece: defs.pieceId(key), x, y, level, rot, tier: 1, variant: 0 }); if (typeof sn === "number") throw new Error(`setup ${key} snap ${sn}`);
-    const f = validatePlacement(w, me, sn, { ignoreCost: true, ignoreRange: true }); if (f) throw new Error(`setup ${key} @${x},${y} r${rot}: fail ${f}`);
+    const f = validatePlacement(w, me, sn, { ignoreCost: true, ignoreRange: true, ignoreClaim: true }); // ADR-310 claims are not under test here if (f) throw new Error(`setup ${key} @${x},${y} r${rot}: fail ${f}`);
     const e = placePiece(w, me, sn, { pay: false }); return e as Entity;
   };
   return { w, me, put };

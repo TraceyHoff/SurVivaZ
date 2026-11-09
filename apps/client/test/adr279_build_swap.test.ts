@@ -4,11 +4,13 @@ import { installPermissions, World } from "@engine/core";
 import * as G from "@engine/gameplay";
 import { BuildMode } from "../src/build-mode.js";
 import { GameMenus } from "../src/game-menus.js";
+import { plantClaim } from "../../../packages/gameplay/test/helpers.js";
 
 describe("ADR-279 active build selection", () => {
   it.each(["keyboardMouse", "gamepad", "touch"] as const)("foundation → wall → other piece without context teardown (%s)", device => {
     const w = new World({ seed: 1, maxEntities: 4096 }); G.installGameplay(w, {}); installPermissions(w);
     const p = G.spawnPlayer(w, { x: 0, y: 0, maxWeight: 0 }); const defs = G.gameplayDefs(w); G.grantSkillUnlocks(w, p);
+    plantClaim(w, p, -4, -4); // ADR-310: base pieces need a covering Claim Flag
     for (const key of ["wood", "stone", "fiber", "sticks", "planks", "rope"]) G.addItem(w, p, defs.itemId(key), 30);
     const pressed = new Set<string>(), stack: string[] = [], changes: boolean[] = [], sent: G.MenuIntent[] = [];
     const ctx = () => ({ world: w, player: p, names: new Map<number, string>() }); let picker = 0; let aim = { mode: 1, x: 2.5, y: 0.5 };

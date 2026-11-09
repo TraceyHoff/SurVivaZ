@@ -34,6 +34,14 @@ describe("ADR-250 basic storage box over the network", () => {
     w.set(A.e, Transform, { x: X - 1.5, y: Y, z: 0 }); w.set(B.e, Transform, { x: X - 1.5, y: Y + 1, z: 0 }); tick(10);
     const rej: string[] = []; onGameplayRejected(A.c, (r) => rej.push(`A:${r.reason}`)); onGameplayRejected(B.c, (r) => rej.push(`B:${r.reason}`));
     expect(G.pieceUnlocked(w, A.e, d.pieces.get(d.pieceId("workbench"))!, 1)).toBe(false); // nothing learned
+    // ADR-310: a fresh player plants a Claim Flag (ungated) over the net before any base piece. ADR-207: storage inside a
+    // claim opens only for the claim's tribe, so B shares A's clan to keep exercising "the other player stores + takes".
+    for (const e of [A.e, B.e]) { if (w.has(e, G.Tribe)) w.setField(e, G.Tribe, "id", 7); else w.add(e, G.Tribe, { id: 7 }); }
+    const flag = d.pieces.get(d.pieceId("claim_totem"))!;
+    for (const c of G.pieceCost(d, flag, flag.fixedTier)) G.addItem(w, A.e, c.item, c.count);
+    tick(3);
+    A.c.sendCommand(gameplayNet(G.PlaceCmd), { piece: flag.id, x: X - 3.5, y: Y + 2, level: 0, rot: 0, tier: flag.fixedTier, variant: 0 } as never); tick(8);
+    expect(G.hasOwnClaim(w, A.e, X, Y), `flag rej ${rej}`).toBe(true);
     for (const c of G.pieceCost(d, d.pieces.get(d.pieceId(KEY))!, 1)) G.addItem(w, A.e, c.item, c.count);
     tick(3);
     A.c.sendCommand(gameplayNet(G.PlaceCmd), { piece: d.pieceId(KEY), x: X, y: Y, level: 0, rot: 2, tier: 1, variant: 0 } as never); tick(8);

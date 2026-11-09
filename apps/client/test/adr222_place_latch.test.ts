@@ -4,10 +4,12 @@ import { describe, expect, test } from "vitest";
 import { installPermissions, World } from "@engine/core";
 import * as G from "@engine/gameplay";
 import { BuildMode, type BuildDevice } from "../src/build-mode.js";
+import { plantClaim } from "../../../packages/gameplay/test/helpers.js";
 
 function rig(device: BuildDevice) {
   const w = new World({ seed: 1, maxEntities: 1 << 12 }); G.installGameplay(w, {}); installPermissions(w);
   const me = G.spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 }); const d = G.gameplayDefs(w); G.grantSkillUnlocks(w, me);
+  plantClaim(w, me, -4, -4); // ADR-310: base pieces need a covering Claim Flag
   const held = new Set<string>(); const edge = new Set<string>(); const sent: G.MenuIntent[] = [];
   const bm = new BuildMode({ input: { pressed: (a) => edge.has(a), down: (a) => held.has(a), push: () => {}, pop: () => {} }, device: () => device,
     ctx: () => ({ world: w, player: me, names: new Map() }), aim: () => ({ x: 2, y: 1, mode: 1 }), send: (i) => { sent.push(i); return true; } });

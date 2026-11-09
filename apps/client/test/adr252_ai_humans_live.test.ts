@@ -28,8 +28,9 @@ describe("ADR-252 AI humans live", () => {
     const iid = (k: string) => [...d.items.values()].find((i) => i.key === k)!.id;
     for (const e of bots) {
       initialLooks.set(e, W.get(e, Appearance));
+      // ADR-310: the Claim Flag's materials too (it is planted before the campfire)
       grantSkillUnlocks(W, e); addItem(W, e, iid("stone_axe"), 1); addItem(W, e, iid("stone_pickaxe"), 1);
-      for (const k of KEYS) { const def = [...d.pieces.values()].find((p) => p.key === k)!; for (const c of pieceCost(d, def, def.fixedTier)) addItem(W, e, c.item, c.count); }
+      for (const k of ["claim_totem", ...KEYS]) { const def = [...d.pieces.values()].find((p) => p.key === k)!; for (const c of pieceCost(d, def, def.fixedTier)) addItem(W, e, c.item, c.count); }
       addItem(W, e, iid("wood"), 30); addItem(W, e, iid("stone"), 40);
     }
     const isBot = new Set<number>(bots as number[]);

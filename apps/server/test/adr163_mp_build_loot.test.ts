@@ -60,6 +60,11 @@ describe("ADR-163 build-mode piece actions over the network", () => {
     // floor + table placed by the server; vase placed by A over the net with rot 1
     for (const k of ["foundation"]) { const sn = G.snapPlacement(w, { piece: d.pieceId(k)!, x: X, y: Y, level: 0, rot: 0, tier: 1, variant: 0 }) as G.Snapped; G.placePiece(w, 0, sn, { pay: false }); }
     { const sn = G.snapPlacement(w, { piece: d.pieceId("table")!, x: X, y: Y, level: 0, rot: 0, tier: 1, variant: 0 }) as G.Snapped; G.placePiece(w, 0, sn, { pay: false }); }
+    { // ADR-310: A plants a Claim Flag over the net so the vase (a base piece) may go down
+      const flag = d.pieces.get(d.pieceId("claim_totem"))!; for (const c of G.pieceCost(d, flag, flag.fixedTier)) G.addItem(w, A.e, c.item, c.count);
+      tick(3); A.c.sendCommand(gameplayNet(G.PlaceCmd), { piece: flag.id, x: X - 3, y: Y + 2.5, level: 0, rot: 0, tier: flag.fixedTier, variant: 0 } as never); tick(8);
+      expect(G.hasOwnClaim(w, A.e, X, Y), `flag rej ${rej}`).toBe(true);
+    }
     for (const c of G.pieceCost(d, d.pieces.get(d.pieceId("vase")!)!, 1)) G.addItem(w, A.e, c.item, c.count * 2);
     tick(5);
     A.c.sendCommand(gameplayNet(G.PlaceCmd), { piece: d.pieceId("vase")!, x: X, y: Y, level: 0, rot: 1, tier: 1, variant: 0 } as never); tick(8);
