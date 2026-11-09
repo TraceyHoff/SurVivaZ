@@ -6,7 +6,8 @@
  */
 import { LootSource, tagLootSource } from "./loot_labels.js";
 import { lootBagInit } from "./loot_despawn.js";
-import { Pet } from "./components.js";
+import { Mount, Pet } from "./components.js";
+import { luresMount, mountSpeciesOfAnimal } from "./mount_defs.js";
 import { DEFAULT_TICK_HZ, Permissions, Transform, defineResource, entityIndex, type Entity, type World } from "@engine/core";
 import { PopulationSpawner, type BuildingGrid, type ChunkKey, type PhaseKey, type PopulationHost, type SpawnEntry, type PopulationViewpoint } from "@engine/world";
 import { Zombie } from "./components.js";
@@ -126,6 +127,7 @@ export function animalAISystem(world: World, dt: number): void {
   const animals = [...world.query([Animal, Transform], [Dead, Pet])]; // ADR-145: pets are driven by petSystem
   if (animals.length === 0) return;
   const hStore = world.store(Health); const anStore = world.store(AnimState);
+  const mountReg = world.isRegistered(Mount);
   // ADR-215: threat candidates (living survivors) gathered once; a short list beats a radius query over every piece
   // and animal in a village. Same set as the radius query (exact distance on the current Transform).
   THREATS.length = 0; let few = true;
@@ -135,6 +137,9 @@ export function animalAISystem(world: World, dt: number): void {
     // (later setFields in this iteration do not change these locals).
     const ei = entityIndex(e); const aSlot = aStore.slot(ei); const aD = aStore.data;
     const aKind = aD.kind[aSlot]!; const def = defs[aKind]; if (!def) continue;
+    const owned = mountReg && world.has(e, Mount); // ADR-319: a tamed mount behaves like a domesticated animal
+    if (owned && (world.getField(e, Mount, "riderNetId") ?? 0) !== 0) continue; // ridden: mountSystem moves it with its rider
+    const lureable = !owned && mountSpeciesOfAnimal(def.key) > 0; // ADR-319: food in hand calms a wild mount species
     const aState = aD.state[aSlot]!; const aHomeX = aD.homeX[aSlot]!; const aHomeY = aD.homeY[aSlot]!; const aGoalX = aD.goalX[aSlot]!; const aGoalY = aD.goalY[aSlot]!; const aThinkAt = aD.thinkAt[aSlot]!;
     const tSlot = tfStore.slot(ei); const tfD = tfStore.data; const tx = tfD.x[tSlot]!; const ty = tfD.y[tSlot]!;
     const hSlot = hStore.slot(ei); const hD = hStore.data; const hp = hSlot >= 0 ? hD.hp[hSlot]! : undefined; const maxHp = hSlot >= 0 ? hD.max[hSlot]! : undefined;
@@ -143,14 +148,15 @@ export function animalAISystem(world: World, dt: number): void {
     const aggressive = !!def.attack && def.aggro.mode !== "passive" && !scared;
     const homeD = Math.hypot(tx - aHomeX, ty - aHomeY);
     let threat: { e: Entity; x: number; y: number; d: number } | undefined;
-    const tame = world.has(e, Tamed); // ADR-113: domesticated animals neither flee nor attack
+    const tame = owned || world.has(e, Tamed); // ADR-113 / ADR-319: domesticated animals neither flee nor attack
     const tr = Math.max(def.fleeRange, aggressive ? def.aggro.leashRange : 0);
     if (!tame && few) for (let i = 0; i < THREATS.length; i += 3) {
       const p = THREATS[i]! as Entity, px = THREATS[i + 1]!, py = THREATS[i + 2]!; const ddx = px - tx, ddy = py - ty; if (ddx * ddx + ddy * ddy > tr * tr) continue;
+      if (lureable && luresMount(world, def.key, p)) continue;
       const d = Math.hypot(px - tx, py - ty); if (!threat || d < threat.d || (d === threat.d && p < threat.e)) threat = { e: p, x: px, y: py, d };
     }
     else if (!tame) for (const p of index.queryRadius(tx, ty, tr)) {
-      if (!world.has(p, Survival) || world.has(p, Dead)) continue; const pt = world.get(p, Transform)!; const d = Math.hypot(pt.x - tx, pt.y - ty);
+      if (!world.has(p, Survival) || world.has(p, Dead) || (lureable && luresMount(world, def.key, p))) continue; const pt = world.get(p, Transform)!; const d = Math.hypot(pt.x - tx, pt.y - ty);
       if (!threat || d < threat.d || (d === threat.d && p < threat.e)) threat = { e: p, x: pt.x, y: pt.y, d };
     }
     let state = aState, gx = aGoalX, gy = aGoalY;
@@ -297,8 +303,8 @@ export function installPopulation(world: World, o: InstallPopulationOptions): Po
       if (entry.category === "human_bot") return o.humanBots?.spawn(x, y, entry.kind) ? "pending" : undefined;
       return undefined;
     },
-    despawn: (e) => { if (world.isAlive(e) && !world.has(e, Tamed)) world.destroy(e); }, // ADR-113: tamed animals stay
-    persistent: (e) => world.has(e, Tamed) || (o.persistent?.(e) ?? false),
+    despawn: (e) => { if (world.isAlive(e) && !world.has(e, Tamed) && !(world.isRegistered(Mount) && world.has(e, Mount))) world.destroy(e); }, // ADR-113 / ADR-319: tamed animals and mounts stay
+    persistent: (e) => world.has(e, Tamed) || (world.isRegistered(Mount) && world.has(e, Mount)) || (o.persistent?.(e) ?? false),
     position: (e) => { if (!world.isAlive(e) || world.has(e, Dead)) return undefined; const t = world.get(e, Transform); return t ? { x: t.x, y: t.y } : undefined; },
   };
   // Human bots are despawned by their host (session leave), not by destroying the entity.

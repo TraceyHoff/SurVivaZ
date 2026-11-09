@@ -223,6 +223,10 @@
    {
     "action": "ToggleDemolish",
     "control": "key.Backspace"
+   },
+   {
+    "action": "Mount.Menu",
+    "control": "key.KeyU"
    }
   ],
   "Building": [

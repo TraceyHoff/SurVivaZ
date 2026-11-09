@@ -28,6 +28,7 @@ import { animSettleSystem } from "./systems/movement.js";
 import { installShaftHatchInput } from "./building/terrain-hatch.js";
 import { installAbandonedStructures } from "./building/abandoned.js";
 import { stanceSystem } from "./stance.js";
+import { installMounts, mountGateSystem, mountSystem } from "./mounts.js";
 import { installBuildingSystems, BUILDING_SYSTEMS } from "./building/install.js";
 import { installCombatSystems, COMBAT_SYSTEMS } from "./combat/install.js";
 import { entityIndex } from "@engine/core";
@@ -59,6 +60,7 @@ export const GAMEPLAY_SYSTEM_ORDER: readonly (readonly [Phase, string, number?])
   ["simulation", "gameplay.clock"],
   ["simulation", "gameplay.weather"],
   ["simulation", "gameplay.vehicles"],
+  ["simulation", "gameplay.mountGate"], // ADR-319: riders cannot build / attack / use doors (before the action systems)
   ...BUILDING_SYSTEMS.pre,
   ["simulation", "gameplay.equip"], // ADR-135 EquipCmd handler
   ["simulation", "gameplay.wear"],
@@ -77,6 +79,7 @@ export const GAMEPLAY_SYSTEM_ORDER: readonly (readonly [Phase, string, number?])
   ["simulation", "gameplay.husbandryUse"], // ADR-113
   ["simulation", "gameplay.husbandry", HUSBANDRY_EVERY], // ADR-113
   ["simulation", "gameplay.pets"], // ADR-145 (after animal AI)
+  ["simulation", "gameplay.mounts"], // ADR-319 / ADR-320: mount follow, regen, saddlebag, death drops
   ["simulation", "gameplay.hordes", HORDES_EVERY], // ADR-121 server director (no-op on clients / when disabled)
   ["simulation", "gameplay.stance"], // ADR-244 carry follow / block break / sleep heal / night skip (authority)
   ["simulation", "gameplay.vitals"],
@@ -136,12 +139,13 @@ export function installGameplay(world: World, options: GameplayOptions | number 
     "gameplay.spoilage": spoilageSystem, "gameplay.chunkSurface": chunkSurfaceSystem,
     "gameplay.recruitment": recruitmentSystem,
     "gameplay.clearIntents": clearIntentsSystem, "gameplay.equipmentSync": equipmentSyncSystem, "gameplay.noiseDecay": noiseDecaySystem,
-    "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
+    "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
     "gameplay.hordes": hordeDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem,
     ...installBuildingSystems(world), ...installCombatSystems(world),
   };
   installProgression(world);
   installPets(world); // ADR-145
+  installMounts(world); // ADR-320 saddle wear
   installDiseases(world); // Task 13: wound-infection Damaged subscription (once per world)
   for (const [phase, name, every] of GAMEPLAY_SYSTEM_ORDER) {
     const fn = sys[name]; if (!fn) throw new Error(`no system ${name}`);

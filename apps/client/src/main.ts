@@ -31,6 +31,8 @@ import { ClaimView, mountClaimOverlay } from "./claim-overlay.js";
 import { mountWorldTools, type WorldToolsHandle } from "./world-tools.js";
 import { syncUnderground } from "./underground.js";
 import { mountVehicleControls, type VehicleControls } from "./vehicle-controls.js";
+import { mountMountControls, type MountControls } from "./mount-controls.js";
+import { mountEventText, mountRejectText, mountRenameIntent } from "@engine/gameplay";
 import { mountTouchOverlay, syncTouchHidden, touchLabel, type TouchCtx } from "./touch-overlay.js";
 import { stanceMode, StanceMode, liftableNear, bedNear } from "@engine/gameplay";
 /**
@@ -44,7 +46,7 @@ import { cosmeticsHashes, createGameLoop, World, PlayerId, Transform, PrevTransf
 import { TileMap, worldToScreen, screenToWorld, DEFAULT_ISO, ProceduralGenerator, computeSpawnPoints } from "@engine/world";
 import { InputSystem, AimResolver, DEFAULT_ACTIONS, DEFAULT_CONTEXTS, DEFAULT_PROFILES, DEFAULT_TOUCH_LAYOUTS } from "@engine/input";
 import { attachBrowserInput } from "@engine/input/browser";
-import { ClanRoster, ClanRosterMember, OnlinePlayer, VehicleStationOpenedEvt, PetEventEvt, WorkerEventEvt, gameplayNet, installDemoWorld, onGameplayRejected } from "@engine/server/protocol";
+import { ClanRoster, ClanRosterMember, OnlinePlayer, VehicleStationOpenedEvt, PetEventEvt, WorkerEventEvt, MountEventEvt, gameplayNet, installDemoWorld, onGameplayRejected } from "@engine/server/protocol";
 import { terrainRejectText } from "./terrain-reject.js";
 import { inventoryOpRejectText } from "./inventory-reject.js";
 import { netIdOf, ChatChannel, type ChatDelivered } from "@engine/net";
@@ -155,6 +157,7 @@ const driveTouchLayout = { ...touchLayout, elements: [...touchLayout.elements,
   { id: "engine", kind: "button" as const, anchor: { x: 0.86, y: 0.4 }, radius: 20, control: "touch.btn.engine", label: "Engine" },
   { id: "lights", kind: "button" as const, anchor: { x: 0.94, y: 0.4 }, radius: 20, control: "touch.btn.lights", label: "Lights" }] };
 let vehicleCtl: VehicleControls | undefined;
+let mountCtl: MountControls | undefined; // ADR-319
 const gameplayTouchLayout = (): typeof touchLayout => (vehicleCtl?.driving ? driveTouchLayout : touchLayout) as typeof touchLayout;
 const browserInput = attachBrowserInput(canvas, input, { ...(matchMedia("(pointer: coarse)").matches ? { virtualLayout: touchLayout } : {}), insets: () => safeAreaInsets() });
 let menus: GameMenus | undefined;
@@ -175,7 +178,8 @@ const touchContext = (): TouchCtx => {
     if (p === undefined) return (touchCtxCache = { reload: false });
     const m = stanceMode(world, p), ranged = holdsRangedWeapon(world, p);
     return (touchCtxCache = { reload: ranged, aim: ranged, carrying: m === StanceMode.Carry, sleeping: m === StanceMode.Sleep,
-      carry: m === StanceMode.None && liftableNear(world, p) !== undefined, sleep: m !== StanceMode.Sleep && bedNear(world, p) !== undefined });
+      carry: m === StanceMode.None && liftableNear(world, p) !== undefined, sleep: m !== StanceMode.Sleep && bedNear(world, p) !== undefined,
+      riding: !!mountCtl?.riding, mount: !mountCtl?.riding && !!mountCtl?.near() });
   } catch { return (touchCtxCache = { reload: false }); }
 };
 if (browserInput.controls) { const c = browserInput.controls; mountTouchOverlay(root, () => { syncTouchHidden(c.hidden, touchContext()); return c.geometry(); }, () => !menus || menus.nav.isOpen, (id) => touchLabel(id, touchContext())); }
@@ -204,7 +208,7 @@ function maybeStartTutorial(): void {
 function startMenus(): void {
   if (menus) return;
   maybeStartTutorial();
-  menus = new GameMenus({ root, input, tutorial: { active: () => tutorialProgress().active, replay: () => { tutorialProgress().start(true); tutorialUi?.update(); }, next: () => { tutorialProgress().next(); tutorialUi?.update(); }, skip: () => { tutorialProgress().skip(); tutorialUi?.update(); } }, audio: audio.mixer, fx: { get: () => fxLayer.settings(), set: (v) => { saveFx(v); fxLayer.apply(v); }, click: () => audio.ui("ui.click") }, worldRules: () => (world.isRegistered(WorldRules) && world.has(world.environment, WorldRules) ? worldRules(world) : undefined), onQuit: quitToMenu, session: () => sessionInfo?.(), deleteProgress: () => deleteInfo?.(), setQuality: (p) => iso?.renderer.setQualityPreset(p), qualityInfo: () => (iso && "quality" in iso.renderer ? (iso.renderer as { quality: { autoLabel(): string; detected?: { name: string; klass: string; remembered: boolean } | undefined } }).quality : undefined), gameplay: { ctx: menuCtx, send: sendIntent, social, clanTint: (t) => iso?.registry.clanPaletteForTint(t)?.primary, clanTint2: (t) => iso?.registry.clanPaletteForTint(t)?.secondary, onBuildSelect: (sel) => buildMode.select(sel), startPlacing: (sel) => buildMode.start(sel, { fromMenu: true }), startDemolish: () => buildMode.startDemolish(), worldTools: worldToolsApi, renamePet },
+  menus = new GameMenus({ root, input, tutorial: { active: () => tutorialProgress().active, replay: () => { tutorialProgress().start(true); tutorialUi?.update(); }, next: () => { tutorialProgress().next(); tutorialUi?.update(); }, skip: () => { tutorialProgress().skip(); tutorialUi?.update(); } }, audio: audio.mixer, fx: { get: () => fxLayer.settings(), set: (v) => { saveFx(v); fxLayer.apply(v); }, click: () => audio.ui("ui.click") }, worldRules: () => (world.isRegistered(WorldRules) && world.has(world.environment, WorldRules) ? worldRules(world) : undefined), onQuit: quitToMenu, session: () => sessionInfo?.(), deleteProgress: () => deleteInfo?.(), setQuality: (p) => iso?.renderer.setQualityPreset(p), qualityInfo: () => (iso && "quality" in iso.renderer ? (iso.renderer as { quality: { autoLabel(): string; detected?: { name: string; klass: string; remembered: boolean } | undefined } }).quality : undefined), gameplay: { ctx: menuCtx, send: sendIntent, social, clanTint: (t) => iso?.registry.clanPaletteForTint(t)?.primary, clanTint2: (t) => iso?.registry.clanPaletteForTint(t)?.secondary, onBuildSelect: (sel) => buildMode.select(sel), startPlacing: (sel) => buildMode.start(sel, { fromMenu: true }), startDemolish: () => buildMode.startDemolish(), worldTools: worldToolsApi, renamePet, renameMount },
     onChat: (text, channel, to) => { if (!session.client?.chat.send(channel as ChatChannel, text, to ? { to } : {})) menus?.pushChat("(not connected — message not sent)"); },
     mapBody: () => { const m = createWorldMap({ world: () => world, player: () => session.player, tiles: () => session.client?.tiles.tiles, send: sendIntent }); return [m.el]; } });
 }
@@ -222,6 +226,14 @@ function renamePet(pet: Entity, current: string): void {
   const ed = buildSignEditor({ kindName: "Pet name", saveLabel: "Save name", maxLen: 16, initial: current, keyboard: promptDevice() === "gamepad", close,
     onSave: (t) => { sendIntent(petRenameIntent(pet, t)); } });
   if (menus) handle = menus.nav.open("pet-rename", ed, () => { closed = true; menus?.refresh(); }); else root.append(ed);
+}
+/** ADR-319: mount rename modal (same editor as pets) -> MountRenameCmd. */
+function renameMount(m: Entity, current: string): void {
+  let handle: { close(): void } | undefined; let closed = false;
+  const close = (): void => { if (closed) return; closed = true; if (handle) handle.close(); else ed.remove(); };
+  const ed = buildSignEditor({ kindName: "Mount name", saveLabel: "Save name", maxLen: 16, initial: current, keyboard: promptDevice() === "gamepad", close,
+    onSave: (t) => { sendIntent(mountRenameIntent(m, t)); } });
+  if (menus) handle = menus.nav.open("mount-rename", ed, () => { closed = true; menus?.refresh(); }); else root.append(ed);
 }
 /** Panel intent -> bridged gameplay net command; Entity args become NetIds (unbridged commands such as PaintCmd return false). */
 function sendIntent(i: MenuIntent): boolean {
@@ -244,9 +256,11 @@ function wireChat(): void {
   // ADR-145 pet feedback (owner only): tamed / refused / shied / fed / level up -> toast + panel refresh
   c.onEvent(PetEventEvt, (e) => { const t = petEventText(world, e.pet as never, e.result, e.value); if (t) farm?.toast(t); if (e.result === 1 && e.pet) menus?.openPet(e.pet); else menus?.refresh(); });
   // Task 22 worker feedback (owner only): hired / job set / released -> toast + panel refresh
+  // ADR-319 / ADR-320 mount feedback (owner only): taming progress, tamed, spooked, saddle changes, blocked actions -> toast + panel refresh
+  c.onEvent(MountEventEvt, (e) => { const t = mountEventText(e.result, e.value); if (t) farm?.toast(t); if (e.result === 2 && e.mount) menus?.openMount(e.mount); else menus?.refresh(); });
   c.onEvent(WorkerEventEvt, (e) => { const t = workerEventText(world, e.worker as never, e.result, e.value); if (t) farm?.toast(t); menus?.refresh(); });
   // ADR-205 / ADR-264: inventory ops and shovel edits rejected by the server -> specific panel text + toast
-  onGameplayRejected(c, (r) => { const t = inventoryOpRejectText(r.command, r.reason) ?? terrainRejectText(r.command, r.reason); if (t) { menus?.notice(t); farm?.toast(t); } });
+  onGameplayRejected(c, (r) => { const t = inventoryOpRejectText(r.command, r.reason) ?? terrainRejectText(r.command, r.reason) ?? mountRejectText(r.command.name, r.reason); if (t) { menus?.notice(t); farm?.toast(t); } });
   c.chat.onReject((ch, reason) => menus?.pushChat(`(${CHAT_TAG[ch] ?? "?"} message rejected: ${reason})`));
 }
 /** Pause menu "Quit to main menu": leave fullscreen, end the session, back to the main menu. */
@@ -343,6 +357,7 @@ function onUiFrame(): void {
   { const id = padMenuAction(input); if (id) { menus?.open(id); return; } } // ADR-139: pad-only bindings: Select = inventory, LB+Select = crafting, RB+Select = chat
   if (input.pressed("QuickUse") && farm) { const p = session.player; if (p !== undefined && quickUseFires(safeFarmPrompt(p))) farm.trigger(); }
   if (vehicleCtl?.update()) return; // ADR-170: enter / exit (Interact), engine + headlights while driving
+  if (mountCtl?.update()) return; // ADR-319: get on / off (Interact), mount panel (Mount.Menu)
   if (input.pressed("Interact") && !(session.player !== undefined && stanceMode(world, session.player) >= StanceMode.Carry && stanceMode(world, session.player) !== StanceMode.Aim)) { /* ADR-244: carrying → Interact drops; asleep → wakes */ const c = menuCtx(); const t = c && interactPanel(c); if (t?.panel === "trade") menus?.openStall(t.stall); else if (t?.panel === "station") menus?.openStation(t.station, t.kind); else if (t?.panel === "pet") menus?.openPet(t.pet); else if (t?.panel === "worker") menus?.openWorker(t.worker); else if (t?.panel === "loot") menus?.openLoot(t.bag); else if (t?.panel === "storage") menus?.openStorage(t.piece); else if (t?.panel === "lootLocked") farm?.toast("That death bag belongs to another player for 60 seconds"); else if (t?.panel === "wardrobe") menus?.open("wardrobe"); else if (t?.panel === "door") sendIntent(toggleDoorIntent(t.piece)); else if (t?.panel === "claim") toggleClaimView(t.piece); else if (t) menus?.open("character"); }
 }
 /** ADR-160: a loot bag the server opened for us (primary click / tap fallback) shows in the inventory panel once. */
@@ -716,6 +731,7 @@ const compassHud = mountCompassHud({ view: () => input.viewQuarter, heading: () 
 // ADR-119..121: sign labels, road drag tool (G), sign placing (N), settlement label, horde toasts + cues
 vehicleCtl = mountVehicleControls(root, { world: () => world, player: () => session.player, send: (i) => sendIntent(i), input,
   toast: (t) => farm?.toast(t), onDrivingChange: () => { const c = browserInput.controls; if (c && !buildMode.active) c.layout = gameplayTouchLayout(); } });
+mountCtl = mountMountControls(root, { world: () => world, player: () => session.player, send: (i) => sendIntent(i), input, toast: (t) => farm?.toast(t), openMenu: (m) => menus?.openMount(m) }); // ADR-319
 worldTools = mountWorldTools(root, { world: () => world, player: () => session.player, camera: () => iso?.renderer.camera, send: (i) => sendIntent(i), hidden: () => !!menus?.nav.isOpen || buildMode.active || !!vehicleCtl?.driving, sound: (k) => audio.mixer.play(k),
   input, device: promptDevice, canvas,
   openModal: (id, el, onClose) => menus ? menus.nav.open(id, el, onClose) : (root.append(el), { close: () => el.remove() }),

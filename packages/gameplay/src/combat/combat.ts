@@ -18,7 +18,8 @@ import { distance } from "../systems/fuel.js";
 import { spendStamina } from "../systems/vitals.js";
 import { checkHit, tagCombat } from "./pvp.js";
 import { installSpatialIndex } from "@engine/world";
-import { Animal, Pet } from "../components.js";
+import { Animal, Mount, Pet, Riding } from "../components.js";
+import { mountOfRider, MOUNT_TUNING } from "../mount_defs.js";
 import { dropZombieLoot } from "../population.js";
 import { damageMulFor } from "../skills/tree.js";
 import { Progression } from "../components.js";
@@ -41,7 +42,7 @@ export function nearestMeleeTarget(world: World, e: Entity): Entity | undefined 
   const reach = heldWeapon(world, e).range + 0.4 + rangeSlack(world, e);
   let best: Entity | undefined; let bd = Infinity;
   for (const o of installSpatialIndex(world).queryRadius(t.x, t.y, reach)) {
-    if (o === e || !world.isAlive(o) || !world.has(o, Health) || world.has(o, Dead) || !(world.has(o, Zombie) || world.has(o, Animal)) || world.has(o, Pet)) continue;
+    if (o === e || !world.isAlive(o) || !world.has(o, Health) || world.has(o, Dead) || !(world.has(o, Zombie) || world.has(o, Animal)) || world.has(o, Pet) || (world.isRegistered(Mount) && world.has(o, Mount))) continue; // ADR-319: tamed mounts are not auto-targeted
     const d = distance(world, e, o); if (d <= reach && d < bd) { bd = d; best = o; }
   }
   return best;
@@ -71,6 +72,11 @@ export function applyDamage(world: World, target: Entity, amount: number, source
   }
   if (world.has(target, BuildPiece)) { damagePiece(world, target, amount, source, cause); return; }
   const hp = world.getField(target, Health, "hp"); if (hp === undefined || world.has(target, Dead)) return;
+  if ((cause === DamageCause.Combat || cause === DamageCause.Explosion) && world.isRegistered(Riding) && world.has(target, Riding)) {
+    // ADR-319: the mount takes its share of a hit on its rider (each side then reduced by its own armor + saddle)
+    const m = mountOfRider(world, target);
+    if (m !== undefined && m !== source && !world.has(m, Dead)) { const share = MOUNT_TUNING.riderDamageShare; applyDamage(world, m, amount * (1 - share), source, cause, pierce); amount *= share; }
+  }
   if (cause === DamageCause.Combat || cause === DamageCause.Explosion) amount = armorReduce(world, target, amount, pierce);
   if (stanceMode(world, target) === StanceMode.Sleep) wake(world, target); // ADR-244: damage wakes a sleeper
   let blocked = false;

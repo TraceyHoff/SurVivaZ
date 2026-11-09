@@ -41,6 +41,8 @@ export const DEFAULT_ACTIONS: readonly ActionDef[] = [
   /** ADR-316 demolish mode without a ghost (KBM Delete / Backspace / pad LB+B / touch build menu + HUD) and ADR-318 move a placed piece
    * (KBM F / pad hold Y / touch HUD "Move"). Appended. */
   btn("ToggleDemolish"), btn("Build.Move"),
+  /** ADR-319 mount panel (ride / saddlebag / saddle / feed / rename): KBM U / pad LB+X / touch "Mount" (contextual). Appended. */
+  btn("Mount.Menu"),
 ];
 /** Context stack defaults. Building keeps movement (non-consuming); menus block movement; chat blocks gameplay except movement on gamepad. */
 export const DEFAULT_CONTEXTS: readonly ContextDef[] = [

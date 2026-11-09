@@ -1,3 +1,5 @@
+import { dismountOnLeave, installMountCommands, MountEvent } from "@engine/gameplay";
+import { MountEventEvt } from "./protocol.js";
 import { friendSpawn } from "./friend-spawn.js";
 import { giveSandboxKit, sandboxPetKit, sandboxPetCorner, sandboxSpawn } from "./sandbox.js";
 import { handLootTarget, Viewing, TerrainRes, terrainFromTileMap } from "@engine/gameplay";
@@ -263,6 +265,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   installTerrainCommands(world, handlers); // gameplay.terrain shovel raise / lower (ADR-263)
   installInventoryOpCommands(world, handlers); // gameplay.splitStack / moveSlot (ADR-204)
   installPetCommands(world, handlers); // gameplay.petOffer / petCommand / petRename / dropItem (ADR-145)
+  installMountCommands(world, handlers); // gameplay.mountFeed / Ride / Dismount / Saddle / Unsaddle / Repair / Rename (ADR-319 / ADR-320)
   installAnimalSkillCommands(world, handlers); // gameplay.animalSkill (Task 15)
   installWorkerCommands(world, handlers); // gameplay.hireWorker / setWorkerJob / dismissWorker (Task 22)
   installDyeCommands(world, handlers); // gameplay.dye — hair / worn / held (Task 25)
@@ -319,6 +322,9 @@ export function createGameServer(o: GameServerOptions): GameServer {
   });
   world.events.on(PetEvent, (ev: { entity: Entity; pet: Entity; result: number; value: number }) => { // ADR-145
     for (const [cid, p] of players) if (p.entity === ev.entity) { net.emitEvent(PetEventEvt, { pet: ev.pet, result: ev.result, value: ev.value }, { reliable: true, scope: { owner: cid } }); break; }
+  });
+  world.events.on(MountEvent, (ev: { entity: Entity; mount: Entity; result: number; value: number }) => { // ADR-319
+    for (const [cid, p] of players) if (p.entity === ev.entity) { net.emitEvent(MountEventEvt, { mount: ev.mount, result: ev.result, value: ev.value }, { reliable: true, scope: { owner: cid } }); break; }
   });
   world.events.on(WorkerEvent, (ev: { entity: Entity; worker: Entity; result: number; value: number }) => { // Task 22
     for (const [cid, p] of players) if (p.entity === ev.entity) { net.emitEvent(WorkerEventEvt, { worker: ev.worker, result: ev.result, value: ev.value }, { reliable: true, scope: { owner: cid } }); break; }
@@ -395,6 +401,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   function leave(clientId: number, why: string): void {
     const p = players.get(clientId); if (!p) return;
     players.delete(clientId); chunks.removeSource(clientId); pendingKicks.delete(clientId);
+    dismountOnLeave(world, p.entity); // ADR-319: off the mount before the save; the mount stays where it is
     if (deleting.delete(p.account)) persist?.untrackPlayer(p.account); // progress deleted (ADR-099): never re-save it
     else if (persist && !closing) { void persist.savePlayer(p.account, p.entity, p.name).catch((e) => log(`persist: save failed ${String(e)}`)); persist.untrackPlayer(p.account); }
     removeEntity(p.entity);

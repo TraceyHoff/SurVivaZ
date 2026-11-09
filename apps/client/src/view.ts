@@ -32,6 +32,10 @@ import { netIdOf } from "@engine/net";
 import { roadSpriteKeys, ROAD_FLAGS, signFrameId } from "./road-sign-view.js";
 import { Road, Sign, surfaceDef, signDef, walkAnimRate, petSits, facingAfterTravel } from "@engine/gameplay";
 import { HitReact, NodeRegrow, hitDirRad, Equipment, Worn, SlotDye, INVENTORY_SLOTS, wornCosmetics } from "@engine/gameplay";
+import { mountRenderScale, mountSpecies, Riding } from "@engine/gameplay";
+import { riderSeatZ } from "./mount-render.js";
+/** ADR-319: rider drawn this many tiles toward the camera so it sorts in front of its mount. */
+const RIDER_SORT_NUDGE = 0.02;
 import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, type ResolvedSprite } from "@engine/gameplay";
 
 /** Render-side schemas the renderer's bindings expect (view World only). */
@@ -657,6 +661,7 @@ export class IsoView {
     this.syncTerrainLadders(net, tiles);
     this.syncHatchBottoms(net, tiles);
     this.syncClutter(tiles, ground);
+    this.syncRiders(net);
     this.syncVehicles(net, player, ground, frac);
     const camE = CAM_ANIMAL && this.camAnimal !== undefined ? this.camAnimal : player;
     const pv = camE !== undefined ? this.map.get(camE) : undefined;
@@ -849,6 +854,33 @@ export class IsoView {
    * VehicleSnapshot (key = NetId) into VehicleView, which owns the segment sprites + headlight lights in the view World. */
   private vehicleView: VehicleView | undefined; private vehAt = 0;
   readonly vehicleSnaps: VehicleSnapshot[] = [];
+  /**
+   * ADR-319: riders sit on their mount. The rider is predicted (own player) or interpolated, the mount always
+   * interpolated, so the mount's view pose is copied from the rider's (no slide); the rider is lifted by the seat height
+   * (riderSeatZ, or the mount art's per-frame "rider" anchor), drawn seated (Sit + vehicle chain) and a hair toward the
+   * camera so it sorts in front of the mount. The mount's walk / run anim follows Riding.speed. Every peer runs this from
+   * replicated Mount / Riding (rider replication).
+   */
+  private syncRiders(net: World): void {
+    if (!net.isRegistered(Riding)) return; const v = this.view;
+    for (const e of net.query([Riding])) {
+      const ve = this.map.get(e); const rd = net.get(e, Riding)!; const m = netIdEntity(net, rd.mountNetId); const mve = m === undefined ? undefined : this.map.get(m);
+      if (ve === undefined || mve === undefined || !v.has(ve, Transform) || !v.has(mve, Transform)) continue;
+      const t = v.get(ve, Transform)!, p = v.get(ve, PrevTransform);
+      v.set(mve, Transform, { x: t.x, y: t.y, z: t.z, facing: t.facing }); if (p && v.has(mve, PrevTransform)) v.set(mve, PrevTransform, { x: p.x, y: p.y, z: p.z, facing: p.facing });
+      const sp = v.get(mve, Sprite); const anchor = sp ? this.riderAnchorY(sp.spriteId, sp.frameId) : undefined;
+      const lift = riderSeatZ(rd.species, anchor, anchor === undefined ? 1 : sp?.scale ?? 1);
+      v.set(ve, Transform, { x: t.x + RIDER_SORT_NUDGE, y: t.y + RIDER_SORT_NUDGE, z: t.z + lift }); if (p) v.set(ve, PrevTransform, { x: p.x + RIDER_SORT_NUDGE, y: p.y + RIDER_SORT_NUDGE, z: p.z + lift });
+      if (v.has(ve, VAnim) && v.getField(ve, VAnim, "state") !== 13) v.set(ve, VAnim, { state: 13, startTick: v.tick }); // seated
+      this.driverVe.add(ve); this.movingVe.delete(ve);
+      const spec = mountSpecies(rd.species); const want = rd.speed < 0.05 ? 0 : spec && rd.speed > spec.walk + 0.3 ? 2 : 1;
+      if (v.has(mve, VAnim) && v.getField(mve, VAnim, "state") !== want && (v.getField(mve, VAnim, "state") ?? 0) <= 2) v.set(mve, VAnim, { state: want, startTick: v.tick });
+    }
+  }
+  /** Per-frame "rider" anchor y (px from the pivot, 1x) of dedicated mount art; undefined for art without it (all current fauna). */
+  private riderAnchorY(spriteId: number, frameId: number): number | undefined {
+    try { return this.registry.frameAnchors(spriteId, frameId)?.["rider"]?.y; } catch { return undefined; }
+  }
   private syncVehicles(net: World, player: Entity | undefined, ground: (x: number, y: number, z: number) => number, frac: number | undefined): void {
     if (!net.isRegistered(GVehicle)) return;
     const list = this.vehicleSnaps; list.length = 0;
@@ -873,7 +905,8 @@ export class IsoView {
     // characters: own player (Survival is owner-only) + other players and human bots (PlayerId / Appearance / Health+AnimState)
     if (net.has(e, Animal)) {
       const k = animalDefs()[net.get(e, Animal)!.kind]; const r = this.rs(k?.spriteKey);
-      if (r) return { sprite: r.id, animated: true, shadow: 0.8, ...(r.tint ? { tint: r.tint } : {}), ...(r.scale !== 1 ? { scale: r.scale, onCreate: r.scale } : {}) };
+      const real = mountRenderScale(k?.key); // ADR-319: rideable species at their real height next to the player
+      if (r) { const sc = r.scale * real; return { sprite: r.id, animated: true, shadow: 0.8, ...(r.tint ? { tint: r.tint } : {}), ...(sc !== 1 ? { scale: sc, onCreate: sc } : {}) }; }
       const ph = this.sid(`animal_${k?.key ?? ""}`) ?? this.sid("player"); // species key fallback; base sprite only if the pack lacks animal art
       return ph === undefined ? undefined : { sprite: ph, animated: true, shadow: 0.6, ...(this.sid(`animal_${k?.key ?? ""}`) === undefined ? { scale: 0.55, onCreate: 0.55 } : {}) };
     }

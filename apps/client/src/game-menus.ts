@@ -22,7 +22,7 @@ import { DEFAULT_QUALITY_PRESET, loadPreset, parsePreset, savePreset, QUALITY_PR
 /** `data-chan` value per @engine/net ChatChannel number (Global 0 … System 6); omitted/unknown = "system". */
 export const CHAT_CHAN_NAMES: Readonly<Record<number, string>> = { 0: "global", 1: "local", 2: "party", 3: "clan", 4: "trade", 5: "whisper", 6: "system" };
 /** Contextual panels are absent from pause: world Interact opens furniture/stalls; the health cluster opens character. */
-export const CONTEXT_ONLY_MENUS: ReadonlySet<string> = new Set(["station", "camper", "character", "wardrobe", "trade"]);
+export const CONTEXT_ONLY_MENUS: ReadonlySet<string> = new Set(["station", "camper", "character", "wardrobe", "trade", "mount"]);
 export interface MenuDef { id: string; title: string; icon: string; hotkeys: string[]; bar?: boolean; text: string }
 export const GAME_MENUS: readonly MenuDef[] = [
   { id: "inventory", title: "Inventory", icon: "ic_backpack.png", hotkeys: ["KeyI", "Tab"], bar: true, text: "Your items and equipment." },
@@ -37,6 +37,7 @@ export const GAME_MENUS: readonly MenuDef[] = [
   { id: "skills", title: "Skills", icon: "ic_star.png", hotkeys: ["KeyJ"], bar: true, text: "Each skill tree levels from its own activities; spend its points there (ADR-209)." },
   { id: "camper", title: "Camper Station", icon: "ic_camper.png", hotkeys: [], text: "Craft, cook, refuel and use storage inside a parked camper." },
   { id: "pet", title: "Pets", icon: "ic_paw.png", hotkeys: ["KeyY"], text: "Tame, feed and command your pets (ADR-145)." },
+  { id: "mount", title: "Mount", icon: "ic_paw.png", hotkeys: [], text: "Ride, saddle, feed or tame a mount (ADR-319). Opens with U / pad LB+X / touch Mount near one." },
   { id: "worker", title: "AI Humans", icon: "ic_farmer.png", hotkeys: [], text: "Hire AI humans to work for you (Task 22)." },
   { id: "map", title: "World Map", icon: "ic_map.png", hotkeys: ["KeyM"], bar: true, text: "Your location, facing and markers. Tap a spot to place a marker." },
   { id: "chat", title: "Chat", icon: "ic_chat.png", hotkeys: ["Enter", "Slash"], bar: true, text: "" },
@@ -177,7 +178,7 @@ export class GameMenus {
   }
   private gameplayNodes(id: GameplayPanel): Node[] {
     const status = this.para(this.statusLine); status.dataset["role"] = "status"; status.setAttribute("aria-live", "polite");
-    return [status, ...gameplayBody(id, { ...this.o.gameplay!, stall: () => this.stallTarget ?? this.o.gameplay!.stall?.(), camper: () => this.camperTarget, station: () => this.stationTarget, pet: () => this.petTarget, selectPet: (e) => this.selectPet(e), worker: () => this.workerTarget, selectWorker: (e) => this.selectWorker(e) }, { para: (t) => this.para(t), rerender: () => this.refresh(), status: (t) => { this.statusLine = t; }, close: () => this.nav.closeAll() })];
+    return [status, ...gameplayBody(id, { ...this.o.gameplay!, stall: () => this.stallTarget ?? this.o.gameplay!.stall?.(), camper: () => this.camperTarget, station: () => this.stationTarget, pet: () => this.petTarget, selectPet: (e) => this.selectPet(e), mount: () => this.mountTarget, openSaddlebag: (m) => this.openStorage(m), worker: () => this.workerTarget, selectWorker: (e) => this.selectWorker(e) }, { para: (t) => this.para(t), rerender: () => this.refresh(), status: (t) => { this.statusLine = t; }, close: () => this.nav.closeAll() })];
   }
   /** Re-render the open gameplay panel from live world state by diffing (only changed nodes are touched, focus kept).
    *  No-op when no gameplay panel is open. Returns the number of DOM mutations. */
@@ -221,6 +222,9 @@ export class GameMenus {
     this.petOpenAt = { pet, t: now }; this.o.gameplay?.send(openContainerIntent(pet as never));
   }
   private petOpenAt = { pet: -1, t: 0 };
+  /** ADR-319: open the mount panel on a mount / wild rideable animal (Mount.Menu next to it, or riding). */
+  openMount(m: number): void { this.mountTarget = m; if (this.nav.top === "mount") this.refresh(); else this.nav.open("mount", this.build("mount")); }
+  mountTarget: number | undefined;
   /** Task 22: open the worker panel on an AI human (Interact next to it); no bag to open, unlike pets. */
   openWorker(worker: number | undefined): void {
     this.selectWorker(worker);

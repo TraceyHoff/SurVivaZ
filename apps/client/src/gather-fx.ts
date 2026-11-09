@@ -16,6 +16,7 @@
  */
 import { setData, setHidden, setStyle, setText } from "./dom-diff.js";
 import { NetId, PlayerId, Transform, type Entity, type World } from "@engine/core";
+import { creatureBarLift, isOwnMount } from "./mount-render.js";
 import { Animal, Dead, gameplayDefs, GroupSummary, Health, HitReact, IntentAction, listSlots, Pet, PlayerIntent, Progression, XP, xpToNext, treesOf, treeShortName, treeXpToNext, ResourceNode, Survival, Zombie } from "@engine/gameplay";
 import { isoToCss, type CameraLike } from "./world-tools.js";
 
@@ -53,7 +54,7 @@ export const CREATURE_BAR_MS = 4000;
 export const CREATURE_BAR_FADE_MS = 800;
 export const COMBAT_TARGET_MS = 8000;
 export type CreatureKind = "human" | "animal" | "zombie";
-export interface CreatureBar { e: Entity; x: number; y: number; frac: number; at: number; kind: CreatureKind; ally: boolean; target: boolean }
+export interface CreatureBar { e: Entity; x: number; y: number; frac: number; at: number; kind: CreatureKind; ally: boolean; target: boolean; /** ADR-319: css px lift override (tall mounts, riders) */ lift?: number }
 export const creatureBarAlpha = (ms: number, target: boolean): number =>
   target ? 1 : ms < 0 ? 0 : ms <= CREATURE_BAR_MS - CREATURE_BAR_FADE_MS ? 1 : ms >= CREATURE_BAR_MS ? 0 : (CREATURE_BAR_MS - ms) / CREATURE_BAR_FADE_MS;
 /** Bar fill colour: allies blue, else by remaining hp. */
@@ -78,7 +79,7 @@ export class CreatureBars {
       if (hr) this.hitTick.set(e, hr.startTick);
       const hitNow = (was !== undefined && h.hp < was - 1e-3) || (hr !== undefined && lastHit !== undefined && hr.startTick !== lastHit);
       if (hitNow && hr && myId && hr.src === myId) this.mine.set(e, now);
-      const myPet = !!myPid && world.has(e, Pet) && world.getField(e, Pet, "owner") === myPid;
+      const myPet = (!!myPid && world.has(e, Pet) && world.getField(e, Pet, "owner") === myPid) || isOwnMount(world, e, myPid); // ADR-319: own mounts too
       const target = (myPet && h.hp < h.max - 1e-3) || attacking === e || now - (this.mine.get(e) ?? -Infinity) < COMBAT_TARGET_MS;
       let b = this.bars.get(e);
       if (!b && !hitNow && !target) continue;
@@ -87,6 +88,7 @@ export class CreatureBars {
       const frac = h.max > 0 ? Math.max(0, Math.min(1, h.hp / h.max)) : 0;
       if (!b) { b = { e, x: t.x, y: t.y, frac, at: now, kind, ally, target }; this.bars.set(e, b); }
       Object.assign(b, { x: t.x, y: t.y, frac, kind, ally, target }); if (hitNow) b.at = now;
+      const lift = creatureBarLift(world, e, kind); if (lift !== undefined) b.lift = lift; else delete b.lift;
     }
     for (const e of [...this.hp.keys()]) if (!seen.has(e)) { this.hp.delete(e); this.hitTick.delete(e); this.mine.delete(e); this.bars.delete(e); }
     for (const [e, b] of this.bars) if (creatureBarAlpha(now - b.at, b.target) <= 0) this.bars.delete(e);
@@ -275,7 +277,7 @@ export function mountGatherFx(root: HTMLElement, d: GatherFxDeps): { destroy(): 
       }
       for (const b of creatures.scan(w, now, p)) { // ADR-134 creature bars: compact, a touch smaller than node bars
         const al = creatureBarAlpha(now - b.at, b.target); if (al <= 0) continue; const s = isoToCss(cam, b.x, b.y);
-        drawBar(s.x, s.y - CREATURE_BAR_LIFT[b.kind] * z, (b.kind === "animal" ? 26 : 30) * z * (touch ? 1.2 : 1), Math.max(3, 4 * z), b.frac, barFill(b.frac, b.ally), al, true);
+        drawBar(s.x, s.y - (b.lift ?? CREATURE_BAR_LIFT[b.kind]) * z, (b.kind === "animal" ? 26 : 30) * z * (touch ? 1.2 : 1), Math.max(3, 4 * z), b.frac, barFill(b.frac, b.ally), al, true);
       }
       parts = parts.filter((q) => (q.age += dt) < q.life);
       for (const q of parts) {

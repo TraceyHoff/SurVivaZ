@@ -6,9 +6,9 @@ import layout from "../../../packages/input/profiles/touchLayout.json";
 describe("ADR-244 touch context", () => {
   it("carry shows only near a liftable bag or while carrying; sleep only near a bed or while asleep", () => {
     const h = new Set<string>();
-    syncTouchHidden(h, { reload: false }); expect([...h].sort()).toEqual(["carry", "reload", "sleep"]);
+    syncTouchHidden(h, { reload: false }); expect([...h].sort()).toEqual(["carry", "mount", "reload", "sleep"]); // ADR-319: mount only near a rideable animal / while riding
     syncTouchHidden(h, { reload: false, carry: true }); expect(h.has("carry")).toBe(false); expect(h.has("sleep")).toBe(true);
-    syncTouchHidden(h, { reload: true, carrying: true, sleep: true }); expect(h.size).toBe(0);
+    syncTouchHidden(h, { reload: true, carrying: true, sleep: true, mount: true }); expect(h.size).toBe(0);
     syncTouchHidden(h, { reload: false, sleeping: true }); expect(h.has("sleep")).toBe(false); expect(h.has("carry")).toBe(true);
   });
   it("captions flip to Drop / Wake / Aim", () => {

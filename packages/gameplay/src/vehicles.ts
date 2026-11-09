@@ -19,7 +19,7 @@ import { movementBlocked } from "./systems/movement.js";
 import { spendStamina } from "./systems/vitals.js";
 import { netIdEntity } from "./vehicle_net.js";
 import { hasKeyFor, keyIssueSystem } from "./vehicle_keys.js";
-import { VehicleLock } from "./components.js";
+import { Riding, VehicleLock } from "./components.js";
 
 export const VEHICLE_CLASSES = ["bicycle", "car", "truck", "van", "camper", "semi", "trailer"] as const;
 export type VehicleClass = (typeof VEHICLE_CLASSES)[number];
@@ -298,7 +298,7 @@ const reachOf = (d: VehicleDef): number => d.footprint.length / 2 + VEHICLE_TUNI
 
 export function validateEnter(world: World, actor: Entity, v: Entity, seat: number): string | undefined {
   if (world.has(actor, Dead)) return "dead";
-  if (world.has(actor, Driver)) return "already_riding";
+  if (world.has(actor, Driver) || (world.isRegistered(Riding) && world.has(actor, Riding))) return "already_riding"; // ADR-319: not while on a mount
   if (!world.isAlive(v) || !world.has(v, Vehicle)) return "not_vehicle";
   const d = vehicleDefOf(world, v); if (!d || d.seats === 0) return "no_seats";
   if (!netIdOf(world, v) || !netIdOf(world, actor)) return "no_net_id";

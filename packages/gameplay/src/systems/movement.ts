@@ -13,7 +13,8 @@ import { shaftAwareHeight, updateShaftOccupancy } from "../building/terrain-hatc
 import { roadSpeedMul } from "../roads.js";
 import { entityIndex, evaluate, Transform, type Entity, type World } from "@engine/core";
 import { contractDisease, diseaseMoveMul } from "../diseases.js";
-import { Anim, AnimState, DamageCause, Health, LootBag, Buffs, Dead, Driver, EdgeSide, Inventory, PlayerIntent, Stat, Survival, Wetness } from "../components.js";
+import { Anim, AnimState, DamageCause, Health, LootBag, Buffs, Dead, Driver, EdgeSide, Inventory, PlayerIntent, Riding, Stat, Survival, Wetness } from "../components.js";
+import { fitsDoorway, fitsUnderCeiling, mountBodyRadius, mountOfRider, mountSpecies, MOUNT_TUNING } from "../mount_defs.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { skillMul } from "../skills/tree.js";
 import { GameplayHoldBits as A, INPUT } from "../input_hooks.js";
@@ -196,10 +197,14 @@ export function applyTerrainFall(world: World, e: Entity, x: number, y: number, 
   const terrain = world.getResource(TerrainRes); if (!terrain) return;
   let tx = Math.floor(x), ty = Math.floor(y); const ux = Math.floor(nx), uy = Math.floor(ny);
   const idx = world.getResource(StructureIndexRes);
+  // ADR-319: a mount cannot use a ladder, so a mounted rider takes the drop (less on a sure-footed species) and so does the mount
+  const riding = world.isRegistered(Riding) && world.has(e, Riding); const mount = riding ? mountOfRider(world, e) : undefined;
+  const safe = riding ? mountSpecies(world.getField(e, Riding, "species") ?? 0)?.fallSafeBonus ?? 0 : 0;
   const cross = (bx: number, by: number): void => {
-    if (!ladderBetween(idx, tx, ty, bx, by)) {
+    if (riding || !ladderBetween(idx, tx, ty, bx, by)) {
       const drop = shaftAwareHeight(world, terrain, tx, ty, e, bx, by) - shaftAwareHeight(world, terrain, bx, by, e, tx, ty);
-      const damage = terrainFallDamage(drop);
+      const damage = terrainFallDamage(drop - safe);
+      if (damage > 0 && mount !== undefined && !world.has(mount, Dead)) applyDamage(world, mount, damage, 0 as Entity, DamageCause.Fall);
       if (damage > 0) {
         const before = world.getField(e, Health, "hp") ?? 0;
         applyDamage(world, e, damage, 0 as Entity, DamageCause.Fall);
@@ -226,6 +231,7 @@ export function applyMovementInput(world: World, e: Entity, actions: number, dt:
     if (world.has(e, PlayerIntent)) world.set(e, PlayerIntent, { moving: 0, sprint: 0 });
     return;
   } // riders move with their vehicle (gameplay.vehicles)
+  if (world.isRegistered(Riding) && world.has(e, Riding)) { applyRidingInput(world, e, actions, dt, analog); return; } // ADR-319
   const dead = world.has(e, Dead);
   const { dx, dy } = dead ? { dx: 0, dy: 0 } : moveVector(actions, analog);
   const moving = dx || dy ? 1 : 0; const ready = autoSprintReady(world, e, dx, dy, dt);
@@ -372,4 +378,62 @@ export function floatLootAshore(world: World): void {
     const x = t.x + (best[0] - t.x) * k, y = t.y + (best[1] - t.y) * k;
     world.set(e, Transform, { x, y }); installSpatialIndex(world).hash.insert(e, x, y);
   }
+}
+
+// ---- ADR-319 riding ----------------------------------------------------------------------------------------
+const angleDiff = (a: number, b: number): number => { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2; return d; };
+/**
+ * ADR-319 riders (players and AI humans, server and client prediction alike): the mount carries its own speed in
+ * Riding.speed. Input steers the heading at the species turn rate; speed eases toward walk (or gallop with sprint /
+ * auto-sprint) at the species acceleration and brakes at accel x decelMul; turning back on yourself (> reverseAngleDeg)
+ * slows to a pivot. No rider stamina. Collision uses the species' real body width; tall riders cannot pass a doorway
+ * or a floor above (only species whose seated rider fits, i.e. donkeys); non-swimmers stop at deep water; ladders are
+ * refused (terrain-ladder.ts) and falls hurt rider and mount (applyTerrainFall).
+ */
+export function applyRidingInput(world: World, e: Entity, actions: number, dt: number, analog?: { x?: number | undefined; y?: number | undefined }): void {
+  const t = world.get(e, Transform); if (!t) return;
+  const r = world.get(e, Riding)!; const sp = mountSpecies(r.species); const tune = MOUNT_TUNING;
+  const { dx, dy } = world.has(e, Dead) || !sp ? { dx: 0, dy: 0 } : moveVector(actions, analog);
+  const mag = Math.min(1, Math.hypot(dx, dy)); const ready = autoSprintReady(world, e, dx, dy, dt) || (mag > 0 && (actions & A.Sprint) !== 0); // hold Sprint to gallop at once
+  if (!world.has(e, PlayerIntent) && world.predicted.has(e)) world.add(e, PlayerIntent);
+  if (world.has(e, PlayerIntent)) world.set(e, PlayerIntent, { moving: mag > 0 ? 1 : 0, sprint: mag > 0 && ready ? 1 : 0 });
+  if (!sp) return;
+  const level = Math.max(0, Math.round(t.z / gameplayDefs(world).building.levelHeight));
+  const swim = level === 0 && sp.swims;
+  let facing = t.facing ?? 0; let target = 0;
+  if (mag > 0) {
+    const want = Math.atan2(dy, dx); const diff = angleDiff(facing, want);
+    target = (ready ? sp.gallop : sp.walk) * mag * (r.hurt ? tune.lowHpSpeedMul : 1) * roadSpeedMul(world, t.x, t.y) * (swim ? swimSpeedMulAt(world, t.x, t.y) : 1);
+    if (Math.abs(diff) > (tune.reverseAngleDeg * Math.PI) / 180) target = Math.min(target, sp.walk * tune.pivotSpeedMul);
+    const step = sp.turn * dt; facing = normalizeFacing(facing + Math.max(-step, Math.min(step, diff)));
+  }
+  let speed = r.speed;
+  if (speed < target) speed = Math.min(target, Math.max(speed, sp.walk * tune.startSpeedMul * mag) + sp.accel * dt);
+  else speed = Math.max(target, speed - sp.accel * tune.decelMul * dt);
+  if (speed < 1e-3) speed = 0;
+  const v = speed * dt; const mx = Math.cos(facing) * v, my = Math.sin(facing) * v; const rad = mountBodyRadius(r.species);
+  let x = t.x, y = t.y;
+  if (v > 0) {
+    let nx = bodyAxisMove(world, x, y, x + mx, 0, level, swim, rad, e);
+    if (rideClearanceBlocked(world, r.species, x, y, nx, y, level)) nx = x;
+    if (level === 0) applyTerrainFall(world, e, x, y, nx, y, dt); x = nx;
+    let ny = bodyAxisMove(world, x, y, y + my, 1, level, swim, rad, e);
+    if (rideClearanceBlocked(world, r.species, x, y, x, ny, level)) ny = y;
+    if (level === 0) applyTerrainFall(world, e, x, y, x, ny, dt); y = ny;
+    const moved = Math.hypot(x - t.x, y - t.y); if (moved < v * 0.25) speed = Math.min(speed, moved / Math.max(dt, 1e-6)); // blocked: lose momentum
+  }
+  if (x !== t.x || y !== t.y) { world.set(e, Transform, { x, y, facing }); updateShaftOccupancy(world, e, t.x, t.y, x, y); }
+  else if (facing !== t.facing) world.set(e, Transform, { facing });
+  if (Math.abs(speed - r.speed) > 1e-6) world.set(e, Riding, { speed });
+  settleStandZ(world, e, dt);
+}
+/** ADR-319 clearance: a seated rider taller than a doorway cannot ride through an edge piece's opening, nor under a deck one level up. */
+export function rideClearanceBlocked(world: World, species: number, x0: number, y0: number, x1: number, y1: number, level: number): boolean {
+  const tx0 = Math.floor(x0), ty0 = Math.floor(y0), tx1 = Math.floor(x1), ty1 = Math.floor(y1); if (tx0 === tx1 && ty0 === ty1) return false;
+  const idx = world.getResource(StructureIndexRes); if (!idx || idx.count === 0) return false;
+  if (!fitsDoorway(species)) {
+    if (tx1 !== tx0 && idx.edge(Math.max(tx0, tx1), ty1, level, EdgeSide.West)) return true;
+    if (ty1 !== ty0 && idx.edge(tx1, Math.max(ty0, ty1), level, EdgeSide.North)) return true;
+  }
+  return !fitsUnderCeiling(species) && !!idx.deck(tx1, ty1, level + 1) && !idx.deck(tx0, ty0, level + 1);
 }

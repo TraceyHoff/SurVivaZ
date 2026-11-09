@@ -1,6 +1,6 @@
 /** ADR-265: full-height, bidirectional terrain-face connections. Rendering never changes sim floor levels. */
 import type { Entity, World } from "@engine/core";
-import { EdgeSide } from "../components.js";
+import { EdgeSide, Riding } from "../components.js";
 import { StructureIndexRes, type StructureIndex } from "./structure.js";
 import { TerrainRes, type Terrain } from "../world.js";
 import { shaftAwareHeight } from "./terrain-hatch.js";
@@ -19,6 +19,7 @@ export function terrainStepBlocked(terrain: Terrain | undefined, idx: StructureI
   const toH = shaftAwareHeight(world, terrain, nx, ny, traveler, x, y);
   // Descents are allowed (and hurt on landing); only upward faces require climbing.
   if (toH - fromH <= MAX_UNAIDED_CLIMB) return false;
+  if (traveler !== undefined && world?.isRegistered(Riding) && world.has(traveler, Riding)) return true; // ADR-319: mounts cannot climb ladders
   return !ladderBetween(idx, x, y, nx, ny);
 }
 export function terrainMoveBlocked(world: World, x: number, y: number, nx: number, ny: number, avoidFalls = false, traveler?: Entity): boolean {

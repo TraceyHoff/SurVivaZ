@@ -183,6 +183,18 @@
     "radius": 22,
     "control": "touch.btn.sleep",
     "glyph": "touch.button.sleep"
+   },
+   {
+    "id": "mount",
+    "kind": "button",
+    "anchor": {
+     "x": 0.85,
+     "y": 0.42,
+     "portrait": { "x": 0.9, "y": 0.43 }
+    },
+    "radius": 22,
+    "control": "touch.btn.mount",
+    "glyph": "touch.button.mount"
    }
   ]
  },

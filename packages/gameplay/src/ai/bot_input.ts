@@ -6,6 +6,7 @@ import type { CommandRegistry, InputFrame } from "@engine/core";
 import { AttackCmd, CraftCmd, EquipCmd, GameplayActions, GatherCmd, OpenContainerCmd, PlaceCmd, UseCmd } from "../input.js";
 import { QueueCraftCmd } from "../systems/craft_queue.js";
 import { BuyFromStallCmd } from "../economy/stall.js";
+import { MountDismountCmd, MountFeedCmd, MountRideCmd, MountSaddleCmd } from "../mount_commands.js";
 
 export type BotIntent =
   | { kind: "idle" }
@@ -18,7 +19,12 @@ export type BotIntent =
   | { kind: "eat"; slot: number }
   | { kind: "equip"; slot: number }
   | { kind: "open"; target: number }
-  | { kind: "buy"; stall: number; listingSlot: number; qty: number; expectedRevision: number; expectedPriceItem: number; expectedPriceCount: number };
+  | { kind: "buy"; stall: number; listingSlot: number; qty: number; expectedRevision: number; expectedPriceItem: number; expectedPriceCount: number }
+  // ADR-319 / ADR-320: AI humans tame (feed), ride, get off and saddle mounts through the same commands as players
+  | { kind: "tameMount"; target: number; item: number }
+  | { kind: "rideMount"; target: number }
+  | { kind: "dismount" }
+  | { kind: "saddleMount"; target: number; slot: number };
 
 const clamp1 = (v: number): number => Math.max(-1, Math.min(1, v));
 /** Build one frame. aim defaults to move direction. Unregistered commands are skipped (returns the frame without them). */
@@ -46,6 +52,10 @@ export function intentToFrame(intent: BotIntent, tick: number, reg: CommandRegis
     case "eat": push(() => reg.make(UseCmd, { slot: intent.slot })); break;
     case "equip": push(() => reg.make(EquipCmd, { slot: intent.slot })); break;
     case "open": f.actions |= GameplayActions.Interact; push(() => reg.make(OpenContainerCmd, { target: intent.target })); break;
+    case "tameMount": push(() => reg.make(MountFeedCmd, { target: intent.target, item: intent.item })); break;
+    case "rideMount": push(() => reg.make(MountRideCmd, { target: intent.target })); break;
+    case "dismount": push(() => reg.make(MountDismountCmd, {})); break;
+    case "saddleMount": push(() => reg.make(MountSaddleCmd, { target: intent.target, slot: intent.slot })); break;
     case "buy": push(() => reg.make(BuyFromStallCmd, { stall: intent.stall, listingSlot: intent.listingSlot, qty: intent.qty, expectedRevision: intent.expectedRevision, expectedPriceItem: intent.expectedPriceItem, expectedPriceCount: intent.expectedPriceCount })); break;
   }
   return f;

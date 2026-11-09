@@ -2860,6 +2860,99 @@
    },
    "desc": "Build a cooking range (cooks like a campfire).",
    "icon": "skill_master_chef"
+  },
+  {
+   "key": "horsemanship",
+   "name": "Horsemanship",
+   "branch": "husbandry",
+   "tier": 0,
+   "x": 1280,
+   "y": 0,
+   "cost": 1,
+   "requires": [],
+   "effects": {
+    "unlock": [
+     "mount:tame"
+    ]
+   },
+   "desc": "Tame rideable animals (horse, donkey, deer, elk, moose, buffalo) by feeding them, then ride them.",
+   "icon": "skill_husbandry_gentle"
+  },
+  {
+   "key": "saddlery_1",
+   "name": "Saddler",
+   "branch": "husbandry",
+   "tier": 1,
+   "x": 1280,
+   "y": 110,
+   "cost": 1,
+   "requires": [
+    "horsemanship"
+   ],
+   "effects": {
+    "unlock": [
+     "item:saddle_leather"
+    ]
+   },
+   "desc": "Saddlery 1: Leather Saddle (3 bag slots).",
+   "icon": "skill_tailoring_1"
+  },
+  {
+   "key": "saddlery_2",
+   "name": "Harness Maker",
+   "branch": "husbandry",
+   "tier": 2,
+   "x": 1280,
+   "y": 220,
+   "cost": 2,
+   "requires": [
+    "saddlery_1"
+   ],
+   "effects": {
+    "unlock": [
+     "item:saddle_reinforced"
+    ]
+   },
+   "desc": "Saddlery 2: Reinforced Saddle (5 bag slots).",
+   "icon": "skill_tailoring_2"
+  },
+  {
+   "key": "saddlery_3",
+   "name": "Iron Saddler",
+   "branch": "husbandry",
+   "tier": 3,
+   "x": 1280,
+   "y": 330,
+   "cost": 2,
+   "requires": [
+    "saddlery_2"
+   ],
+   "effects": {
+    "unlock": [
+     "item:saddle_iron"
+    ]
+   },
+   "desc": "Saddlery 3: Iron Saddle (7 bag slots).",
+   "icon": "skill_armorsmithing_2"
+  },
+  {
+   "key": "saddlery_4",
+   "name": "Master Saddler",
+   "branch": "husbandry",
+   "tier": 4,
+   "x": 1280,
+   "y": 440,
+   "cost": 3,
+   "requires": [
+    "saddlery_3"
+   ],
+   "effects": {
+    "unlock": [
+     "item:saddle_steel"
+    ]
+   },
+   "desc": "Saddlery 4: Steel Saddle (9 bag slots).",
+   "icon": "skill_armorsmithing_3"
   }
  ]
 }

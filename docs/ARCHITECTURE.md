@@ -418,6 +418,9 @@ flowchart LR
 | Camera.Zoom | `AltLeft+mouse.wheelDown/mouse.wheelUp`, `Minus/Equal` | `pad.rb+pad.ddown/pad.dup` | `touch.pinch.in/touch.pinch.out` |
 | Camera.RotateCCW / Camera.RotateCW (ADR-253) | `BracketLeft` / `BracketRight` | `pad.rb+pad.dleft` / `pad.rb+pad.dright` | `btn:camccw` / `btn:camcw` (⟲ ⟳ HUD) |
 | Aim | — | `pad.rx/pad.ry` | `touch.aim.x/touch.aim.y` |
+| Mount.Menu (ADR-319: mount panel — tame / ride / saddle / saddlebag) | `U` | `pad.lb+pad.x` | `btn:mount` (♞, shown near a rideable animal or while riding) |
+| Interact while riding / beside own mount (ADR-319) | `E` dismounts / mounts | `pad.x` dismounts / mounts | `btn:context` |
+| Sprint while riding (ADR-319) | `ShiftLeft` = gallop (auto-gallop after the ADR-289 warmup too) | `pad.ls` | `btn:sprint` |
 
 **Building**
 

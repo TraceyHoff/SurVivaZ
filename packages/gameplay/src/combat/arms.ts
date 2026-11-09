@@ -22,6 +22,7 @@ import { Anim, AnimState } from "../components.js";
 import { indexEntity } from "../spawn.js";
 import { PVP, hasPlayerId } from "./pvp.js";
 import { ignite } from "./pvp_pieces.js";
+import { saddleArmorOf } from "../mount_defs.js";
 
 export const Exploded = ev<{ entity: Entity; item: number; owner: Entity; x: number; y: number; radius: number }>("gameplay.Exploded");
 export const Reloaded = ev<{ entity: Entity; item: number; ammo: number; rounds: number }>("gameplay.Reloaded");
@@ -40,7 +41,8 @@ export function wornItems(world: World, e: Entity): number[] {
   const st = world.store(Worn); const s = st.slot(entityIndex(e)); if (s < 0) return [];
   const out: number[] = []; for (let i = 0; i < WEAR_SLOTS; i++) out.push(st.data.item[s * WEAR_SLOTS + i]!); return out;
 }
-export const armorOf = (world: World, e: Entity): number => world.getField(e, Worn, "armor") ?? 0;
+/** Worn armor plus ADR-320 saddle defense (a saddled mount, or a rider on one). */
+export const armorOf = (world: World, e: Entity): number => (world.getField(e, Worn, "armor") ?? 0) + saddleArmorOf(world, e);
 export const waterproofOf = (world: World, e: Entity): number => world.getField(e, Worn, "waterproof") ?? 0;
 
 /** Toggle-wear the item in inventory `slot` (authority). Returns false if not wearable. */

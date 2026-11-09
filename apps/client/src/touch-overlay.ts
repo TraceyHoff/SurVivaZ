@@ -12,6 +12,7 @@ export const TOUCH_LABELS: Record<string, { icon: string; text: string }> = {
   confirm: { icon: "✓", text: "Place" }, cancel: { icon: "✕", text: "Cancel" }, rotate: { icon: "⟳", text: "Rotate" },
   engine: { icon: "ic_key.png", text: "Engine" }, lights: { icon: "ic_bulb.png", text: "Lights" }, // ADR-170: only in the driving layout
   secondary: { icon: "ic_shield.png", text: "Block" }, crouch: { icon: "⤓", text: "Crouch" }, carry: { icon: "⇪", text: "Carry" }, sleep: { icon: "☾", text: "Sleep" }, // ADR-244
+  mount: { icon: "♞", text: "Mount" }, // ADR-319: contextual (near a rideable animal / riding)
 };
 /** The icon node for a control: a custom icon <img> for icon files, a text span for typographic glyphs. */
 const iconNode = (icon: string): HTMLElement => { if (isIconFile(icon)) return iconImg(icon, 22); const s = document.createElement("span"); s.textContent = icon; return s; };
@@ -24,7 +25,7 @@ const setIcon = (node: ChildNode, icon: string): void => {
   else node.textContent = icon;
 };
 /** ADR-244 touch context: which contextual stance buttons apply now and their live captions. */
-export interface TouchCtx { reload: boolean; carry?: boolean; carrying?: boolean; sleep?: boolean; sleeping?: boolean; aim?: boolean }
+export interface TouchCtx { reload: boolean; carry?: boolean; carrying?: boolean; sleep?: boolean; sleeping?: boolean; aim?: boolean; /** ADR-319 */ mount?: boolean; riding?: boolean }
 /** Live caption for a control (Carry↔Drop, Sleep↔Wake, Block↔Aim); falls back to TOUCH_LABELS. */
 export function touchLabel(id: string, ctx: TouchCtx): { icon: string; text: string } | undefined {
   if (id === "carry" && ctx.carrying) return { icon: "⇩", text: "Drop" };
@@ -66,4 +67,5 @@ export function syncTouchHidden(hidden: Set<string>, ctx: TouchCtx): void {
   const show = (id: string, on: boolean): void => { if (on) hidden.delete(id); else hidden.add(id); };
   show("reload", ctx.reload);
   show("carry", !!(ctx.carry || ctx.carrying)); show("sleep", !!(ctx.sleep || ctx.sleeping)); // ADR-244: contextual, minimal
+  show("mount", !!(ctx.mount || ctx.riding)); // ADR-319
 }

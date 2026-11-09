@@ -92,6 +92,7 @@ export * from "./vehicles.js";
 export * from "./vehicle_craft.js";
 export * from "./vehicle_net.js";
 export * from "./ui/camper.js";
+export * from "./ui/mount_view.js"; // ADR-319 / ADR-320
 export * from "./forget.js";
 export * from "./farming.js";
 export * from "./tool-hint.js";
@@ -109,6 +110,9 @@ export * from "./terrain.js";
 export * from "./signs.js";
 export * from "./hordes.js";
 export * from "./pets.js"; // ADR-145
+export * from "./mount_defs.js"; // ADR-319 / ADR-320
+export * from "./mount_commands.js";
+export * from "./mounts.js";
 export * from "./animal_skills.js"; // Task 15: per-animal skill trees
 export * from "./recruitment.js"; // Task 22: AI-human recruitment (hire / jobs / multiplayer toggle)
 export * from "./dye.js"; // Task 25: dye system (DyeCmd, SlotDye, brush rule)

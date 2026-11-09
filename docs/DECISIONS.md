@@ -3743,3 +3743,41 @@ Updated tests (deliberate changes):
 - **Replicas.** Pieces replicate their Transform; on non-authority peers `structureIndexSystem` re-indexes a piece whose Transform changed to a different slot, so the client's index (targets, previews, outlines) follows a server move.
 
 **Validation.** `adr317_318_demolish_move.test.ts`: move keeps entity / hp / tier / tribe / builder / contents and re-slots the index; damaged, foreign and no-permission refusals; clanmate allowed; validateMove leaves everything unchanged; occupied destination; structural dependents refused; flag move ignores its own zone and fails ClaimOverlap. `adr316_demolish_mode.test.ts`: F lifts, wheel can't change the piece, Esc restores with nothing sent, click sends MoveCmd; damaged → "Repair it first"; pad hold Y / B. `adr318_mp_move.test.ts`: a stocked box moved over the network keeps its contents and moves on every client's replica and structure index; an outsider's MoveCmd changes nothing. Server command tail tests list `MOVE_COMMANDS`.
+
+## ADR-319: Mounts — taming, riding, realistic scale (SurVivaZ)
+
+**Context.** Crossing the map on foot is slow (walk 2.9, sprint 4.64 tiles/s). Players asked for rideable animals that are tamed, ridden, shown with the rider on them, sized realistically next to the 1.75 m player (t362u, t363).
+
+**Decision.**
+- **Data.** `packages/gameplay/data/mounts.json` (`mount_defs.ts`): six species, per-species speeds, acceleration, turn rate, hp, taming difficulty, food preferences, traits and a real-world **size** block. Every walk beats an on-foot sprint; gallop is faster still.
+
+  | Species | Animals (art) | Walk | Gallop | Accel | Turn | HP | Tame diff. | Traits |
+  |---|---|---|---|---|---|---|---|---|
+  | Horse | `animal_horse` (pending art) | 5.4 | **9.6** | 4.0 | 5.5 | 180 | 1.0 | fastest gallop |
+  | Donkey | `animal_donkey` (pending art) | 4.9 | 6.9 | 3.0 | 6.5 | 150 | 0.7 | +1 safe drop tile; fits doorways |
+  | Deer | `animal_red_deer`, `animal_stag` | 5.5 | 9.1 | 5.0 | 7.0 | 90 | 1.3 | quickest accel; skittish |
+  | Elk | `animal_elk` | 5.2 | 8.5 | 3.5 | 5.0 | 160 | 1.2 | sturdy |
+  | Moose | `animal_moose` | 5.0 | 7.8 | 2.5 | 3.8 | 240 | 1.6 | swims deep water; kicks |
+  | Buffalo | `animal_bison` | 4.9 | 8.0 | 2.5 | 3.5 | 260 | 1.5 | toughest; kicks |
+
+- **Realism table** (player 1.75 m = 58 px at 1x → 33.14 px/m; z step 16 px). Applied to render scale, rider seat height, collision radius and clearance:
+
+  | Species | Withers m (×player) | Head/antler/hump top m | Length m | Width m | Seat m | Rider head m | Doorway (≤2.0 m) | Deck ceiling (≤2.4 m) | Body radius | Withers / top / length / seat px (1x) | Render scale (current art) |
+  |---|---|---|---|---|---|---|---|---|---|---|---|
+  | Horse | 1.60 (0.91) | 2.25 | 2.4 | 0.65 | 1.45 (0.83×) | 2.30 | no | yes | 0.375 | 53 / 75 / 80 / 48 | — (no art) |
+  | Donkey | 1.20 (0.69) | 1.75 | 1.8 | 0.50 | 1.10 | 1.95 | **yes** | yes | 0.30 | 40 / 58 / 60 / 36 | — (no art) |
+  | Deer | 1.35 (0.77) | 2.10 | 2.0 | 0.50 | 1.25 | 2.10 | no | yes | 0.30 | 45 / 70 / 66 / 41 | red_deer 1.99, stag 1.42 |
+  | Elk | 1.45 (0.83) | 2.60 | 2.4 | 0.60 | 1.35 | 2.20 | no | yes | 0.35 | 48 / 86 / 80 / 45 | 1.69 |
+  | Moose | 2.00 (1.14) | 2.70 | 2.9 | 0.75 | 1.85 | 2.70 | no | **no** | 0.425 | 66 / 89 / 96 / 61 | 1.90 |
+  | Buffalo | 1.80 (1.03) | 1.90 | 3.0 | 0.95 | 1.55 | 2.40 | no | yes | 0.48 | 60 / 63 / 99 / 51 | 2.25 |
+
+  `mountRenderScale = round(headTopM × px/m ÷ artTopPx, 3)` (measured pivot-to-top of the idle frames) applies to every individual of a rideable species, wild or tamed. Rider seat lift = `(seatM − 0.45 m seated hip) × px/m ÷ 16` z units (horse ≈ 2.07 = 33 px). Rider head = seat + 0.85 m seated torso. Collision radius = clamp(width/2 + 0.05, 0.3, 0.48).
+- **Components** (appended): `Mount {species, kind, owner, tribe, riderNetId, saddle, saddleItem, saddleDur, hp, len, name[16]}` (networked + persistent; `kind` rebuilds `Animal` after a load), `Riding {mountNetId, species, speed, hurt}` (networked, not persistent), `MountTaming {progress, by, lastTick}`. All replicate to everyone ("all") so every peer draws the rider on the mount.
+- **Taming.** Unlock node **Horsemanship** (husbandry branch, tier 0, `mount:tame`) gates taming and riding. Feed a liked food (`MountFeedCmd`): progress += gain(love 25 / like 15 / ok 8) × (1 + tame mod) ÷ difficulty; each feed may spook (chance = 0.18 × difficulty × (1 − progress/100) × pref multiplier × (1 − tame mod)): −15 progress, then a kick (6 damage) for species with an attack, else it bolts. Progress decays after 20 s without food. At 100 the animal becomes a `Mount` owned by the tamer (a hired worker tames for the employer), with the tamer's tribe. A wild mount-species animal is lured (no flee / charge) by someone holding a food it eats.
+- **Riding.** `MountRideCmd` / `MountDismountCmd`; who may ride = owner, tribe / clan mate, or a worker of the owner. Movement runs through the shared `applyMovementInput` (`applyRidingInput`, so client prediction and AI humans use the same code): speed ramps from 0.6× walk by species accel, decel 2.5× accel, species turn rate, a sharp reverse drops to the pivot speed, Sprint (or the ADR-289 auto-sprint warmup) gallops, roads and swimming apply, a mount below 30 % hp runs at 0.75×. Collision uses the species body radius; only swimmers enter deep water. `rideClearanceBlocked`: riders taller than a doorway cannot pass an edge-piece opening; riders taller than a deck ceiling cannot ride under a deck one level up. Terrain ladders over 3 refuse riders; falls are taken with the species' safe bonus and the mount is hurt too. While mounted: gather / build / repair / demolish / move / doors / fire / attack / reload are cleared (`mountGateSystem`); eating, crafting and containers still work. A hit on a rider is split: the mount takes 40 %. Death, disconnect, entering a vehicle or a stale link dismount; the mount stays put.
+- **Controls.** `Mount.Menu` (append-only): KBM `U`, pad `LB+X`, touch ♞ "Mount" (shown near a rideable animal or while riding) opens the mount panel (status, speeds, hp / tame / saddle bars, tame-with-food, Ride / Dismount, Saddlebag, Rename, saddle actions; all gamepad-navigable buttons). `Interact` dismounts while riding and mounts the nearest own free mount on foot; Use never opens the saddlebag (ADR-303).
+- **Rendering.** `view.ts syncRiders`: the mount draws at the rider's (predicted) pose; the rider draws seated (Sit) lifted by the seat height, or by a dedicated sprite's per-frame `rider` anchor when present. Mount walk / run from `Riding.speed`. Creature bars sit above the real head height.
+- **AI humans.** Bot intents `tameMount`, `rideMount`, `dismount`, `saddleMount`; riding AI moves at mount speed through the same movement code. No autonomous planner policy yet (hook only).
+
+**Validation.** `adr319_mounts.test.ts` (species list, speeds > sprint, withers / seat ratios, pixel targets, render scale × art top = head top px, seat lift, body radius, doorway / ceiling lists, taming + needs_skill, worker / AI ownership, permissions, ride / gallop / dismount, gate, mount_busy, disconnect + link heal, death drop, replication scopes, chunk save / load + Animal rebuild, doorway clearance). `adr319_mount_bindings.test.ts`, `adr319_mount_render.test.ts`, `adr234_skill_audit` (+ `mount:` token), touch layout ids.
+

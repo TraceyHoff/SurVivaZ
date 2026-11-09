@@ -3,7 +3,8 @@
  * containers (open/close with range check + viewer tracking for net's "viewers" scope, deposit/withdraw,
  * auto-close when out of range). The client predicts none of this (only the ghost).
  */
-import { Pet } from "../components.js";
+import { Mount, Pet } from "../components.js";
+import { canOpenSaddlebag } from "../mount_defs.js";
 import { entityIndex, Owner, Transform, type Entity, type World } from "@engine/core";
 import { canLootBag } from "../combat/pvp.js";
 import { isPetOwner } from "../pets.js";
@@ -196,6 +197,7 @@ export function containerSystem(world: World): void {
     if (action === IntentAction.OpenContainer) {
       if (!canLootBag(world, e, c)) { fail(BuildFail.Locked); continue; }
       if (world.has(c, Pet) && !isPetOwner(world, e, c)) { fail(BuildFail.Locked); continue; } // ADR-145 pet inventory: owner only
+      if (world.isRegistered(Mount) && world.has(c, Mount) && !canOpenSaddlebag(world, e, c)) { fail(BuildFail.Locked); continue; } // ADR-320: saddlebag needs a saddle + permission
       if (!canUseBaseStorage(world, e, c)) { fail(BuildFail.Locked); continue; } // ADR-207: base storage inside a claim = its tribe (clan) only
       if (world.getField(e, Viewing, "container") === c) continue;
       closeContainer(world, e);

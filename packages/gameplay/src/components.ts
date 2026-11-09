@@ -462,6 +462,25 @@ export const AbandonedSite = defineComponent("AbandonedSite", {
   originX: "i32", originY: "i32", width: "u8", height: "u8", kind: "u8", stories: "u8", claimed: "u8", claimedBy: "u32",
 }, { persistent: true });
 
+/** ADR-319 mounts. A tamed rideable animal (horse, donkey, deer, elk, moose, buffalo; data/mounts.json `species`, 1-based).
+ *  owner = owner PlayerId (players and AI humans; 0 = none), tribe = the tamer's Tribe at tame time (tribe / clan members
+ *  may ride too; hired workers ride their employer's mounts). riderNetId = NetId of the current rider (0 = free; healed
+ *  after loads / disconnects). ADR-320: saddle = saddle tier (0 = bareback: no slots, no defense), saddleItem = the item
+ *  that tier came from, saddleDur = its remaining durability. hp mirrors Health (Health is rebuilt after a load, like
+ *  Pet.hp). kind = the animal archetype index (Animal.kind, like Tamed.kind) so Animal is rebuilt after a load.
+ *  name = optional ASCII name (len bytes). Networked + persistent (chunk codec, with the Container saddlebag). */
+export const MOUNT_NAME_MAX = 16;
+export const Mount = defineComponent("Mount", {
+  species: "u8", kind: "u8", owner: "u32", tribe: "u16", riderNetId: "u32", saddle: "u8", saddleItem: "u16", saddleDur: "u16", hp: "f32",
+  len: "u8", name: { type: "u8", length: MOUNT_NAME_MAX },
+}, { networked: true, persistent: true });
+/** ADR-319: on a rider. mountNetId = the ridden Mount's NetId; species cached so client prediction moves at mount speed
+ *  without resolving the mount; speed = current ground speed (acceleration ramp); hurt = 1 while the mount is below the
+ *  low-hp threshold (slower). Networked (prediction + render) but NOT persistent: everyone is on foot after a restart. */
+export const Riding = defineComponent("Riding", { mountNetId: "u32", species: "u8", speed: "f32", hurt: "u8" }, { networked: true });
+/** ADR-319: taming progress (0..100) on a wild mount-species animal, by PlayerId `by`, last fed at `lastTick` (decays). */
+export const MountTaming = defineComponent("MountTaming", { progress: "f32", by: "u32", lastTick: "u32" }, { networked: true });
+
 export const GAMEPLAY_COMPONENTS = [
   Emitter, Buffs,
   Health, ResourceNode, Survival, VitalsState, Exposure, Dead,
@@ -513,4 +532,5 @@ export const GAMEPLAY_COMPONENTS = [
   InShaft, // append-only (ADR-299)
   AbandonedSite, // append-only (ADR-300)
   PieceBuilder, // append-only (ADR-317)
+  Mount, Riding, MountTaming, // append-only (ADR-319 mounts)
 ] as const;

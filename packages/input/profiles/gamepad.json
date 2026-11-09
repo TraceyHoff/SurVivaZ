@@ -274,6 +274,13 @@
     "modifiers": [
      "pad.lb"
     ]
+   },
+   {
+    "action": "Mount.Menu",
+    "control": "pad.x",
+    "modifiers": [
+     "pad.lb"
+    ]
    }
   ],
   "Building": [

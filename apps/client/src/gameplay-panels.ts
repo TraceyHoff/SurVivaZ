@@ -23,6 +23,7 @@ import { hasDisease, iconForItem, ROADS, clanTintIndex,
   type BuildSelection, type MenuCtx, type MenuIntent, camperStationView, vehicleRefuelIntent, type CamperRecipeView,
   progressionView, unlockSkillIntent, respecSkillsIntent, SKILL_REJECT_TEXT, useIntent, drinkWaterIntent, nearWater,
   SKILLS, equipIntent, wearIntent, equipmentView, boilIntent, nearLitCampfire, holdingTorch,
+  mountView, mountRideIntent, mountDismountIntent, mountFeedIntent, mountSaddleIntent, mountUnsaddleIntent, mountRepairIntent, MOUNT_SPECIES,
   petView, petsOf, petOfferIntent, petCommandIntent, petGuardIntent, animalSkillIntent, animalSkillView, petStatusLabel, dropItemIntent, splitStackIntent, moveSlotIntent, containerToSlotIntent, slotToContainerIntent, defaultSplit, HOTBAR_SIZE, PACK_SLOTS, HOTBAR_OFFSET, PET_HELP, petName, petSpecies, Pet, Animal, BuildPiece, Tamed,
   workerView, WORKER_JOBS, WORKER_JOB_LABELS, WORKER_JOB_HELP, WORKER_HELP, hireWorkerIntent, dismissWorkerIntent,
   treeShortName, treeIndex, readSlots, SPRITE_FALLBACKS, characterSheetView, dyeView, dyeIntent, wetnessStage,
@@ -33,7 +34,7 @@ import { colorChoices, requestCharacterEdit } from "./character-creator.js";
 import { GroupRole, Membership, PlayerId, SLOT_PALETTE, swatchColor, Transform, type Entity, type WearableSlot } from "@engine/core";
 import { fillBar, fillLabel } from "./fill-bar.js";
 
-export const GAMEPLAY_PANELS = ["inventory", "crafting", "build", "character", /* Task 31 */ "wardrobe", "party", "clan", "trade", "camper", "skills", "station", /* ADR-145 */ "pet", /* Task 22 */ "worker"] as const;
+export const GAMEPLAY_PANELS = ["inventory", "crafting", "build", "character", /* Task 31 */ "wardrobe", "party", "clan", "trade", "camper", "skills", "station", /* ADR-145 */ "pet", /* Task 22 */ "worker", /* ADR-319 */ "mount"] as const;
 export type GameplayPanel = (typeof GAMEPLAY_PANELS)[number];
 /** What the client wires in (main.ts): the local replica + player, and a command sender (NetId mapping + gameplayNet). */
 export interface GameplaySource {
@@ -70,6 +71,12 @@ export interface GameplaySource {
   selectWorker?(e: Entity | undefined): void;
   /** ADR-145: open the rename editor (modal; on-screen keyboard on gamepad). */
   renamePet?(pet: Entity, current: string): void;
+  /** ADR-319: mount / wild rideable animal the mount panel shows (GameMenus.openMount). */
+  mount?(): Entity | undefined;
+  /** ADR-320: open the saddlebag in the normal container (inventory) panel. */
+  openSaddlebag?(m: Entity): void;
+  /** ADR-319: mount rename editor. */
+  renameMount?(m: Entity, current: string): void;
 }
 export interface PanelKit { para(t: string): HTMLElement; rerender(): void; status(t: string): void; close(): void }
 
@@ -512,7 +519,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
       const shown = v.recipes.filter((r) => (craftUi.cat === "all" || catOf(r.output.item) === craftUi.cat) && (!qq || r.output.name.toLowerCase().includes(qq) || r.ingredients.some((i) => i.name.toLowerCase().includes(qq))));
       const g = grid(); g.dataset["role"] = "recipe-grid";
       const dupOut = new Set<number>(); { const seen = new Set<number>(); for (const r of v.recipes) { if (seen.has(r.output.item)) dupOut.add(r.output.item); seen.add(r.output.item); } }
-      const why = (r: (typeof v.recipes)[number]): string => r.reason ? (r.reason === "no_station" && st ? "light it / move closer" : r.reason === "skill_locked" ? "🔒 learn this station in the skill tree" : r.reason.replace(/_/g, " ")) : "";
+      const why = (r: (typeof v.recipes)[number]): string => r.reason ? (r.reason === "no_station" && st ? "light it / move closer" : r.reason === "skill_locked" ? "🔒 learn this station in the skill tree" : r.reason === "recipe_locked" ? "🔒 learn it in the skill tree" : r.reason.replace(/_/g, " ")) : "";
       for (const r of shown) {
         // alternate recipes for the same item (e.g. Hoe from stone or bone) are told apart by their first distinct ingredient
         const alt = dupOut.has(r.output.item) ? ` (${recipeVariantLabel(r, v.recipes)})` : "";
@@ -922,6 +929,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
     }
     case "pet": return petBody(c, src, kit, btn, send);
     case "worker": return workerBody(c, src, kit, btn, send);
+    case "mount": return mountBody(c, src, kit, btn, send);
     case "camper": {
       const ve = src.camper?.(); const v = ve === undefined ? undefined : camperStationView(c, ve);
       if (!v) return [kit.para("Open a camper's station (interact inside a parked camper).")];
@@ -1115,5 +1123,49 @@ function workerBody(c: MenuCtx, src: GameplaySource, kit: PanelKit, btn: Btn, se
   }
   head.append(el("p", { "data-role": "worker-owner" }, `Works for Player ${v.owner}.`));
   out.push(head);
+  return out;
+}
+
+// ---- ADR-319 / ADR-320 mount panel ------------------------------------------------------------------------
+const MOUNT_PREF: Record<string, string> = { love: "loves it", like: "likes it", ok: "will eat it" };
+function mountBody(c: MenuCtx, src: GameplaySource, kit: PanelKit, btn: Btn, send: (i: MenuIntent, ok: string) => void): Node[] {
+  const m = src.mount?.(); const v = m !== undefined ? mountView(c.world, c.player, m) : undefined;
+  if (!v) return [kit.para("Walk up to a horse, donkey, deer, elk, moose or buffalo and press Mount (U / pad LB+X)."), kit.para(`Rideable: ${MOUNT_SPECIES.map((s) => s.name).join(", ")}.`)];
+  const out: Node[] = [];
+  const head = el("section", { "data-role": "mount-status", "data-species": MOUNT_SPECIES[v.species - 1]?.key ?? "" });
+  head.append(el("p", { "data-role": "mount-name" }, v.wild ? `Wild ${v.speciesName}` : v.name === v.speciesName ? v.speciesName : `${v.name} (${v.speciesName})`));
+  head.append(el("p", { "data-role": "mount-speed" }, `Walk ${v.walk.toFixed(1)} · Gallop ${v.gallop.toFixed(1)} tiles/s`));
+  head.append(bar("HP", v.hp, v.maxHp, "mount-hp"));
+  if (v.wild) head.append(bar("Tame", v.tame, 100, "mount-tame"));
+  if (v.saddle) head.append(bar(`${v.saddle.name} · +${v.saddle.defense} armor · ${v.saddle.used}/${v.saddle.slots} slots`, v.saddle.dur, v.saddle.max, "mount-saddle"));
+  out.push(head);
+  if (!v.wild && !v.mayUse) { out.push(kit.para("Someone else's mount.")); return out; }
+  if (v.wild) {
+    if (!v.canTame) { out.push(kit.para(`Learn ${v.tameNeeds ?? "Horsemanship"} in the skill tree to tame it.`)); return out; }
+    out.push(heading("Tame with food"));
+    const og = grid(); og.dataset["role"] = "mount-feed";
+    for (const f of v.foods) og.append(btn(`Feed ${f.name} ×${f.count}`, `mount-feed-${f.item}`, () => send(mountFeedIntent(v.entity, f.item), `Offered ${f.name}…`), { role: "offer", title: `${v.speciesName} ${MOUNT_PREF[f.pref]}`, data: { item: String(f.item), icon: f.key } }));
+    if (og.childElementCount) out.push(og); else out.push(kit.para("Carry food it likes (hay, apples, carrots, wheat or berries) and hold it so it stays calm."));
+    return out;
+  }
+  const g = grid(); g.dataset["role"] = "mount-actions";
+  if (v.riding) g.append(btn("Dismount", "mount-dismount", () => send(mountDismountIntent(), "You got off."), { title: "Get off (Use)" }));
+  else g.append(btn("Ride", "mount-ride", () => { send(mountRideIntent(v.entity), "Mounted."); kit.close(); }, { disabled: v.taken, title: v.taken ? "Someone is riding it" : "Get on (Use)" }));
+  if (v.saddle) g.append(btn(`Saddlebag (${v.saddle.used}/${v.saddle.slots})`, "mount-bag", () => src.openSaddlebag?.(v.entity), { title: "Open the saddlebag" }));
+  g.append(btn("Rename", "mount-rename", () => src.renameMount?.(v.entity, v.name), { alt: true, title: "Give your mount a name" }));
+  out.push(g);
+  out.push(heading("Saddle"));
+  const sg = grid(); sg.dataset["role"] = "mount-saddles";
+  for (const s of v.saddles) sg.append(btn(`Put on ${s.name} (${s.slots} slots, +${s.defense})`, `mount-saddle-${s.slot}`, () => send(mountSaddleIntent(v.entity, s.slot), `${s.name} on.`), { data: { item: String(s.item) } }));
+  if (v.saddle) {
+    sg.append(btn("Remove saddle", "mount-unsaddle", () => send(mountUnsaddleIntent(v.entity), "Saddle off."), { alt: true, disabled: v.saddle.used > 0, title: v.saddle.used > 0 ? "Empty the saddlebag first" : "Take the saddle off" }));
+    if (v.repair.length) { const ok = v.repair.every((r) => r.have >= r.count); sg.append(btn(`Repair (${v.repair.map((r) => `${r.count} ${r.name}`).join(", ")})`, "mount-repair", () => send(mountRepairIntent(v.entity), "Repaired."), { disabled: !ok, title: ok ? "Restore durability" : "Missing materials" })); }
+  }
+  if (sg.childElementCount) out.push(sg); else out.push(kit.para("Bareback: no armor, no saddlebag. Craft a saddle at a workbench (Saddlery, Husbandry tree)."));
+  if (v.foods.length && v.hp < v.maxHp - 0.5) {
+    out.push(heading("Feed (heals)")); const fg = grid(); fg.dataset["role"] = "mount-feed";
+    for (const f of v.foods) fg.append(btn(`Feed ${f.name} ×${f.count}`, `mount-feed-${f.item}`, () => send(mountFeedIntent(v.entity, f.item), `Fed ${f.name}.`), { role: "offer", data: { item: String(f.item), icon: f.key } }));
+    out.push(fg);
+  }
   return out;
 }

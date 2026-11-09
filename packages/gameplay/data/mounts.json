@@ -1,0 +1,81 @@
+{
+  "$comment": "ADR-319 mounts (tame + ride) and ADR-320 saddles. Speeds in tiles/s (on-foot walk 2.9, sprint 2.9 x 1.6 = 4.64): every mount's walk already beats an on-foot sprint; gallop follows the shared AutoSprint warmup (~4 s steady heading). size: real-world metres vs the 1.75 m player (ADR-319 realism table, t363); renderScale for existing art = headTopM x pxPerM / artTopPx (measured pivot-to-top, 1x px, idle frames). pendingArt species have no art yet: their archetypes exist but wild spawns stay off until Art & Assets deliver (never a placeholder).",
+  "scale": {
+    "playerHeightM": 1.75,
+    "playerHeightPx": 58,
+    "zStepPx": 16,
+    "doorwayClearanceM": 2.0,
+    "ceilingClearanceM": 2.4,
+    "seatedTorsoM": 0.85,
+    "riderSitHipM": 0.45
+  },
+  "tuning": {
+    "interactRange": 2.2,
+    "tameDecayAfterSeconds": 20,
+    "tameDecayPerSecond": 2,
+    "spookBase": 0.18,
+    "spookLoss": 15,
+    "kickDamage": 6,
+    "prefGain": { "love": 25, "like": 15, "ok": 8 },
+    "lowHpFrac": 0.3,
+    "lowHpSpeedMul": 0.75,
+    "reverseAngleDeg": 110,
+    "pivotSpeedMul": 0.5,
+    "startSpeedMul": 0.6,
+    "decelMul": 2.5,
+    "riderDamageShare": 0.6,
+    "regenPerMinute": 6,
+    "feedHeal": 10,
+    "dismountOffset": 0.9
+  },
+  "species": [
+    {
+      "key": "horse", "name": "Horse", "animals": [{ "key": "animal_horse", "artTopPx": 0 }], "pendingArt": true,
+      "walk": 5.4, "gallop": 9.6, "accel": 4.0, "turn": 5.5, "hp": 180, "tameDifficulty": 1.0,
+      "foods": { "carrot": "love", "apple": "love", "hay": "like", "wheat": "like", "berries": "ok" },
+      "traits": ["fastest gallop"], "fallSafeBonus": 0, "swims": false,
+      "size": { "withersM": 1.6, "headTopM": 2.25, "lengthM": 2.4, "widthM": 0.65, "seatM": 1.45 }
+    },
+    {
+      "key": "donkey", "name": "Donkey", "animals": [{ "key": "animal_donkey", "artTopPx": 0 }], "pendingArt": true,
+      "walk": 4.9, "gallop": 6.9, "accel": 3.0, "turn": 6.5, "hp": 150, "tameDifficulty": 0.7,
+      "foods": { "carrot": "love", "hay": "love", "apple": "like", "wheat": "like", "berries": "ok" },
+      "traits": ["sure-footed: +1 safe drop tile", "low enough to ride through doorways"], "fallSafeBonus": 1, "swims": false,
+      "size": { "withersM": 1.2, "headTopM": 1.75, "lengthM": 1.8, "widthM": 0.5, "seatM": 1.1 }
+    },
+    {
+      "key": "deer", "name": "Deer", "animals": [{ "key": "animal_red_deer", "artTopPx": 35 }, { "key": "animal_stag", "artTopPx": 49 }],
+      "walk": 5.5, "gallop": 9.1, "accel": 5.0, "turn": 7.0, "hp": 90, "tameDifficulty": 1.3,
+      "foods": { "apple": "love", "berries": "love", "carrot": "like", "wheat": "ok" },
+      "traits": ["quickest to accelerate", "skittish (spooks more while taming)"], "fallSafeBonus": 0, "swims": false,
+      "size": { "withersM": 1.35, "headTopM": 2.1, "lengthM": 2.0, "widthM": 0.5, "seatM": 1.25 }
+    },
+    {
+      "key": "elk", "name": "Elk", "animals": [{ "key": "animal_elk", "artTopPx": 51 }],
+      "walk": 5.2, "gallop": 8.5, "accel": 3.5, "turn": 5.0, "hp": 160, "tameDifficulty": 1.2,
+      "foods": { "apple": "love", "hay": "like", "berries": "like", "wheat": "ok" },
+      "traits": ["sturdy"], "fallSafeBonus": 0, "swims": false,
+      "size": { "withersM": 1.45, "headTopM": 2.6, "lengthM": 2.4, "widthM": 0.6, "seatM": 1.35 }
+    },
+    {
+      "key": "moose", "name": "Moose", "animals": [{ "key": "animal_moose", "artTopPx": 47 }],
+      "walk": 5.0, "gallop": 7.8, "accel": 2.5, "turn": 3.8, "hp": 240, "tameDifficulty": 1.6,
+      "foods": { "apple": "love", "berries": "like", "hay": "like", "wheat": "ok" },
+      "traits": ["strong swimmer: crosses deep water", "kicks while being tamed"], "fallSafeBonus": 0, "swims": true,
+      "size": { "withersM": 2.0, "headTopM": 2.7, "lengthM": 2.9, "widthM": 0.75, "seatM": 1.85 }
+    },
+    {
+      "key": "buffalo", "name": "Buffalo", "animals": [{ "key": "animal_bison", "artTopPx": 28 }],
+      "walk": 4.9, "gallop": 8.0, "accel": 2.5, "turn": 3.5, "hp": 260, "tameDifficulty": 1.5,
+      "foods": { "hay": "love", "wheat": "love", "carrot": "like", "apple": "ok" },
+      "traits": ["toughest hide", "kicks while being tamed"], "fallSafeBonus": 0, "swims": false,
+      "size": { "withersM": 1.8, "headTopM": 1.9, "lengthM": 3.0, "widthM": 0.95, "seatM": 1.55 }
+    }
+  ],
+  "saddles": [
+    { "tier": 1, "item": "saddle_leather", "name": "Leather Saddle", "slots": 3, "defense": 10, "durability": 300 },
+    { "tier": 2, "item": "saddle_reinforced", "name": "Reinforced Saddle", "slots": 5, "defense": 20, "durability": 450 },
+    { "tier": 3, "item": "saddle_iron", "name": "Iron Saddle", "slots": 7, "defense": 32, "durability": 600 },
+    { "tier": 4, "item": "saddle_steel", "name": "Steel Saddle", "slots": 9, "defense": 45, "durability": 800 }
+  ]
+}

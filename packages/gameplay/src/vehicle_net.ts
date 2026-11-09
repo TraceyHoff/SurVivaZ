@@ -11,7 +11,9 @@
  *  - vehicleGuardSystem: server-side per-tick vehicle speed / teleport sanity check (reverts the step, reports).
  */
 import { defineResource, NetId, Transform, type Entity, type World } from "@engine/core";
-import { Driver, Hitch, Vehicle, VehicleSeats } from "./components.js";
+import { Driver, Hitch, Riding, Vehicle, VehicleSeats } from "./components.js";
+import { mountSpecies } from "./mount_defs.js";
+import { ROADS } from "./roads.js";
 import { isAuthority } from "./config.js";
 import { hitchPoint, vehicleDefOf, VEHICLE_TUNING } from "./vehicles.js";
 
@@ -112,6 +114,7 @@ export function riderVehicleSpeed(world: World, rider: Entity): number {
 // ---- anti-cheat -----------------------------------------------------------------------------------------
 /** Top speed (tiles/s, incl. boost) of the vehicle `e` rides, or undefined when on foot (AntiCheat maxSpeedFor). */
 export function riderMaxSpeed(world: World, e: Entity): number | undefined {
+  if (world.isRegistered(Riding) && world.has(e, Riding)) { const s = mountSpecies(world.getField(e, Riding, "species") ?? 0); return s ? s.gallop * Math.max(1, ...ROADS.surfaces.map((r) => r.speedMul)) : undefined; } // ADR-319
   if (!world.has(e, Driver)) return undefined;
   const v = netIdEntity(world, world.getField(e, Driver, "vehicleNetId")!); const d = v === undefined ? undefined : vehicleDefOf(world, v);
   return d ? d.maxSpeed * VEHICLE_TUNING.boostMul : undefined;

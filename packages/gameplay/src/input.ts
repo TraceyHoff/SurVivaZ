@@ -28,6 +28,7 @@ import { EXPRESSION_COMMANDS } from "./expression.js";
 import { SKILL_COMMANDS } from "./skills/progression.js";
 import { VEHICLE_CRAFT_COMMANDS, VEHICLE_CRAFT_ENTITY_FIELDS } from "./vehicle_craft.js";
 import { driveFromBits, setDriveInput, VEHICLE_COMMANDS, VEHICLE_STATE_COMMANDS, VEHICLE_ENTITY_FIELDS } from "./vehicles.js";
+import { MOUNT_COMMANDS } from "./mount_commands.js";
 import { analogMoving, GameplayEdgeBits, GameplayHoldBits, hotbarSlotFromEdges, runInputHooks } from "./input_hooks.js";
 import { HOTBAR_OFFSET } from "./components.js";
 import { ECONOMY_COMMAND_RATES, ECONOMY_COMMANDS, ECONOMY_ENTITY_FIELDS } from "./economy/stall.js";
@@ -133,6 +134,7 @@ export function registerGameplayCommands(reg: CommandRegistry = new CommandRegis
   for (const [d] of HOTBAR_COMMANDS) reg.register(d); // ADR-289: append-only, idempotent HUD selection
   for (const [d] of RECLAIM_COMMANDS) reg.register(d); // ADR-300: append-only reclaim
   for (const [d] of MOVE_COMMANDS) reg.register(d); // ADR-318: append-only move
+  for (const d of MOUNT_COMMANDS) reg.register(d); // ADR-319 / ADR-320: append-only mounts + saddles
   return reg;
 }
 
