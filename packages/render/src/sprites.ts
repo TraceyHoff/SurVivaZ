@@ -867,7 +867,7 @@ export class SpriteBatch {
       // ADR-241 seat socket: a v2 sit/vehicle frame's `seat` anchor (pelvis contact) lands on the entity position (the
       // vehicle seat socket) instead of the feet pivot; body + layers shift together. v1 frames have no seat: unchanged.
       let seatDx = 0, seatDy = 0;
-      if (bodyL && (res.anim === "vehicle" || res.anim === "sit")) { const sa = atlas.handOf(res, SEAT_SOCKET); if (sa) { seatDx = sa.x - res.ax; seatDy = sa.y - res.ay; res.ax += seatDx; res.ay += seatDy; } }
+      if (bodyL && (res.anim === "vehicle" || res.anim === "sit" || res.anim.startsWith("ride_"))) { /* ADR-319: ride_* seat on the mount seat */ const sa = atlas.handOf(res, SEAT_SOCKET); if (sa) { seatDx = sa.x - res.ax; seatDy = sa.y - res.ay; res.ax += seatDx; res.ay += seatDy; } }
       // ADR-244 (c): sleep_lie* frames sit on the bed (pivot = bed footprint centre + bedFits offset) and sort after it
       let bedBias = 0;
       if (bodyL && res.anim.startsWith("sleep_lie")) { const bf = cx.bindings.bedFit?.(e); if (bf) { res.ax -= bf.x; res.ay -= bf.y; seatDx -= bf.x; seatDy -= bf.y; bedBias = BED_SORT_EPS; } }

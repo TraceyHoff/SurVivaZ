@@ -17,33 +17,41 @@ const ONFOOT_SPRINT = 2.9 * 1.6;
 
 describe("ADR-319 mount data: species, speeds and realistic scale (t363)", () => {
   it("horse, donkey, deer, elk, moose and buffalo exist; every walk already beats an on-foot sprint; gallop > walk", () => {
-    expect(G.MOUNT_SPECIES.map((s) => s.key)).toEqual(["horse", "donkey", "deer", "elk", "moose", "buffalo"]);
+    expect(G.MOUNT_SPECIES.map((s) => s.key)).toEqual(["horse", "donkey", "deer", "elk", "moose", "buffalo", "yak"]);
     for (const s of G.MOUNT_SPECIES) { expect(s.walk).toBeGreaterThan(ONFOOT_SPRINT); expect(s.gallop).toBeGreaterThan(s.walk); }
     const gallops = G.MOUNT_SPECIES.map((s) => s.gallop); expect(new Set(gallops).size).toBe(gallops.length); // all different
     expect(Math.max(...gallops)).toBe(sp("horse").gallop);
   });
   it("withers / player-height ratios match the real-world references (player 1.75 m)", () => {
     const P = G.MOUNT_SCALE.playerHeightM; const r = (k: string): number => sp(k).size.withersM / P;
-    const want: Record<string, [number, number]> = { horse: [0.86, 0.97], donkey: [0.6, 0.75], moose: [1.06, 1.22], deer: [0.72, 0.87], buffalo: [0.95, 1.1], elk: [0.74, 0.9] };
+    const want: Record<string, [number, number]> = { horse: [0.86, 0.97], donkey: [0.6, 0.75], moose: [1.06, 1.22], deer: [0.72, 0.87], buffalo: [0.95, 1.1], elk: [0.74, 0.9], yak: [0.8, 0.95] };
     for (const [k, [lo, hi]] of Object.entries(want)) { expect(r(k), k).toBeGreaterThanOrEqual(lo); expect(r(k), k).toBeLessThanOrEqual(hi); }
     expect(sp("horse").size.seatM / P).toBeGreaterThanOrEqual(0.7); expect(sp("horse").size.seatM / P).toBeLessThanOrEqual(0.9); // seat ~ rider chest
     expect(r("donkey")).toBeLessThan(r("deer")); expect(r("deer")).toBeLessThan(r("horse")); expect(r("horse")).toBeLessThan(r("buffalo")); expect(r("buffalo")).toBeLessThan(r("moose"));
     expect(sp("buffalo").size.widthM).toBe(Math.max(...G.MOUNT_SPECIES.map((s) => s.size.widthM))); // heavy + wide
     for (const s of G.MOUNT_SPECIES) { expect(s.size.seatM).toBeLessThan(s.size.withersM + 0.01); expect(s.size.headTopM).toBeGreaterThan(s.size.withersM); }
   });
-  it("pixel targets and render scale: renderScale x artTop ~ headTop x px/m (1x art, 58 px player)", () => {
-    expect(G.PX_PER_M).toBeCloseTo(58 / 1.75, 6);
+  it("pixel targets: the dedicated mount sheets (Art fafe447e) are authored at the player's 52 px = 1.75 m, so withers px = withersM x px/m", async () => {
+    expect(G.PX_PER_M).toBeCloseTo(52 / 1.75, 6);
     const px = (k: string): number => Math.round(sp(k).size.withersM * G.PX_PER_M);
-    expect([px("horse"), px("donkey"), px("deer"), px("elk"), px("moose"), px("buffalo")]).toEqual([53, 40, 45, 48, 66, 60]);
-    for (const s of G.MOUNT_SPECIES) for (const a of s.animals) {
-      if (s.pendingArt) { expect(G.mountRenderScale(a.key)).toBe(1); continue; }
-      expect(G.mountRenderScale(a.key) * a.artTopPx, a.key).toBeCloseTo(G.targetTopPx(s), 0);
+    expect(["horse", "donkey", "deer", "elk", "moose", "buffalo", "yak"].map(px)).toEqual([48, 36, 40, 43, 59, 53, 46]);
+    const { readFileSync } = await import("node:fs");
+    const anchors = JSON.parse(readFileSync(new URL("../../assets/pack/nature/mount_anchors.json", import.meta.url), "utf8")) as { pxPerMetre: number; playerHeightPx: number; species: Record<string, { heightM: number; heightPx: number; sprite: string }> };
+    expect(anchors.pxPerMetre).toBeCloseTo(G.PX_PER_M, 3); expect(anchors.playerHeightPx).toBe(G.MOUNT_SCALE.playerHeightPx);
+    for (const s of G.MOUNT_SPECIES) {
+      const a = anchors.species[s.art]!; expect(a, s.key).toBeDefined(); expect(a.sprite).toBe(G.mountSpriteKey(G.mountSpeciesOfKey(s.key)));
+      expect(a.heightM, s.key).toBeCloseTo(s.size.withersM, 2); expect(Math.abs(a.heightPx - G.withersPx(s)), s.key).toBeLessThan(0.6);
     }
-    expect(G.mountRenderScale("animal_wolf")).toBe(1); // non-mount animals untouched
+  });
+  it("every rideable species has a wild archetype that spawns somewhere (horse, donkey, yak wander on their mount sheet)", () => {
+    const keys = new Set(G.animalDefs().map((a) => a.key));
+    for (const s of G.MOUNT_SPECIES) for (const a of s.animals) expect(keys.has(a.key), a.key).toBe(true);
+    const spawned = new Set(G.POPULATION_DATA.spawns("sp").map((e: { kind: string }) => e.kind));
+    for (const k of ["animal_horse", "animal_donkey", "animal_yak", "animal_moose", "animal_bison", "animal_elk", "animal_deer"]) expect(spawned.has(k), k).toBe(true);
   });
   it("rider seat lift, body radius (collision footprint) and doorway / ceiling clearance follow the size table", () => {
     const k = (s: string): number => G.mountSpeciesOfKey(s);
-    expect(G.riderSeatLiftZ(k("horse"))).toBeCloseTo(((1.45 - 0.45) * G.PX_PER_M) / 16, 5);
+    expect(G.riderSeatLiftZ(k("horse"))).toBeCloseTo(((1.45 - 0.45) * G.PX_PER_M) / 16, 5); // fallback when a frame has no seat anchor
     expect(G.riderSeatLiftZ(k("moose"))).toBeGreaterThan(G.riderSeatLiftZ(k("horse"))); expect(G.riderSeatLiftZ(k("donkey"))).toBeLessThan(G.riderSeatLiftZ(k("horse")));
     expect(G.mountBodyRadius(k("buffalo"))).toBeGreaterThan(G.mountBodyRadius(k("horse"))); expect(G.mountBodyRadius(k("donkey"))).toBeLessThan(G.mountBodyRadius(k("horse")));
     expect(G.MOUNT_SPECIES.filter((s) => G.fitsDoorway(k(s.key))).map((s) => s.key)).toEqual(["donkey"]);

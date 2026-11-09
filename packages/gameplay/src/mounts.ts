@@ -2,7 +2,7 @@
  * ADR-319 mounts (taming, riding) + ADR-320 saddles (tiers, defense, saddlebag). Server-authoritative; riding movement is
  * the shared applyRidingInput (systems/movement.ts) so client prediction matches. Data: data/mounts.json via mount_defs.ts.
  *
- * - A wild animal of a rideable species (horse, donkey, deer, elk, moose, buffalo) is tamed by feeding it foods it likes
+ * - A wild animal of a rideable species (horse, donkey, deer, elk, moose, buffalo, yak) is tamed by feeding it foods it likes
  *   (MountFeedCmd) once the rider has the "mount:tame" unlock (Horsemanship). Each feed adds progress scaled by how much it
  *   likes the food, the species' difficulty and the `tame` skill mod; it can spook (bolt, progress lost) or kick (wild
  *   species with an attack). Progress decays when feeding stops. At 100 the animal becomes a Mount owned like a

@@ -1130,7 +1130,7 @@ function workerBody(c: MenuCtx, src: GameplaySource, kit: PanelKit, btn: Btn, se
 const MOUNT_PREF: Record<string, string> = { love: "loves it", like: "likes it", ok: "will eat it" };
 function mountBody(c: MenuCtx, src: GameplaySource, kit: PanelKit, btn: Btn, send: (i: MenuIntent, ok: string) => void): Node[] {
   const m = src.mount?.(); const v = m !== undefined ? mountView(c.world, c.player, m) : undefined;
-  if (!v) return [kit.para("Walk up to a horse, donkey, deer, elk, moose or buffalo and press Mount (U / pad LB+X)."), kit.para(`Rideable: ${MOUNT_SPECIES.map((s) => s.name).join(", ")}.`)];
+  if (!v) return [kit.para("Walk up to a horse, donkey, deer, elk, moose, buffalo or yak and press Mount (U / pad LB+X)."), kit.para(`Rideable: ${MOUNT_SPECIES.map((s) => s.name).join(", ")}.`)];
   const out: Node[] = [];
   const head = el("section", { "data-role": "mount-status", "data-species": MOUNT_SPECIES[v.species - 1]?.key ?? "" });
   head.append(el("p", { "data-role": "mount-name" }, v.wild ? `Wild ${v.speciesName}` : v.name === v.speciesName ? v.speciesName : `${v.name} (${v.speciesName})`));

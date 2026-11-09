@@ -1,21 +1,43 @@
-/** ADR-319/320 client render helpers: seat height from the realism table (or a dedicated art "rider" anchor), saddle overlay keys, bar lift. */
+/** ADR-319/320 client render helpers: rider pose on the mount seat anchor, screen-neutral layer order, sheet / saddle keys, gait. */
 import { describe, expect, it } from "vitest";
-import { MOUNT_SCALE, MOUNT_SPECIES, mountSpeciesOfKey, PX_PER_M, riderSeatLiftZ } from "@engine/gameplay";
-import { BAR_PX_PER_ART_PX, riderSeatZ, saddleOverlayKey } from "../src/mount-render.js";
+import { MOUNT_SCALE, MOUNT_SPECIES, mountSpeciesOfKey, riderSeatLiftZ } from "@engine/gameplay";
+import { BAR_PX_PER_ART_PX, LAYER_KEY, mountForeKey, mountGait, mountSpriteKeyOf, riderPose, riderSeatZ, saddleOverlayKey, screenNeutralShift } from "../src/mount-render.js";
+import { animChainFor } from "@engine/render";
+import { AnimState } from "@engine/core";
+import manifest from "../../../packages/assets/pack/nature/manifest.nature.json";
+
+const screen = (x: number, y: number, z: number) => ({ sx: (x - y) * 32, sy: (x + y) * 16 - z * 16, key: x + y + z / 3 });
+const keys = new Set((manifest as unknown as { sprites: { key: string }[] }).sprites.map((s) => s.key));
 
 describe("ADR-319 mount rendering", () => {
-  it("rider seat lift = (seat height - seated hip) in z steps; a dedicated art anchor overrides it", () => {
-    const horse = mountSpeciesOfKey("horse");
-    expect(riderSeatZ(horse)).toBe(riderSeatLiftZ(horse));
-    expect(riderSeatZ(horse) * MOUNT_SCALE.zStepPx).toBeCloseTo((1.45 - MOUNT_SCALE.riderSitHipM) * PX_PER_M, 4); // ~33 px: seat at rider chest height
-    const anchored = riderSeatZ(horse, -48, 1); expect(anchored).toBeCloseTo((48 - MOUNT_SCALE.riderSitHipM * PX_PER_M) / 16, 5);
-    expect(riderSeatZ(horse, Number.NaN)).toBe(riderSeatLiftZ(horse));
-    const lifts = ["donkey", "deer", "horse", "moose"].map((k) => riderSeatZ(mountSpeciesOfKey(k))); expect([...lifts].sort((a, b) => a - b)).toEqual(lifts);
+  it("sheet, fore and saddle overlay keys exist in the art pack for every species and tier", () => {
+    for (let i = 1; i <= MOUNT_SPECIES.length; i++) {
+      expect(keys.has(mountSpriteKeyOf(i)), mountSpriteKeyOf(i)).toBe(true); expect(keys.has(mountForeKey(i)), mountForeKey(i)).toBe(true);
+      for (const t of [1, 2, 3, 4]) expect(keys.has(saddleOverlayKey(t, i)), saddleOverlayKey(t, i)).toBe(true);
+    }
+    expect(saddleOverlayKey(0, 1)).toBe(""); expect(saddleOverlayKey(4, mountSpeciesOfKey("buffalo"))).toBe("mount_saddle_bison_steel");
   });
-  it("saddle overlays: one dedicated key per tier per species, none bareback", () => {
-    const keys = MOUNT_SPECIES.flatMap((s, i) => [1, 2, 3, 4].map((t) => saddleOverlayKey(t, i + 1)));
-    expect(keys).toHaveLength(24); expect(new Set(keys).size).toBe(24); expect(keys).toContain("saddle_1_horse"); expect(keys).toContain("saddle_4_buffalo");
-    expect(saddleOverlayKey(0, 1)).toBe("");
-    expect(BAR_PX_PER_ART_PX).toBeCloseTo(74 / 58, 6);
+  it("screen-neutral shifts keep the screen spot and only raise the depth key, in every view rotation", () => {
+    for (const q of [0, 1, 2, 3]) {
+      const s = screenNeutralShift(0.03, q); const a = screen(0, 0, 0); const rot = (x: number, y: number) => { const c = [1, 0, -1, 0][q]!, n = [0, 1, 0, -1][q]!; return { u: c * x - n * y, v: n * x + c * y }; };
+      const r = rot(s.dx, s.dy); const b = screen(r.u, r.v, s.dz);
+      expect(b.sx).toBeCloseTo(a.sx, 6); expect(b.sy).toBeCloseTo(a.sy, 6); expect(b.key - a.key).toBeCloseTo(0.03, 6);
+    }
+    expect(LAYER_KEY.saddle).toBeLessThan(LAYER_KEY.rider); expect(LAYER_KEY.rider).toBeLessThan(LAYER_KEY.fore);
+  });
+  it("the rider lands on the mount's seat anchor (screen px) and sorts just above the mount, under the fore layer", () => {
+    const horse = mountSpeciesOfKey("horse"); const seat = { x: 2.14, y: -41.53 };
+    const p = riderPose(horse, seat, 0); const s = screen(p.dx, p.dy, p.dz);
+    expect(s.sx).toBeCloseTo(2.14, 4); expect(s.sy).toBeCloseTo(-41.53, 4); expect(s.key).toBeCloseTo(LAYER_KEY.rider, 6);
+    const f = riderPose(horse, undefined, 0); expect(screen(f.dx, f.dy, f.dz).sy).toBeCloseTo(-riderSeatLiftZ(horse) * MOUNT_SCALE.zStepPx, 4);
+    expect(riderSeatZ(horse)).toBe(riderSeatLiftZ(horse)); expect(riderSeatZ(horse, -48)).toBeCloseTo(3, 6);
+  });
+  it("gait: idle / walk / gallop from the ridden speed; bar scale follows the 52 px doll", () => {
+    const deer = mountSpeciesOfKey("deer"); expect(mountGait(0, deer)).toBe(0); expect(mountGait(3, deer)).toBe(1); expect(mountGait(9, deer)).toBe(2);
+    expect(BAR_PX_PER_ART_PX).toBeCloseTo(74 / 52, 6);
+  });
+  it("a seated rider plays ride_<gait> (frame-locked to the mount), falling back to the vehicle / sit pose", () => {
+    expect(animChainFor(AnimState.Sit, { ride: 2 })?.[0]).toBe("ride_gallop"); expect(animChainFor(AnimState.Sit, { ride: 0 })).toContain("vehicle");
+    expect(animChainFor(AnimState.Sit, { driver: true })?.[0]).toBe("vehicle");
   });
 });

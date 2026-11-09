@@ -57,7 +57,7 @@ describe("TexturePacker importer", () => {
 
 describe("animation + weather mapping", () => {
   it("AnimState fallbacks", () => {
-    expect(STATE_ANIMS[AnimState.Run]).toEqual(["run", "walk"]);
+    expect(STATE_ANIMS[AnimState.Run]).toEqual(["run", "gallop", "walk"]); // ADR-319 mount sheets
     expect(STATE_ANIMS[AnimState.Hurt]).toContain("hurt");
     expect(STATE_ANIMS[AnimState.Shamble]).toEqual(["shamble", "walk"]);
   });

@@ -462,7 +462,7 @@ export const AbandonedSite = defineComponent("AbandonedSite", {
   originX: "i32", originY: "i32", width: "u8", height: "u8", kind: "u8", stories: "u8", claimed: "u8", claimedBy: "u32",
 }, { persistent: true });
 
-/** ADR-319 mounts. A tamed rideable animal (horse, donkey, deer, elk, moose, buffalo; data/mounts.json `species`, 1-based).
+/** ADR-319 mounts. A tamed rideable animal (horse, donkey, deer, elk, moose, buffalo, yak; data/mounts.json `species`, 1-based).
  *  owner = owner PlayerId (players and AI humans; 0 = none), tribe = the tamer's Tribe at tame time (tribe / clan members
  *  may ride too; hired workers ride their employer's mounts). riderNetId = NetId of the current rider (0 = free; healed
  *  after loads / disconnects). ADR-320: saddle = saddle tier (0 = bareback: no slots, no defense), saddleItem = the item

@@ -59,7 +59,7 @@ export type ImageLike = ImageBitmap | HTMLImageElement | HTMLCanvasElement | Off
  * numeric literals here. Unknown / out-of-range states resolve to idle.
  */
 const STATE_ANIM_TABLE: Record<CoreAnimState, readonly string[]> = {
-  [CoreAnimState.Idle]: ["idle"], [CoreAnimState.Walk]: ["walk"], [CoreAnimState.Run]: ["run", "walk"],
+  [CoreAnimState.Idle]: ["idle"], [CoreAnimState.Walk]: ["walk"], [CoreAnimState.Run]: ["run", "gallop", "walk"], // ADR-319: mount sheets name their run `gallop`
   [CoreAnimState.Attack]: ["attack"], [CoreAnimState.Hurt]: ["hit", "hurt", "idle"], [CoreAnimState.Die]: ["death", "die", "idle"],
   [CoreAnimState.Gather]: ["gather", "idle"], [CoreAnimState.Build]: ["build", "idle"],
   // animals: manifest anims `eat` / `graze`, each falls back to the other, then idle

@@ -3,8 +3,9 @@
  * config and core only) so movement, combat (armorOf) and population can read it without ESM cycles.
  *
  * Realism (t363): every species carries real-world metres (withers, head/antler top, body length, body width, saddle
- * seat height) relative to the 1.75 m player. Render scale, the rider's seat lift, the collision footprint and the
- * doorway / ceiling clearance checks all derive from that one table, so a mount never looks or behaves "toy sized".
+ * seat height) relative to the 1.75 m player. The dedicated mount sheets are authored at the player's px/m (52 px = 1.75 m),
+ * so they draw at scale 1; the rider's fallback seat lift, the collision footprint and the doorway / ceiling clearance checks
+ * derive from the same table, so a mount never looks or behaves "toy sized".
  */
 import { NetId, PlayerId, type Entity, type World } from "@engine/core";
 import raw from "../data/mounts.json";
@@ -14,7 +15,7 @@ import { gameplayDefs } from "./config.js";
 export type FoodPref = "love" | "like" | "ok";
 export interface MountSize { withersM: number; headTopM: number; lengthM: number; widthM: number; seatM: number }
 export interface MountSpecies {
-  key: string; name: string; animals: { key: string; artTopPx: number }[]; pendingArt?: boolean;
+  key: string; name: string; animals: { key: string }[]; art: string;
   walk: number; gallop: number; accel: number; turn: number; hp: number; tameDifficulty: number;
   foods: Record<string, FoodPref>; traits: string[]; fallSafeBonus: number; swims: boolean; size: MountSize;
 }
@@ -37,16 +38,14 @@ export const mountSpeciesOfKey = (key: string): number => MOUNT_SPECIES.findInde
 // ---- realism (t363) ----------------------------------------------------------------------------------------
 /** Target on-screen height (1x px, pivot to the tallest point: head / antlers / hump) for a species. */
 export const targetTopPx = (s: MountSpecies): number => s.size.headTopM * PX_PER_M;
-/**
- * Draw scale for an animal sprite so its tallest point matches the species' real height next to the player. Existing
- * (pre-mount) art was drawn small; dedicated mount art drawn at targetTopPx comes out at 1 (artTopPx 0 = native).
- * Non-rideable animals keep 1.
- */
-export function mountRenderScale(animalKey: string | undefined): number {
-  const sp = mountSpecies(mountSpeciesOfAnimal(animalKey)); const a = sp?.animals.find((x) => x.key === animalKey);
-  if (!sp || !a || !(a.artTopPx > 0)) return 1;
-  return Math.round((targetTopPx(sp) / a.artTopPx) * 1000) / 1000;
-}
+/** Withers / shoulder height in 1x px (the dedicated mount sheets are authored to this: mount_anchors.json heightPx). */
+export const withersPx = (s: MountSpecies): number => s.size.withersM * PX_PER_M;
+/** Art key of a species' dedicated true-scale sheets (`mount_<art>`, `mount_<art>_fore`, `mount_saddle_<art>_<tier>`). */
+export const mountArtKey = (species: number): string | undefined => mountSpecies(species)?.art;
+/** Sprite key of a tamed mount (and of a wild animal with no own wild sheet): `mount_<art>`. Drawn at scale 1 (true scale). */
+export const mountSpriteKey = (species: number): string | undefined => { const a = mountArtKey(species); return a ? `mount_${a}` : undefined; };
+/** Saddle tier names used by the art (`mount_saddle_<art>_<tier name>`), tier 1..4. */
+export const SADDLE_ART_TIERS = ["leather", "reinforced", "iron", "steel"] as const;
 /** Seat height above the ground in terrain z levels (16 px each), minus the seated pose's hip height above its own pivot. */
 export function riderSeatLiftZ(species: number): number {
   const s = mountSpecies(species); if (!s) return 0;

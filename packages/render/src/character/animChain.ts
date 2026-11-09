@@ -15,6 +15,8 @@ export interface AnimChainCtx {
   weaponClass?: string;
   /** Main-hand item key: throwing_* / sling use attack_throw whatever their class. */
   itemKey?: string;
+  /** ADR-319: rider on a mount: Sit plays `ride_idle` / `ride_walk` / `ride_gallop` (0 / 1 / 2, frame-locked to the mount). */
+  ride?: 0 | 1 | 2 | undefined;
   /** Rider in a vehicle driver seat (gameplay Driver): Sit plays `vehicle`. */
   driver?: boolean;
   /** Sleep in a bed: "lie" = top/only spot (sleep_lie), "under" = bunk lower spot (sleep_lie_under). */
@@ -42,6 +44,7 @@ const CROUCH_IDLE = c("crouch_idle", "idle"), CROUCH_WALK = c("crouch_walk", "cr
 const CARRY_IDLE = c("carry_idle", "idle"), CARRY_WALK = c("carry_walk", "carry_idle", "walk", "idle");
 const SLEEP = c("sleep", "sit", "idle"), SLEEP_LIE = c("sleep_lie", "sleep", "sit", "idle"), SLEEP_LIE_UNDER = c("sleep_lie_under", "sleep_lie", "sleep", "sit", "idle");
 const VEHICLE = c("vehicle", "sit", "idle");
+const RIDE = [c("ride_idle", "vehicle", "sit", "idle"), c("ride_walk", "ride_idle", "vehicle", "sit", "idle"), c("ride_gallop", "ride_walk", "ride_idle", "vehicle", "sit", "idle")] as const;
 
 /** Attack class of an item: throwing_* / sling throw, else the weapon class. */
 export function attackClassOf(ctx: AnimChainCtx): string {
@@ -62,7 +65,7 @@ export function animChainFor(state: number, ctx: AnimChainCtx): readonly string[
     case AnimState.Crouch: return ctx.moving ? CROUCH_WALK : CROUCH_IDLE;
     case AnimState.Carry: return ctx.moving ? CARRY_WALK : CARRY_IDLE;
     case AnimState.Sleep: return ctx.bed === "under" ? SLEEP_LIE_UNDER : ctx.bed === "lie" ? SLEEP_LIE : SLEEP;
-    case AnimState.Sit: return ctx.driver ? VEHICLE : undefined;
+    case AnimState.Sit: return ctx.ride !== undefined ? RIDE[ctx.ride] : ctx.driver ? VEHICLE : undefined;
     default: return undefined;
   }
 }

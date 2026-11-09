@@ -1558,6 +1558,21 @@
       "to": [
         "salt_barrel"
       ]
+    },
+    "animal_horse": {
+      "to": [
+        "mount_horse"
+      ]
+    },
+    "animal_donkey": {
+      "to": [
+        "mount_donkey"
+      ]
+    },
+    "animal_yak": {
+      "to": [
+        "mount_yak"
+      ]
     }
   },
   "stages": {

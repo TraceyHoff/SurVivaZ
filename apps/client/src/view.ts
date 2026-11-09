@@ -32,10 +32,9 @@ import { netIdOf } from "@engine/net";
 import { roadSpriteKeys, ROAD_FLAGS, signFrameId } from "./road-sign-view.js";
 import { Road, Sign, surfaceDef, signDef, walkAnimRate, petSits, facingAfterTravel } from "@engine/gameplay";
 import { HitReact, NodeRegrow, hitDirRad, Equipment, Worn, SlotDye, INVENTORY_SLOTS, wornCosmetics } from "@engine/gameplay";
-import { mountRenderScale, mountSpecies, Riding } from "@engine/gameplay";
-import { riderSeatZ } from "./mount-render.js";
-/** ADR-319: rider drawn this many tiles toward the camera so it sorts in front of its mount. */
-const RIDER_SORT_NUDGE = 0.02;
+import { Mount, Riding } from "@engine/gameplay";
+import { LAYER_KEY, MOUNT_GAIT_ANIM, mountForeKey, mountGait, mountSpriteKeyOf, riderPose, saddleOverlayKey, screenNeutralShift } from "./mount-render.js";
+import { AssetRegistry as AssetRegistryClass } from "@engine/assets";
 import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, type ResolvedSprite } from "@engine/gameplay";
 
 /** Render-side schemas the renderer's bindings expect (view World only). */
@@ -273,7 +272,7 @@ export class IsoView {
   private itemClass = new Map<number, readonly [string, string]>();
   private chainCtx: AnimChainCtx = {};
   private animCtx(ve: number, elapsed: number): AnimChainCtx {
-    const c = this.chainCtx; c.moving = this.movingVe.has(ve); c.driver = this.driverVe.has(ve); c.elapsed = elapsed; c.bed = this.bedOf.get(ve)?.lie; // ADR-244 (c)
+    const c = this.chainCtx; c.moving = this.movingVe.has(ve); c.driver = this.driverVe.has(ve); c.elapsed = elapsed; c.bed = this.bedOf.get(ve)?.lie; c.ride = this.rideOf.get(ve); // ADR-244 (c), ADR-319 ride gait
     const item = this.view.has(ve as Entity, VEquip) ? this.view.getField(ve as Entity, VEquip, "mainHandItem") ?? 0 : 0;
     let ic = this.itemClass.get(item);
     if (!ic) { const key = item && this.netRef ? gameplayDefs(this.netRef).items.get(item)?.key ?? "" : ""; ic = [key, weaponClassOf(key || undefined)]; if (this.netRef || !item) this.itemClass.set(item, ic); }
@@ -661,7 +660,7 @@ export class IsoView {
     this.syncTerrainLadders(net, tiles);
     this.syncHatchBottoms(net, tiles);
     this.syncClutter(tiles, ground);
-    this.syncRiders(net);
+    this.syncMounts(net);
     this.syncVehicles(net, player, ground, frac);
     const camE = CAM_ANIMAL && this.camAnimal !== undefined ? this.camAnimal : player;
     const pv = camE !== undefined ? this.map.get(camE) : undefined;
@@ -854,32 +853,68 @@ export class IsoView {
    * VehicleSnapshot (key = NetId) into VehicleView, which owns the segment sprites + headlight lights in the view World. */
   private vehicleView: VehicleView | undefined; private vehAt = 0;
   readonly vehicleSnaps: VehicleSnapshot[] = [];
+  /** ADR-319 rider gait per rider view entity (anim chain ride_idle / ride_walk / ride_gallop). */
+  private rideOf = new Map<number, 0 | 1 | 2>();
+  /** ADR-319 / ADR-320 view-only layers of a mount: saddle overlay and (while ridden) the fore layer drawn over the rider. */
+  private mountLayers = new Map<Entity, { saddle?: Entity; fore?: Entity }>();
   /**
-   * ADR-319: riders sit on their mount. The rider is predicted (own player) or interpolated, the mount always
-   * interpolated, so the mount's view pose is copied from the rider's (no slide); the rider is lifted by the seat height
-   * (riderSeatZ, or the mount art's per-frame "rider" anchor), drawn seated (Sit + vehicle chain) and a hair toward the
-   * camera so it sorts in front of the mount. The mount's walk / run anim follows Riding.speed. Every peer runs this from
-   * replicated Mount / Riding (rider replication).
+   * ADR-319 / ADR-320 mounts on every peer, from replicated Mount / Riding:
+   * - a tamed mount switches to its true-scale `mount_<art>` sheet (taming happens after the view entity exists);
+   * - the mount takes the rider's (predicted or interpolated) pose, so it never slides under them; gait idle / walk / gallop
+   *   from Riding.speed, and the rider's ride_<gait> restarts on the same tick so both play frame-locked (1:1 frames, same fps);
+   * - the rider sits at the mount frame's `seat` anchor (the doll's own ride_* seat socket lands there, see sprites.ts);
+   * - draw order mount -> saddle `mount_saddle_<art>_<tier>` -> rider -> `mount_<art>_fore`, by screen-neutral depth shifts.
    */
-  private syncRiders(net: World): void {
-    if (!net.isRegistered(Riding)) return; const v = this.view;
-    for (const e of net.query([Riding])) {
-      const ve = this.map.get(e); const rd = net.get(e, Riding)!; const m = netIdEntity(net, rd.mountNetId); const mve = m === undefined ? undefined : this.map.get(m);
-      if (ve === undefined || mve === undefined || !v.has(ve, Transform) || !v.has(mve, Transform)) continue;
-      const t = v.get(ve, Transform)!, p = v.get(ve, PrevTransform);
-      v.set(mve, Transform, { x: t.x, y: t.y, z: t.z, facing: t.facing }); if (p && v.has(mve, PrevTransform)) v.set(mve, PrevTransform, { x: p.x, y: p.y, z: p.z, facing: p.facing });
-      const sp = v.get(mve, Sprite); const anchor = sp ? this.riderAnchorY(sp.spriteId, sp.frameId) : undefined;
-      const lift = riderSeatZ(rd.species, anchor, anchor === undefined ? 1 : sp?.scale ?? 1);
-      v.set(ve, Transform, { x: t.x + RIDER_SORT_NUDGE, y: t.y + RIDER_SORT_NUDGE, z: t.z + lift }); if (p) v.set(ve, PrevTransform, { x: p.x + RIDER_SORT_NUDGE, y: p.y + RIDER_SORT_NUDGE, z: p.z + lift });
-      if (v.has(ve, VAnim) && v.getField(ve, VAnim, "state") !== 13) v.set(ve, VAnim, { state: 13, startTick: v.tick }); // seated
-      this.driverVe.add(ve); this.movingVe.delete(ve);
-      const spec = mountSpecies(rd.species); const want = rd.speed < 0.05 ? 0 : spec && rd.speed > spec.walk + 0.3 ? 2 : 1;
-      if (v.has(mve, VAnim) && v.getField(mve, VAnim, "state") !== want && (v.getField(mve, VAnim, "state") ?? 0) <= 2) v.set(mve, VAnim, { state: want, startTick: v.tick });
+  private syncMounts(net: World): void {
+    const v = this.view; const riders = new Set<number>();
+    if (net.isRegistered(Mount)) {
+      const q = (this.renderer.iso.view ?? 0) & 3; const live = new Set<Entity>();
+      for (const m of net.query([Mount])) {
+        const mve = this.map.get(m); if (mve === undefined || !v.has(mve, Transform)) continue; live.add(m);
+        const mm = net.get(m, Mount)!; const sp = mm.species;
+        const want = this.rs(mountSpriteKeyOf(sp)); const cur = v.get(mve, Sprite);
+        if (want && cur && cur.spriteId !== want.id && !net.has(m, Dead)) { v.set(mve, Sprite, { spriteId: want.id, scale: want.scale, tint: want.tint }); this.scales.set(mve, want.scale); }
+        const rider = mm.riderNetId ? netIdEntity(net, mm.riderNetId) : undefined;
+        const rve = rider !== undefined && net.has(rider, Riding) ? this.map.get(rider) : undefined;
+        const L = this.mountLayers.get(m) ?? {}; this.mountLayers.set(m, L);
+        if (rider !== undefined && rve !== undefined && v.has(rve, Transform)) {
+          const t = v.get(rve, Transform)!, p = v.get(rve, PrevTransform);
+          v.set(mve, Transform, { x: t.x, y: t.y, z: t.z, facing: t.facing }); if (p && v.has(mve, PrevTransform)) v.set(mve, PrevTransform, { x: p.x, y: p.y, z: p.z, facing: p.facing });
+          const gait = mountGait(net.getField(rider, Riding, "speed") ?? 0, sp);
+          if (v.has(mve, VAnim)) { const st = v.getField(mve, VAnim, "state") ?? 0; if (st !== gait && st <= 2) { v.set(mve, VAnim, { state: gait, startTick: v.tick }); if (v.has(rve, VAnim)) v.set(rve, VAnim, { state: 13, startTick: v.tick }); } }
+          if (v.has(rve, VAnim) && v.getField(rve, VAnim, "state") !== 13) v.set(rve, VAnim, { state: 13, startTick: v.getField(mve, VAnim, "startTick") ?? v.tick });
+          this.rideOf.set(rve, gait); riders.add(rve); this.driverVe.add(rve); this.movingVe.delete(rve);
+          const pose = riderPose(sp, this.mountSeat(mve, gait, q), q);
+          v.set(rve, Transform, { x: t.x + pose.dx, y: t.y + pose.dy, z: t.z + pose.dz }); if (p) v.set(rve, PrevTransform, { x: p.x + pose.dx, y: p.y + pose.dy, z: p.z + pose.dz });
+          const fore = this.layerOn(mve, L.fore, mountForeKey(sp), LAYER_KEY.fore, q); if (fore !== undefined) L.fore = fore; else delete L.fore;
+        } else if (L.fore !== undefined) { v.destroy(L.fore); delete L.fore; }
+        const sad = this.layerOn(mve, L.saddle, mm.saddle ? saddleOverlayKey(mm.saddle, sp) : "", LAYER_KEY.saddle, q); if (sad !== undefined) L.saddle = sad; else delete L.saddle;
+      }
+      for (const [m, L] of this.mountLayers) if (!live.has(m)) { if (L.saddle !== undefined) v.destroy(L.saddle); if (L.fore !== undefined) v.destroy(L.fore); this.mountLayers.delete(m); }
     }
+    for (const ve of this.rideOf.keys()) if (!riders.has(ve)) this.rideOf.delete(ve);
   }
-  /** Per-frame "rider" anchor y (px from the pivot, 1x) of dedicated mount art; undefined for art without it (all current fauna). */
-  private riderAnchorY(spriteId: number, frameId: number): number | undefined {
-    try { return this.registry.frameAnchors(spriteId, frameId)?.["rider"]?.y; } catch { return undefined; }
+  /** Creates / updates / removes one overlay layer (`key` sprite) on mount view entity `mve`, `k` sort steps above it. */
+  private layerOn(mve: Entity, ve: Entity | undefined, key: string, k: number, q: number): Entity | undefined {
+    const v = this.view; const r = key ? this.rs(key) : undefined;
+    if (!r) { if (ve !== undefined) v.destroy(ve); return undefined; }
+    const t = v.get(mve, Transform)!, p = v.get(mve, PrevTransform) ?? t; const a = v.get(mve, VAnim); const sh = screenNeutralShift(k, q);
+    if (ve === undefined) { ve = v.create(); v.add(ve, Transform, { x: 0, y: 0, z: 0, facing: 0 }).add(ve, PrevTransform, { x: 0, y: 0, z: 0, facing: 0 }).add(ve, Sprite, { spriteId: r.id, frameId: 0, flags: 0, scale: r.scale, tint: r.tint }).add(ve, VAnim, { state: 0, startTick: 0 }); }
+    else if (v.getField(ve, Sprite, "spriteId") !== r.id) v.set(ve, Sprite, { spriteId: r.id, scale: r.scale, tint: r.tint });
+    v.set(ve, Transform, { x: t.x + sh.dx, y: t.y + sh.dy, z: t.z + sh.dz, facing: t.facing }); v.set(ve, PrevTransform, { x: p.x + sh.dx, y: p.y + sh.dy, z: p.z + sh.dz, facing: p.facing });
+    if (a && (v.getField(ve, VAnim, "state") !== a.state || v.getField(ve, VAnim, "startTick") !== a.startTick)) v.set(ve, VAnim, { state: a.state, startTick: a.startTick });
+    return ve;
+  }
+  /** Current frame's `seat` anchor of a mount sheet (1x px from the pivot), or undefined (no anchor: table seat height). */
+  private mountSeat(mve: Entity, gait: 0 | 1 | 2, q: number): { x: number; y: number } | undefined {
+    const v = this.view; const sp = v.get(mve, Sprite); const a = v.get(mve, VAnim); if (!sp) return undefined;
+    try {
+      const anim = MOUNT_GAIT_ANIM[gait]; const def = this.registry.sprite(sp.spriteId).animations.get(anim); if (!def) return undefined;
+      const n = def.frames.length || 1; const hz = this.renderer.tickHz || 20; const i = Math.floor(((v.tick - (a?.startTick ?? 0)) / hz) * (def.fps || 1)) % n;
+      const facing = (v.getField(mve, Transform, "facing") ?? 0) + q * (Math.PI / 2); const dirs = def.directions ?? 8;
+      const seat = this.registry.dirFrameAnchors(sp.spriteId, anim, i * dirs + AssetRegistryClass.directionIndex(facing, dirs))?.["seat"];
+      return seat ? { x: seat.x * (sp.scale || 1), y: seat.y * (sp.scale || 1) } : undefined;
+    } catch { return undefined; }
   }
   private syncVehicles(net: World, player: Entity | undefined, ground: (x: number, y: number, z: number) => number, frac: number | undefined): void {
     if (!net.isRegistered(GVehicle)) return;
@@ -904,9 +939,11 @@ export class IsoView {
     if (net.isRegistered(GVehicle) && net.has(e, GVehicle)) return undefined; // ADR-170: drawn by VehicleView (syncVehicles)
     // characters: own player (Survival is owner-only) + other players and human bots (PlayerId / Appearance / Health+AnimState)
     if (net.has(e, Animal)) {
-      const k = animalDefs()[net.get(e, Animal)!.kind]; const r = this.rs(k?.spriteKey);
-      const real = mountRenderScale(k?.key); // ADR-319: rideable species at their real height next to the player
-      if (r) { const sc = r.scale * real; return { sprite: r.id, animated: true, shadow: 0.8, ...(r.tint ? { tint: r.tint } : {}), ...(sc !== 1 ? { scale: sc, onCreate: sc } : {}) }; }
+      const k = animalDefs()[net.get(e, Animal)!.kind];
+      // ADR-319: a tamed mount draws on its dedicated true-scale sheet (mount_<art>, scale 1); wild animals keep their own sheet
+      const mk = net.isRegistered(Mount) && net.has(e, Mount) ? this.rs(mountSpriteKeyOf(net.getField(e, Mount, "species") ?? 0)) : undefined;
+      const r = mk ?? this.rs(k?.spriteKey);
+      if (r) { const sc = r.scale; return { sprite: r.id, animated: true, shadow: 0.8, ...(r.tint ? { tint: r.tint } : {}), ...(sc !== 1 ? { scale: sc, onCreate: sc } : {}) }; }
       const ph = this.sid(`animal_${k?.key ?? ""}`) ?? this.sid("player"); // species key fallback; base sprite only if the pack lacks animal art
       return ph === undefined ? undefined : { sprite: ph, animated: true, shadow: 0.6, ...(this.sid(`animal_${k?.key ?? ""}`) === undefined ? { scale: 0.55, onCreate: 0.55 } : {}) };
     }

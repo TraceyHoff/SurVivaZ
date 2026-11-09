@@ -53,6 +53,8 @@ export function recipesUnlockedAt(key: string, level: number): string[] {
 export function unlockText(token: string): string {
   const [kind, key = ""] = token.split(":");
   if (kind === "tier") return `Build and upgrade to the ${human(key)} tier`;
+  if (kind === "mount") return "Tame and ride horses, donkeys, deer, elk, moose, buffalo and yaks"; // ADR-319
+  if (kind === "item") return `Craft and repair the ${key.startsWith("saddle_") ? `${cap(human(key.slice(7)))} Saddle` : cap(human(key))}`; // ADR-320 (saddles)
   const name = cap(human(key)); const station = STATION_PIECES.has(key);
   return station ? `Build the ${name} (and craft its recipes)` : `Build the ${name}`;
 }

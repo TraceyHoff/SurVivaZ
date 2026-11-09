@@ -1164,6 +1164,89 @@
      "sp": true,
      "mp": true
     }
+   },
+   {
+    "kind": "animal_horse",
+    "category": "animal",
+    "density": 0.12,
+    "timeWeights": {
+     "night": 0.2,
+     "dawn": 1,
+     "day": 1,
+     "dusk": 0.7
+    },
+    "biomeWeights": {
+     "grass": 1
+    },
+    "minPlayerDistance": 10,
+    "perChunkCap": 3,
+    "globalCap": 10,
+    "despawnDistance": 70,
+    "group": [
+     2,
+     4
+    ],
+    "groupSpread": 5,
+    "modes": {
+     "sp": true,
+     "mp": true
+    }
+   },
+   {
+    "kind": "animal_donkey",
+    "category": "animal",
+    "density": 0.08,
+    "timeWeights": {
+     "night": 0.2,
+     "dawn": 1,
+     "day": 1,
+     "dusk": 0.7
+    },
+    "biomeWeights": {
+     "grass": 0.6,
+     "sand": 1
+    },
+    "minPlayerDistance": 10,
+    "perChunkCap": 2,
+    "globalCap": 6,
+    "despawnDistance": 70,
+    "group": [
+     1,
+     3
+    ],
+    "groupSpread": 5,
+    "modes": {
+     "sp": true,
+     "mp": true
+    }
+   },
+   {
+    "kind": "animal_yak",
+    "category": "animal",
+    "density": 0.06,
+    "timeWeights": {
+     "night": 0.2,
+     "dawn": 1,
+     "day": 1,
+     "dusk": 0.7
+    },
+    "biomeWeights": {
+     "stone": 1,
+     "grass": 0.3
+    },
+    "minPlayerDistance": 10,
+    "perChunkCap": 2,
+    "globalCap": 6,
+    "despawnDistance": 70,
+    "group": [
+     1,
+     3
+    ],
+    "groupSpread": 5,
+    "modes": {
+     "sp": true,
+     "mp": true
+    }
    }
   ],
   "humans": [

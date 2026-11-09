@@ -94,7 +94,7 @@ const has = (k: string): boolean => realSprites.has(k);
 describe("Task 32: new pets", () => {
   it("roster: 17 species; the 4 new pets have distinct roles, treats and diets", () => {
     expect(G.PET_SPECIES.length).toBe(17);
-    expect(G.animalDefs().length).toBe(37);
+    expect(G.animalDefs().length).toBe(40); // + ADR-319 horse, donkey, yak
     const fox = G.PET_SPECIES[G.petSpeciesOfKey("fox") - 1]!;
     expect(fox).toMatchObject({ animal: "animal_fox", family: "small", baseTame: 0.2, damageMul: 0.9 });
     expect(fox.treats).toMatchObject({ meaty_chew: "love", fish_treat: "love", dog_biscuit: "like", egg_crunch: "like", veggie_bites: "ok", seed_mix: "hate" });
