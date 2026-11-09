@@ -69,3 +69,30 @@ Build-window icons in `items_build` (32px + 64px pages): `build_shaft_hatch_t1..
 `build_shaft_hatch_bottom_t0..t4` 292–296.
 Re-run only `packages/assets/pack/building/src/add_shaft_hatch.py` (append-only, reuses existing indices);
 it preserves all previously shipped sprite records and pixel cells. Never run the whole building pack for this addition.
+
+## Door / gate swing in-betweens (add-only art)
+Covers every `door: true` piece: `door_wood`, `door_metal`, `hatch_wood`, `window_shutters`, `garden_gate` (+ `@picket` / `@iron` / `@rustic`), `gate_clan`, `clan_hall_door`.
+
+**Sequence.** Opening plays `closed → swing1 → swing2 → swing3 → swing4 → open`, and closing plays the same frames in reverse.
+- Swing angle: smoothstep at even times, so the steps sit at 10.4 / 35.2 / 64.8 / 89.6 % of the open angle.
+- The hinge side, swing direction and hinge drift all end on the shipped open frame.
+- Style: flat cel tones, binary alpha, ink outline.
+- Every cell is pixel-unique: 326 new cells, none equal to any shipped cell.
+
+| swing sprite | atlas (cell, cols) | indices: `[rot][damage]` per step k=0..3 |
+|---|---|---|
+| `door_wood_swing` / `door_metal_swing` / `hatch_wood_swing` | `door_swing_openings` (128×128, 16 cols, 2048×1792, 1x) | start 0 / 64 / 128 + (k·4 + rot)·4 + dmg |
+| `window_shutters_swing` | same | 192 + (k·2 + rot%2)·4 + dmg |
+| `dec_garden_gate[__picket\|__iron\|__rustic]_swing` | `door_swing_yard` (72×120, 12 cols, 1x + @2x, tint masks) | start 0 / 8 / 16 + k·2 + rot%2 (no baked damage; `bld_crack`) |
+| `gate_clan_swing` / `clan_hall_door_swing` | `door_swing_clan` (160×256, 12 cols, 1920×1536, 1x + tint mask) | start 0 / 32 + (k·2 + rot%2)·4 + dmg |
+
+- Each sprite has `building.states.swing1..4`, `frames = swing1`, and `animations.swing.rotations[rot]` = 4 intact frames.
+  - fps is 16 (62.5 ms per frame), or 11 (~91 ms) for the clan pieces.
+- New open endpoints:
+  - `clan_hall_door`: `clan_structures_large` 16–23 (16 + dmg·2 + rot%2); the page grows 768 → 1024 px tall.
+  - `dec_garden_gate*`: `decor_yard_t` 20/21 picket, 22/23 iron, 24/25 rustic; the page size is unchanged.
+  - Both get `states.closed` / `states.open` and `animations.closed` / `animations.open`.
+- Garden gates open 75° (away, -y) so they stay inside the 72 px cell.
+- Re-run only `packages/assets/pack/building/src/add_door_swing.py`; it is idempotent and append-only.
+  - A full `build.py` / `decor.emit` / clan fragment run rewrites `decor_yard_t` and `clan_structures_large`. Re-run `add_door_swing.py` after one.
+- SFX: `door.open.swing`, `door.close.swing`, `door.open.gate`, `door.close.gate` (procedural `door_swing` recipe in `assets/audio/tools/sfx.py`).

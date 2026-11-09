@@ -58,3 +58,26 @@ Until Art ships these, the renderer falls back to the bare key, which is missing
   - Anchor each sprite on the post at the tile corner, not the tile centre.
 - Triangle pieces rotate in 30° steps (12). The renderer currently shows them at the nearest quarter turn.
 - Art-only keys that gameplay does not place: `wall_corner`, `roof_ridge`. Gameplay uses `wall_corner_outer` and `roof_gable` for these.
+
+## Door / gate swing in-betweens (add-only art)
+Every `door: true` piece (all go through `doorSystem` / `DoorState`) has 4 in-between frames between the shipped `closed` and `open` states.
+Play them `closed → swing1..4 → open`; to close, play the same frames reversed (`open → swing4..1 → closed`).
+
+| piece | swing sprite (piece key) | atlas | fps | per frame | open or close (closed held, then 4 in-betweens + endpoint = 5 frame steps) |
+|---|---|---|---|---|---|
+| `door_wood`, `door_metal`, `hatch_wood`, `window_shutters` | `<key>_swing` | `door_swing_openings` | 16 | 62.5 ms | 312.5 ms (in-betweens alone 250 ms) |
+| `garden_gate` (+ `@picket` `@iron` `@rustic`) | `dec_garden_gate[__v]_swing` (`garden_gate_swing[@v]`) | `door_swing_yard` | 16 | 62.5 ms | 312.5 ms |
+| `gate_clan`, `clan_hall_door` | `<key>_swing` | `door_swing_clan` | 11 | ~91 ms | ~455 ms (in-betweens alone ~364 ms) |
+
+- Each swing sprite has `building.states.swing1..4` as `[rot][damage]`, and `frames = swing1`.
+  - Its `animations.swing` is `{ frames (rot 0, intact), fps, loop: false, rotations: [rot][step] }`.
+- The hinge side and the swing direction match the shipped open sprite.
+- Damage is baked per stage everywhere except garden gates, which have no baked damage and use the `bld_crack` overlay as before.
+- New base states:
+  - `clan_hall_door`: `states.closed` / `states.open`, plus `animations.closed` / `animations.open`.
+  - `dec_garden_gate*`: the same states and animations.
+  - The open endpoints are appended to `clan_structures_large` (16–23) and `decor_yard_t` (20–25).
+- SFX (bank keys):
+  - Plain doors, hatch and shutters: `door.open.swing` and `door.close.swing`.
+  - Garden gates and clan gates: `door.open.gate` and `door.close.gate`.
+  - The existing `door.open` / `door.close` (`.metal`) stay as they are.

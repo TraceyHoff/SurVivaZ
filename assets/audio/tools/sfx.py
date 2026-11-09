@@ -754,3 +754,34 @@ def horde(rng, dur, f, kind="warning"):
         for i, r in enumerate([2.0, 2.5]):
             place(y, fade(chime_note(rng, f * r * 2, 0.6, 0.25, 0.4), 0.001, 0.2) * 0.35, 0.55 + 0.12 * i)
     return S_(fade(y[:n], 0.002, 0.35 if kind == "defeated" else 0.15))
+
+
+def door_swing(rng, dur, f, act, heavy=False):
+    """Door-swing SFX timed to the swing animation (doors ~312 ms, clan gates ~455 ms).
+    open:  latch click, then a hinge creak whose pitch rises as the leaf speeds up and eases out at the stop.
+    close: a short falling creak, the leaf meeting the frame (thud) and the latch dropping in (click).
+    heavy (clan gates): lower, slower creak with iron strap rattle and a deeper thump."""
+    n = n_(dur)
+    y = np.zeros(n)
+    if act == "open":
+        place(y, click(rng, 0.05, rng.uniform(1100, 1500) * (0.7 if heavy else 1.0)) * 0.5, 0.0)
+        cd = dur * 0.85
+        c = creak(rng, cd, f * rng.uniform(0.92, 1.08))
+        m = n_(cd)
+        c *= np.linspace(0.6, 1.0, m) ** 0.5 * np.minimum(1.0, np.linspace(1.6, 0.0, m) + 0.25)
+        place(y, c * 0.9, 0.03)
+        if heavy:
+            place(y, grains(rng, dur * 0.7, 10, 1500, 4500, 0.006, spread=dur * 0.5, decay=0.05) * 0.35, 0.05)
+            place(y, wood_knock(rng, 140, 0.25, 0.05) * 0.35, dur * 0.82)
+        else:
+            place(y, wood_knock(rng, 320, 0.12, 0.02) * 0.2, dur * 0.8)
+        return y
+    cd = dur * (0.45 if heavy else 0.4)
+    c = creak(rng, cd, f * rng.uniform(2.2, 2.8) if not heavy else f * rng.uniform(1.8, 2.2))
+    place(y, c * np.linspace(1.0, 0.5, n_(cd)) * 0.55, 0.0)
+    hit = cd * 0.9
+    place(y, thud(rng, dur - hit, f * rng.uniform(0.9, 1.1)) * (1.0 if heavy else 0.9), hit)
+    if heavy:
+        place(y, clank(rng, min(0.3, dur - hit), 420) * 0.35, hit + 0.01)
+    place(y, click(rng, 0.05, rng.uniform(1300, 1700)) * 0.4, hit + rng.uniform(0.05, 0.08))
+    return y

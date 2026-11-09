@@ -56,6 +56,9 @@ const rows = [
   // doors / containers / consumption
   ["door.open", "sfx", 0, 3, 0.6, "creak", 400, 0.6, 45, 4], ["door.close", "sfx", 0, 3, 0.5, "thud", 160, 0.6, 45, 4],
   ["door.locked", "sfx", 0, 1, 0.3, "click", 1200, 0.5, 40, 2], ["door.open.metal", "sfx", 0, 2, 0.7, "creak", 900, 0.6, 45, 2], ["door.close.metal", "sfx", 0, 2, 0.5, "clank", 500, 0.6, 45, 2],
+  // door-swing animation (art: <door>_swing sprites, ~312 ms doors / ~455 ms clan gates): timed open creak + close creak-and-thud
+  ["door.open.swing", "sfx", 0, 2, 0.4, "creak", 520, 0.6, 45, 4], ["door.close.swing", "sfx", 0, 2, 0.45, "thud", 170, 0.6, 45, 4],
+  ["door.open.gate", "sfx", 0, 2, 0.6, "creak", 260, 0.7, 50, 2], ["door.close.gate", "sfx", 0, 2, 0.6, "thud", 110, 0.7, 50, 2],
   ["container.open", "sfx", 0, 2, 0.5, "creak", 600, 0.55, 40, 2], ["container.close", "sfx", 0, 2, 0.4, "thud", 220, 0.55, 40, 2],
   ["consume.eat", "sfx", 0, 4, 0.7, "crunch", 1500, 0.55, 40, 3], ["consume.drink", "sfx", 0, 3, 0.8, "gulp", 300, 0.55, 40, 3],
   // vitals / voices

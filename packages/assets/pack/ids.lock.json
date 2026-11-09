@@ -5395,7 +5395,17 @@
     "build_shaft_hatch_bottom_t2": 5393,
     "build_shaft_hatch_bottom_t3": 5394,
     "build_shaft_hatch_bottom_t4": 5395,
-    "build_shaft_hatch_t0": 5396
+    "build_shaft_hatch_t0": 5396,
+    "clan_hall_door_swing": 5397,
+    "dec_garden_gate__iron_swing": 5398,
+    "dec_garden_gate__picket_swing": 5399,
+    "dec_garden_gate__rustic_swing": 5400,
+    "dec_garden_gate_swing": 5401,
+    "door_metal_swing": 5402,
+    "door_wood_swing": 5403,
+    "gate_clan_swing": 5404,
+    "hatch_wood_swing": 5405,
+    "window_shutters_swing": 5406
   },
   "sounds": {
     "amb_rain": 1,

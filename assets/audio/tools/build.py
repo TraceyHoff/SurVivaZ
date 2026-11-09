@@ -164,6 +164,8 @@ def render_sfx(r, rng):
             for t in (0.0, 0.07, 0.15):
                 place(y, S.click(rng, 0.05, f * rng.uniform(0.8, 1.2)) * 0.6 + S.wood_knock(rng, 300, 0.05, 0.01) * 0.3, t)
             return y
+        if len(p) > 2 and p[2] in ("swing", "gate"):
+            return S.door_swing(rng, dur, f, act, p[2] == "gate")
         metal = len(p) > 2 and p[2] == "metal"
         if act == "open":
             y = S.creak(rng, dur, f)

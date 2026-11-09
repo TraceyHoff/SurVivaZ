@@ -1636,6 +1636,78 @@
     "len": 0.5
    }
   },
+  "door.open.swing": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/door_open_swing_1",
+    "audio/sfx/door_open_swing_2"
+   ],
+   "volume": 0.6,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 45,
+   "maxVoices": 4,
+   "synth": {
+    "r": "creak",
+    "f": 520,
+    "len": 0.4
+   }
+  },
+  "door.close.swing": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/door_close_swing_1",
+    "audio/sfx/door_close_swing_2"
+   ],
+   "volume": 0.6,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 45,
+   "maxVoices": 4,
+   "synth": {
+    "r": "thud",
+    "f": 170,
+    "len": 0.45
+   }
+  },
+  "door.open.gate": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/door_open_gate_1",
+    "audio/sfx/door_open_gate_2"
+   ],
+   "volume": 0.7,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 50,
+   "maxVoices": 2,
+   "synth": {
+    "r": "creak",
+    "f": 260,
+    "len": 0.6
+   }
+  },
+  "door.close.gate": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/door_close_gate_1",
+    "audio/sfx/door_close_gate_2"
+   ],
+   "volume": 0.7,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 50,
+   "maxVoices": 2,
+   "synth": {
+    "r": "thud",
+    "f": 110,
+    "len": 0.6
+   }
+  },
   "container.open": {
    "bus": "sfx",
    "files": [
