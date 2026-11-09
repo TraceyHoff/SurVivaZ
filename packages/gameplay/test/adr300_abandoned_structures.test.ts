@@ -58,7 +58,7 @@ describe("ADR-300 abandoned structures", () => {
     expect(ks).toContain("wall_corner_outer");
     expect(ks).toContain("door_wood");
     expect(ks.some((k) => k.includes("storage") || k === "barrel_storage")).toBe(true);
-    expect(ks).toContain("roof_flat");
+    expect(ks.some((k) => k.startsWith("roof_"))).toBe(true); // ADR-311: style varies per seed
   });
 
   it("stamps a homestead with a fenced garden and animal pen", () => {
@@ -80,7 +80,7 @@ describe("ADR-300 abandoned structures", () => {
     const twoKeys = keys(w, two.placed);
     expect(twoKeys).toContain("stairs");
     expect(two.placed.some((e) => twoKeys[two.placed.indexOf(e)] === "floor" && zOf(w, e) >= 1)).toBe(true);
-    expect(two.placed.some((e) => twoKeys[two.placed.indexOf(e)] === "roof_flat" && zOf(w, e) === 2)).toBe(true);
+    expect(two.placed.some((e) => twoKeys[two.placed.indexOf(e)]!.startsWith("roof_") && zOf(w, e) === 2)).toBe(true);
 
     const w3 = makeWorld();
     const three = G.stampAbandonedSite(w3, 8, 8, { kind: G.AbandonedKind.Townhouse, rot: 0, ruin: 0, tier: 1 });
@@ -89,7 +89,7 @@ describe("ADR-300 abandoned structures", () => {
     const threeKeys = keys(w3, three.placed);
     expect(threeKeys).toContain("stairs");
     expect(three.placed.some((e) => threeKeys[three.placed.indexOf(e)] === "floor" && zOf(w3, e) >= 2)).toBe(true);
-    expect(three.placed.some((e) => threeKeys[three.placed.indexOf(e)] === "roof_flat" && zOf(w3, e) === 3)).toBe(true);
+    expect(three.placed.some((e) => threeKeys[three.placed.indexOf(e)]!.startsWith("roof_") && zOf(w3, e) === 3)).toBe(true);
   });
 
   it("applies disrepair without dropping load-bearing decks, walls, or stairs", () => {

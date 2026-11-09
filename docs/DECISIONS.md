@@ -3463,7 +3463,7 @@ The default `charArt=v1` has **no dedicated block animation**: both the state ch
 
 **Decision.** On authority chunk load, stamp a sparse catalog of abandoned sites from existing pieces (`foundation`, walls, doors, windows, stairs, floors, roofs, furniture, fences, garden beds, troughs). Kind, rotation, origin inside the chunk, ruin, and loot are a pure function of `(world seed, location)`. Sites stay inside one chunk, skip water, steep ground, and the approximate dawn-spawn clearings, and persist via a non-networked `AbandonedSite` marker so a reload or a total demolish does not regenerate the ruin. Resource nodes that land inside the footprint are despawned after the stamp.
 
-Single-story types include sheds, cottages, cabins, workshops, hunter shacks, barns with pens, farmhouses, and homesteads with fenced gardens and animal pens. Multistory types use the existing stairs / `floor` / `floor_stairwell` / `roof_flat` rules: two-story cottages, farmhouses, and homesteads, three-story townhouses, and larger two-story manors. Load-bearing decks, walls, and stairs are never omitted; disrepair is HP / `damageStage` plus missing doors, windows, furniture, fence, and some roof tiles.
+Single-story types include sheds, cottages, cabins, workshops, hunter shacks, barns with pens, farmhouses, and homesteads with fenced gardens and animal pens. Multistory types use the existing stairs / `floor` / `floor_stairwell` / roof rules (roof style varies by seed since ADR-311): two-story cottages, farmhouses, and homesteads, three-story townhouses, and larger two-story manors. Load-bearing decks, walls, and stairs are never omitted; disrepair is HP / `damageStage` plus missing doors, windows, furniture, fence, and some roof tiles.
 
 Players and AI humans repair damaged pieces with the existing Repair action. `ReclaimCmd` (`IntentAction.Reclaim = 15`, registered last so command ids stay stable) transfers `PieceOwner` and `Tribe` on unowned site pieces and yard contents to the actor. A second actor cannot take an already-claimed site. Sites do not spawn a `claim_totem`; land protection still uses a totem the reclaiming player or AI places themselves.
 
@@ -3579,3 +3579,21 @@ Each building type also rolls extra furnishings from a separate seed stream so e
 
 **Validation.** A learned player cannot place a foundation until a covering Claim Flag is planted; a flag outside radius 12 does not count; a foreign flag returns `NoPrivilege`. Repair without a covering flag returns `NeedClaim`; repair inside a claim without the piece unlock returns `SkillLocked`; both present repairs the piece. Reclaim without a covering flag returns `NeedClaim`. An AI `obtainPiece("foundation")` with no flag emits a `claim_totem` build step. Shaft-hatch `NoShaft` still fires before `NeedClaim`.
 
+
+## ADR-311: Varied roof types on abandoned buildings (SurVivaZ)
+
+**Context.** Seed-generated abandoned structures (ADR-300 / ADR-301) roofed every building with `roof_flat`, although the build catalog already has `roof_slope`, `roof_corner`, `roof_gable`, `roof_hip`, and `roof_chimney`, all with tier 1–4 art. Roof tiles were placed in row order, so a corner tile tried before its wall-anchored neighbour failed the deck support check and was silently dropped.
+
+**Decision.** Each site picks a top-story roof style from its own seeded stream (`hashU32(seed, origin, 0x2F0F0311)`), weighted by building kind (sheds and hunter shacks lean flat or gable; cabins, workshops, and barns lean gable; cottages, farmhouses, homesteads, two-story homes, and manors lean eaves or hip-ended gables; townhouses lean flat or eaves). `opts.roof` (`RoofStyle`) forces one.
+
+- **Flat**: `roof_flat` everywhere.
+- **Eaves**: `roof_corner` at the four corners, `roof_slope` along each edge with the eave facing out, `roof_flat` in the middle.
+- **Gable**: rows of `roof_gable` ridges along the long axis (random axis on square footprints).
+- **HipGable**: the same ridge rows with `roof_hip` caps at both ends.
+- Flat and Eaves roofs over a fireplace may swap the centre tile nearest the hearth for `roof_chimney` (65%).
+
+Rotations follow the roof art height fields (`assets/tools/buildings2.py roof_d`): eave direction for rot 0–3 is S, W, N, E; a corner's eaves are rot and rot+3; a hip's eave end is rot+3; a gable ridge runs E–W at rot 0/2 and N–S at rot 1/3. Roof specs now rotate with the building like corners and furniture. Styling rewrites the existing roof specs in place (same count and order), so the main plan stream, extras (`0x57A70001`), and loot (`0x1007`) are unchanged. Material tier matches the walls. Roof tiles that fail support on the first pass get up to three bounded retry passes after the rest of the site is stamped, so single-story roofs land complete; very high roofs can still lose tiles to the normal stability limit.
+
+**Not changed.** Support and stability rules, disrepair (roof omission chance and HP), ADR-309 cutaway / indoor zoom, ADR-310 claim and skill-unlock rules for repair and reclaim, compass, graphics, and art. `roof_ridge`, `roof_valley`, and `roof_peak` are art-only keys with no gameplay piece, so they are not used. No new sprites.
+
+**Validation.** Across 200 seeds all four styles and all six roof pieces appear, and only those keys. Plans are deterministic per seed; forcing Flat reproduces every non-roof piece and every omit / HP roll. For every kind and building rotation, slopes sit on edges with eaves pointing outward, corners sit on corners with both eaves outward, hip caps sit at ridge ends facing out, and ridges share one axis. Stamped roofs sit on the top story, match planned key and rotation, and meet `minStability`. Disrepair still omits styled roof tiles, and the tiles stay reclaimable under a Claim Flag with the same unlock gates as `roof_flat`.

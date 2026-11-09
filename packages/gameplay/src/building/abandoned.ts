@@ -1,6 +1,8 @@
 /**
  * ADR-300 / ADR-301: seed-driven abandoned structures stamped from real base-building pieces.
  * Layout, furnishings, stations, disrepair, and searchable container loot are a pure function of (world seed, origin).
+ * ADR-311: the top-story roof style (flat, eaves, gable, hip-ended gable, optional chimney) is picked per site from its
+ * own seeded stream, so layouts, loot, and furnishing rolls are unchanged.
  */
 import { PlayerId, Transform, type Entity, type World } from "@engine/core";
 import { CHUNK_SIZE, isWaterId, parseChunkKey, waterDepthAt, WaterDepth, type ChunkKey } from "@engine/world";
@@ -61,6 +63,16 @@ const KIND_WEIGHTS: readonly { kind: AbandonedKindId; w: number }[] = [
 type Role = "deck" | "wall" | "opening" | "stair" | "furniture" | "fence" | "garden" | "loot" | "roof";
 interface Spec { key: string; x: number; y: number; level: number; rot: number; role: Role }
 
+/**
+ * ADR-311 roof styles built from the existing roof pieces (all have tier 1-4 art):
+ * Flat = `roof_flat`; Eaves = `roof_corner` at corners, `roof_slope` along each edge (eave outward), flat centre;
+ * Gable = rows of `roof_gable` ridges along the long axis; HipGable = the same rows with `roof_hip` caps at both ends.
+ * Flat and Eaves roofs over a hearth may swap one centre tile for `roof_chimney`.
+ */
+export const RoofStyle = { Flat: 0, Eaves: 1, Gable: 2, HipGable: 3 } as const;
+export type RoofStyleId = (typeof RoofStyle)[keyof typeof RoofStyle];
+export const ROOF_STYLE_KEYS: readonly string[] = ["flat", "eaves", "gable", "hip_gable"];
+
 export interface PlannedPiece {
   key: string; x: number; y: number; level: number; rot: number; role: Role;
   tier: number; omit: boolean; hpFrac: number;
@@ -69,6 +81,7 @@ export interface PlannedSite {
   kind: AbandonedKindId; kindKey: string; originX: number; originY: number;
   width: number; height: number; stories: number; rot: number; ruin: number; tier: number;
   garden: boolean; pen: boolean; pieces: PlannedPiece[];
+  /** ADR-311 */ roofStyle: RoofStyleId; chimney: boolean;
 }
 export interface StampResult {
   marker: Entity | 0; placed: Entity[]; omitted: number; skipped: boolean;
@@ -285,7 +298,7 @@ function rotateBuilt(b: Built, rot: number): Built {
   const bw = b.w, bh = b.h;
   const pieces = b.pieces.map((s) => {
     const [x, y] = rotPoint(s.x, s.y, rot, bw, bh);
-    const keep = s.role === "furniture" || s.role === "loot" || s.role === "fence" || s.role === "garden" || s.key === "wall_corner_outer";
+    const keep = s.role === "furniture" || s.role === "loot" || s.role === "fence" || s.role === "garden" || s.role === "roof" || s.key === "wall_corner_outer";
     return { ...s, x, y, rot: keep ? (s.rot + rot) & 3 : 0 };
   });
   const w = (rot & 1) ? bh : bw, h = (rot & 1) ? bw : bh;
@@ -331,7 +344,61 @@ function extraRole(key: string): Role {
   return key.includes("storage") || key.includes("chest") || key === "barrel_storage" || key.includes("wardrobe") || key === "salt_barrel" ? "loot" : "furniture";
 }
 
-export function planAbandonedSite(seed: number, originX: number, originY: number, opts: { kind?: AbandonedKindId; rot?: number; ruin?: number; tier?: number } = {}): PlannedSite {
+/** ADR-311: roof style weights [flat, eaves, gable, hip_gable] by kind — light huts lean flat/gable, homes lean eaves/hip. */
+function roofWeights(kind: AbandonedKindId): readonly number[] {
+  switch (kind) {
+    case AbandonedKind.Shed: case AbandonedKind.HunterShack: return [0.4, 0, 0.45, 0.15];
+    case AbandonedKind.Workshop: case AbandonedKind.Barn: return [0.25, 0.1, 0.45, 0.2];
+    case AbandonedKind.Cabin: return [0.15, 0.15, 0.4, 0.3];
+    case AbandonedKind.Townhouse: return [0.3, 0.4, 0.05, 0.25];
+    case AbandonedKind.TwoStoryCottage: case AbandonedKind.TwoStoryFarmhouse: case AbandonedKind.TwoStoryHomestead: case AbandonedKind.Manor:
+      return [0.1, 0.4, 0.2, 0.3];
+    default: return [0.1, 0.35, 0.25, 0.3];
+  }
+}
+function pickRoofStyle(kind: AbandonedKindId, rand: () => number): RoofStyleId {
+  const ws = roofWeights(kind); let r = rand() * ws.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < ws.length; i++) { r -= ws[i]!; if (r < 0 && ws[i]! > 0) return i as RoofStyleId; }
+  return RoofStyle.Flat;
+}
+/**
+ * ADR-311: restyle the flat top-story roof tiles in place (same count and order, so the main plan stream is untouched).
+ * Rotations follow the roof art (assets/tools/buildings2.py roof_d): eave direction for rot 0..3 is S, W, N, E;
+ * a corner's eaves are rot and rot+3; a hip's eave end is rot+3; a gable ridge runs E-W at rot 0 and N-S at rot 1.
+ */
+function styleRoof(pieces: Spec[], style: RoofStyleId, rand: () => number): boolean {
+  const roofs = pieces.filter((s) => s.role === "roof"); if (roofs.length === 0) return false;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const s of roofs) { x0 = Math.min(x0, Math.floor(s.x)); y0 = Math.min(y0, Math.floor(s.y)); x1 = Math.max(x1, Math.floor(s.x)); y1 = Math.max(y1, Math.floor(s.y)); }
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const ew = w > h || (w === h && rand() < 0.5); // ridge axis along the long side
+  for (const s of roofs) {
+    const i = Math.floor(s.x) - x0, j = Math.floor(s.y) - y0;
+    if (style === RoofStyle.Eaves && w >= 3 && h >= 3) {
+      const n = j === 0, so = j === h - 1, we = i === 0, ea = i === w - 1;
+      if (n && we) { s.key = "roof_corner"; s.rot = 2; } else if (n && ea) { s.key = "roof_corner"; s.rot = 3; }
+      else if (so && ea) { s.key = "roof_corner"; s.rot = 0; } else if (so && we) { s.key = "roof_corner"; s.rot = 1; }
+      else if (n) { s.key = "roof_slope"; s.rot = 2; } else if (so) { s.key = "roof_slope"; s.rot = 0; }
+      else if (we) { s.key = "roof_slope"; s.rot = 1; } else if (ea) { s.key = "roof_slope"; s.rot = 3; }
+      else { s.key = "roof_flat"; s.rot = 0; }
+    } else if (style === RoofStyle.Gable || style === RoofStyle.HipGable) {
+      const along = ew ? i : j, len = ew ? w : h;
+      s.key = "roof_gable"; s.rot = ew ? 0 : 1;
+      if (style === RoofStyle.HipGable && len >= 3 && along === 0) { s.key = "roof_hip"; s.rot = ew ? 2 : 3; }
+      else if (style === RoofStyle.HipGable && len >= 3 && along === len - 1) { s.key = "roof_hip"; s.rot = ew ? 0 : 1; }
+    } else { s.key = "roof_flat"; s.rot = 0; }
+  }
+  const hearth = pieces.find((s) => s.key === "fireplace");
+  if (!hearth || (style !== RoofStyle.Flat && style !== RoofStyle.Eaves) || w < 3 || h < 3 || rand() >= 0.65) return false;
+  const ci = Math.min(w - 2, Math.max(1, Math.floor(hearth.x) - x0)), cj = Math.min(h - 2, Math.max(1, Math.floor(hearth.y) - y0));
+  const cell = roofs.find((s) => Math.floor(s.x) - x0 === ci && Math.floor(s.y) - y0 === cj);
+  if (!cell) return false;
+  cell.key = "roof_chimney"; cell.rot = 0;
+  return true;
+}
+
+export interface AbandonedOpts { kind?: AbandonedKindId; rot?: number; ruin?: number; tier?: number; roof?: RoofStyleId }
+export function planAbandonedSite(seed: number, originX: number, originY: number, opts: AbandonedOpts = {}): PlannedSite {
   const rand = rng(hashU32(seed >>> 0, originX, originY, 0xA5B30001));
   const kind = opts.kind ?? pickKind(rand);
   const rot = opts.rot ?? (rand() * 4 | 0);
@@ -340,6 +407,9 @@ export function planAbandonedSite(seed: number, originX: number, originY: number
   for (const ex of extrasFor(kind)) {
     if (extraRand() < ex.chance) built0.pieces.push({ key: ex.key, x: ex.x, y: ex.y, level: ex.level ?? 0, rot: 0, role: extraRole(ex.key) });
   }
+  const roofRand = rng(hashU32(seed >>> 0, originX, originY, 0x2F0F0311)); // ADR-311: own stream
+  const roofStyle = opts.roof ?? pickRoofStyle(kind, roofRand);
+  const chimney = styleRoof(built0.pieces, roofStyle, roofRand);
   const built = rotateBuilt(built0, rot);
   const ruin = opts.ruin ?? (0.18 + rand() * 0.62);
   const tier = opts.tier ?? (STONE_KINDS.has(kind) && rand() < 0.35 ? 2 : 1);
@@ -354,7 +424,7 @@ export function planAbandonedSite(seed: number, originX: number, originY: number
   return {
     kind, kindKey: ABANDONED_KIND_KEYS[kind] ?? "cottage", originX, originY,
     width: built.w, height: built.h, stories: built.stories, rot, ruin, tier,
-    garden: built.garden, pen: built.pen, pieces,
+    garden: built.garden, pen: built.pen, pieces, roofStyle, chimney,
   };
 }
 
@@ -445,7 +515,7 @@ function placeSpec(world: World, p: PlannedPiece): Entity | 0 {
   return e;
 }
 
-export function stampAbandonedSite(world: World, originX: number, originY: number, opts: { kind?: AbandonedKindId; rot?: number; ruin?: number; tier?: number } = {}): StampResult {
+export function stampAbandonedSite(world: World, originX: number, originY: number, opts: AbandonedOpts = {}): StampResult {
   const empty = (kind: AbandonedKindId = opts.kind ?? AbandonedKind.Shed): StampResult => ({ marker: 0, placed: [], omitted: 0, skipped: true, kind, stories: 1, garden: false, pen: false });
   if (!isAuthority(world)) return empty();
   const plan = planAbandonedSite(world.seed, originX, originY, opts);
@@ -456,12 +526,20 @@ export function stampAbandonedSite(world: World, originX: number, originY: numbe
   const ordered = [...plan.pieces].sort((a, b) => a.level - b.level || PHASE[a.role] - PHASE[b.role]);
   const placed: Entity[] = []; let omitted = 0;
   const lootRand = rng(hashU32(world.seed, originX, originY, 0x1007));
+  let retry: PlannedPiece[] = [];
   for (const spec of ordered) {
     if (spec.omit) { omitted++; continue; }
     const e = placeSpec(world, spec);
-    if (!e) continue;
+    if (!e) { if (spec.role === "roof") retry.push(spec); continue; }
     placed.push(e);
     if (spec.role === "loot") fillLoot(world, e, lootRand);
+  }
+  // ADR-311: roof tiles whose wall-anchored neighbour came later in row order get another pass (bounded, no new rand)
+  for (let pass = 0; pass < 3 && retry.length; pass++) {
+    const next: PlannedPiece[] = [];
+    for (const spec of retry) { const e = placeSpec(world, spec); if (e) placed.push(e); else next.push(spec); }
+    if (next.length === retry.length) break;
+    retry = next;
   }
   if (placed.length === 0) return { ...empty(plan.kind), kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen, omitted };
   if (world.isRegistered(ResourceNode)) {
