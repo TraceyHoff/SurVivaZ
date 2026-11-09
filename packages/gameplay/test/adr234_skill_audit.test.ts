@@ -172,6 +172,13 @@ function audit(i: number): string[] {
       const pdef = d.pieces.get(d.pieceId(key))!; const pu = pair(i, (w, p) => G.pieceUnlocked(w, p, pdef, 0)); expect(pu.v).toEqual([false, true]);
       const st = [...Array(64).keys()].find((k) => G.stationToken(k as G.StationKind) === tok);
       if (st !== undefined) { const su = pair(i, (w, p) => G.stationUnlocked(w, p, st as G.StationKind)); expect(su.v, `${n.key} station gate`).toEqual([false, true]); }
+    } else if (kind === "mount") { // ADR-319: Horsemanship gates taming a wild rideable animal
+      const t = pair(i, (w, p) => { const a = G.spawnAnimal(w, "animal_elk", 1, 0); G.addItem(w, p, id("apple"), 1); return G.checkFeed(w, p, a, id("apple")); });
+      expect(t.v, `${n.key} taming`).toEqual(["needs_skill", undefined]);
+    } else if (kind === "item") { // ADR-320: Saddlery nodes gate the saddle recipe and its repair
+      const recipe = [...d.recipes.values()].find((x) => x.output.item === id(key))!;
+      expect(pair(i, (w, p) => G.recipeOutputUnlocked(w, p, recipe)).v, `${n.key} recipe`).toEqual([false, true]);
+      expect(pair(i, (w, p) => G.itemRepairUnlocked(w, p, id(key))).v, `${n.key} repair`).toEqual([false, true]);
     } else {
       const tier = d.tiers.findIndex((t) => t.key === key); const wall = [...d.pieces.values()].find((p) => p.tiered)!;
       const pu = pair(i, (w, p) => G.pieceUnlocked(w, p, wall, tier)); expect(pu.v, `${n.key} tier ${key}`).toEqual([false, true]);
@@ -183,7 +190,7 @@ function audit(i: number): string[] {
 
 describe("ADR-234 skill-tree audit: every node's effect is applied server-side at its described magnitude", () => {
   it("covers all nodes and only known effect kinds", () => {
-    expect(NODES.length).toBe(135);
+    expect(NODES.length).toBe(140); // ADR-319 / ADR-320: + Horsemanship, Saddlery 1-4
     for (const n of NODES) {
       const e = n.effects; const kinds = [...Object.keys(e.mods ?? {}), ...(e.perk ? [e.perk] : []), ...(e.skill ? ["skill"] : []), ...(e.unlock ?? [])];
       expect(kinds.length, `${n.key} has an effect`).toBeGreaterThan(0);

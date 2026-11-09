@@ -17,7 +17,7 @@ import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks } from "../defs.js";
 import { CraftCompleted, CraftFail, CraftFailed, CraftStarted, emit } from "../events.js";
 import { crafterIdFor } from "../economy/provenance.js";
-import { meetsSkill, recipeStationOk, stationInRange, stationUnlocked, torchCraftable } from "./crafting.js";
+import { meetsSkill, recipeOutputUnlocked, recipeStationOk, stationInRange, stationUnlocked, torchCraftable } from "./crafting.js";
 import { recordRecentCraft } from "../recent.js";
 
 export const CRAFT_QUEUE_SLOTS = 4;
@@ -93,6 +93,7 @@ export function craftQueueReason(world: World, e: Entity, recipe: number, count:
   if (!torch && !stationUnlocked(world, e, r.station)) return "skill_locked"; // ADR-221: before no_station (you cannot build it yet)
   if (!torch && !stationInRange(world, e, r.station)) return "no_station";
   if (!meetsSkill(world, e, r)) return "skill_too_low";
+  if (!recipeOutputUnlocked(world, e, r)) return "recipe_locked"; // ADR-320: saddles need their Saddlery node
   const q = world.getResource(CraftQueuesRes); if (q && q.jobs(e).length >= CRAFT_QUEUE_SLOTS) return "queue_full";
   let have = true;
   transaction(world, (t) => { for (const i of r.ingredients) if (!t.remove(e, i.item, i.count * count).ok) { have = false; break; } return { ok: false, reason: "dry_run" }; }, e);

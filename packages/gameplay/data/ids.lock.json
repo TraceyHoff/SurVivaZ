@@ -490,7 +490,11 @@
     "truffle": 488,
     "truffle_stew": 489,
     "soil": 490,
-    "leg_splint": 491
+    "leg_splint": 491,
+    "saddle_iron": 492,
+    "saddle_leather": 493,
+    "saddle_reinforced": 494,
+    "saddle_steel": 495
   },
   "resources": {
     "fallen_branches": 1,
@@ -966,7 +970,11 @@
     "rice_bowl": 375,
     "salad": 376,
     "truffle_stew": 377,
-    "leg_splint": 378
+    "leg_splint": 378,
+    "saddle_iron": 379,
+    "saddle_leather": 380,
+    "saddle_reinforced": 381,
+    "saddle_steel": 382
   },
   "pieces": {
     "anvil": 1,

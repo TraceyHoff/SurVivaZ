@@ -307,5 +307,9 @@
     ,{"key": "rice_bowl", "station": "campfire", "seconds": 4, "ingredients": [{"item": "rice", "count": 1}, {"item": "fish", "count": 1}], "output": {"item": "rice_bowl", "count": 1}}
     ,{"key": "truffle_stew", "station": "campfire", "seconds": 6, "ingredients": [{"item": "truffle", "count": 1}, {"item": "potato", "count": 1}, {"item": "onion", "count": 1}], "output": {"item": "truffle_stew", "count": 1}}
   ,{"key": "leg_splint", "station": "none", "seconds": 3, "ingredients": [{"item": "sticks", "count": 2}, {"item": "cloth", "count": 2}], "output": {"item": "leg_splint", "count": 1}}
+  ,{"key": "saddle_leather", "station": "workbench", "seconds": 8, "ingredients": [{"item": "leather", "count": 4}, {"item": "rope", "count": 2}, {"item": "thread", "count": 2}], "output": {"item": "saddle_leather", "count": 1}}
+  ,{"key": "saddle_reinforced", "station": "workbench", "seconds": 10, "ingredients": [{"item": "hardened_leather", "count": 4}, {"item": "leather", "count": 2}, {"item": "rope", "count": 2}, {"item": "nails", "count": 4}], "output": {"item": "saddle_reinforced", "count": 1}}
+  ,{"key": "saddle_iron", "station": "anvil", "seconds": 12, "ingredients": [{"item": "iron_ingot", "count": 4}, {"item": "hardened_leather", "count": 3}, {"item": "leather", "count": 2}, {"item": "rope", "count": 2}], "output": {"item": "saddle_iron", "count": 1}}
+  ,{"key": "saddle_steel", "station": "anvil", "seconds": 14, "ingredients": [{"item": "steel_ingot", "count": 4}, {"item": "hardened_leather", "count": 4}, {"item": "thread", "count": 4}, {"item": "rope", "count": 2}], "output": {"item": "saddle_steel", "count": 1}}
   ]
 }

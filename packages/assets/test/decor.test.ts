@@ -47,7 +47,7 @@ describe("ADR-113 icons", () => {
   const keys = new Set(items.sprites.map((s) => s.key));
   it("every skill branch and node icon exists", () => {
     const icons = [...JSON.stringify(skills).matchAll(/"icon":\s*"([^"]+)"/g)].map((m) => m[1]!);
-    expect(icons.length).toBe(154); // ADR-132: +perks branch, +7 category tabs; ADR-221: +13 unlock nodes (reused icons)
+    expect(icons.length).toBe(159); // ADR-132: +perks branch, +7 category tabs; ADR-221: +13 unlock nodes (reused icons); ADR-319/320: +5 (Horsemanship + 4 Saddlery, reused icons)
     expect(icons.filter((k) => !keys.has(k))).toEqual([]);
   });
   it("animal_feed icon exists", () => expect(keys.has("animal_feed")).toBe(true));

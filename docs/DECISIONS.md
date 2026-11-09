@@ -3781,3 +3781,24 @@ Updated tests (deliberate changes):
 
 **Validation.** `adr319_mounts.test.ts` (species list, speeds > sprint, withers / seat ratios, pixel targets, render scale × art top = head top px, seat lift, body radius, doorway / ceiling lists, taming + needs_skill, worker / AI ownership, permissions, ride / gallop / dismount, gate, mount_busy, disconnect + link heal, death drop, replication scopes, chunk save / load + Animal rebuild, doorway clearance). `adr319_mount_bindings.test.ts`, `adr319_mount_render.test.ts`, `adr234_skill_audit` (+ `mount:` token), touch layout ids.
 
+## ADR-320: Saddles (SurVivaZ)
+
+**Context.** Bareback riding has no storage and no protection; saddles should add both, scaling per tier, and show on the mount (t362u).
+
+**Decision.**
+- **Items + recipes** (append-only ids): 
+
+  | Tier | Item | Slots | Defense | Durability | Recipe (station) | Unlock node |
+  |---|---|---|---|---|---|---|
+  | 1 | Leather Saddle `saddle_leather` | **3** | 10 | 300 | leather 4, rope 2, thread 2 (workbench) | Saddler (tier 1, 1 pt) |
+  | 2 | Reinforced Saddle `saddle_reinforced` | 5 | 20 | 450 | hardened leather 4, leather 2, rope 2, nails 4 (workbench) | Harness Maker (tier 2, 2 pts) |
+  | 3 | Iron Saddle `saddle_iron` | 7 | 32 | 600 | iron ingot 4, hardened leather 3, leather 2, rope 2 (anvil) | Iron Saddler (tier 3, 2 pts) |
+  | 4 | Steel Saddle `saddle_steel` | 9 | 45 | 800 | steel ingot 4, hardened leather 4, thread 4, rope 2 (anvil) | Master Saddler (tier 4, 3 pts) |
+
+  Bareback: 0 slots, 0 defense. Saddlery nodes are unlock nodes with `item:<saddle>` tokens (husbandry branch); crafting checks `recipeOutputUnlocked` (craft queue reason `recipe_locked`, "🔒 learn it in the skill tree"), repair checks `itemRepairUnlocked` (ADR-310).
+- **Equip.** `MountSaddleCmd {target, slot}` puts a saddle from the player's inventory on; a swap returns the old saddle with its wear; a smaller saddle needs its extra bag slots empty (`bag_too_full`). `MountUnsaddleCmd` needs an empty bag. The saddlebag is the mount's `Container` (slotCount = saddle slots), opened through the normal OpenContainer / storage panel only with a saddle on and permission (ADR-303: a container, but distinct from mounting).
+- **Defense.** `armorOf` adds the saddle defense to the mount, and to the rider while riding. Hits on the rider or mount wear the saddle (max(1, round(dmg × 0.5))); at 0 durability it gives no defense. `MountRepairCmd` costs 30 % (rounded up) of the recipe.
+- **Death.** A dead mount drops its saddle (with wear) and saddlebag contents in an owner-tagged loot bag.
+- **Rendering.** Saddle overlay sprite key `saddle_<tier>_<species>` (24 dedicated sprites, drawn only when the pack has that art — none yet; no placeholder).
+
+**Validation.** `adr320_saddles.test.ts` (tier table, 3-slot basic, rising stats, items + recipes; bareback; equip → 3 slots + 10 armor on mount and rider; stranger can't open the bag; swap returns the steel saddle with its durability; bag_too_full / bag_not_empty; unsaddle; wear; broken = no defense; repair cost + restore; rider / mount damage split; recipe + repair gating; node names).

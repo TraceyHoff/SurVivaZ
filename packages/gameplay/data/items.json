@@ -4991,5 +4991,9 @@
       "weight": 0.7
     }
   ,{"key": "leg_splint", "name": "Leg Splint", "category": "food", "maxStack": 10, "weight": 0.4, "food": {"hunger": 0, "thirst": 0, "health": 0}, "cures": ["broken_leg"]}
+  ,{"key": "saddle_leather", "name": "Leather Saddle", "category": "resource", "maxStack": 1, "weight": 6, "tier": 1, "family": "saddle", "durability": 300}
+  ,{"key": "saddle_reinforced", "name": "Reinforced Saddle", "category": "resource", "maxStack": 1, "weight": 8, "tier": 2, "family": "saddle", "durability": 450}
+  ,{"key": "saddle_iron", "name": "Iron Saddle", "category": "resource", "maxStack": 1, "weight": 11, "tier": 3, "family": "saddle", "durability": 600}
+  ,{"key": "saddle_steel", "name": "Steel Saddle", "category": "resource", "maxStack": 1, "weight": 13, "tier": 4, "family": "saddle", "durability": 800}
   ]
 }

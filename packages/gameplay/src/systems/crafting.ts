@@ -81,8 +81,13 @@ export const stationToken = (kind: StationKind): string | undefined => kind === 
 export function stationUnlocked(world: World, e: Entity, kind: StationKind): boolean {
   const t = stationToken(kind); const fn = world.getResource(UnlockRes)?.fn; return !t || !fn || fn(e, t);
 }
+/** ADR-320: a recipe whose output has an `item:<key>` unlock node (saddles) needs it; ungated outputs always pass. */
+export function recipeOutputUnlocked(world: World, e: Entity, r: RecipeDef): boolean {
+  const key = gameplayDefs(world).items.get(r.output.item)?.key; const fn = world.getResource(UnlockRes)?.fn; return !key || !fn || fn(e, `item:${key}`);
+}
 function checkRecipe(world: World, e: Entity, r: RecipeDef): CraftFail | 0 {
   if (!meetsSkill(world, e, r)) return CraftFail.SkillTooLow;
+  if (!recipeOutputUnlocked(world, e, r)) return CraftFail.Locked;
   const torch = torchCraftable(world, e, r);
   if (!torch && !stationUnlocked(world, e, r.station)) return CraftFail.Locked;
   if (!torch && !stationInRange(world, e, r.station)) return CraftFail.NoStation;
