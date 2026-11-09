@@ -222,6 +222,199 @@
     "len": 0.2
    }
   },
+  "mount.hoof": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/mount_hoof_1",
+    "audio/sfx/mount_hoof_2",
+    "audio/sfx/mount_hoof_3",
+    "audio/sfx/mount_hoof_4"
+   ],
+   "volume": 0.5,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 25,
+   "maxVoices": 8,
+   "synth": {
+    "r": "step",
+    "f": 260,
+    "len": 0.2
+   }
+  },
+  "mount.hoof.grass": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/mount_hoof_grass_1",
+    "audio/sfx/mount_hoof_grass_2",
+    "audio/sfx/mount_hoof_grass_3",
+    "audio/sfx/mount_hoof_grass_4"
+   ],
+   "volume": 0.45,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 25,
+   "maxVoices": 8,
+   "synth": {
+    "r": "step",
+    "f": 240,
+    "len": 0.2
+   }
+  },
+  "mount.hoof.sand": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/mount_hoof_sand_1",
+    "audio/sfx/mount_hoof_sand_2",
+    "audio/sfx/mount_hoof_sand_3",
+    "audio/sfx/mount_hoof_sand_4"
+   ],
+   "volume": 0.45,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 25,
+   "maxVoices": 8,
+   "synth": {
+    "r": "step",
+    "f": 300,
+    "len": 0.25
+   }
+  },
+  "mount.hoof.wood": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/mount_hoof_wood_1",
+    "audio/sfx/mount_hoof_wood_2",
+    "audio/sfx/mount_hoof_wood_3",
+    "audio/sfx/mount_hoof_wood_4"
+   ],
+   "volume": 0.6,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 25,
+   "maxVoices": 8,
+   "synth": {
+    "r": "step",
+    "f": 200,
+    "len": 0.22
+   }
+  },
+  "mount.hoof.stone": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/mount_hoof_stone_1",
+    "audio/sfx/mount_hoof_stone_2",
+    "audio/sfx/mount_hoof_stone_3",
+    "audio/sfx/mount_hoof_stone_4"
+   ],
+   "volume": 0.55,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 25,
+   "maxVoices": 8,
+   "synth": {
+    "r": "step",
+    "f": 900,
+    "len": 0.2
+   }
+  },
+  "mount.hoof.dirt": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/mount_hoof_dirt_1",
+    "audio/sfx/mount_hoof_dirt_2",
+    "audio/sfx/mount_hoof_dirt_3",
+    "audio/sfx/mount_hoof_dirt_4"
+   ],
+   "volume": 0.5,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 25,
+   "maxVoices": 8,
+   "synth": {
+    "r": "step",
+    "f": 300,
+    "len": 0.2
+   }
+  },
+  "mount.hoof.water": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/mount_hoof_water_1",
+    "audio/sfx/mount_hoof_water_2",
+    "audio/sfx/mount_hoof_water_3",
+    "audio/sfx/mount_hoof_water_4"
+   ],
+   "volume": 0.5,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 25,
+   "maxVoices": 6,
+   "synth": {
+    "r": "splash",
+    "f": 600,
+    "len": 0.3
+   }
+  },
+  "mount.gallop": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/mount_gallop_1"
+   ],
+   "volume": 0.5,
+   "pitchJitter": 0.03,
+   "volumeJitter": 0,
+   "loop": true,
+   "priority": 35,
+   "maxVoices": 2,
+   "synth": {
+    "r": "step",
+    "f": 260,
+    "len": 2
+   }
+  },
+  "mount.mount": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/mount_mount_1",
+    "audio/sfx/mount_mount_2"
+   ],
+   "volume": 0.6,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 45,
+   "maxVoices": 2,
+   "synth": {
+    "r": "creak",
+    "f": 420,
+    "len": 0.8
+   }
+  },
+  "mount.dismount": {
+   "bus": "sfx",
+   "files": [
+    "audio/sfx/mount_dismount_1",
+    "audio/sfx/mount_dismount_2"
+   ],
+   "volume": 0.6,
+   "pitchJitter": 0.08,
+   "volumeJitter": 0.12,
+   "loop": false,
+   "priority": 45,
+   "maxVoices": 2,
+   "synth": {
+    "r": "thud",
+    "f": 120,
+    "len": 0.6
+   }
+  },
   "combat.swing.fists": {
    "bus": "sfx",
    "files": [

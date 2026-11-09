@@ -25,6 +25,12 @@ const rows = [
   ["footstep.dirt", "sfx", 0, 6, 0.25, "step", 350, 0.42, 20, 8], ["footstep.water", "sfx", 0, 6, 0.35, "splash", 700, 0.45, 20, 6],
   ["footstep.swim", "sfx", 0, 4, 0.8, "splash", 400, 0.5, 25, 4], ["footstep.zombie", "sfx", 0, 4, 0.35, "step", 150, 0.35, 15, 6],
   ["footstep.animal", "sfx", 0, 4, 0.2, "step", 400, 0.25, 10, 4],
+  // rideable mounts (art pass): hoof steps per footstep ground type, gallop loop (500 ms stride = gallop anim 6f @ 12 fps), mount/dismount
+  ["mount.hoof", "sfx", 0, 4, 0.2, "step", 260, 0.5, 25, 8], ["mount.hoof.grass", "sfx", 0, 4, 0.2, "step", 240, 0.45, 25, 8],
+  ["mount.hoof.sand", "sfx", 0, 4, 0.25, "step", 300, 0.45, 25, 8], ["mount.hoof.wood", "sfx", 0, 4, 0.22, "step", 200, 0.6, 25, 8],
+  ["mount.hoof.stone", "sfx", 0, 4, 0.2, "step", 900, 0.55, 25, 8], ["mount.hoof.dirt", "sfx", 0, 4, 0.2, "step", 300, 0.5, 25, 8],
+  ["mount.hoof.water", "sfx", 0, 4, 0.3, "splash", 600, 0.5, 25, 6], ["mount.gallop", "sfx", 1, 1, 2, "step", 260, 0.5, 35, 2],
+  ["mount.mount", "sfx", 0, 2, 0.8, "creak", 420, 0.6, 45, 2], ["mount.dismount", "sfx", 0, 2, 0.6, "thud", 120, 0.6, 45, 2],
   // combat
   ...Object.entries(MELEE).map(([c, [r, f]]) => [`combat.swing.${c}`, "sfx", 0, 4, 0.35, r, f, 0.6, 50, 6]),
   ["combat.punch.hit", "sfx", 0, 4, 0.2, "smack", 140, 0.75, 55, 4],

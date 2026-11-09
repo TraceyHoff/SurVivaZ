@@ -785,3 +785,88 @@ def door_swing(rng, dur, f, act, heavy=False):
         place(y, clank(rng, min(0.3, dur - hit), 420) * 0.35, hit + 0.01)
     place(y, click(rng, 0.05, rng.uniform(1300, 1700)) * 0.4, hit + rng.uniform(0.05, 0.08))
     return y
+
+
+# ---------------------------------------------------------------- mounts (rideable animals)
+
+def hoof(rng, dur, f, surface="generic"):
+    """One hoof strike for ridden mounts, per footstep ground type (grass/sand/wood/stone/dirt/water + generic).
+    A hoof is a hard keratin clop on top of a heavy low body thump - deeper and harder than a footstep."""
+    n = n_(dur)
+    y = np.zeros(n)
+    body = thump(rng, rng.uniform(55, 75), min(dur, 0.16), 0.045, 1.9) * 0.9
+    if surface == "grass":
+        s = body + grit(rng, 0.12, 1500, 6000, 0.03) * 0.5 + grains(rng, 0.12, 20, 2500, 6500, 0.006) * 0.45
+        s += wood_knock(rng, f * rng.uniform(0.9, 1.1), 0.06, 0.008) * 0.15
+    elif surface == "sand":
+        s = body * 0.8 + grains(rng, 0.18, 70, 1200, 5000, 0.006, spread=0.12, decay=0.05) * 0.8 + lp(grit(rng, 0.18, 300, 2500, 0.05), 2500) * 0.5
+    elif surface == "wood":
+        s = body * 0.7 + wood_knock(rng, f * rng.uniform(0.9, 1.15), 0.2, 0.05) * 1.0 + click(rng, 0.04, f * 4.0) * 0.25
+    elif surface == "stone":
+        s = body * 0.6 + stone_tap(rng, f * rng.uniform(0.85, 1.15), 0.12) * 0.9 + click(rng, 0.05, f * 1.6) * 0.35
+        s += grains(rng, 0.1, 8, 3000, 8000, 0.004) * 0.25
+    elif surface == "dirt":
+        s = body + lp(grit(rng, 0.14, 200, 2500, 0.03), 2500) * 0.8 + grains(rng, 0.12, 14, 1200, 3500, 0.006) * 0.4
+    elif surface == "water":
+        m = n_(dur)
+        s = body * 0.5 + bp(noise(rng, m), 400, 3500) * env_exp(m, 0.06, 0.003) * 0.9
+        for _ in range(rng.integers(5, 9)):
+            place(s, bubble(rng, rng.uniform(350, 1200)) * 0.3, rng.uniform(0.01, dur * 0.6))
+    else:
+        s = body + lp(grit(rng, 0.12, 250, 3000, 0.025), 3000) * 0.6 + wood_knock(rng, f, 0.08, 0.012) * 0.3
+    place(y, s, 0.0)
+    return S_(lp(y, 9000))
+
+
+def tack_jingle(rng, dur, f=2400, count=4):
+    """Little buckle / ring jingles from the bridle and saddle hardware."""
+    y = np.zeros(n_(dur))
+    for _ in range(count):
+        place(y, metal_tink(rng, f * rng.uniform(0.8, 1.3), 0.18, 0.04, 7000) * rng.uniform(0.15, 0.35), rng.uniform(0, dur * 0.8))
+    return y
+
+
+def mount_rider(rng, dur, f, act="mount"):
+    """mount: boot into the stirrup (creak), body swing (cloth whoosh), settling into the saddle (leather creak +
+    soft heavy thump), a happy little animal snort-blow.  dismount: saddle creak as weight leaves, cloth whoosh,
+    two boots landing (thump + dirt grit), tack jingle."""
+    n = n_(dur)
+    y = np.zeros(n)
+    if act == "mount":
+        place(y, creak(rng, 0.18, f * rng.uniform(0.9, 1.1)) * 0.5, 0.0)
+        place(y, whoosh_core(rng, 0.3, rng.uniform(700, 1000), 1.6, 0.5) * 0.9, 0.08)
+        place(y, creak(rng, 0.3, f * rng.uniform(0.6, 0.75)) * 0.75, 0.32)
+        place(y, thump(rng, rng.uniform(70, 90), 0.22, 0.06) * 0.8, 0.34)
+        place(y, tack_jingle(rng, 0.35, 2400, 4), 0.34)
+        m = n_(0.22)  # snort: breathy filtered noise burst
+        place(y, bp(noise(rng, m), 500, 2500) * env_bell(m, 0.2, 1.5) * 0.35, min(dur - 0.24, 0.5))
+    else:
+        place(y, creak(rng, 0.22, f * rng.uniform(0.7, 0.85)) * 0.6, 0.0)
+        place(y, whoosh_core(rng, 0.28, rng.uniform(800, 1100), 1.6, 0.45) * 0.8, 0.06)
+        for k, at in enumerate((0.3, 0.3 + rng.uniform(0.04, 0.07))):
+            place(y, thump(rng, rng.uniform(85, 110), 0.14, 0.035) * (0.8 if k == 0 else 0.55), at)
+            place(y, lp(grit(rng, 0.1, 250, 2500, 0.02), 2500) * 0.4, at)
+        place(y, tack_jingle(rng, 0.3, 2600, 3), 0.28)
+    return S_(y)
+
+
+def gallop_loop(rng, dur, f, stride=0.5):
+    """Seamless gallop loop synced to the mount gallop anim (6 frames @ 12 fps = one 500 ms stride): a four-beat
+    hoof pattern (hind-hind-fore-fore, then the suspension gap) on dirt/grass, a breath every stride and tack jingle."""
+    n = n_(dur)
+    y = np.zeros(n)
+
+    def put(src, at, gain=1.0):
+        if at < dur - 0.002:
+            place(y, src, max(0.0, at), gain)
+    beats = (0.0, 0.085, 0.2, 0.27)
+    t = 0.0
+    while t < dur:
+        for k, b in enumerate(beats):
+            at = t + b + rng.uniform(-0.006, 0.006)
+            put(hoof(rng, 0.16, f, "dirt" if k % 2 == 0 else "grass") * (0.85 + 0.15 * (k >= 2)), at)
+        m = n_(0.2)
+        put(bp(noise(rng, m), 300, 1800) * env_bell(m, 0.3, 1.4) * 0.12, t + 0.32)
+        put(tack_jingle(rng, 0.2, 2500, 2) * 0.6, t + 0.2)
+        t += stride
+    return S_(y)

@@ -70,6 +70,12 @@ def render_sfx(r, rng):
         return S.splash(rng, dur, f, "swim")
     if p[0] == "footstep":
         return S.footstep(rng, dur, f, p[1] if len(p) > 1 else "generic")
+    if p[0] == "mount":  # rideable mounts: mount.hoof[.<ground>], mount.gallop (loop), mount.mount / mount.dismount
+        if p[1] == "hoof":
+            return S.hoof(rng, dur, f, p[2] if len(p) > 2 else "generic")
+        if p[1] == "gallop":
+            return S.gallop_loop(rng, dur, f)
+        return S.mount_rider(rng, dur, f, p[1])
     if p[0] == "combat":
         if p[1] == "swing":
             return S.swing(rng, dur, f, HEAVY.get(p[2], 0.3))
