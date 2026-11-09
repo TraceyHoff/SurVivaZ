@@ -155,6 +155,15 @@ const POOL_MIN_SLOTS_DESKTOP = 48, POOL_MIN_SLOTS_LOWMEM = 24, POOL_GAP = 4, PAG
 /** ADR-148: GPU page uploads per frame (see uploadTurn). */
 export const PAGE_UPLOADS_PER_FRAME = 2;
 export const STREAM_POOL_SLOTS_DESKTOP = 24, STREAM_POOL_SLOTS_LOWMEM = 12, STREAM_UPLOADS_PER_FRAME = 2, STREAM_UNLOAD_FRAMES = 180;
+/** ADR-314: stream pages larger than this (either side, 1x px) are planned in their own pool (see splitStreamPages). */
+export const STREAM_PAGE_MAX_PX = 1024;
+export const BIG_STREAM_SLOTS_DESKTOP = 2, BIG_STREAM_SLOTS_LOWMEM = 1;
+/** ADR-314: [regular, oversize] stream pages; an oversize page in the regular pool would size every slot to it. */
+export function splitStreamPages<T extends { lazy?: { w1: number; h1: number } | null }>(pages: readonly T[], maxPx = STREAM_PAGE_MAX_PX): [T[], T[]] {
+  const small: T[] = [], big: T[] = [];
+  for (const a of pages) (Math.max(a.lazy?.w1 ?? 0, a.lazy?.h1 ?? 0) > maxPx ? big : small).push(a);
+  return [small, big];
+}
 export const STREAM_MARGIN_PX = 256, STREAM_MARGIN_ANIMAL_PX = 640, STREAM_KEEP_FACTOR = 1.5;
 const WEAR_1X_SLOTS_LOWMEM = 18, WEAR_1X_SLOTS_DESKTOP = 32;
 /** Wear pages whose 1x size fits WEAR_SMALL_PX square (faces, eyes, shoes, small accessories: ~1/3 of the MaxRects-
@@ -787,7 +796,7 @@ export class AtlasManager {
     this.planningRebuild = true;
     const lowMem = this.textureBudgetMB <= 256; this.sideShift = lowMem ? SIDE_SHIFT_LOWMEM : SIDE_SHIFT;
     const groups: { cls: PoolClass; lazy: AtlasRT[]; minSlots: number; cap: boolean; /** wear split: fraction of the 1x working set */ share?: number }[] = [];
-    const wear = lazyList.filter((a) => a.lazy!.pool === 0), veh = lazyList.filter((a) => a.lazy!.pool === 1), bld = lazyList.filter((a) => a.lazy!.pool === 2), body = lazyList.filter((a) => a.lazy!.pool === 3), strm = lazyList.filter((a) => a.lazy!.pool === 4);
+    const wear = lazyList.filter((a) => a.lazy!.pool === 0), veh = lazyList.filter((a) => a.lazy!.pool === 1), bld = lazyList.filter((a) => a.lazy!.pool === 2), body = lazyList.filter((a) => a.lazy!.pool === 3); const [strm, strmBig] = splitStreamPages(lazyList.filter((a) => a.lazy!.pool === 4));
     // ADR-220: character pools (bodies, then wearables) come first and stay in the main RGBA8 colour array: their pages are
     // uploaded losslessly from the PNG (never the ETC1S tail: ~10% of a paper-doll sheet's texels came back >32 off, which
     // read as smeared, blotchy clothes/faces once the KTX2 page replaced the first look). One slot per body sheet
@@ -817,6 +826,9 @@ export class AtlasManager {
       const fit = layerCost > 0 ? Math.floor(this.textureBudgetMB * 1048576 * STREAM_BUDGET_SHARE / layerCost) * g1.perLayer : want;
       groups.push({ cls: "stream", lazy: strm, minSlots: Math.max(Math.min(want, fit), Math.min(want, STREAM_FLOOR_SLOTS)), cap: true });
     }
+    // ADR-314: oversize stream pages (door swing sheets, 2048x1792) get their own small pool so they never widen every
+    // stream slot (1024 pages tile a 2048 layer 2x2; one 2048 page in the group made each slot a whole layer)
+    if (strmBig.length) groups.push({ cls: "stream", lazy: strmBig, minSlots: Math.min(strmBig.length, lowMem ? BIG_STREAM_SLOTS_LOWMEM : BIG_STREAM_SLOTS_DESKTOP), cap: true });
     // vehicles are visible art: their pool keeps a full-res (1x) working set that fitBudget never trades away; the
     // wearables pool is the streaming tier and may shrink (more paging) before any visible art is blurred
     // wear is never planned below wearScale and always keeps its 1x working set (planPool forces it even over budget), so

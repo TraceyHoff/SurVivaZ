@@ -345,6 +345,10 @@ export class Canvas2DRenderer {
       const spk = r.ghost ? { sid: r.vis, flags: 0 } : this.seasonPick(reg, r.vis); // ADR-239: <key>_<season> piece art, else procedural
       const ar = (r.rot + q) & 3; // ADR-253: the art row seen from this view
       let f; try { f = pieceFireFrame(reg, spk.sid, ar, r.dmg, pst, fire, r.ghost, time, entityIndex(r.e)); } catch { try { f = pieceFireFrame(reg, r.vis, ar, r.dmg, pst, fire, r.ghost, time, entityIndex(r.e)); } catch { continue; } } let img: CanvasImageSource | null = this.image(f.atlas.key); if (!img) continue;
+      if (!r.ghost && this.bindings.pieceSwing && r.vis === world.get(r.e, bpd)?.visualId) { // ADR-314: a swinging door draws its swing step once that atlas image is loaded
+        const sw = this.bindings.pieceSwing?.(r.e, time);
+        if (sw) { try { const sf = reg.buildingFrame(sw.vis, ar, r.dmg, sw.state); const si = this.image(sf.atlas.key); if (si) { f = sf; img = si; } } catch { /* no swing art */ } }
+      }
       const f0 = f; let tintSalt = "";
       { // ADR-230: clan tint through the atlas tintmask (R primary, G secondary), as the WebGL2 shader does
         const tp = r.ghost ? undefined : this.bindings.pieceTints?.(r.e) ?? (r.tint ? [r.tint >>> 0, 0] as const : undefined);

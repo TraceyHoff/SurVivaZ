@@ -36,6 +36,10 @@ export function surfaceOf(tile: number, floorMaterial?: string): string {
 }
 /** Tier index (twig wood stone metal reinforced) -> material. */
 export const tierMaterial = (tier: number): string => (tier <= 1 ? "wood" : tier === 2 ? "stone" : "metal");
+/** ADR-314: door SFX set for a piece key: garden and clan gates use the gate set; doors, hatches, shutters and hall doors the swing set. */
+export const doorSfxClass = (pieceKey: string): "gate" | "swing" => (pieceKey === "gate_clan" || pieceKey.startsWith("garden_gate") ? "gate" : "swing");
+/** Bank key for a door state change (bank.json door.open.swing / door.close.swing / door.open.gate / door.close.gate). */
+export const doorSfxKey = (pieceKey: string, open: boolean): string => `door.${open ? "open" : "close"}.${doorSfxClass(pieceKey)}`;
 export const STEP_DIST = { walk: 0.95, run: 1.35, zombie: 1.1, animal: 0.8 };
 
 interface Mem { stepAcc: number; lastX: number; lastY: number; nextVocal: number; lastChase: number; lastAttackAt: number }
@@ -122,7 +126,7 @@ export class AudioDirector {
         else if (now >= mem.nextVocal) { mem.nextVocal = now + (e.kind === "zombie" ? 5 + rng() * 10 : 10 + rng() * 20); if (e.kind === "zombie" || near(e, 12)) at(e, `${e.kind}.${e.sub}.idle`); }
       }
       // ---- doors, fire, defenses, crops, vehicles ----
-      if (p && e.door !== undefined && p.door !== undefined && e.door !== p.door) at(e, `door.${e.door ? "open" : "close"}${e.material === "metal" ? ".metal" : ""}`);
+      if (p && e.door !== undefined && p.door !== undefined && e.door !== p.door) at(e, doorSfxKey(e.sub, !!e.door)); // ADR-314: swing / gate sets
       if (e.lit !== undefined) {
         if (p && p.lit !== undefined && e.lit && !p.lit) at(e, "fire.ignite");
         if (p && p.lit && !e.lit) { const snuffer = cur.find((o) => o.kind === "zombie" && o.sub === "snuffer" && Math.hypot(o.x - e.x, o.y - e.y) < 3.5);

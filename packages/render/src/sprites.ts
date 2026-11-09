@@ -160,6 +160,11 @@ export interface GameplayBindings {
   pieceTints?: (entity: number) => readonly [number, number] | undefined;
   /** Per build-piece state index override (e.g. stall closed/open from StallHeader.open); undefined = BuildPiece.state. */
   pieceState?: (entity: number) => number | undefined;
+  /** ADR-314 door swing: the `<sprite>_swing` sprite and its swing1..4 state index to draw at render time `now` (s), or undefined
+   *  for the piece's own (open / closed / breached) art. A swinging door is drawn dynamically (never baked into a static chunk). */
+  pieceSwing?: (entity: number, now: number) => { vis: number; state: number } | undefined;
+  /** ADR-314: swing sprite of a door piece (undefined = not a door): its streamed page is warmed while the door is on screen. */
+  pieceSwingSprite?: (entity: number) => number | undefined;
   /** ADR-218 fired pieces: FireState (0 out, 1 lit, 2 lit hearth with embers/smoke); undefined = not a fired piece. Lit pieces whose
    *  sprite has a looping multi-frame `idle` anim animate it on the render clock (drawn dynamically, never baked into a static
    *  chunk); out pieces show the sprite's `unlit` anim frame when the building has no own unlit state. */
@@ -1139,10 +1144,20 @@ export class SpriteBatch {
         const drawVis = pieceDrawSprite(atlas, spk.sid); if (drawVis < 0) continue;
         if (drawVis !== spk.sid) { if (atlas.streamClass(vis) === "bld") this.tierFallbacks++; else this.streamFallbacks++; }
         const pst = cx.bindings.pieceState?.(e) ?? (d.state ? d.state[k]! - 1 : -1);
-        if (!atlas.resolvePiece(drawVis, d.variant![k]!, (rot + vq) & 3, dmg, res, pst)) continue;
-        if ((vq & 1) && !atlas.isDirectional(drawVis)) res.flipX = !res.flipX; // ADR-253 fallback: no facing art -> mirror
+        // ADR-314: a door mid-swing draws its <sprite>_swing step (render clock) once that streamed page is resident; until
+        // then (or when not swinging) its own open / closed art. On-screen doors keep the swing page warm.
+        let swung = false;
+        if (ghost === 0 && part.last && cx.bindings.pieceSwingSprite) {
+          const swv = cx.bindings.pieceSwingSprite(e);
+          if (swv !== undefined && atlas.pageReady(swv, PRIO_NEAR)) {
+            const sw = cx.bindings.pieceSwing?.(e, cx.now);
+            if (sw && atlas.resolvePiece(sw.vis, 0, (rot + vq) & 3, dmg, res, sw.state)) swung = true;
+          }
+        }
+        if (!swung && !atlas.resolvePiece(drawVis, d.variant![k]!, (rot + vq) & 3, dmg, res, pst)) continue;
+        if ((vq & 1) && !atlas.isDirectional(swung ? cx.bindings.pieceSwingSprite!(e)! : drawVis)) res.flipX = !res.flipX; // ADR-253 fallback: no facing art -> mirror
         // ADR-218: lit fires animate their idle loop on the render clock (per-entity phase); out fires show their unlit frame
-        let animated = false;
+        let animated = swung;
         const fire = pieceLit ? pieceLit(e) : undefined;
         const psc = pieceScale ? pieceScale(e) ?? 1 : 1; // ADR-227
         if (fire !== undefined && dmg === 0 && ghost === 0) {

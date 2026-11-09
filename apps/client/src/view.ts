@@ -22,6 +22,7 @@ import { assetFetch, setDayFraction, setSeasonState, resolveOffHandSprite, CharA
 import { dayCount, sunFraction } from "./day-clock.js";
 import { clanPieceTint, clanPieceTintPair } from "./clan-tint.js";
 import { pieceVariantOpts } from "./piece-variant.js";
+import { DoorView, doorArt } from "./door-view.js";
 import { loadManifest, buildPieceVisual, type AssetRegistry } from "@engine/assets";
 import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard } from "@engine/render";
 import { countFraction } from "./load-progress.js";
@@ -31,7 +32,7 @@ import { netIdOf } from "@engine/net";
 import { roadSpriteKeys, ROAD_FLAGS, signFrameId } from "./road-sign-view.js";
 import { Road, Sign, surfaceDef, signDef, walkAnimRate, petSits, facingAfterTravel } from "@engine/gameplay";
 import { HitReact, NodeRegrow, hitDirRad, Equipment, Worn, SlotDye, INVENTORY_SLOTS, wornCosmetics } from "@engine/gameplay";
-import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, type ResolvedSprite } from "@engine/gameplay";
+import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, type ResolvedSprite } from "@engine/gameplay";
 
 /** Render-side schemas the renderer's bindings expect (view World only). */
 const VAnim = defineComponent("ViewAnimState", { state: "u8", startTick: "u32" });
@@ -201,6 +202,8 @@ export class IsoView {
   private lightOf = new Map<Entity, { spec: LightSpec; fuel?: Entity }>();
   /** Piece view entity -> building state index (e.g. "unlit") for the renderer's pieceState binding. */
   private pieceStates = new Map<number, number>();
+  /** ADR-314: door open state + render-clock swing per view entity. */
+  private readonly doors = new DoorView();
   /** ADR-218: fired piece view entity -> FireState (0 out, 1 lit, 2 lit hearth); drives flame anim + embers/smoke. */
   private pieceLit = new Map<number, number>(); private litHearths = new Map<number, number>();
   /** ADR-230: clan-tinted piece view entity -> [primary, secondary] RGBA8 (tintmask R/G) + the tint index it was built from. */
@@ -215,7 +218,7 @@ export class IsoView {
     useRaidBurning(renderer.burning, registry); // ADR-242: pvp_clan raid flames when served
     const cat = noCosmetics ? undefined : registry.cosmetics;
     if (cat?.size) this.view.register(Appearance);
-    renderer.bindGameplay({ animState: VAnim, buildPiece: VPiece, wetness: VWet, bodyTemp: VTemp, lit: VFuel, burning: VBurn, pieceState: (e) => this.pieceStates.get(e), pieceScale: (e) => this.pieceScales.get(e), pieceLit: (e) => this.pieceLit.get(e), pieceTints: (e) => this.pieceTintPairs.get(e), litPieces: () => this.litHearths,
+    renderer.bindGameplay({ animState: VAnim, buildPiece: VPiece, wetness: VWet, bodyTemp: VTemp, lit: VFuel, burning: VBurn, pieceState: (e) => this.pieceStates.get(e), pieceSwing: (e, now) => this.doors.swing(e, now), pieceSwingSprite: (e) => this.doors.swingSprite(e), pieceScale: (e) => this.pieceScales.get(e), pieceLit: (e) => this.pieceLit.get(e), pieceTints: (e) => this.pieceTintPairs.get(e), litPieces: () => this.litHearths,
       carriedSprite: (e) => this.carriedOf.get(e), bedFit: (e) => this.bedOf.get(e)?.fit, // ADR-244 carry socket / bed fit
       hitFlash: (e) => this.hitPoseOf.get(e)?.flash ?? 0, hitTilt: (e) => this.hitPoseOf.get(e)?.tilt ?? 0,
       animRate: (e, st) => (st === 1 && this.characters.has(e) ? this.walkRate : undefined),
@@ -649,7 +652,7 @@ export class IsoView {
       if (v.has(ve, VFuel)) { const f = net.get(e, Fuel); if (f) { v.set(ve, VFuel, { lit: f.lit, burnUntilTick: f.burnUntilTick }); if (v.has(ve, Sprite)) { const sp = v.get(ve, Sprite)!; const fid = this.fireFrame(sp.spriteId, f.lit !== 0); if (sp.frameId !== fid) v.set(ve, Sprite, { frameId: fid }); } } }
     }
     if (r.vfx) this.raid.step(this.registry, r.vfx, this.raidPieces, performance.now() / 1000); this.raidPieces.length = 0; // ADR-242 (Canvas2D: no vfx layer)
-    for (const [ne, ve] of this.map) if (!seen.has(ne)) { if (ve === this.focusVe) { r.setFocusEntity(-1); this.focusVe = -1; } v.destroy(ve); this.map.delete(ne); this.corrSampler.forget(ne); this.lastFace.delete(ne); this.characters.delete(ve); this.movingVe.delete(ve); this.driverVe.delete(ve); this.bedOf.delete(ve); this.carriedOf.delete(ve); this.lightOf.delete(ne); this.dropHeldLight(ve); this.pieceStates.delete(ve); this.pieceScales.delete(ve); this.pieceLit.delete(ve); this.litHearths.delete(ve); this.pieceTintPairs.delete(ve); this.pieceTintIdx.delete(ve); this.nodeAmt.delete(ne); this.nodeHit.delete(ne); this.animalHp.delete(ne); this.animalPrev.delete(ne); this.scales.delete(ve); this.hitSeen.delete(ne); this.hitPoseOf.delete(ve); this.gearOf.delete(ve); }
+    for (const [ne, ve] of this.map) if (!seen.has(ne)) { if (ve === this.focusVe) { r.setFocusEntity(-1); this.focusVe = -1; } v.destroy(ve); this.map.delete(ne); this.corrSampler.forget(ne); this.lastFace.delete(ne); this.characters.delete(ve); this.movingVe.delete(ve); this.driverVe.delete(ve); this.bedOf.delete(ve); this.carriedOf.delete(ve); this.lightOf.delete(ne); this.dropHeldLight(ve); this.pieceStates.delete(ve); this.doors.forget(ve); this.pieceScales.delete(ve); this.pieceLit.delete(ve); this.litHearths.delete(ve); this.pieceTintPairs.delete(ve); this.pieceTintIdx.delete(ve); this.nodeAmt.delete(ne); this.nodeHit.delete(ne); this.animalHp.delete(ne); this.animalPrev.delete(ne); this.scales.delete(ve); this.hitSeen.delete(ne); this.hitPoseOf.delete(ve); this.gearOf.delete(ve); }
 
     this.syncTerrainLadders(net, tiles);
     this.syncHatchBottoms(net, tiles);
@@ -808,6 +811,14 @@ export class IsoView {
       const open = this.openHatchTiles.has(`${Math.floor(t.x)},${Math.floor(t.y)}`);
       const vis = buildPieceVisual(this.registry, { type: p0.type, ...pieceArt(net, p0.type, p0.rot), tint: p0.tint, paint: p0.paint, damageStage: p0.damageStage, state: open ? "open" : "closed" }, { tier: p0.tier, pieceKey: (typ) => this.pk(defs.pieces.get(typ)?.key), ...pieceVariantOpts(pieceDef.variantNames, p0.variant) });
       this.pieceStates.set(ve, vis.stateIndex);
+      return;
+    }
+    if (pieceDef?.door) { // ADR-314: DoorState lives on the Door attachment (replicated); draw open / closed / breached and swing on change
+      const att = resolveAttachment(net, e, AttachKind.Door); const open = att !== undefined ? net.getField(att, DoorState, "open") ?? 0 : 0;
+      const vid = this.view.get(ve, VPiece)?.visualId ?? 0;
+      const opts = { tier: p0.tier, pieceKey: (typ: number) => this.pk(defs.pieces.get(typ)?.key), ...pieceVariantOpts(pieceDef.variantNames, p0.variant) };
+      const st = this.doors.sync(ve, open, () => doorArt(this.registry, pieceDef.key, { type: p0.type, ...pieceArt(net, p0.type, p0.rot), tint: p0.tint, paint: p0.paint, damageStage: p0.damageStage }, opts), vid);
+      if (st >= 0) this.pieceStates.set(ve, st); else this.pieceStates.delete(ve);
       return;
     }
     const def = pieceDef as { fired?: boolean } | undefined; if (!def?.fired) return;

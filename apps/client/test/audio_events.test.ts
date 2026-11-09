@@ -51,10 +51,10 @@ describe("ADR-117 event mapping", () => {
     const f = settled(); expect(f.step([{ id: 4, kind: "piece", x: 0, y: 0, z: 0, sub: "campfire", lit: 1 }], { now: 0, listener: L }).loops[0]!.key).toBe("fire.crackle");
   });
   test("door, explosion (despawn), build place gated by settle + bulk spawn", () => {
-    const d = new AudioDirector(); d.settleSec = 1; const door = { id: 2, kind: "piece" as const, x: 1, y: 0, z: 0, sub: "door", door: 0, material: "metal" };
+    const d = new AudioDirector(); d.settleSec = 1; const door = { id: 2, kind: "piece" as const, x: 1, y: 0, z: 0, sub: "door_metal", door: 0, material: "metal" };
     expect(keys(d.step([door, { id: 30, kind: "piece", x: 2, y: 0, z: 0, sub: "wall", material: "wood" }], { now: 0, listener: L }))).toEqual([]);
     expect(keys(d.step([door], { now: 0.5, listener: L }))).toEqual([]); // despawn before settle: silent
-    expect(keys(d.step([{ ...door, door: 1 }, { id: 31, kind: "explosive", x: 3, y: 0, z: 0, sub: "" }], { now: 2, listener: L }))).toEqual(["door.open.metal"]);
+    expect(keys(d.step([{ ...door, door: 1 }, { id: 31, kind: "explosive", x: 3, y: 0, z: 0, sub: "" }], { now: 2, listener: L }))).toEqual(["door.open.swing"]); // ADR-314: Art's swing set (was door.open.metal)
     expect(keys(d.step([{ ...door, door: 1 }], { now: 2.1, listener: L }))).toContain("explosion");
     expect(keys(d.step([{ ...door, door: 1 }, { id: 40, kind: "piece", x: 2, y: 2, z: 0, sub: "wall", material: "stone" }], { now: 3, listener: L }))).toContain("build.place.stone");
     const bulk = Array.from({ length: 10 }, (_, i): EntSnap => ({ id: 100 + i, kind: "piece", x: 1, y: 1, z: 0, sub: "wall" }));

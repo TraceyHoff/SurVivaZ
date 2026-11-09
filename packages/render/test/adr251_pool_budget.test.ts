@@ -70,3 +70,17 @@ describe("ADR-251 ground follow-ups", () => {
     expect(JSON.stringify(fb)).not.toContain("basic_storage_box");
   });
 });
+
+describe("ADR-314: oversize stream pages get their own pool", () => {
+  it("splitStreamPages keeps 1024 pages together and moves the 2048 door swing sheets out", async () => {
+    const { splitStreamPages, STREAM_PAGE_MAX_PX } = await import("../src/assets/atlasManager.js");
+    const pages = [page("decor_furn_s", 1024, 440, 4), page("season_bld_winter_p0", 1024, 1024, 4), page("door_swing_openings", 2048, 1792, 4), page("door_swing_clan", 1920, 1536, 4), page("door_swing_yard", 864, 240, 4)];
+    const [small, big] = splitStreamPages(pages);
+    expect(small.map((p) => p.key)).toEqual(["decor_furn_s", "season_bld_winter_p0", "door_swing_yard"]);
+    expect(big.map((p) => p.key)).toEqual(["door_swing_openings", "door_swing_clan"]);
+    expect(STREAM_PAGE_MAX_PX).toBe(1024);
+    const a = am(1024);
+    expect(a.poolGeom(small, 1).perLayer).toBe(4); // still 2x2 per 2048 layer
+    expect(a.poolGeom(pages, 1).perLayer).toBe(1); // what one big page did to every stream slot
+  });
+});

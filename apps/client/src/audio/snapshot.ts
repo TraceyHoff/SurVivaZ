@@ -1,7 +1,7 @@
 /** ADR-117 extracts audio-relevant entity snapshots from the replicated (net) world. Read-only; no netcode. */
 import { Transform, type World, type Entity } from "@engine/core";
 import { gameplayDefs, animalDefs, vehicleDef, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Crafter, Fuel, Burning, AnimState, BuildPiece, Dead, Equipment,
-  DoorState, Defense, Vehicle, VehicleSeats, VehicleState, WeaponState, LiveExplosive, Crop, Progression, CombatTag, LootBag } from "@engine/gameplay";
+  DoorState, AttachKind, resolveAttachment, Defense, Vehicle, VehicleSeats, VehicleState, WeaponState, LiveExplosive, Crop, Progression, CombatTag, LootBag } from "@engine/gameplay";
 import { PlayerId } from "@engine/core";
 import { weaponClass, surfaceOf, tierMaterial, type EntSnap } from "./events.js";
 import type { Vec2 } from "./spatial.js";
@@ -52,7 +52,7 @@ export function snapshotWorld(w: World, local: Entity | undefined, tiles: Tiles,
       const bp = w.get(e, BuildPiece)!; const pd = defs?.pieces.get(bp.type); s.sub = pd?.key ?? "piece"; s.material = tierMaterial(bp.tier);
       if (pd?.roof) roofs.push({ x: t.x, y: t.y, z: t.z ?? 0 });
       if (pd && /floor|foundation/.test(pd.key)) floors.push({ x: t.x, y: t.y, m: s.material });
-      if (pd?.door) s.door = w.getField(e, DoorState, "open") ?? 0;
+      if (pd?.door) { const a = resolveAttachment(w, e, AttachKind.Door); s.door = a !== undefined ? w.getField(a, DoorState, "open") ?? 0 : 0; } // ADR-314: DoorState is on the Door attachment
       if (w.has(e, Defense)) s.ready = w.getField(e, Defense, "readyTick") ?? 0;
     } else if (!w.has(e, Burning)) continue;
     if (w.has(e, Fuel)) s.lit = w.getField(e, Fuel, "lit") ?? 0;
