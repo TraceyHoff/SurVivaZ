@@ -11,7 +11,7 @@ import { dayCount, dayHours, sunScheduleNow } from "./day-clock.js";
 import { formatClock12 } from "./clock-format.js";
 import { sunFractionFor } from "@engine/core";
 import { activeDiseases, diseasePresentation, infectionTier, Diseases, Exposure, Health, RoomHeat, Survival, temperatureTier, damagingTemperatureTier, wetnessStage } from "@engine/gameplay";
-import { conditionIconImg } from "./game-icons.js";
+import { conditionIconImg, iconImg } from "./game-icons.js";
 import { seasonAtDays } from "@engine/core";
 import { formatBodyTemp, formatTemp, gaugeFrac, TEMP_UNIT_EVENT, GAUGE_GRADIENT, hudAirTemp, hudShelteredTemp, loadTempUnit, SEASON_LABEL, tempBand, type TempUnit } from "./hud-temp.js";
 
@@ -23,6 +23,17 @@ const STATS = [
 /** Task 25: custom pixel-art icons (apps/client/public/icons/) for the season glyph — the atlas has no season frames. */
 const SEASON_ICON = ["ic_sun.png", "ic_leaf.png", "ic_snowflake.png"] as const;
 
+/**
+ * ADR-312: HUD shelter state from the replicated Exposure.sheltered percent (0..100). Hidden below 10%; 100% is
+ * "Indoors" (fully enclosed and roofed); otherwise "Sheltered N%" rounded to 5% so the chip does not flicker.
+ */
+export function shelterChipState(pct: number): { show: boolean; full: boolean; pct: number; label: string } {
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  if (p < 10) return { show: false, full: false, pct: p, label: "" };
+  if (p >= 100) return { show: true, full: true, pct: 100, label: "Indoors" };
+  const r = Math.min(95, Math.max(10, Math.round(p / 5) * 5));
+  return { show: true, full: false, pct: r, label: `Sheltered ${r}%` };
+}
 export interface HudOverrides { hours?: number; weather?: number; /** ADR-239 ?season= (0 summer, 1 fall, 2 winter) */ season?: number; /** tests: unit instead of Settings */ unit?: TempUnit }
 const SPRITE_KEYS = ["health", "hunger", "thirst", "stamina"] as const;
 
@@ -80,9 +91,8 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
   const tLab = document.createElement("span"); tLab.className = "lab"; const tIc = document.createElement("img"); tIc.className = "ic"; tIc.alt = "temp"; tIc.style.display = "none"; tLab.prepend(tIc);
   const tBar = document.createElement("div"); tBar.className = "bar"; const tAir = document.createElement("i"); tAir.className = "air"; const tFelt = document.createElement("i"); tFelt.className = "felt"; const tGrad = document.createElement("i"); tGrad.className = "grad"; tBar.append(tGrad, tAir, tFelt); // gradient as a child so the bar_track nine-slice frame (fill) stays around it
   const tVal = document.createElement("span"); tVal.className = "tv"; tVal.dataset["hud"] = "temp";
-  // Task 25: the indoors marker is a custom house icon (was the 🏠 emoji prefix on the temp text).
-  const houseIcon = document.createElement("img"); houseIcon.className = "ic"; houseIcon.alt = "indoors"; houseIcon.src = `${base}icons/ic_house.png`; houseIcon.style.display = "none";
-  tRow.append(tLab, tBar, houseIcon, tVal); root.append(tRow);
+  // ADR-312: the indoors / sheltered marker is the shelter chip in the status row (house icon + "Sheltered N%").
+  tRow.append(tLab, tBar, tVal); root.append(tRow);
   // Task 13: one chip per active disease on the local player (replicated Diseases component); chips vanish on cure
   const chips = document.createElement("div"); chips.dataset["role"] = "disease-chips"; root.append(chips);
   let unit: TempUnit = ov.unit ?? loadTempUnit(), unitAt = 0, tempIcon = "", hudBottom = -1;
@@ -152,7 +162,7 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
       const indoors = indoor !== undefined && indoor.sheltered && Math.abs(indoor.temp - air) >= 1;
       const shown = indoors ? indoor!.temp : air;
       const band = tempBand(felt ?? shown); setAttr("band", tRow, "band", band);
-      setStyle("airLeft", tAir, "left", `${(gaugeFrac(shown) * 100).toFixed(1)}%`); setText("tempVal", tVal, `${formatTemp(shown, unit)}`); setStyle("houseDisp", houseIcon, "display", indoors ? "" : "none");
+      setStyle("airLeft", tAir, "left", `${(gaugeFrac(shown) * 100).toFixed(1)}%`); setText("tempVal", tVal, `${formatTemp(shown, unit)}`);
       if (felt !== undefined && Math.abs(felt - shown) >= 1) { setStyle("feltDisp", tFelt, "display", ""); setStyle("feltLeft", tFelt, "left", `${(gaugeFrac(felt) * 100).toFixed(1)}%`); } else setStyle("feltDisp", tFelt, "display", "none");
       setAttr("rowTitle", tRow, "title", `Air ${formatTemp(air, unit)}${indoors ? ` · ${indoor!.enclosed ? "indoors" : "sheltered"} ${formatTemp(indoor!.temp, unit)}` : ""}${felt !== undefined ? ` · feels like ${formatTemp(felt, unit)}` : ""}`);
       if (ui) { const k = band === "mild" ? "icon_temp" : `icon_temp_${band}`; const url = ui.url(k) ?? ui.url("icon_temp"); if (url && tempIcon !== k) { tIc.src = url; tempIcon = k; } }
@@ -167,7 +177,8 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
       const actives = p !== undefined && w.isRegistered(Diseases) ? activeDiseases(w, p) : [];
       const wet = p !== undefined ? (w.getField(p, Exposure, "wetness") ?? 0) : 0;
       const stage = wetnessStage(wet), tier = sv ? temperatureTier(sv.bodyTemp) : undefined;
-      const keys = `${ui ? "atlas" : "loading"}|${actives.map((d) => d.key).join(",")}|${stage}|${tier}|${p !== undefined ? infectionTier(w, p) : ""}`;
+      const shelter = shelterChipState(p !== undefined ? (w.getField(p, Exposure, "sheltered") ?? 0) : 0);
+      const keys = `${ui ? "atlas" : "loading"}|${actives.map((d) => d.key).join(",")}|${stage}|${tier}|${p !== undefined ? infectionTier(w, p) : ""}|${shelter.show ? shelter.pct : ""}`;
       if (chips.dataset["keys"] !== keys) {
         chips.dataset["keys"] = keys; chips.innerHTML = "";
         for (const d of actives) { const shown = diseasePresentation(w, p!, d); const c = document.createElement("span"); c.className = "dchip"; c.dataset["disease"] = d.key; if (shown.stage) c.dataset["status"] = shown.stage; c.append(conditionIconImg(shown.icon, 11, shown.name), ` ${shown.short}`); c.title = shown.name + (shown.stage === "septic" ? " — losing health! Use a medicated bandage." : shown.stage ? " — treat before it worsens; medicated bandages cure infection." : ""); c.style.background = d.color; chips.append(c); }
@@ -178,6 +189,13 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
         };
         if (tier) status(tier, `${tier} — body ${formatBodyTemp(sv!.bodyTemp, unit)}. ${damagingTemperatureTier(tier) ? "Losing health!" : "Find comfortable shelter before this worsens."}`, tier === "chilly" || tier === "cold" || tier === "freezing" ? "#386DA6" : "#AC432B");
         if (stage) status(stage, `${stage} — dry indoors or by a fire; deeper wetness takes longer to dry`, "#4A7A9E");
+        if (shelter.show) { // ADR-312: protected from the elements by surrounding base pieces
+          const c = document.createElement("span"); c.className = "dchip"; c.dataset["status"] = "sheltered"; c.dataset["shelter"] = shelter.full ? "full" : "partial";
+          const ic = iconImg("ic_house.png", 11, "Sheltered"); if (!shelter.full) ic.style.opacity = String(0.55 + 0.45 * (shelter.pct / 100));
+          c.append(ic, ` ${shelter.label}`);
+          c.title = shelter.full ? "Indoors — fully protected from rain, wind and sun" : `${shelter.label} from the elements — a roof keeps rain off; walls and closed doors block wind and cold`;
+          c.style.background = shelter.full ? "#4E7A3A" : "#7A6A3E"; chips.append(c);
+        }
         if (!ro) publishHudBottom(); // no ResizeObserver: chips are the only content that changes the HUD height
       }
     } catch { /* replica without Diseases yet */ }

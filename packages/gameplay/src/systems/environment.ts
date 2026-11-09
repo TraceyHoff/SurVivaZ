@@ -213,7 +213,8 @@ export function surfaceTemperature(world: World, x = 0, y = 0): number {
  */
 export function shelterTempShift(sh: Shelter, ambient: number, vt: VitalsTuning, shelterBonus: number): number {
   // ADR-239: shelter warms when it is cold and shades (cools) when the air is above the comfort band
-  const shelter = (1 - sh.exposure) * (ambient > vt.comfortMax ? -shelterBonus : shelterBonus);
+  // ADR-312: in the heat the shade (sun exposure: roof first) cools; in the cold the walls + roof (exposure) warm.
+  const shelter = ambient > vt.comfortMax ? (1 - sh.sun) * -shelterBonus : (1 - sh.exposure) * shelterBonus;
   // Wall insulation pulls felt toward comfort, scaled by how sheltered the spot is (full inside, none in the open).
   const wallShift = sh.insulation * (1 - sh.exposure) * (ambient > vt.comfortMax ? -1 : ambient < vt.comfortMin ? 1 : 0);
   return shelter + wallShift;
@@ -314,7 +315,8 @@ export function exposureSystem(world: World, dt: number): void {
     // Task 33: standing in a water tile wets you (and your worn gear, which shares your wetness) even when
     // it is not raining. Drying afterwards follows the existing rules below (indoors / by a fire).
     if (inWater(world, x, y)) wet += WATER_WET_PER_SEC * dt;
-    else if (wdef.wetnessPerSec > 0 && sh.exposure > 0) wet += wdef.wetnessPerSec * w.intensity * sh.exposure * (1 - waterproofOf(world, e)) * dt;
+    // ADR-312: rain / snow wets in proportion to rain exposure (a roof overhead blocks most of it).
+    else if (wdef.wetnessPerSec > 0 && sh.rain > 0) wet += wdef.wetnessPerSec * w.intensity * sh.rain * (1 - waterproofOf(world, e)) * dt;
     else wet = dryWetness(wet, dt, env.dryPerSec * (heat > 0 ? env.heatDryMul : 1));
     wet = Math.min(1, Math.max(0, wet));
     const ambient = isUnderground(world, x, y) ? TERRAIN.undergroundTempC : ambient0 ?? ambientTemperature(world, x, y); // ADR-263
@@ -324,12 +326,12 @@ export function exposureSystem(world: World, dt: number): void {
     const ins = ex.data.insulation[s]!;
     const insShift = ambient > vt.comfortMax ? -effectiveInsulation(ins, wet) : ambient < vt.comfortMin ? effectiveInsulation(ins, wet) : 0;
     let felt = ambient + insShift + shelterTempShift(sh, ambient, vt, env.shelterTempBonus)
-      - env.wetChill * wet - env.windChillPerSpeed * Math.sqrt(Math.max(0, w.windSpeed)) * sh.exposure;
+      - env.wetChill * wet - env.windChillPerSpeed * Math.sqrt(Math.max(0, w.windSpeed)) * sh.wind; // ADR-312: walls block the wind
     // Fully enclosed + roofed: protected from the elements and from death by them — felt never leaves the comfort
     // band, except for the room's own fire heat on top (a sealed room with a roaring fire can still overheat).
     if (enclosed) felt = Math.min(vt.comfortMax, Math.max(vt.comfortMin, felt)) + roomHeat;
     else felt += heat;
-    ex.data.wetness[s] = wet; ex.data.feltTemp[s] = felt; ex.data.sheltered[s] = sh.covered ? 1 : 0; ex.markChanged(idx);
+    ex.data.wetness[s] = wet; ex.data.feltTemp[s] = felt; ex.data.sheltered[s] = Math.round(sh.factor * 100); /* ADR-312: shelter percent 0..100 (HUD icon) */ ex.markChanged(idx);
 
     // ADR-277: felt temperature drives body-temperature progression; no instant air damage.
 

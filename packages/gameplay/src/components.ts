@@ -40,6 +40,7 @@ export const enum Stat { HungerRate = 1, ThirstRate = 2, StaminaRegen = 3, Healt
 /** Buff kinds are just (stat, op) pairs with expiry; see systems/environment.ts + vitals.ts for the rules. */
 export const Buffs = defineModifierStack("gameplay.Buffs", 8, { networked: true });
 export const Exposure = defineComponent("Exposure", {
+  /** sheltered: ADR-312 shelter percent 0 (open) .. 100 (fully enclosed and roofed), for the HUD shelter icon. */
   insulation: "f32", sheltered: "u8",
   wetness: { type: "f32", quant: { bits: 7, min: 0, max: 1 } },
   feltTemp: { type: "f32", quant: { bits: 10, min: -40, max: 60 }, default: 20 },

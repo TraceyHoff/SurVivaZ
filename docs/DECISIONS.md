@@ -3597,3 +3597,30 @@ Rotations follow the roof art height fields (`assets/tools/buildings2.py roof_d`
 **Not changed.** Support and stability rules, disrepair (roof omission chance and HP), ADR-309 cutaway / indoor zoom, ADR-310 claim and skill-unlock rules for repair and reclaim, compass, graphics, and art. `roof_ridge`, `roof_valley`, and `roof_peak` are art-only keys with no gameplay piece, so they are not used. No new sprites.
 
 **Validation.** Across 200 seeds all four styles and all six roof pieces appear, and only those keys. Plans are deterministic per seed; forcing Flat reproduces every non-roof piece and every omit / HP roll. For every kind and building rotation, slopes sit on edges with eaves pointing outward, corners sit on corners with both eaves outward, hip caps sit at ridge ends facing out, and ridges share one axis. Stamped roofs sit on the top story, match planned key and rotation, and meet `minStability`. Disrepair still omits styled roof tiles, and the tiles stay reclaimable under a Claim Flag with the same unlock gates as `roof_flat`.
+
+## ADR-312: Partial shelter from surrounding base pieces, with a HUD shelter icon (SurVivaZ)
+
+**Context.** Shelter was close to all or nothing. A sealed, roofed room (edge enclosure plus roof cover) set every exposure to 0. Anything less fell back to the `BuildingGrid.exposure` heuristic: a roof halved exposure, and only solid grid wall cells upwind counted. Thin edge walls, the walls players actually build, did not count unless they fully closed the room. So three walls and a roof gave the same rain, wind, and cold as a lone roof. Players also had no on-screen sign that they were sheltered (the temperature row's house marker pointed at a missing `icons/ic_house.png`).
+
+**Decision.** `shelterAt` adds a graduated reading from the pieces around the tile:
+- **Roof cover R (0..1):** the condition of the lowest roof or deck above the tile.
+- **Wall ring W (0..1):** for each of the 4 cardinal directions, the nearest edge piece within `SHELTER_RING` = 4 tiles. Weights: wall 1, `wall_low` 0.5, window wall with an insert 0.8, empty window 0.6, closed door 0.9, open door 0.35, empty doorway 0.25. The 4 values are averaged.
+- **Damage:** each piece's weight is multiplied by its condition from `damageStage` (1 / 0.85 / 0.6 / 0.3), so disrepaired abandoned pieces protect less.
+
+The exposures are: rain `1 − (R(0.8 + 0.2W) + (1−R)·0.2W)`, wind `1 − (0.85W + 0.15R)`, cold `1 − (0.6W + 0.4R)`, sun `1 − (0.75R + 0.25W)`. Each one is `min`'d with the legacy exposure, so nothing protects less than before. A fully enclosed, roofed tile still returns all zeros (`factor` 1), so indoor behaviour is unchanged.
+
+`exposureSystem` scales the effects separately:
+- Rain or snow wetting scales by `rain`.
+- Wind chill scales by `wind`.
+- The cold-side shelter bonus and wall insulation scale by `exposure` (cold).
+- The heat-side shade scales by `sun`.
+
+Cold and flu exposure follow automatically, because they are driven by wetness and body temperature. `Exposure.sheltered` (u8, networked, previously an unread covered flag) now carries the shelter percent: `round(factor × 100)`, with `factor = 1 − mean(rain, wind, cold)`. AI humans are player entities on the same spawn path and system, so they get identical numbers.
+
+The roof and ring reading is cached per tile and level. The cache is invalidated by `StructureIndex.version` (structural changes and door toggles) and refreshed every `SHELTER_CACHE_TICKS` = 20 ticks so damage shows up. It only runs when `anyPieceNear` finds a piece, so there is no cost in the open. The HUD shows a shelter chip in the status-chip row (the same wrapping row as the wet, cold, and disease chips) using the existing dedicated `ic_house.png` house icon. The chip is hidden below 10%, reads "Sheltered N%" in 5% steps (icon opacity rises with the percent), and reads "Indoors" at 100%. It replaces the temperature-row house marker.
+
+Examples: a lone roof gives rain 0.2, wind 0.5, cold 0.5 (60% sheltered). Two walls with no roof give rain 0.9, wind 0.575, cold 0.7 (~28%). Three walls plus a roof give rain 0.05, wind 0.21, cold 0.15 (~86%). Three walls, a roof, and an open door give ~91%. With the door closed the room is sealed: 100%, "Indoors".
+
+**Not changed.** Full-enclosure behaviour (comfort-band clamp, RoomHeat, no wetting), Task 5/23/24/30/31 numbers, `BuildingGrid.exposure`, compass, graphics, door art. No sprites were added or recoloured. A purpose-made partial-shelter icon is requested from Art.
+
+**Validation.** Shelter factor tests cover: none, roof only, 2 walls, 3 walls + roof, a strictly graduated sequence, full enclosure (all 0, factor 1), damaged walls and roof counting less, closed versus open door, and a 5×5 room's centre still seeing its walls. Under a lone roof, rain wets at 20% of the open rate; a sealed room stays dry. Felt temperature in winter wind is ordered open < 2 walls < 3 walls + roof, and the sealed room stays in the comfort band. `Exposure.sheltered` is 0 outside, 100 indoors, and matches the factor in between. AI and human entities on the same tile get identical numbers. The cache is reused within a tick and refreshed on a structural change. The HUD chip state and DOM (partial, full, hidden) are tested.
