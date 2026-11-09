@@ -3624,3 +3624,20 @@ Examples: a lone roof gives rain 0.2, wind 0.5, cold 0.5 (60% sheltered). Two wa
 **Not changed.** Full-enclosure behaviour (comfort-band clamp, RoomHeat, no wetting), Task 5/23/24/30/31 numbers, `BuildingGrid.exposure`, compass, graphics, door art. No sprites were added or recoloured. A purpose-made partial-shelter icon is requested from Art.
 
 **Validation.** Shelter factor tests cover: none, roof only, 2 walls, 3 walls + roof, a strictly graduated sequence, full enclosure (all 0, factor 1), damaged walls and roof counting less, closed versus open door, and a 5×5 room's centre still seeing its walls. Under a lone roof, rain wets at 20% of the open rate; a sealed room stays dry. Felt temperature in winter wind is ordered open < 2 walls < 3 walls + roof, and the sealed room stays in the comfort band. `Exposure.sheltered` is 0 outside, 100 indoors, and matches the factor in between. AI and human entities on the same tile get identical numbers. The cache is reused within a tick and refreshed on a structural change. The HUD chip state and DOM (partial, full, hidden) are tested.
+
+## ADR-313: Hidden-ledge warnings appear much sooner (SurVivaZ)
+
+**Context.** The ADR-306 drop arrow only checked the tile the player stood on. It appeared at the rim, or one step before it when facing the ledge. At walk speed (2.9 t/s) that is about 0.2 s of warning, and at sprint (4.64 t/s) less than that, which is too late to stop before a lethal fall.
+
+**Decision.** `pickLedgeHints` keeps the ADR-306 rim check (distance 0) and adds three grid-walk rays: one along the travel heading and two at ±0.35 rad. Each ray marches up to `ledgeLookahead(speed)` = speed × 2 s + 1 tile, clamped to 3–14 tiles: idle 3, walk ~6.8, sprint ~10.3. A ray ends at the first drop of 1 or more tiles; a drop on a camera-hidden side becomes a hint, and a visible drop ends the ray silently. A climb of more than 1 tile (a cliff face) also ends the ray.
+
+To keep clutter down:
+- Hints on the same hidden side within 3.5 tiles of each other merge into the nearest, so a straight cliff line shows one arrow.
+- At most 3 arrows are drawn, nearest on top, and off-screen arrows are skipped.
+- Opacity is full within 1.5 tiles and fades to 0.35 at the edge of the lookahead.
+
+Speed and heading come from a frame-to-frame `LedgeMotionTracker` (EMA, ~0.15 s; teleports reset it), falling back to the PrevTransform step, then to facing. So sprinting automatically looks farther: a ledge is shown at least ~2 s of travel before the rim. Colours and HP rules (`classifyLedgeRisk`, ladder = safe, `shaftAwareHeight`), the Settings toggle "Hidden ledge warnings", and hiding under menus, build mode, and driving are unchanged. When the toggle is off, the overlay skips the scan entirely.
+
+**Not changed.** Fall-damage formula, arrow shape, size and colours, ADR-305 facing, compass, graphics.
+
+**Validation.** Tests check that `ledgeLookahead` gives 3 / 6.8 / 10.28 tiles for idle, walk, and sprint (≥ 2 s for both). A hidden ledge 6.5 tiles ahead shows while walking (the old rim check missed it). A ledge 8.5 tiles ahead is out of walk range but in sprint range with more than 1.5 s to react. Nothing shows when walking away or toward a camera-near drop, and a cliff face blocks the ray. A lethal drop is still red, a staircase yields at most 3 hints sorted nearest first, and the fade covers 1 → 0.35. The rim-under-foot case still works. The tracker measures sprint speed and heading, and the toggle off draws nothing without scanning. The ADR-306 tests still pass.
