@@ -131,6 +131,40 @@ describe("rideable mounts", () => {
     }
   });
 
+  it("adds hit / death / graze (all species) and moose swim to the mount, fore and every saddle tier on their own pages", () => {
+    const ACTS: [string, number, number, boolean][] = [["hit", 3, 10, true], ["death", 6, 8, false], ["graze", 4, 4, true]];
+    const seen = new Map<string, string>();
+    for (const sp of Object.keys(SPECIES)) {
+      const acts = sp === "moose" ? [...ACTS, ["swim", 6, 8, true] as [string, number, number, boolean]] : ACTS;
+      for (const key of [`mount_${sp}`, `mount_${sp}_fore`, ...TIERS.map((t) => `mount_saddle_${sp}_${t}`)]) {
+        const s = sprite(key);
+        if (sp !== "moose") expect(s.animations.swim, key).toBeUndefined();
+        for (const [an, n, fps, loop] of acts) {
+          const a = s.animations[an]!;
+          expect(a, `${key}.${an}`).toBeTruthy();
+          expect(a.frames).toHaveLength(n); expect(a.fps).toBe(fps); expect(a.loop).toBe(loop);
+          expect(a.directions).toBe(8); expect(a.dirStride).toBe(n); expect(a.dirFrames).toHaveLength(n * 8);
+          a.dirFrames.forEach((df, i) => {
+            expect(df.atlas.startsWith(key.includes("saddle") ? `nature_mount_saddle_acts_${sp}_` : `nature_mount_acts_${sp}_`), df.atlas).toBe(true);
+            const at = atlas(df.atlas); expect(Math.max(at.frameW, at.frameH)).toBeLessThanOrEqual(1024); expect(at.ktx2).toBeTruthy();
+            if (key === `mount_${sp}`) {
+              expect(df.rect.w).toBeGreaterThan(8);
+              const seat = a.frameMeta![`df:${i}`]!.anchors.seat;
+              expect(seat).toEqual(anchors.species[sp].actSeat[an][Math.floor(i / 8)][i % 8]);
+              if (an === "swim") expect(a.frameMeta![`df:${i}`]!.anchors.water.y).toBe(anchors.species[sp].swimWaterY[Math.floor(i / 8)][i % 8]);
+            }
+            if (df.rect.w === 4 && df.rect.h === 4) return;
+            const id = `${df.atlas}/${df.rect.x},${df.rect.y},${df.rect.w},${df.rect.h}`;
+            expect(seen.get(id), `${key}.${an}[${i}]`).toBeUndefined(); seen.set(id, `${key}.${an}[${i}]`);
+          });
+        }
+      }
+    }
+    expect(anchors.acts.anims.death).toMatchObject({ frames: 6, fps: 8, loop: false });
+    expect(anchors.acts.anims.swim.species).toEqual(["moose"]);
+    expect(anchors.acts.riderAnim.death).toBeNull();
+  });
+
   it("adds four saddle tier icons in the nature icon sheet with ids and CSS", () => {
     for (const [i, t] of TIERS.entries()) {
       const s = man.sprites.find((x: Sprite) => x.key === `saddle_${t}`);

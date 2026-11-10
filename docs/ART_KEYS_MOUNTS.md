@@ -86,6 +86,27 @@ Pages (stream residency, placeholder `placeholder_animal_l`, PNG + KTX2 at 1x an
 | `nature_mounts_yak_0` | 1024×768 | 2048×1536 |
 | `nature_mount_saddles_yak_0` | 1024×592 | 2048×1184 |
 
+## Action anims (hit / death / graze / swim)
+
+Added to the same sprites (`mount_<sp>`, `mount_<sp>_fore`, `mount_saddle_<sp>_<tier>`), same facings, pivot, scale,
+`dirFrames` index `frame * 8 + facing`, on their own pages (the gait pages above are unchanged):
+`nature_mount_acts_<sp>_<n>` (mount + fore) and `nature_mount_saddle_acts_<sp>_<n>` (4 tiers). Renderer:
+`mounts.ACTS` / `params()`; packer `packages/assets/pack/nature/src/artpass_mounts_acts.py` (re-entrant, append-only).
+
+| anim | species | frames | fps | loop | look | rider |
+|---|---|---|---|---|---|---|
+| hit | all | 3 | 10 | yes | flinch: rears back, head jerks up, > < eyes, ears pinned, tail flick, impact stars | `ride_idle` |
+| death | all | 6 | 8 | **no** | goofy flop: dizzy stagger -> knees buckle -> belly splat, legs splayed -> bounce -> X eyes + tongue (no blood) | dismounts (none) |
+| graze | all | 4 | 4 | yes | head down at the grass, chewing a grass tuft, ear flick, tail swish | `ride_idle` |
+| swim | moose | 6 | 8 | yes | only back / neck / head above water (water clip baked in), paddling bob, ripple rings + splashes | `ride_idle`, clipped |
+
+Seat anchors: `frameMeta["df:<i>"].anchors.seat` on `mount_<sp>` for every action frame too, mirrored in
+`mount_anchors.json` -> `species.<sp>.actSeat.<anim>[frame][facing]`; `acts.anims` / `acts.riderAnim` describe timing.
+The action anims do not share frame counts with `ride_idle`, so the rider plays `ride_idle` on its own clock and is
+pinned each tick (doll pivot = mount pivot + actSeat - rider body seat). Moose swim also has `anchors.water`
+(`species.moose.swimWaterY[frame][facing]`): the water-surface row in px from the pivot at the seat column; clip the rider's
+pixels below it (same idea as the player swim sink). The swim pivot is the water-surface point under the moose.
+
 ## Rider seat anchors
 
 * Mount: `mount_<sp>.animations.<anim>.frameMeta["df:<i>"].anchors.seat = {x, y}` = px at 1x from the mount pivot

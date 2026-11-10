@@ -42,7 +42,11 @@ SCALE_TABLE = {   # species: (sprite key, shoulder/withers height m, note)
 }
 WILD_KEY = {"moose": "animal_moose", "deer": "animal_deer", "elk": "animal_elk", "bison": "animal_bison"}
 TIERS = ("leather", "reinforced", "iron", "steel")
-ANIMS = [("idle", 4, 4), ("walk", 6, 8), ("gallop", 6, 12)]
+ANIMS = [("idle", 4, 4), ("walk", 6, 8), ("gallop", 6, 12)]          # rideable gaits (rider ride_<anim> 1:1)
+# action anims (second pass, appended on their own pages): (name, frames, fps, loop, species or None = all)
+ACTS = [("hit", 3, 10, True, None), ("death", 6, 8, False, None), ("graze", 4, 4, True, None), ("swim", 6, 8, True, ("moose",))]
+NFRAMES = {a[0]: a[1] for a in ANIMS} | {a[0]: a[1] for a in ACTS}
+def acts_for(species): return [(a, n, fps, loop) for a, n, fps, loop, only in ACTS if only is None or species in only]
 DIR8_PHI = [45 - 45 * i for i in range(8)]
 ELEV = 0.42
 
@@ -112,9 +116,43 @@ def canvas_size(sp):
 
 # ---------------------------------------------------------------- motion
 def params(anim, fi, sp):
-    n = {"idle": 4, "walk": 6, "gallop": 6}[anim]; t = 2 * math.pi * fi / n
+    n = NFRAMES[anim]; t = 2 * math.pi * fi / n
     leglen = sp["wh"] - 2 * sp["rb"] * .85
-    P = dict(sw=[0.0] * 4, lift=[0.0] * 4, z=0.0, pitch=0.0, hdz=0.0, hdy=0.0, wag=0.0, ear=0.0, eyes="open", flow=0.0, mouth=0)
+    P = dict(sw=[0.0] * 4, lift=[0.0] * 4, z=0.0, pitch=0.0, hdz=0.0, hdy=0.0, wag=0.0, ear=0.0, eyes="open", flow=0.0, mouth=0,
+             spread=[0.0] * 4, fz=0.0, water=None, tongue=False, grass=False, stars=0)
+    bz0 = sp["wh"] - sp["rb"] - sp.get("hump", 0) * .55; hz0 = sp["wh"] + sp["neck"][1]
+    def head_at(zt, z): return zt - hz0 - z     # hdz that puts the head centre at height zt
+    if anim == "hit":      # flinch: rear back, head jerks up/back, > < eyes, ears pinned, tail flick
+        P["z"] = [-.03, -.05, -.015][fi]; P["pitch"] = [-.06, -.03, -.01][fi]; P["hdy"] = [-.09, -.05, -.01][fi]; P["hdz"] = [.07, .03, .0][fi]
+        P["sw"] = [[.06, .06, -.05, -.05], [.03, .04, -.07, -.06], [.01, .0, -.02, -.01]][fi]; P["spread"] = [.04, .06, .02][fi:fi + 1] * 4
+        P["ear"] = [-.7, -.5, .2][fi]; P["wag"] = [1.1, -.9, .3][fi]; P["eyes"] = ["ouch", "ouch", "blink"][fi]; P["mouth"] = fi < 2; P["stars"] = [3, 2, 0][fi]
+        return P
+    if anim == "death":    # goofy flop: dizzy stagger -> knees buckle -> belly splat with legs splayed -> bounce -> X eyes + tongue
+        lie = -(bz0 - sp["rb"] * .95)
+        P["z"] = [0, -.14 * leglen, -.38 * leglen, lie, lie + .05, lie][fi]
+        P["pitch"] = [.04, -.03, -.05, 0, .01, 0][fi]
+        sp_ = [.04, .08, .16, .34, .3, .36][fi]; P["spread"] = [sp_] * 4
+        fwd = [0, .02, .06, .22, .2, .24][fi]; P["sw"] = [fwd, fwd * .9, -fwd, -fwd * .9]
+        P["fz"] = 0.0; P["lift"] = [0, 0, 0, 0] if fi < 3 else [.04, .05, .03, .04]
+        lay = sp["hr"] * .95
+        P["hdz"] = [.05, -.1, -.3, head_at(lay, lie), head_at(lay + .07, lie + .05), head_at(lay, lie)][fi]; P["hdy"] = [-.03, .03, .08, .16, .14, .17][fi]
+        P["wag"] = [.6, -.5, .2, -1.0, 1.2, .0][fi]; P["ear"] = [.3, -.3, -.5, -.8, -.6, -.9][fi]
+        P["eyes"] = ["dizzy", "dizzy", "ouch", "x", "x", "x"][fi]; P["tongue"] = fi >= 3; P["stars"] = [3, 2, 1, 0, 0, 0][fi]; P["mouth"] = fi == 2
+        return P
+    if anim == "graze":    # head down to the grass, chewing (grass tuft in the mouth), ear flick, tail swish
+        P["hdy"] = .14 + [0, .015, .03, .01][fi]; P["hdz"] = head_at(sp["hr"] * 1.15 + [0, .03, .01, .04][fi], 0)
+        P["z"] = [0, .006, .012, .004][fi]; P["wag"] = [-.5, .2, .7, -.1][fi]; P["ear"] = [0, .35, -.1, .2][fi]
+        P["sw"] = [.04, .02, -.02, -.01]; P["eyes"] = ["open", "happy", "blink", "open"][fi]; P["mouth"] = fi in (1, 3); P["grass"] = fi in (0, 1, 3)
+        return P
+    if anim == "swim":     # moose swimming: only back, neck and head above the water, legs paddling under, ripple ring + splashes
+        sink = -(bz0 + sp["rb"] - .14)
+        P["z"] = sink + math.sin(t) * .025; P["fz"] = P["z"]; P["pitch"] = math.sin(t + .7) * .02
+        P["hdz"] = .1 + math.sin(t + 1.2) * .03; P["hdy"] = .05
+        for i, ph in enumerate((0, .5, .5, 0)):
+            u = t + ph * 2 * math.pi; P["sw"][i] = math.sin(u) * leglen * .3; P["lift"][i] = max(0, math.cos(u)) * leglen * .25
+        P["wag"] = math.sin(t) * .6; P["ear"] = [0, .2, .35, .1, -.15, -.05][fi]; P["eyes"] = ["open", "open", "happy", "open", "blink", "open"][fi]; P["mouth"] = fi in (2, 3)
+        P["water"] = fi
+        return P
     if anim == "idle":
         P["z"] = [0, .008, .016, .008][fi]; P["hdz"] = [0, .012, .02, .006][fi]; P["wag"] = [0, .6, 0, -.6][fi]
         P["ear"] = [0, .25, 0, -.15][fi]; P["eyes"] = "blink" if fi == 2 else "open"; P["mouth"] = fi == 1
@@ -150,6 +188,18 @@ def hull(pts):
 
 def eye(cv, p, r, mode, k):
     ink = ramp("ink")
+    if mode == "x":       # cartoon knocked-out X eyes
+        w = r * .85
+        for sgn in (-1, 1): cv.line([(p[0] - w, p[1] - w * sgn), (p[0] + w, p[1] + w * sgn)], ink[3], max(.6 * k, r * .32))
+        return
+    if mode == "ouch":    # squeezed > < eyes
+        w = r * .85
+        cv.line([(p[0] - w, p[1] - w * .7), (p[0] + w * .3, p[1]), (p[0] - w, p[1] + w * .7)], ink[3], max(.6 * k, r * .3))
+        return
+    if mode == "dizzy":   # swirly ring + dot
+        cv.line([(p[0] + r * .8 * math.cos(a / 3), p[1] + r * .8 * math.sin(a / 3)) for a in range(0, 19)], ink[3], max(.5 * k, r * .25))
+        cv.fill(circ(p, r * .25, r * .25, wob=0), ink[3])
+        return
     if mode == "open":
         cv.fill(circ(p, r * .82, r, wob=0), ink[3])
         cv.fill(circ((p[0] - r * .3, p[1] - r * .38), r * .36, r * .36, wob=0), (255, 255, 255))
@@ -199,12 +249,13 @@ class Mount:
         sp, P, k, G = self.sp, self.P, self.k, self.G; rb, L = sp["rb"], sp["L"]
         hy = fy * L / 2 * .92; hipz = self.zc(hy) - rb * .25
         hip = (sx * sp["lx"], hy, hipz + rb * .1)
-        foot = (sx * sp["lx"] * 1.05, hy + P["sw"][i], .035 + P["lift"][i])
+        foot = (sx * (sp["lx"] * 1.05 + P["spread"][i]), hy + P["sw"][i], .035 + P["lift"][i] + P["fz"])
         mid = [(a + b) / 2 for a, b in zip(hip, foot)]
         bend = (P["lift"][i] * 1.1 + .02) * (1 if fy > 0 else -1)
         knee = (mid[0], mid[1] + bend, mid[2] + .02)
         (hp, hv), (kp, kv), (fp, fv) = self.proj(*hip), self.proj(*knee), self.proj(*foot)
         dep = self.body_depth - .05 * G + ((hv + fv) / 2) * .001
+        if P["spread"][i] > .2 and self.nv(sx, 0) > .3: dep = self.body_depth + .05 * G   # splayed near legs lie in front of the barrel
         lw = sp["lw"] * G; furc = sp["leg"]; dark = sx < 0
         def draw(cv):
             base = ramp(furc)[2] if dark else None
@@ -359,6 +410,14 @@ class Mount:
                 for side in (-1, 1):
                     (np_, _) = self.proj(side * r / G * .4, sn3[1] + r / G * .7, sn3[2] + r / G * .15)
                     cv.fill(circ(np_, r * .16, r * .12, wob=0), ramp("ink")[3])
+                if P["tongue"]:
+                    (mp, _) = self.proj(0, sn3[1] + r / G * .5, sn3[2] - r / G * .55)
+                    cv.part(circ((mp[0] + r * .15, mp[1] + r * .3), r * .3, r * .42, wob=0), "flower_pink", lw=.7 * k, shade=.25, hl=.2)
+                if P["grass"]:
+                    (mp, _) = self.proj(0, sn3[1] + r / G * .6, sn3[2] - r / G * .45)
+                    for j, (dx, dy) in enumerate(((-.5, .9), (0, 1.1), (.55, .85))):
+                        cv.line([mp, (mp[0] + dx * r * (1 + .2 * self.fi), mp[1] + dy * r)], ramp("leaf")[3], max(1.4 * k, r * .22))
+                        cv.line([mp, (mp[0] + dx * r * (1 + .2 * self.fi), mp[1] + dy * r)], ramp("leaf")[1], max(.7 * k, r * .11))
                 if P["mouth"]:
                     (mp, _) = self.proj(0, sn3[1] + r / G * .55, sn3[2] - r / G * .5)
                     cv.line([(mp[0] - r * .35, mp[1] - r * .05), (mp[0], mp[1] + r * .18), (mp[0] + r * .35, mp[1] - r * .05)], ramp("ink")[3], max(.6 * k, r * .1))
@@ -390,6 +449,11 @@ class Mount:
                         (cp, _) = self.proj(hr * .95 * math.sin(an) * 1.02, hc3[1] + hr * .72 * math.cos(an), hc3[2] - hr * .3)
                         cv.fill(circ(cp, r * 1.0, r * .55, wob=0), ramp("flower_pink")[1], alpha=255)
             ears(cv, False)
+            for j in range(P["stars"]):   # cartoon impact stars circling the head
+                a = self.fi * 1.3 + j * 2 * math.pi / max(1, P["stars"])
+                (q, _) = self.proj(math.cos(a) * hr * 1.3, hc3[1] + math.sin(a) * hr * 1.3, hc3[2] + hr * 1.35)
+                rr = .045 * G; pts = [(q[0] + rr * (1 if m % 2 == 0 else .45) * math.cos(m * math.pi / 5 - math.pi / 2), q[1] + rr * (1 if m % 2 == 0 else .45) * math.sin(m * math.pi / 5 - math.pi / 2)) for m in range(10)]
+                cv.part(pts, "gold" if "gold" in palette.RAMPS else "sun", lw=.6 * k, shade=.2, hl=.2)
             if sp.get("antlers") and fwd >= 0: antlers(cv)
             if sp.get("horns") and fwd >= 0: horns(cv)
         self.add(max(hv, snv) + .01 * G, head, "head")
@@ -497,6 +561,48 @@ class Mount:
             fn(cv)
         im = cv.final()
         a = np.asarray(im).copy(); a[..., 3] = np.where(a[..., 3] >= 128, 255, 0); a[a[..., 3] == 0] = 0
+        if self.P["water"] is not None: a = self.water(a, mode == "full")
+        return a
+
+    # swimming: the water surface (z = 0) hides everything below the near edge of the body/water intersection
+    def water_outline(self, grow=1.0):
+        sp = self.sp; rb, L = sp["rb"], sp["L"]; rx, ry = rb * 1.02 * grow, (L / 2 + rb * .85) * grow
+        return [self.proj(rx * math.cos(u), ry * math.sin(u) + .02, 0.0)[0] for u in np.linspace(0, 2 * math.pi, 96, endpoint=False)]
+
+    def waterline(self, shape):
+        from PIL import ImageDraw
+        H, W = shape[:2]; m = Image.new("L", (W, H), 0); ImageDraw.Draw(m).polygon(self.water_outline(), fill=255)
+        E = np.asarray(m) > 0; rows = np.arange(H)[:, None]
+        wl = np.where(E.any(0), np.where(E, rows, -1).max(0), int(round(self.proj(0, 0, 0)[0][1])))
+        return wl
+
+    def water(self, a, ripple):
+        H, W = a.shape[:2]; k = self.k; wl = self.waterline(a.shape)
+        below = np.arange(H)[:, None] > wl[None, :]
+        a = a.copy(); a[below] = 0
+        if not ripple: return a
+        from PIL import ImageDraw
+        fi = self.fi; cy = self.proj(0, 0, 0)[0][1]
+        ring = Image.new("L", (W, H), 0); dr = ImageDraw.Draw(ring)
+        for grow, w in ((1.06 + .05 * math.sin(fi * math.pi / 3), 2.2), (1.32 + .1 * ((fi % 6) / 6), 1.5)):
+            pts = self.water_outline(grow); dr.line(pts + pts[:1], fill=255, width=max(1, int(round(w * k))))
+        R = np.asarray(ring) > 0
+        rows = np.arange(H)[:, None]
+        R &= (rows >= cy) | (a[..., 3] == 0)          # far half of the ring stays behind the visible animal
+        lt, dk = (189, 242, 240), (58, 156, 204)   # palette "water" highlight / dark
+        from scipy.ndimage import binary_dilation
+        edge = binary_dilation(R, iterations=max(1, k)) & ~R & ((rows >= cy) | (a[..., 3] == 0))
+        a[edge] = (*dk, 255); a[R] = (*lt, 255)
+        # splash droplets around the chest, positions change every frame
+        rng = np.random.default_rng(zlib.crc32(f"swim{self.s}{self.d}{fi}".encode()))
+        pts = self.water_outline(1.15)
+        for j in rng.choice(len(pts), 5, replace=False):
+            x, y = pts[j]; y -= (2 + rng.random() * 4) * k * (1 + .5 * math.sin(fi + j))
+            r = (1.0 + rng.random() * .8) * k; xi, yi = np.ogrid[:H, :W]
+            d = (xi - y) ** 2 + (yi - x) ** 2
+            yy, xx = min(H - 1, max(0, int(y))), min(W - 1, max(0, int(x)))
+            if yy < cy and a[yy, xx, 3] > 0: continue      # never splash over the visible animal behind the ring
+            a[d <= (r + k) ** 2] = (*dk, 255); a[d <= r ** 2] = (*lt, 255)
         return a
 
     def seat_anchor(self):
@@ -513,5 +619,8 @@ def render_frame(species, d, anim, fi):
         occ = fore[..., 3] > 0
         for t in TIERS:
             s = m.draw("saddle:" + t); s[occ] = 0; out.setdefault("saddle_" + t, []).append(s)
-        if k == 1: out["seat"] = m.seat_anchor(); out["size"] = (m.W, m.H, m.feet)
+        if k == 1:
+            out["seat"] = m.seat_anchor(); out["size"] = (m.W, m.H, m.feet)
+            if m.P["water"] is not None:   # rider clip line: water surface row at the seat column, px from the pivot
+                wl = m.waterline((m.H, m.W)); cx = int(round(m.seat_px[0])); out["water"] = round(float(wl[min(m.W - 1, max(0, cx))]) - m.feet, 2)
     return out
