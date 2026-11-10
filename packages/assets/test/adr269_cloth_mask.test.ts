@@ -38,6 +38,10 @@ describe("ADR-269 cloth mask art contract", () => {
             // New guard poses have their own cells on append-only block pages, not the old wear page.
             expect(d.atlas, name).toMatch(/^cz_block_accessory_/);
             expect(ref.animations[name].dirFrames.some((b: M) => b.atlas === d.atlas && b.frame === d.frame)).toBe(false);
+          } else if (name.startsWith("ride_")) {
+            // Seated mount-riding poses: own cells on append-only cz_ride_ pages, never the bandana's.
+            expect(d.atlas, name).toMatch(/^cz_ride_accessory_/);
+            expect(ref.animations[name].dirFrames.some((b: M) => b.atlas === d.atlas && b.frame === d.frame && JSON.stringify(b.rect) === JSON.stringify(d.rect))).toBe(false);
           } else expect(d.atlas, name).toBe(want);
         }
       }

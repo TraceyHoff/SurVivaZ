@@ -34,10 +34,17 @@ ANIM_START["punch"] = ANIM_START["swim"] + 8 * SWIM_N
 GATHER = [("harvest", 6, 10, True), ("chop", 6, 12, True), ("mine", 6, 12, True), ("drink", 5, 8, False), ("eat", 5, 8, False)]
 GATHER_N = {g[0]: g[1] for g in GATHER}
 BLOCK_ANIMS = {"block": 3, "block_hit": 2}  # extra dirFrames; never part of the legacy 8x31 grid
+# Mount riding (seated astride a saddle): frame i syncs 1:1 with mount idle/walk/gallop frame i (pack/mounts).
+# The rider pivot stays (FW/2, FEET); body frames carry a frameMeta "seat" socket (1x px from the pivot) that the
+# engine pins onto the mount's per-frame seat anchor (pack/mounts/mount_anchors.json). Far leg hidden behind the barrel.
+RIDE_ANIMS = {"ride_idle": 4, "ride_walk": 6, "ride_gallop": 6}
+RIDE_FPS = {"ride_idle": 4, "ride_walk": 8, "ride_gallop": 12}
 HIT_N = 3                                 # ADR-134 hurt (AnimState.Hurt -> "hit"): 3 frames, dirFrames only (legacy grid block keeps 2)
 _s, _n = ANIM_START["punch"], PUNCH_N
 for _g in GATHER: _s += 8 * _n; ANIM_START[_g[0]] = _s; _n = _g[1]
 for _name, _count in BLOCK_ANIMS.items():
+    _s += 8 * _n; ANIM_START[_name] = _s; _n = _count
+for _name, _count in RIDE_ANIMS.items():   # seed bases only (ride frames live on their own cz_ride_* pages)
     _s += 8 * _n; ANIM_START[_name] = _s; _n = _count
 def rows_for(slot):
     n = 8 * NF + (8 * len(EXPR_EXTRA) if slot in EXPR_SLOTS else 0)
@@ -92,6 +99,11 @@ def pose(bt, d, anim, fi, n):
             back = -2.0 if fi == 0 else -.8; tilt = -.8 if fi == 0 else -.25
         legs = [(-1.8, 0), (2.1, 0)]
         expr = "focus"
+    elif anim in RIDE_ANIMS:
+        # every frame differs (bob + side rock + lean breathing), so no ride cell repeats another frame or action
+        if anim == "ride_idle": bob = [-.2, .5, .9, .3][fi % 4]; tilt = [0, .7, .25, -.6][fi % 4]; lean = [0, .6, .25, -.55][fi % 4]; expr = ["happy", "normal", "blink", "focus"][fi % 4]
+        elif anim == "ride_walk": bob = -abs(math.sin(2 * ph + .5)) * 1.0 + .3 + .35 * math.sin(ph); lean = .4 + .7 * math.cos(ph + .5); tilt = math.sin(ph + .6) * .9; expr = ["normal", "happy", "focus", "happy", "normal", "happy"][fi % 6]
+        else: bob = math.sin(ph - .9) * 1.0; lean = 2.2 + .8 * math.cos(ph - .8); tilt = math.sin(ph + .9) * .6; crouch = .4 + .5 * math.sin(ph + .6); expr = ["focus", "yell", "yell", "yell", "focus", "yell"][fi % 6]
     elif anim == "sit": bob = [0, .35, .7, .35][fi % 4]
     elif anim == "harvest": crouch = [1, 3, 4.5, 4.5, 3, 1.5][fi % 6]; lean = [1, 2, 3, 3, 2, 1][fi % 6]; expr = "focus"
     elif anim == "chop": crouch = [0, -.5, -.5, 1.5, 1, .3][fi % 6]; lean = [-.6, -1, 0, 2.6, 2.2, .8][fi % 6]; expr = ["focus", "focus", "yell", "yell", "focus", "focus"][fi % 6]
@@ -105,8 +117,10 @@ def pose(bt, d, anim, fi, n):
     if anim == "death" and fi >= 3: hipz = 4.6
     sit = anim == "sit"
     if sit: by = bob * .6 - 4.0; bz = 19 + by; hipz = 7.4 + bob * .2
+    ride = anim in RIDE_ANIMS
+    if ride: by = bob * 1.0 - 2.6 - crouch; bz = 19 + by; hipz = 9.0 + bob * .5; sit = True   # seated astride: bent legs, no ground shadow
     rig = Rig(None, DIR_PHI[d], FW / 2, FEET)
-    K = dict(sit=sit, bt=bt, B=B, d=d, anim=anim, fi=fi, n=n, rig=rig, expr=expr, tilt=tilt, back=back, lean=lean, bob=bob, by=by, bz=bz)
+    K = dict(ride=ride, sit=sit, bt=bt, B=B, d=d, anim=anim, fi=fi, n=n, rig=rig, expr=expr, tilt=tilt, back=back, lean=lean, bob=bob, by=by, bz=bz)
     K["hips"] = {}; K["feet"] = {}; K["knees"] = {}
     for i, side in enumerate((-1, 1)):
         fwd, lift = legs[i]
@@ -114,10 +128,18 @@ def pose(bt, d, anim, fi, n):
         foot = (side * B["hipw"] * (1.28 if anim in BLOCK_ANIMS else 1.05) + (side * 1.5 if ffwd else 0), fwd + back * 0.2 + ffwd, 2.2 + lift + (0.4 if ffwd > 5 else 0))
         K["hips"][side] = hip; K["feet"][side] = foot
         K["knees"][side] = tuple((h + f) / 2 for h, f in zip(hip, foot))
-        if sit:   # thigh forward along the seat, shin down to the floor (pivot stays the floor point under the seat)
+        if ride:   # astride: thigh out over the barrel, shin hanging down the flank (gallop: heels swing a little)
+            sw = (math.sin(ph + side * 1.6) * 1.5 if anim == "ride_gallop" else math.sin(ph + side * 1.6) * .9 if anim == "ride_walk" else [0, .25, .4, .1][fi % 4])
+            hip = (side * B["hipw"], -.3, hipz); knee = (side * (B["hipw"] + 5.2), 2.2, hipz - 1.3)
+            foot = (side * (B["hipw"] + 6.0 + sw * .5), 2.4 + sw, hipz - 6.6)
+            K["hips"][side] = hip; K["knees"][side] = knee; K["feet"][side] = foot
+        elif sit:   # thigh forward along the seat, shin down to the floor (pivot stays the floor point under the seat)
             hip = (side * B["hipw"], -1.2, hipz); knee = (side * (B["hipw"] + .4), 5.6, hipz + .6)
             foot = (side * B["hipw"] * 1.05, 6.8, 2.2)
             K["hips"][side] = hip; K["knees"][side] = knee; K["feet"][side] = foot
+    if ride:   # far leg is behind the mount's barrel in side / diagonal facings
+        K["hide"] = {side for side in (-1, 1) if rig.nv(side, 0) < -.45}
+        (sp_, _) = rig.proj(0, -.3, hipz - 2.4); K["seat"] = {"x": round(sp_[0] - FW / 2, 2), "y": round(sp_[1] - FEET, 2)}
     K["tc"] = (tilt * 0.25, back * 0.4 + lean * 0.4, bz)
     K["hipc"] = (0, back * 0.3, hipz + 1.0)
     shw = B["shw"]; K["sh"] = {}; K["hand"] = {}
@@ -133,6 +155,8 @@ def pose(bt, d, anim, fi, n):
         elif anim == "hit": hand3 = (side * (shw + 4), -2, bz + 6 + fi)
         elif anim == "death":
             hand3 = (side * (shw + 4), -2, bz + 6) if fi < 2 else (side * (shw + 2.5), -3 + back * 0.4, max(2.6, bz - 6))
+        elif ride:   # both hands forward on the reins
+            hand3 = (side * (shw - 3.4), 6.2 + lean * .8, bz - 4.6 + (bob * .4 if anim != "ride_idle" else 0))
         elif sit: hand3 = (side * (shw - 3.0), 7.0, bz - 5.5)
         elif anim == "swim":   # paddling circles just at the water surface, sides half a cycle apart
             a = ph + (0 if side > 0 else math.pi); hand3 = (side * (shw + .8), 6.0 + math.sin(a) * 3.5, SWIM_Z + 2.0 + bob + math.cos(a) * 2.6)
@@ -173,6 +197,7 @@ def pose(bt, d, anim, fi, n):
     elif anim == "gather": dv = (0.0, 0.85, [-0.5, -0.2, -0.5, -0.2][fi])
     elif anim == "run": dv = (0.15, -0.45, 0.85)
     elif anim == "walk": dv = (0.15, 0.3 + 0.08 * math.sin(ph), 0.92)
+    elif ride: dv = (0.0, 0.7, 0.6)
     elif sit: dv = (0.0, 0.55, 0.8)
     elif anim in BLOCK_ANIMS: dv = (0.0, .35, .94)
     elif anim == "punch": dv = (0.0, 0.95, 0.3)

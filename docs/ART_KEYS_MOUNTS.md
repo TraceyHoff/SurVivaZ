@@ -118,6 +118,12 @@ Arrays are `[frame][facing]`, 1x px; double for @2x.
 
 Every live v1 body / wear / hair / face layer (430 keys) has `ride_idle` (4 f, 4 fps), `ride_walk` (6 f, 8 fps) and
 `ride_gallop` (6 f, 12 fps), loop, 8 facings, dirFrames on `cz_ride_<slot>_<n>` pages (customization shards).
+Pages: 99 new `cz_ride_<slot>_<n>` pages (<=1024 @1x, PNG + tintmask + KTX2, @2x pages double), dirFrames index
+`frame * 8 + facing`, pivot = doll feet (24, 74 in the 48x80 1x cell; anchor 0.5, 0.925 as every doll anim). Body sprites
+(`body_male`, `body_female`) carry frameMeta `df:<i>` anchors `seat` (+ `handR` / `handL` on the reins); clothing / hair /
+face / eyes / hat / accessory layers share the body's pivot, so the body's seat anchor places the whole doll.
+Motion per frame (so cells differ): idle = breathing bob + small head rock + blink/expressions; walk = rider bounce with a
+side rock and forward lean wave, heels swinging; gallop = crouched jockey pose, larger bob, lean wave, heel swing, yells.
 Pose: seated astride with bent knees, hands forward on the reins, the far leg hidden behind the mount in side and 3/4
 facings (layers stay in the slot / layer order and keep their tint masks, like the block anims).
 

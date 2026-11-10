@@ -53,6 +53,7 @@ def body(c, spec):
     K = c.K; B = K["B"]; cv = c.cv; cv.cel = True; cv.pal = []   # solid cel-shaded skin (no airbrush gradients)
     if not K.get("sit"): cv.shadow(24, 74.5, 10.5, 3.6)   # seated riders cast no ground shadow (the vehicle does)
     for side in (-1, 1):
+        if side in K.get("hide", ()): continue   # ride: far leg hidden behind the mount
         hip, ft = K["hips"][side], K["feet"][side]
         d = (c.P(hip)[1] + c.P(ft)[1]) / 2 - 2
         def leg(hip=hip, ft=ft, side=side):
@@ -602,6 +603,7 @@ def draw_bottom(c, spec):
             gear_parts.marks(c, t, c.p(along(c, lp, .74)), 2.2, g, vertical=True)
     if not skirt:
         for side in (-1, 1):
+            if side in K.get("hide", ()): continue
             hip, ft = K["hips"][side], K["feet"][side]; d = (c.P(hip)[1] + c.P(ft)[1]) / 2 - 2
             c.add(d + .01, lambda side=side: legpiece(side))
     def pelvis():
@@ -686,6 +688,7 @@ def draw_shoes(c, spec):
             for i, (dx, dy) in enumerate([(-1, 1.5), (1.2, 2.8), (.2, .2)]):
                 p = c.p(c.off(ft, dx, dy, .4)); cv.fill(circle(p, .7, .55), "S0", tm=(0, 1))
     for side in (-1, 1):
+        if side in K.get("hide", ()): continue
         ft = K["feet"][side]; d = (c.P(K["hips"][side])[1] + c.P(ft)[1]) / 2 - 2
         c.add(d + .02, lambda side=side: shoe(side))
 
