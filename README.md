@@ -228,21 +228,122 @@ None remaining — every animal key resolves to its own packed sprite when the p
 
 ---
 
-## Handoff note for Grok — read this first (updated 2026-11-06, ~13:10 CST)
+## Handoff note for Muse (Muse.ai) — read this first (updated 2026-11-09, ~21:30 CST)
 
-You are picking up the 2.5d survival engine (repo `TraceyHoff/SurVivaZ`, live at https://traceyhoff.github.io/SurVivaZ/). The previous agent (Muse) is nearly out of the user's free weekly usage (resets Nov 10, 10:19 AM CST). Do the remaining work, then stop — do not start anything beyond the queue below without the user.
+Welcome back, Muse. You handed off at remote `main` **`b320c3b5`** (Task 34, ADR-253 was the last ADR), with this note written in `afb21665` and finished in `472caf8a` (2026-11-06, 13:55 CST). Since then Grok worked Tasks 35/36 and the requests that followed: **ADR-254 through ADR-325**. The remote `main` tip is **`3fc34d8d`** (ADR-325), and CI and Pages are green. Pick up from here.
 
-### Where things stand
-- Remote `main` was at **`b320c3b5`** (Task 34). **Task 35 (ADR-254) is implemented** on top of current main — see DECISIONS.md ADR-254. Previous note:: CI run 42275457127 job-level SUCCESS and Pages run 42275457130 SUCCESS, menu `vb320c3b5`. Local checkout is clean at the same commit (`~/workspace/work/survival-engine`, sparse checkout; never clone into /tmp, 512 MB tmpfs). Do NOT `git reset`, `git checkout -- .`, or re-clone.
-- **Task 34 (done):** unique bee/owl art painted at runtime in `apps/client/src/task34-art.ts` (software rasterizer; keys `pets_bee`, `pets_owl`, `decor_apiary`; idle + walk, 8 directions × 4 frames; Apiary 2 rotations × 4 damage stages); favourite treats in the pet hand-interact panel via `favoriteTreats()` from `pets.json` love entries; Apiary buildable piece (tier 1, 12-slot container, planks 6 + rope 2, `free` placement, ground, outdoor); bees deposit honey in the nearest Apiary within 10 tiles, trough fallback, honey kept and retried next tick if both full — never lost. Gate: **2,743 passed / 1 failed (pre-existing sparse-checkout `pack.test.ts` KEYS.md absence) / 3 skipped**; client 575/575, server 107/107, render 441/441, gameplay 1,106/1,109; profile flat (open 1.063 / base 1.528 ms/tick). The CI fix for Task 34 was a one-line copy in `canvasToBlobURL` (`new ImageData(new Uint8ClampedArray(pixels), w, h)`) — see the TypeScript lesson below. Honest caveats: the new art was verified numerically (pixel counts, distinctness), NOT visually — no GL in the VM; the user's eyes on the live build are the real check for "beautiful". The pet-panel treat row has no client DOM test (data pinned at gameplay level via `petView.favorites`).
-- **Next — the queue, in order, one batch at a time. Each starts only after the previous batch's CI + Pages are BOTH green (confirmed from the jobs endpoint, never the runs list):**
-  1. **Task 35 (DONE — ADR-254):** world randomly generates with a seed each playthrough (map layout, resource and animal spawns differ; same seed is deterministic); safe zones (Task 33, 20-tile radius, hordes exempt) respected; varied terrain heights (`0..HEIGHT_MAX`); camera-hidden ledges kept visible (dim far cliff faces + top-face ledge lips).
-  2. **Task 36 (DONE — ADR-263):** players/AI humans use a shovel in the hotbar to raise/lower terrain; max terrain height 25 tiles above ground and 25 below; realistic flowing water (dig rivers that flow, elevated bases, pits/walls around bases); underground bases are dark until players make light sources, temperature stays 60°F year-round below 3 tiles underground, plants grow underground with continuous light + water + their other requirements.
-- **Art pass (separate from Tasks 35/36):** the user wants the arts/assets bot to replace the borrowed/reused artwork. The full inventory is in the README section "New creatures, items & art — status for the art pass" above — every creature, crop, piece and item still drawn from another sheet or a generic icon, with its current fallback target. Read that section first; `packages/gameplay/data/sprite_fallbacks.json` is the source of truth for what reuses what.
+### State in brief
+- **Stack:** TypeScript pnpm monorepo. The packages are `core` (ECS), `world`, `net`, `persist`, `gameplay` (rules plus `data/*.json`), `input`, `render` (WebGL2), `assets`, `testkit`, `apps/server` (authoritative), `apps/client` (Vite; singleplayer hosts the server in-process, with AI humans as virtual players in `apps/client/src/local.ts`). The repository layout table above is still accurate.
+- **Commands:** `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm check` (typecheck + every Vitest suite), `pnpm -r build`.
+- **CI:** `.github/workflows/ci.yml` runs install, `pnpm check` and `pnpm -r build`. `pages.yml` deploys https://traceyhoff.github.io/SurVivaZ/.
+- **Last local gate (3fc34d8d):** 574 test files, 3,578 passed, 3 skipped.
+- **Pushing:** pushes are plain git fast-forwards: `git push origin <sha>:main` (never force-push, never reset). The `push-files` snapshot route and sparse-checkout notes in the old note are obsolete.
+- **Stale sections:** the "Status", "Current build status" and "What's playable today" sections above still describe `b320c3b5` and need a refresh.
 
-### How work gets done here (hard-won rules — follow them)
-- **Verify first, then commit locally, then ask the user for push approval — never push without the user tapping "Yes, push it" AND the separate snapshot approval card.** Pushes go through `/opt/hatch/bin/github push-files --owner TraceyHoff --repo SurVivaZ --branch main --message <msg> --source-dir ~/workspace/work/survival-engine --paths-file <file>`. The paths manifest must be NUL-delimited AND end with a trailing NUL. Keep any single snapshot comfortably under ~5 MB. The snapshot route carries **UTF-8 text files only — no binary PNGs** (embed art as base64 data URIs in a `.ts` file, or paint it in code as Task 34 does).
-- **Gate before pushing:** `./node_modules/.bin/vitest run` across gameplay/render/client/server (report exact per-suite counts; the 7 `better-sqlite3` server load failures and the sparse-checkout `pack.test.ts` KEYS.md failure are pre-existing, not regressions) AND typecheck every changed package **including test files** with the lockfile-pinned **TypeScript 5.9.3** — NOT the VM's local `tsc` (5.6.3), which missed a real CI failure in Task 34 (TS2769 `new ImageData` overload; see above). A usable 5.9.3 binary can be fetched with `npm pack typescript@5.9.3` into /tmp. `pnpm` is at `~/workspace/work/tools/node_modules/.bin/pnpm`; plain npm fails on `workspace:` protocol; never run `pnpm add`. Remove any `package.json`/`package-lock.json` diff from npm before pushing. Local `node_modules/@engine/*` symlinks are NOT committed and must never be pushed.
-- **CI-only failure classes the local VM hides:** (a) undeclared cross-package imports resolve locally via root symlinks but fail CI's strict pnpm linking — check every new import against the owning package's `package.json` deps, and never create a dep cycle (gameplay must not depend on persist); (b) the 7 unreadable server test files — grep-check shared-shape changes against them by reading them; (c) `pack.test.ts` — run it directly and confirm the only failure is the KEYS.md one. **Typecheck lesson from Task 30:** `AgentContext` lives in `@engine/core`, NOT the gameplay index — never write `G.AgentContext`.
-- **After pushing:** check CI + Pages via the GitHub Actions **jobs endpoint** (`/actions/runs/<id>/jobs`, and check-run annotations for failures) — the runs list goes stale. A deploy counts as live only when its Pages run is confirmed successful at job level; report the live menu version (`v<short hash>`). If CI fails, fix it the same way (find the exact error from annotations, fix, re-push).
-- **Other standing facts:** all engine work is for this repo only (not the user's other game repo). Names are required to enter the game. Full is the default graphics preset for fresh installs. Death-bag 60s owner-only window is intentional. Disease rates were rebalanced in Task 33 (raw meat 0.25→0.08, untreated water 0.30→0.10, rotten 0.60→0.25, sick food 0.15→0.05, bite 0.20→0.08, transmission 0.25→0.10). Safe spawn radius is 20 tiles. Fur armor set already exists (23.5 insulation total). Dye system, diseases, wetness/cold/flu, Recently Crafted sections, and the Task 32 pets/crops/farm animals (fox, owl, turtle, squirrel; lettuce, pepper, beetroot, rice; pig, alpaca, bee, angora rabbit) are all already in. Full task history lives in `~/MEMORY.md` on this machine.
+### Where decisions live
+- [docs/DECISIONS.md](docs/DECISIONS.md): one ADR per change. Each one covers context, decision, knobs and tests.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [packages/gameplay/DESIGN.md](packages/gameplay/DESIGN.md)
+- [docs/AI_AGENTS.md](docs/AI_AGENTS.md) (AI humans)
+- Tuning knobs are in `packages/gameplay/data/*.json`. New since you left: `mounts.json` (including `"bots"`), `travel.json` and `ai_spawn.json`.
+
+### What changed since `b320c3b5`
+Built from `git log` and DECISIONS.md headings. Short SHAs are the implementing commits.
+- **World and terrain**
+  - Seeded worldgen, varied heights and visible ledges: ADR-254 `35210c48`
+  - Lakes, rivers and ponds on every seed: ADR-255 `98d53984`
+  - Shovel terrain editing, flowing water and underground bases: ADR-263 `d617f77b`
+  - Soil conservation: ADR-264 `032547b2`
+  - Terrain ladder, finite AI earthworks, complete-frame camera crossfade and build hologram cell: ADR-265–268 `09813745` (hardening in `af8f0bfc`)
+  - Relief previews and a larger streamed wilderness: ADR-272 `762e01ba`
+  - Camera-aware drop-off relief: ADR-276 `dc5118aa`
+  - 4× world domain and terrain range −60…+75: ADR-296/297 `f912fe4a`
+  - Shaft Hatch: ADR-299 `35e3d2af`
+  - Seeded abandoned structures with loot and stations: ADR-300 `cc9bc9c6`, ADR-301 `a16ba8a1`
+  - Varied roofs on abandoned buildings: ADR-311 `4e011a77`
+- **Seasons, climate and time**
+  - Spring season: ADR-260 `b9dfe3e2`
+  - 15-day seasons: ADR-261 `fdfde647`
+  - °F/°C everywhere, seasonal daylight and AM/PM clock: ADR-282–284 `7e87f66c`
+  - Player-tuned sunrise/sunset: ADR-285 `b1d2f0d6`
+- **Survival and health**
+  - Torch boils water and cooks meat: ADR-262 `f3dbdfcf`
+  - Fewer infections, a dry first day, held-tool grips and choosing the seed first: ADR-270 `361d5e6f`
+  - Three-tile climbing and fall damage: ADR-271 `a3a28578`
+  - Speed bump, Broken Leg and Leg Splint: ADR-274 `829503a1`
+  - Staged body temperature, wetness and infection: ADR-277–281 `3eb09515`
+  - Partial shelter with a HUD icon: ADR-312 `9bd83f24`
+- **Farming**
+  - Unique wild lettuce, wheat and hay: ADR-256/257 `233f1094`, `4a067cf5`
+  - Plants need water and light: ADR-286 `e43fdde8`
+  - Growth, hydration and fertilizer bars: ADR-287 `5ea10433`
+- **Building and claims**
+  - Furniture section: ADR-288 `f121d321`
+  - Clearer demolish targets and the Claim Flag in Hand Crafted: ADR-302 `653a908a`
+  - Doors open from Use, and no floating floors: ADR-303 `db8b4b82`
+  - Claim Flag required before building, and skill-gated repairs: ADR-310 `b54c9710`. The Claim Flag costs 10 logs (`d28e41fb`). CI was restored in `a99b800d`.
+  - Door swing art and sounds: ADR-314 `46b3493e` (art `0159d391`)
+  - Bigger claims with a radius preview, a border toggle and no overlaps: ADR-315 `a60affc4`
+  - Demolish without a hologram, touch select and confirm, builder refunds, claim permission gate, and moving placed pieces: ADR-316–318 `7b7e1454`
+- **Camera, UI and controls**
+  - Portrait HUD, host AI policy and safe hand input: ADR-258 `85e5392f`
+  - Undressed AI spawns, cloth mask and character outline: ADR-269 `001f7428`
+  - North follows the default view: ADR-273 `2167f6b1`
+  - Contextual tips: ADR-275 `d311a97a`
+  - Auto-sprint and direct hotbar taps: ADR-289 `c1c59652`
+  - Liquid fill bar: ADR-290 `aaf9b673`
+  - Visible Block, then dedicated block animations: ADR-291/298 `5fcf65cc`, `7e08bbc0`
+  - North-up map, idle facing and sprint run-up: ADR-292–294 `766d4367`
+  - Closer indoor zoom with wall cutaway: ADR-304 `166d5472`
+  - Idle heading and colour-coded ledge warnings: ADR-305/306 `2e48ae16`
+  - Asset cache and prefetch: ADR-307 `62154140`
+  - Current story only: ADR-308 `bb111636`
+  - Indoor zoom under missing ceilings: ADR-309 `af8dbcc7`
+  - Earlier ledge warnings: ADR-313 `d8a309a7`
+  - Crafting-menu icon fix and creator beard fix: `aca8340a`, `5351c72f`
+- **Multiplayer:** friend-code guests spawn near the host: ADR-295 `4c180f57`
+- **Mounts and saddles**
+  - Tame, ride and gallop at true scale: ADR-319 `44565535`, `f890ab2d` (art `fafe447e`)
+  - Four saddle tiers with saddlebags and Saddlery: ADR-320 `9421ff1b`
+  - Seated rider poses, mount hit/death/graze/swim, and lazy ride pages: ADR-322 `b6801e42` (art `a775f75c`, `9281a1bd`, `22893a25`)
+- **AI humans**
+  - Detailed hired orders and survival-aware Follow: ADR-259 `a7f51e32`
+  - Tame, ride and care for their own mounts: ADR-321 `42e1e4bf`
+  - Mount food from own, employer or permitted clan storage (never others'), foraging otherwise, and saddle material planning with tier fallback and timeout: ADR-323 `63cf6398`
+  - World-wide travel:
+    - hierarchical region routes;
+    - clan-stay vs roam preference;
+    - riding on long legs;
+    - a budgeted, deterministic off-screen sim.
+    - ADR-324 `3cd8d41d`
+  - Spawn and respawn over seeded world-wide points (least-populated, away from players; bed, then home, then a distributed point); far spawns start off-screen: ADR-325 `3fc34d8d`
+
+### Open items and untested areas
+- **`vehicle_net` flake:** `apps/server/test/vehicle_net.test.ts` ("converges under latency, jitter and 10% loss") fails now and then in CI, at about 4.22 against a limit of 4. Rerun the failed job.
+- **Not checked on real devices:** nothing was verified on a real phone or controller. The claim overlay and riding have not been seen on screen. Art and UI were checked by tests and numbers only.
+- **AI spawn safe zones:** the new world-wide AI spawn points (ADR-325) have no safe zone. Task 33's 20-tile radius covers only the four starter points.
+- **Hired workers and saddles:** hired workers don't run the saddle chain (ADR-323). An affordable saddle tier also needs every station already at the base.
+- **Route water sampling:** region routing judges water from 5 samples per 16-tile region, and unloaded terrain counts as land (ADR-324).
+- **`gate_clan` door swing:** a pop on the last frame was seen during the session. It is not fixed and not written up in DECISIONS.md.
+- **No tests yet for:**
+  - the live off-screen hand-back after a far respawn;
+  - restoring a saved bot account over the new spawn placement;
+  - relocated homesteads being rebuilt;
+  - mount riding on long trips;
+  - multiplayer with several humans and spread AI spawns.
+
+### Working conventions (from the user)
+- **Art:** unique, dedicated art only. No recolors or reused sprites, and never generate or fake art.
+- **Input:** gamepad, keyboard and touch must all work for every feature.
+- **UI:** minimal, with nothing overlapping. Use never opens the inventory, except for containers. Don't change the compass. Don't lower graphics quality. Keep play smooth.
+- **Code:** reuse existing systems, and put tuning knobs in data JSON. Don't reopen finished ADRs except to extend them. Commit style: `feat(SurVivaZ): … (ADR-xxx)` with a DECISIONS.md entry.
+- **Shipping:** fast-forward pushes to `main` only, and CI must be green after every push. "Done" means implemented and tested.
+- **Times:** report times in America/Chicago (CST).
+
+### Where to pick up next
+There is no open queue. ADR-325 finished the last request. The next ADR number is **ADR-326**. Good first candidates, from the open items above:
+- spawn-safety for the ADR-325 AI spawn points;
+- the `gate_clan` last-frame pop;
+- refreshing the stale README status sections;
+- an on-screen and device check of claims and riding (needs the user).
+Confirm priorities with the user before starting anything new.
