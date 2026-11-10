@@ -44,7 +44,9 @@ const CROUCH_IDLE = c("crouch_idle", "idle"), CROUCH_WALK = c("crouch_walk", "cr
 const CARRY_IDLE = c("carry_idle", "idle"), CARRY_WALK = c("carry_walk", "carry_idle", "walk", "idle");
 const SLEEP = c("sleep", "sit", "idle"), SLEEP_LIE = c("sleep_lie", "sleep", "sit", "idle"), SLEEP_LIE_UNDER = c("sleep_lie_under", "sleep_lie", "sleep", "sit", "idle");
 const VEHICLE = c("vehicle", "sit", "idle");
-const RIDE = [c("ride_idle", "vehicle", "sit", "idle"), c("ride_walk", "ride_idle", "vehicle", "sit", "idle"), c("ride_gallop", "ride_walk", "ride_idle", "vehicle", "sit", "idle")] as const;
+// ADR-322: every live v1 doll layer ships ride_* (Art a775f75c), so the vehicle / sit stand-in is gone; idle is only the
+// last resort (a layer without ride frames, or the body's ride page still streaming in: sprites.ts falls back to idle).
+const RIDE = [c("ride_idle", "idle"), c("ride_walk", "ride_idle", "idle"), c("ride_gallop", "ride_walk", "ride_idle", "idle")] as const;
 
 /** Attack class of an item: throwing_* / sling throw, else the weapon class. */
 export function attackClassOf(ctx: AnimChainCtx): string {

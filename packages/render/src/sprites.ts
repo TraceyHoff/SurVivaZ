@@ -132,6 +132,8 @@ export interface GameplayBindings {
   /** ADR-244 (c): a sleeper's bed fit (sample.v2.json sleepLie.bedFits[piece][spot][rot], 1x px): the sleep_lie /
    *  sleep_lie_under frame's pivot lands on the bed footprint centre + (x, y), drawn just after (in front of) the bed. */
   bedFit?: (entity: number) => { x: number; y: number } | undefined;
+  /** ADR-322: rider on a swimming moose: water row as px above the doll's seat pivot (negative = below); clip pixels under it. */
+  riderClip?: (entity: number) => number | undefined;
   /** Wetness {level u8 0..255} (art's 0-3 intensity maps onto 0..255). */
   wetness?: WetnessDefT;
   /** BodyTemp {cold, heat u8; shivering 0/1}: shivering gates the shiver, cold scales it and drives the frost rim, heat drives flush. */
@@ -239,7 +241,7 @@ void main() {
   vec2 sl = (flags & 1) != 0 ? vec2(-aC.w, -aC.z) : aC.zw;
   bool maskSway = (vFB.x & 4) != 0 && aG.x > 0.0; float m = maskSway ? aG.x + 1.0 : 0.0; // sway mask: per-pixel UV shift, quad grows by amp
   float x0 = max(-ow - m, aC.x + sl.x), x1 = min(dim.x + ow + m, aC.x + sl.y);
-  float x = mix(x0, x1, c.x), y = mix(-ow, aJ.x > 0.0 ? min(dim.y + ow, aC.y - aJ.x) : dim.y + ow, c.y); // swim: lower body clipped
+  float x = mix(x0, x1, c.x), y = mix(-ow, aJ.x > 0.0 || aJ.y < 0.0 ? clamp(aC.y - aJ.x, -ow, dim.y + ow) : dim.y + ow, c.y); // swim: lower body clipped; ADR-322 aJ.y < 0: clip only (rider below the swim waterline), any sign
   float flip = (flags & 1) != 0 ? -1.0 : 1.0;
   float px = (x - aC.x) * s * flip;
   float hp = (aC.y - y) * s;
@@ -251,7 +253,7 @@ void main() {
   if (aF.z > 0.5) px += sin(uTime * 52.0 + aB.z * 40.0) * (0.4 + 1.4 * aF.y) * s; // shiver
   vUvRaw = vec3(mix(uvr.xy, uvr.zw, vec2(x / dim.x, y / dim.y)), dim.z); vLayer = int(dim.z + 0.5);
   vec2 off = vec2(px, -hp);
-  if (aJ.x > 0.0) off.y += (aJ.x + sin(uTime * 3.0 + aB.z * 6.283) * aJ.y) * s; // swim: sink the upper body to the waterline + bob
+  if (aJ.x > 0.0 && aJ.y >= 0.0) off.y += (aJ.x + sin(uTime * 3.0 + aB.z * 6.283) * aJ.y) * s; // swim: sink the upper body to the waterline + bob
   if (aI.x != 0.0) { float cr = cos(aI.x), sr = sin(aI.x); off = vec2(cr * off.x - sr * off.y, sr * off.x + cr * off.y); }
   vec2 iso = snapPivot(aA.xy) + off; vScr = iso;
   int dm = int(aJ.z + 0.5); vDeckM = ivec2(dm & 15, dm >> 4); // ADR-197: tile offset of this pixel on the deck top plane
@@ -851,7 +853,8 @@ export class SpriteBatch {
         ok = atlas.resolve(sid, bai, f, t, 0, res);
         // ADR-244 (b): a v2 combat/ranged/pose/sleep sheet streams; until its page is in, the doll plays the resident core
         // idle (body + every layer follow dollAnim), never a missing/placeholder body
-        if (bodyL && ok && res.atlas >= 0 && !atlas.streamPageReady(res.atlas, sprio)) { const ia = atlas.animIndex(sid, "idle"); if (ia >= 0 && atlas.resolve(sid, ia, f, t, 0, res)) this.streamBodyFallbacks++; }
+        // ADR-322: the same while the lazy cz_ride body page streams in (requested here: only riders ever ask for it)
+        if (bodyL && ok && res.atlas >= 0 && (!atlas.streamPageReady(res.atlas, sprio) || (res.anim.startsWith("ride_") && !atlas.pageReadyAt(res.atlas, sprio)))) { const ia = atlas.animIndex(sid, "idle"); if (ia >= 0 && atlas.resolve(sid, ia, f, t, 0, res)) this.streamBodyFallbacks++; }
         if (bodyL) { dollAnim = res.anim; if (ok && res.atlas >= 0) atlas.markUsedAt(res.atlas); }
       } else {
         // ADR-218: a lit fire sprite (station bonfire: Fuel.lit, frame 0 = idle) loops its idle anim on the render clock
@@ -908,6 +911,8 @@ export class SpriteBatch {
       if (hitOf) { const hf = hitOf(e); if (hf > 0) o0[18] = -Math.min(1, hf); }
       // ADR-107 swim fallback: no "swim" frames on this sprite -> walk frames, lower body clipped at the waterline + bob
       if (st === CoreAnimState.Swim && res.anim !== "swim") { o0[36] = res.ay * SWIM_CLIP; o0[37] = SWIM_BOB_PX; }
+      // ADR-322: a rider on a swimming moose: clip the doll below the water row (px above the seat pivot; clip only, no sink)
+      if (bodyL && res.anim.startsWith("ride_")) { const rc = cx.bindings.riderClip?.(e); if (rc !== undefined) { o0[36] = rc; o0[37] = -1; } }
       if (bodyL) this.writeLayerTint(o0, bodyL);
       // paper-doll depth: the vertex shader clamps the height term per vertex (max(hp, 0)), so a quad reaching below the
       // pivot gets a flatter interpolated depth slope than one that doesn't. Body and wear quads have different extents

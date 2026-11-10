@@ -36,8 +36,8 @@ describe("ADR-319 mount rendering", () => {
     const deer = mountSpeciesOfKey("deer"); expect(mountGait(0, deer)).toBe(0); expect(mountGait(3, deer)).toBe(1); expect(mountGait(9, deer)).toBe(2);
     expect(BAR_PX_PER_ART_PX).toBeCloseTo(74 / 52, 6);
   });
-  it("a seated rider plays ride_<gait> (frame-locked to the mount), falling back to the vehicle / sit pose", () => {
-    expect(animChainFor(AnimState.Sit, { ride: 2 })?.[0]).toBe("ride_gallop"); expect(animChainFor(AnimState.Sit, { ride: 0 })).toContain("vehicle");
+  it("a seated rider plays ride_<gait> (frame-locked to the mount), falling back to the ride_* chain then idle (ADR-322: no vehicle / sit)", () => {
+    expect(animChainFor(AnimState.Sit, { ride: 2 })?.[0]).toBe("ride_gallop"); expect(animChainFor(AnimState.Sit, { ride: 0 })).not.toContain("vehicle");
     expect(animChainFor(AnimState.Sit, { driver: true })?.[0]).toBe("vehicle");
   });
 });

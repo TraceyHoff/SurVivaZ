@@ -63,10 +63,13 @@ export async function assetBytes(url: string): Promise<ArrayBuffer> {
   return res.arrayBuffer();
 }
 
+/** ADR-322: `cz_ride_<slot>_<n>` doll pages (ride_idle / ride_walk / ride_gallop): never prefetched, never resident. */
+export const isRidePageKey = (key: string): boolean => /^cz_ride_/.test(key);
 /** Resident boot images we want warm before / during setRegistry. Streamed pages stay on-demand. */
 export function shouldPrefetchAtlas(key: string, image: string, residency?: string): boolean {
   if (!key || !image || /^(blob|data):/i.test(image)) return false;
   if (/^veh_/.test(key) || /^building_t\d+$/.test(key)) return false;
+  if (isRidePageKey(key)) return false; // ADR-322: seated rider pages (~111 MB) stream only while someone rides
   if (/(^|\/)customization(\/|_v2)/i.test(image) && !/^body_/.test(key)) return false;
   if (residency === "stream" && !/^body_/.test(key) && !/^gt_/.test(key)) return false;
   return true;

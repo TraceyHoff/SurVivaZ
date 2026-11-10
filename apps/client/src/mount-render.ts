@@ -62,3 +62,36 @@ export function creatureBarLift(world: World, e: Entity, kind: "human" | "animal
 }
 /** True when `e` is a mount owned by player id `pid` (ally-coloured bar like own pets). */
 export const isOwnMount = (world: World, e: Entity, pid: number): boolean => !!pid && world.isRegistered(Mount) && world.has(e, Mount) && world.getField(e, Mount, "owner") === pid;
+
+// ---- ADR-322: mount actions (Art 9281a1bd) and the rider during them -------------------------------------------
+/** Mount action anims on mount_<art>, mount_<art>_fore and every saddle overlay (moose also swim). */
+export type MountAct = "hit" | "death" | "graze" | "swim";
+/** mount_anchors.json `acts.riderAnim`: hit / graze / swim keep the rider seated on `ride_idle` (its own clock, pinned to
+ *  the act's seat anchor every tick); death has none: the rider gets off. */
+export const RIDER_ACT_ANIM: Readonly<Record<MountAct, "ride_idle" | null>> = { hit: "ride_idle", graze: "ride_idle", swim: "ride_idle", death: null };
+/** View anim state (core AnimState) of a mount -> the action it plays (undefined = a gait: idle / walk / gallop).
+ *  Swim counts only when the sheet has dedicated swim frames (moose); others keep the walk + waterline fallback. */
+export function mountActOf(state: number, hasSwim: boolean): MountAct | undefined {
+  return state === 4 ? "hit" : state === 5 ? "death" : state === 8 || state === 9 ? "graze" : state === 14 && hasSwim ? "swim" : undefined;
+}
+/** How the rider plays during `act`: seated on ride_idle with its own clock, or dismounted (death). Gaits: frame-locked. */
+export function riderActPlan(act: MountAct | undefined): { anim: (typeof RIDER_GAIT_ANIM)[number] | null; ownClock: boolean } {
+  if (!act) return { anim: null, ownClock: false };
+  const a = RIDER_ACT_ANIM[act]; return { anim: a, ownClock: a !== null };
+}
+/** Rider VAnim start tick: frame-locked to the mount's gait (rider frame fi = mount frame fi, same fps), or its own clock
+ *  (started when the act began) while the mount plays an action whose frame count differs from ride_idle. */
+export const riderStartTick = (act: MountAct | undefined, mountStart: number, actStart: number): number => (riderActPlan(act).ownClock ? actStart : mountStart);
+/** Doll pivot offset from the mount pivot: mount seat anchor minus the doll's own ride_* seat socket (= riderOffset). */
+export const riderPivotOffset = (mountSeat: { x: number; y: number }, riderSeat: { x: number; y: number }): { x: number; y: number } => ({ x: mountSeat.x - riderSeat.x, y: mountSeat.y - riderSeat.y });
+/** Moose swim clip for the rider: the water row (`anchors.water.y`, 1x px from the mount pivot, +y down) as px above the
+ *  rider's seat pivot (sprites.ts lands the doll's ride_* seat socket on the mount seat), negative = below the seat. */
+export const swimClipPx = (seatY: number, waterY: number): number => seatY - waterY;
+/** Idle grazing for tamed mounts and wild horse / donkey / yak (they wander on their mount sheet): a per-entity cycle of
+ *  GRAZE_ON of every GRAZE_CYCLE seconds while standing still and unridden (cosmetic, render-side only). */
+export const GRAZE_CYCLE = 12, GRAZE_ON = 5;
+/** Wild archetypes that wander on their mount sheet (no wild sheet; sprite_fallbacks.json animal_<k> -> mount_<k>). */
+export const MOUNT_SHEET_WILD: ReadonlySet<string> = new Set(["animal_horse", "animal_donkey", "animal_yak"]);
+export function idleGrazing(tick: number, tickHz: number, hash: number): boolean {
+  const t = tick / Math.max(1, tickHz) + (hash % (GRAZE_CYCLE * 10)) / 10; return t % GRAZE_CYCLE < GRAZE_ON;
+}

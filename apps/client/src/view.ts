@@ -33,7 +33,7 @@ import { roadSpriteKeys, ROAD_FLAGS, signFrameId } from "./road-sign-view.js";
 import { Road, Sign, surfaceDef, signDef, walkAnimRate, petSits, facingAfterTravel } from "@engine/gameplay";
 import { HitReact, NodeRegrow, hitDirRad, Equipment, Worn, SlotDye, INVENTORY_SLOTS, wornCosmetics } from "@engine/gameplay";
 import { Mount, Riding } from "@engine/gameplay";
-import { LAYER_KEY, MOUNT_GAIT_ANIM, mountForeKey, mountGait, mountSpriteKeyOf, riderPose, saddleOverlayKey, screenNeutralShift } from "./mount-render.js";
+import { idleGrazing, LAYER_KEY, MOUNT_GAIT_ANIM, MOUNT_SHEET_WILD, mountActOf, mountForeKey, mountGait, mountSpriteKeyOf, riderPose, riderStartTick, saddleOverlayKey, screenNeutralShift, swimClipPx, type MountAct } from "./mount-render.js";
 import { AssetRegistry as AssetRegistryClass } from "@engine/assets";
 import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, type ResolvedSprite } from "@engine/gameplay";
 
@@ -222,7 +222,7 @@ export class IsoView {
     const cat = noCosmetics ? undefined : registry.cosmetics;
     if (cat?.size) this.view.register(Appearance);
     renderer.bindGameplay({ animState: VAnim, buildPiece: VPiece, wetness: VWet, bodyTemp: VTemp, lit: VFuel, burning: VBurn, pieceState: (e) => this.pieceStates.get(e), pieceSwing: (e, now) => this.doors.swing(e, now), pieceSwingSprite: (e) => this.doors.swingSprite(e), pieceScale: (e) => this.pieceScales.get(e), pieceLit: (e) => this.pieceLit.get(e), pieceTints: (e) => this.pieceTintPairs.get(e), litPieces: () => this.litHearths,
-      carriedSprite: (e) => this.carriedOf.get(e), bedFit: (e) => this.bedOf.get(e)?.fit, // ADR-244 carry socket / bed fit
+      carriedSprite: (e) => this.carriedOf.get(e), bedFit: (e) => this.bedOf.get(e)?.fit, riderClip: (e) => this.riderClipOf.get(e), // ADR-244 carry socket / bed fit
       hitFlash: (e) => this.hitPoseOf.get(e)?.flash ?? 0, hitTilt: (e) => this.hitPoseOf.get(e)?.tilt ?? 0,
       animRate: (e, st) => (st === 1 && this.characters.has(e) ? this.walkRate : undefined),
       animChain: (e, st, elapsed) => ((st === 3 || st >= 13) && this.characters.has(e) ? animChainFor(st, this.animCtx(e, elapsed)) : undefined), // ADR-241
@@ -765,11 +765,20 @@ export class IsoView {
   private animalAnim(net: World, e: Entity, an: { kind: number; state: number }, moving: boolean, dead: boolean, _player: Entity | undefined): number {
     const now = performance.now(); const hp = net.getField(e, Health, "hp"); const rec = this.animalHp.get(e) ?? { hp: hp ?? 0, hitUntil: 0 };
     if (hp !== undefined) { if (hp < rec.hp - 1e-3) rec.hitUntil = now + 250; rec.hp = hp; } this.animalHp.set(e, rec); // ADR-117: animal sounds come from the audio director
-    const st = dead || (hp !== undefined && hp <= 0) ? 5 : now < rec.hitUntil ? 4 : an.state === 2 && moving ? 2 : moving ? 1 : petSits(net, e) ? 13 : 0; // ADR-146: Stay -> sit
+    let st = dead || (hp !== undefined && hp <= 0) ? 5 : now < rec.hitUntil ? 4 : an.state === 2 && moving ? 2 : moving ? 1 : petSits(net, e) ? 13 : 0; // ADR-146: Stay -> sit
+    if (st === 0 && this.grazes(net, e, an.kind)) st = 9; // ADR-322: graze (mount sheets: tamed mounts, wild horse / donkey / yak)
     this.animalPrev.set(e, st === 5 ? 5 : an.state);
     return st;
   }
   private animalPrev = new Map<Entity, number>();
+  /** ADR-322: a standing, unridden mount-sheet animal grazes: when just fed (AnimState Eat / Graze) or on its idle cycle. */
+  private grazes(net: World, e: Entity, kind: number): boolean {
+    const tamed = net.isRegistered(Mount) && net.has(e, Mount);
+    if (!tamed && !MOUNT_SHEET_WILD.has(animalDefs()[kind]?.key ?? "")) return false;
+    if (tamed && (net.getField(e, Mount, "riderNetId") ?? 0) !== 0) return false;
+    const ga = net.getInto(e, GAnim, this.sAnim); if (ga && (ga.anim === 8 || ga.anim === 9)) return true;
+    return idleGrazing(net.tick, this.renderer.tickHz || 20, (entityIndex(e) * 2654435761) >>> 0);
+  }
   base = "/"; private camAnimal: Entity | undefined;
 
   private scales = new Map<Entity, number>();
@@ -855,6 +864,8 @@ export class IsoView {
   readonly vehicleSnaps: VehicleSnapshot[] = [];
   /** ADR-319 rider gait per rider view entity (anim chain ride_idle / ride_walk / ride_gallop). */
   private rideOf = new Map<number, 0 | 1 | 2>();
+  /** ADR-322: rider ve -> swim clip (px above the seat pivot); mount -> {act, tick it began} (rider own clock). */
+  private riderClipOf = new Map<number, number>(); private mountAct = new Map<Entity, { act: MountAct; at: number }>();
   /** ADR-319 / ADR-320 view-only layers of a mount: saddle overlay and (while ridden) the fore layer drawn over the rider. */
   private mountLayers = new Map<Entity, { saddle?: Entity; fore?: Entity }>();
   /**
@@ -877,14 +888,21 @@ export class IsoView {
         const rider = mm.riderNetId ? netIdEntity(net, mm.riderNetId) : undefined;
         const rve = rider !== undefined && net.has(rider, Riding) ? this.map.get(rider) : undefined;
         const L = this.mountLayers.get(m) ?? {}; this.mountLayers.set(m, L);
-        if (rider !== undefined && rve !== undefined && v.has(rve, Transform)) {
+        // ADR-322: the mount's action (hit / graze / moose swim; death = the rider is off) from its view anim state
+        const mst = v.getField(mve, VAnim, "state") ?? 0; const act = mountActOf(mst, this.spriteHasAnim(mve, "swim"));
+        if (act) { const was = this.mountAct.get(m); if (!was || was.act !== act) this.mountAct.set(m, { act, at: v.tick }); } else this.mountAct.delete(m);
+        if (rider !== undefined && rve !== undefined && v.has(rve, Transform) && act !== "death" && !net.has(m, Dead)) {
           const t = v.get(rve, Transform)!, p = v.get(rve, PrevTransform);
           v.set(mve, Transform, { x: t.x, y: t.y, z: t.z, facing: t.facing }); if (p && v.has(mve, PrevTransform)) v.set(mve, PrevTransform, { x: p.x, y: p.y, z: p.z, facing: p.facing });
           const gait = mountGait(net.getField(rider, Riding, "speed") ?? 0, sp);
-          if (v.has(mve, VAnim)) { const st = v.getField(mve, VAnim, "state") ?? 0; if (st !== gait && st <= 2) { v.set(mve, VAnim, { state: gait, startTick: v.tick }); if (v.has(rve, VAnim)) v.set(rve, VAnim, { state: 13, startTick: v.tick }); } }
-          if (v.has(rve, VAnim) && v.getField(rve, VAnim, "state") !== 13) v.set(rve, VAnim, { state: 13, startTick: v.getField(mve, VAnim, "startTick") ?? v.tick });
-          this.rideOf.set(rve, gait); riders.add(rve); this.driverVe.add(rve); this.movingVe.delete(rve);
-          const pose = riderPose(sp, this.mountSeat(mve, gait, q), q);
+          if (v.has(mve, VAnim) && !act) { const st = v.getField(mve, VAnim, "state") ?? 0; if (st !== gait && st <= 2) v.set(mve, VAnim, { state: gait, startTick: v.tick }); }
+          // gaits: rider frame fi = mount frame fi (same start tick, same fps); actions: ride_idle on the rider's own clock
+          const rs = riderStartTick(act, v.getField(mve, VAnim, "startTick") ?? v.tick, this.mountAct.get(m)?.at ?? v.tick);
+          if (v.has(rve, VAnim) && (v.getField(rve, VAnim, "state") !== 13 || v.getField(rve, VAnim, "startTick") !== rs)) v.set(rve, VAnim, { state: 13, startTick: rs });
+          this.rideOf.set(rve, act ? 0 : gait); riders.add(rve); this.driverVe.add(rve); this.movingVe.delete(rve);
+          const an = this.mountAnchors(mve, act ?? MOUNT_GAIT_ANIM[gait], q);
+          if (act === "swim" && an?.seat && an.water) this.riderClipOf.set(rve, swimClipPx(an.seat.y, an.water.y)); else this.riderClipOf.delete(rve);
+          const pose = riderPose(sp, an?.seat, q);
           v.set(rve, Transform, { x: t.x + pose.dx, y: t.y + pose.dy, z: t.z + pose.dz }); if (p) v.set(rve, PrevTransform, { x: p.x + pose.dx, y: p.y + pose.dy, z: p.z + pose.dz });
           const fore = this.layerOn(mve, L.fore, mountForeKey(sp), LAYER_KEY.fore, q); if (fore !== undefined) L.fore = fore; else delete L.fore;
         } else if (L.fore !== undefined) { v.destroy(L.fore); delete L.fore; }
@@ -893,6 +911,13 @@ export class IsoView {
       for (const [m, L] of this.mountLayers) if (!live.has(m)) { if (L.saddle !== undefined) v.destroy(L.saddle); if (L.fore !== undefined) v.destroy(L.fore); this.mountLayers.delete(m); }
     }
     for (const ve of this.rideOf.keys()) if (!riders.has(ve)) this.rideOf.delete(ve);
+    for (const ve of this.riderClipOf.keys()) if (!riders.has(ve)) this.riderClipOf.delete(ve);
+    for (const m of this.mountAct.keys()) if (!net.isAlive(m)) this.mountAct.delete(m);
+  }
+  /** True when the sprite on view entity `ve` has an animation named `anim`. */
+  private spriteHasAnim(ve: Entity, anim: string): boolean {
+    const sp = this.view.get(ve, Sprite); if (!sp) return false;
+    try { return this.registry.sprite(sp.spriteId).animations.has(anim); } catch { return false; }
   }
   /** Creates / updates / removes one overlay layer (`key` sprite) on mount view entity `mve`, `k` sort steps above it. */
   private layerOn(mve: Entity, ve: Entity | undefined, key: string, k: number, q: number): Entity | undefined {
@@ -905,15 +930,18 @@ export class IsoView {
     if (a && (v.getField(ve, VAnim, "state") !== a.state || v.getField(ve, VAnim, "startTick") !== a.startTick)) v.set(ve, VAnim, { state: a.state, startTick: a.startTick });
     return ve;
   }
-  /** Current frame's `seat` anchor of a mount sheet (1x px from the pivot), or undefined (no anchor: table seat height). */
-  private mountSeat(mve: Entity, gait: 0 | 1 | 2, q: number): { x: number; y: number } | undefined {
+  /** Current frame's `seat` (and moose swim `water`) anchors of a mount sheet's `anim` (gait or ADR-322 action), 1x px from
+   *  the pivot; undefined = no anchor (table seat height). Non-looping anims (death) hold their last frame. */
+  private mountAnchors(mve: Entity, anim: string, q: number): { seat?: { x: number; y: number }; water?: { x: number; y: number } } | undefined {
     const v = this.view; const sp = v.get(mve, Sprite); const a = v.get(mve, VAnim); if (!sp) return undefined;
     try {
-      const anim = MOUNT_GAIT_ANIM[gait]; const def = this.registry.sprite(sp.spriteId).animations.get(anim); if (!def) return undefined;
-      const n = def.frames.length || 1; const hz = this.renderer.tickHz || 20; const i = Math.floor(((v.tick - (a?.startTick ?? 0)) / hz) * (def.fps || 1)) % n;
+      const def = this.registry.sprite(sp.spriteId).animations.get(anim); if (!def) return undefined;
+      const n = def.frames.length || 1; const hz = this.renderer.tickHz || 20; const raw = Math.floor(((v.tick - (a?.startTick ?? 0)) / hz) * (def.fps || 1));
+      const i = def.loop === false ? Math.min(Math.max(0, raw), n - 1) : ((raw % n) + n) % n;
       const facing = (v.getField(mve, Transform, "facing") ?? 0) + q * (Math.PI / 2); const dirs = def.directions ?? 8;
-      const seat = this.registry.dirFrameAnchors(sp.spriteId, anim, i * dirs + AssetRegistryClass.directionIndex(facing, dirs))?.["seat"];
-      return seat ? { x: seat.x * (sp.scale || 1), y: seat.y * (sp.scale || 1) } : undefined;
+      const an = this.registry.dirFrameAnchors(sp.spriteId, anim, i * dirs + AssetRegistryClass.directionIndex(facing, dirs)); const k = sp.scale || 1;
+      const seat = an?.["seat"], water = an?.["water"];
+      return { ...(seat ? { seat: { x: seat.x * k, y: seat.y * k } } : {}), ...(water ? { water: { x: water.x * k, y: water.y * k } } : {}) };
     } catch { return undefined; }
   }
   private syncVehicles(net: World, player: Entity | undefined, ground: (x: number, y: number, z: number) => number, frac: number | undefined): void {

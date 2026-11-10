@@ -3843,3 +3843,30 @@ Updated tests (deliberate changes):
 - saddle equip with no downgrade, craft at the workbench, then equip and repair; saddlebag overflow;
 - strangers' and tribe-mates' mounts ignored, a worker using and taming for its employer;
 - feeding a hurt mount, fetching a strayed mount home, and replacement after death.
+
+## ADR-322: seated rider poses, mount actions and lazy ride pages (SurVivaZ)
+
+Context: Art & Assets shipped `ride_idle` (4f@4) / `ride_walk` (6f@8) / `ride_gallop` (6f@12) on every doll layer (pages
+`cz_ride_<slot>_<n>`, ~111 MB) and hit (3f@10) / death (6f@8, no loop) / graze (4f@4) on every mount, fore and saddle
+sheet, plus moose swim (6f@8), with `mount_anchors.json` (riderSeat, seat, riderOffset, actSeat, acts.riderAnim,
+moose swimWaterY). See docs/ART_KEYS_MOUNTS.md.
+
+Decision:
+- Rider chain is `ride_<gait>` -> slower ride_* -> idle; the ADR-319 vehicle / sit fallback is gone. sprites.ts still lands the
+  body's ride frame `seat` socket (frameMeta df:i, body only; layers follow) on the mount seat, so doll pivot = mount pivot +
+  seat - riderSeat (= riderOffset). On a gait the rider VAnim start tick equals the mount's, so rider frame fi = mount frame fi.
+- Mount actions come from the mount's view anim state (`mountActOf`): 4 hit, 5 death, 8/9 graze, 14 swim (only on a sheet with
+  swim, i.e. moose). hit / graze / swim: the rider plays ride_idle on its own clock (start tick = when the act began), pinned
+  each tick to that act frame's seat anchor (actSeat). death: the rider is not seated (the server dismount follows).
+- Moose swim: `riderClip` binding = water row as px above the seat pivot (`swimClipPx` = seat.y - water.y); the sprite shader
+  clips the doll below it without the swim sink / bob (aJ.y < 0 flag).
+- Graze: standing, unridden tamed mounts and the wild archetypes on a mount sheet (horse / donkey / yak, no wild sheet:
+  sprite_fallbacks animal_<k> -> mount_<k>) graze when fed (Eat / Graze) and on a deterministic idle duty cycle
+  (GRAZE_ON 5 s of every GRAZE_CYCLE 12 s, phase hashed per entity). STATE_ANIM_TABLE already mapped Hurt/Die/Graze/Swim.
+- Streaming: `cz_ride_*` pages are never body (eager) pages; they join the lazy wear pool and load when a ridden frame needs
+  them (the body shows idle until the page is ready). prefetch-art skips them (`shouldPrefetchAtlas`).
+
+Tests: apps/client/test/adr322_mount_acts.test.ts (anchor pairing for all species x gait x frame x facing, male and female,
+body frameMeta seat = riderSeat, frame / fps pairing, act -> rider map vs acts.riderAnim, actSeat = sheet seat anchors,
+act sheets on mount / fore / saddles, wild mount-sheet archetypes, swim water anchors + clip), packages/render/test/
+adr322_ride_lazy.test.ts (real registry: every cz_ride page lazy, none eager, none prefetched).

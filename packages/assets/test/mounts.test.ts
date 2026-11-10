@@ -151,7 +151,7 @@ describe("rideable mounts", () => {
               expect(df.rect.w).toBeGreaterThan(8);
               const seat = a.frameMeta![`df:${i}`]!.anchors.seat;
               expect(seat).toEqual(anchors.species[sp].actSeat[an][Math.floor(i / 8)][i % 8]);
-              if (an === "swim") expect(a.frameMeta![`df:${i}`]!.anchors.water.y).toBe(anchors.species[sp].swimWaterY[Math.floor(i / 8)][i % 8]);
+              if (an === "swim") expect(a.frameMeta![`df:${i}`]!.anchors.water!.y).toBe(anchors.species[sp].swimWaterY[Math.floor(i / 8)][i % 8]);
             }
             if (df.rect.w === 4 && df.rect.h === 4) return;
             const id = `${df.atlas}/${df.rect.x},${df.rect.y},${df.rect.w},${df.rect.h}`;
@@ -171,8 +171,8 @@ describe("rideable mounts", () => {
     const area = (r: Rect) => r.w * r.h;
     for (const sp of Object.keys(SPECIES)) {
       for (const [an, n] of ANIMS) {
-        const df = sprite(`mount_${sp}`).animations[an].dirFrames;
-        for (let fi = 0; fi < n; fi++) expect(area(df[fi * 8 + 5].rect) / area(df[fi * 8 + 1].rect), `${sp} ${an} f${fi}`).toBeGreaterThanOrEqual(1.25);
+        const df = sprite(`mount_${sp}`).animations[an]!.dirFrames!;
+        for (let fi = 0; fi < n; fi++) expect(area(df[fi * 8 + 5]!.rect!) / area(df[fi * 8 + 1]!.rect!), `${sp} ${an} f${fi}`).toBeGreaterThanOrEqual(1.25);
       }
     }
   });
