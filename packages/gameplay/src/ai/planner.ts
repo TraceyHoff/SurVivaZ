@@ -312,7 +312,12 @@ export const isWinter = (world: World): boolean => seasonAt(world).weights[2] >=
 const EVENING = (have: number): Goal[] => [{ k: "item", key: "wood", count: Math.max(8, Math.min(150, NIGHT_WOOD - have)) }];
 const spendsFuel = (g: Goal): boolean => (g.k === "item" && (g.key === "wood" || g.key === "stone")) || (g.k === "piece" && g.key === "campfire") || g.k === "hearth" || g.k === "cook";
 
-export interface PlanInput { earth?: TerrainBasePlan; terrainOnly?: boolean; shelterOnly?: boolean; world: World; self: Entity; defs: GameDefs; base?: { x: number; y: number }; bs?: BaseState; fails: Record<string, number>; hungry?: boolean; snooze?: Record<string, number>; freezing?: boolean; evening?: boolean; /** ADR-252 / ADR-239: winter (cold all day): fire + a day's fuel come first */ winter?: boolean }
+export interface PlanInput {
+  /** ADR-323: extra item goals planned right after the survival pre-goals (the AI's saddle chain); onlyPriority = plan just those. */
+  priority?: readonly { key: string; count: number }[]; onlyPriority?: boolean;
+  /** ADR-323: recursion cap of the backward chain (recipe depth); deeper = stuck. */
+  maxDepth?: number;
+  earth?: TerrainBasePlan; terrainOnly?: boolean; shelterOnly?: boolean; world: World; self: Entity; defs: GameDefs; base?: { x: number; y: number }; bs?: BaseState; fails: Record<string, number>; hungry?: boolean; snooze?: Record<string, number>; freezing?: boolean; evening?: boolean; /** ADR-252 / ADR-239: winter (cold all day): fire + a day's fuel come first */ winter?: boolean }
 class Resolver {
   avail = new Map<number, number>(); inv = new Map<number, number>(); visiting = new Set<number>();
   step?: Step; leaves = new Set<number>(); hunt = new Set<number>(); keep = new Set<number>(); stuck = false; /** ADR-221: a piece / station not learned yet */ locked?: string;
@@ -325,7 +330,7 @@ class Resolver {
     this.keep.add(item); const had = this.avail.get(item) ?? 0; const got = this.take(item, n);
     if (got >= n) { const bag = this.inv.get(item) ?? 0; if (inBag && bag < n && !this.step) this.step = { k: "withdraw", item, count: Math.min(had, n) - bag + 0 }; return !inBag || bag >= n; }
     const missing = n - got;
-    if (this.visiting.has(item) || !this.ix.reachable.has(item)) { this.stuck = true; return false; }
+    if (this.visiting.has(item) || !this.ix.reachable.has(item) || (this.p.maxDepth !== undefined && this.visiting.size >= this.p.maxDepth)) { this.stuck = true; return false; }
     this.visiting.add(item);
     try {
       const rs = this.ix.recipes.get(item) ?? []; const nodes = this.ix.nodes.get(item) ?? [];
@@ -400,7 +405,8 @@ export function makePlan(p: PlanInput): Plan {
   const pre: Goal[] = []; if (p.freezing) pre.push(...EMERGENCY); if (p.hungry) pre.push({ k: "cook" });
   if (p.winter && !p.evening) { const fire = p.bs?.stations.get(StationKind.Campfire); const inFire = fire ? Math.floor(fire.fuelTicks / 400) : 0; if (inFire < WINTER_WOOD) { if (!fire) pre.push(GOAL_LADDER[0]!, { k: "piece", key: "campfire" }); pre.push({ k: "item", key: "wood", count: Math.max(8, WINTER_WOOD - inFire) }); } }
   if (p.evening) { const fire = p.bs?.stations.get(StationKind.Campfire); const inFire = fire ? Math.floor(fire.fuelTicks / 400) : 0; if (inFire < NIGHT_WOOD) { if (!fire) pre.push(GOAL_LADDER[0]!, { k: "piece", key: "campfire" }); pre.push(...EVENING(inFire)); } } // ADR-252: a stone axe and the fire first (5 wood + 4 stone), then its night of fuel
-  const ladder: readonly Goal[] = p.terrainOnly ? [{ k: "earthworks" }] : p.shelterOnly ? [{ k: "earthworks" }, { k: "base" }, { k: "hearth" }, { k: "bed" }] : pre.length ? [...pre, ...GOAL_LADDER] : GOAL_LADDER; const woodId = ix.item.get("wood")?.id;
+  const prio: Goal[] = (p.priority ?? []).map((g) => ({ k: "item", key: g.key, count: g.count }));
+  const ladder: readonly Goal[] = p.onlyPriority ? prio : prio.length && !p.terrainOnly && !p.shelterOnly ? [...pre, ...prio, ...GOAL_LADDER] : p.terrainOnly ? [{ k: "earthworks" }] : p.shelterOnly ? [{ k: "earthworks" }, { k: "base" }, { k: "hearth" }, { k: "bed" }] : pre.length ? [...pre, ...GOAL_LADDER] : GOAL_LADDER; const woodId = ix.item.get("wood")?.id;
   let held = false; // ADR-252: a locked build goal holds the later ones (campfire -> box -> workbench order); item / tool goals go on
   for (const g of ladder) {
     if (p.snooze && (p.snooze[goalName(g)] ?? 0) > world.tick) continue; // gave up on it for now (no source found in time)

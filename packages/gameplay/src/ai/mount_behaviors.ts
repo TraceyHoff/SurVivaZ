@@ -25,7 +25,7 @@
 import { entityIndex, Transform, type Agent, type AgentContext, type AgentOutput, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
-import { Animal, Dead, Equipment, Health, Mount, MountTaming, Pet, Tamed } from "../components.js";
+import { Animal, Dead, Equipment, Health, Mount, MountTaming, Pet, Survival, Tamed, Worker } from "../components.js";
 import { gameplayDefs } from "../config.js";
 import { countItem, readSlots } from "../inventory.js";
 import { animalDefs } from "../population.js";
@@ -33,11 +33,14 @@ import { MOUNT_BOTS as B, mayUseMount, mountOfRider, mountOwnerIdFor, mountSpeci
 import { bestMountFood, checkRepair, isRiding, liveRider, MOUNT_TAME_TOKEN, saddleInfo } from "../mounts.js";
 import { hasSkillUnlock } from "../skills/tree.js";
 import { zoneOwnedBy, zonesAt } from "../building/place.js";
+import { canUseBaseStorage } from "../building/actions.js";
+import { resolveAttachment } from "../building/links.js";
+import { AttachKind } from "../components.js";
 import { recipeOutputUnlocked, stationInRange, stationUnlocked } from "../systems/crafting.js";
 import { rideClearanceBlocked } from "../systems/movement.js";
 import { agentWorld, containerSeq, goTo } from "./base_behaviors.js";
-import { storageDepositActions } from "./storage_api.js";
-import { insideBase } from "./planner.js";
+import { nearbyStorage, storageDepositActions, storageWithdrawActions, storedCount, type StorageInfo } from "./storage_api.js";
+import { aiMemoryOf, baseHome, insideBase, makePlan, plannerIndex } from "./planner.js";
 
 export interface SeenMount {
   id: number; x: number; y: number; species: number; hp: number; riding: boolean; busy: boolean;
@@ -56,8 +59,16 @@ export interface MountSensors {
   saddleUp?: SaddlePlan;
   /** Free inventory slots (saddlebag overflow). */
   invFree?: number;
+  /** ADR-323: liked food to fetch from an allowed storage box (own / employer's / clan's) for taming or feeding. */
+  mountFood?: MountFoodFetch;
+  /** ADR-323: liked food no allowed storage holds: foraged through the normal gather pick (bb "mountNeeds"). */
+  mountForage?: number[];
+  /** ADR-323: the saddle tier whose material chain the planner works on (bb "saddleGoal"). */
+  saddleGoal?: SaddleGoal;
 }
-export const MOUNT_SENSOR_KEYS = ["mount", "mountSkill", "tameMount", "saddleUp", "invFree"] as const;
+export interface MountFoodFetch { piece: number; x: number; y: number; item: number; count: number; why: "tame" | "feed" }
+export interface SaddleGoal { key: string; tier: number; since: number }
+export const MOUNT_SENSOR_KEYS = ["mount", "mountSkill", "tameMount", "saddleUp", "invFree", "mountFood", "mountForage", "saddleGoal"] as const;
 type Ctx = AgentContext<AgentWorldView>;
 type Out = AgentOutput;
 
@@ -104,7 +115,7 @@ function seenMount(world: World, self: Entity, m: Entity): SeenMount {
 const tamerId = (world: World, self: Entity): number => mountOwnerIdFor(world, self) || entityIndex(self);
 const slotOf = (v: ReturnType<typeof readSlots>, item: number): number => { for (let i = 0; i < v.slotCount; i++) if (v.item(i) === item && v.count(i)) return i; return -1; };
 /** Wild candidates: a radius query on the spatial hash (no full-world scan), scored, banned / claimed / dangerous ones skipped. */
-function pickTameTarget(world: World, self: Entity, a: Agent, hp: number): number {
+function pickTameTarget(world: World, self: Entity, a: Agent, hp: number, needFood = true): number {
   const t = world.get(self, Transform)!; const ban = bans(a); const ad = animalDefs(); const tick = world.tick;
   let best = -1, bs = -Infinity;
   for (const e of installSpatialIndex(world).queryRadius(t.x, t.y, B.seekRadius)) {
@@ -113,7 +124,7 @@ function pickTameTarget(world: World, self: Entity, a: Agent, hp: number): numbe
     const def = ad[world.getField(e, Animal, "kind") ?? -1]; const sp = mountSpeciesOfAnimal(def?.key); const spec = mountSpecies(sp); if (!spec) continue;
     const p = world.get(e, Transform); if (!p) continue; const d = dist(t.x, t.y, p.x, p.y); if (d > B.seekRadius) continue;
     if (def!.attack && hp < B.kickerMinHp) continue; // a kicker is not worth the risk while hurt
-    if (!bestMountFood(world, self, sp)) continue;
+    if (needFood && !bestMountFood(world, self, sp)) continue;
     if (zonesAt(world, p.x, p.y).some((z) => !zoneOwnedBy(world, z, self))) continue; // someone else's claim
     const tm = world.get(e, MountTaming); if (tm && tm.by !== tamerId(world, self) && tm.progress > 0 && tick - tm.lastTick < 200) continue; // someone else is taming it
     const s = spec.gallop + spec.hp / 60 - d * 0.15;
@@ -156,6 +167,106 @@ function saddlePlan(world: World, self: Entity, view: AgentWorldView, m: SeenMou
   }
   return undefined;
 }
+// ---- ADR-323: liked food from allowed storage, else forage ----------------------------------------------------
+/** Storage this AI may take from: inside a claim every covering zone must be its own / its clan's (tribe) / its employer's
+ *  (zoneOwnedBy), unclaimed boxes only at its own home (planner base) or, for a hired worker, its employer's home. The
+ *  server's ADR-207 gate (canUseBaseStorage) must agree too. Anything else is someone else's: never touched. */
+export function mayTakeFromStorage(world: World, self: Entity, a: Agent | undefined, s: Pick<StorageInfo, "piece" | "x" | "y">): boolean {
+  const c = resolveAttachment(world, s.piece, AttachKind.Storage); if (c !== undefined && !canUseBaseStorage(world, self, c)) return false;
+  const zs = zonesAt(world, s.x, s.y); if (zs.length) return zs.every((z) => zoneOwnedBy(world, z, self));
+  const near = (x: number, y: number): boolean => dist(s.x, s.y, x, y) <= B.homeStorageTiles;
+  const wk = world.isRegistered(Worker) ? world.get(self, Worker) : undefined;
+  if (wk?.owner) return near(wk.homeX, wk.homeY);
+  const base = a ? aiMemoryOf(a).base : undefined; return !!base && near(baseHome(base).x, baseHome(base).y);
+}
+/** Liked foods of a species, best first (love > like > ok), as item ids. */
+function likedFoods(world: World, species: number): number[] {
+  const spec = mountSpecies(species); if (!spec) return []; const defs = gameplayDefs(world); const out: number[] = [];
+  for (const pref of ["love", "like", "ok"] as const) for (const [k, p] of Object.entries(spec.foods)) if (p === pref) { const id = [...defs.items.values()].find((d) => d.key === k)?.id; if (id) out.push(id); }
+  return out;
+}
+/** Food for `species` the AI should go and get: from the closest allowed box (best liked food first), only what it needs + a buffer. */
+function foodPass(world: World, self: Entity, view: AgentWorldView, a: Agent, species: number, why: "tame" | "feed"): void {
+  const foods = likedFoods(world, species); if (!foods.length) return;
+  const want = (why === "tame" ? B.tameFoodCount : B.feedFoodCount) + B.foodBuffer;
+  const have = foods.reduce((n, id) => n + countItem(world, self, id), 0); if (have >= want) return;
+  const tick = world.tick;
+  if (tick - a.bb.num("foodFetchAt", -1e9) >= B.foodFetchCooldownTicks) {
+    // budget: the storage scan (a BuildPiece query) runs at most every scanEveryTicks; the pick is cached in between
+    let f = a.bb.get<MountFoodFetch | null>("foodScan");
+    if (tick - a.bb.num("foodScanAt", -1e9) >= B.scanEveryTicks || (f && f.why !== why)) {
+      a.bb.set("foodScanAt", tick); f = null;
+      const boxes = nearbyStorage(world, self, B.storageRadius).filter((s) => s.contents && mayTakeFromStorage(world, self, a, s));
+      pick: for (const id of foods) for (const s of boxes) { const n = storedCount(s, id); if (n > 0) { f = { piece: s.piece, x: s.x, y: s.y, item: id, count: Math.min(n, want - have), why }; break pick; } }
+      a.bb.set("foodScan", f);
+    }
+    if (f && world.isAlive(f.piece as Entity)) { view.mountFood = { ...f, count: Math.max(1, Math.min(f.count, want - have)) }; return; }
+  }
+  view.mountForage = foods; a.bb.set("mountNeeds", foods);
+}
+/** Mount sensors still need food: a tameable animal is near but no liked food is on hand, or the own mount is hurt and nothing feeds it. */
+function foodSensors(world: World, self: Entity, view: AgentWorldView, a: Agent, hp: number): void {
+  a.bb.set("mountNeeds", undefined);
+  const m = view.mount;
+  if (m) { if (m.hp < B.feedBelowHp && !m.feedItem) foodPass(world, self, view, a, m.species, "feed"); return; }
+  if (!view.mountSkill || view.tameMount || isRiding(world, self)) return;
+  const tick = world.tick; let sp = a.bb.num("tameFoodSp", 0);
+  if (tick - a.bb.num("tameFoodScanAt", -1e9) >= B.scanEveryTicks) {
+    a.bb.set("tameFoodScanAt", tick); const e = pickTameTarget(world, self, a, hp, false);
+    sp = e >= 0 ? mountSpeciesOfAnimal(animalDefs()[world.getField(e as Entity, Animal, "kind") ?? -1]?.key) : 0; a.bb.set("tameFoodSp", sp);
+  }
+  if (sp) foodPass(world, self, view, a, sp, "tame");
+}
+
+// ---- ADR-323: saddle material chain (the planner backward-chains it; this picks the tier and keeps it honest) -------
+const needsLow = (world: World, self: Entity, a: Agent, hp: number): boolean => {
+  const sv = world.get(self, Survival); const t = world.get(self, Transform)!; const z = a.memory.nearest("zombie", t.x, t.y, 0.3);
+  return hp < B.minHp || (!!sv && (sv.hunger < 30 || sv.thirst < 30)) || (!!z && dist(t.x, t.y, z.x, z.y) < B.safeTiles);
+};
+/** Stations the backward chain of `item` crafts at (first reachable recipe per item, the planner's pick; gatherable /
+ *  huntable items and stock on hand are leaves), depth-capped at planMaxDepth. Affordable tier = all of them stand at the base. */
+function chainStations(world: World, self: Entity, item: number, stock: (id: number) => number, out = new Set<number>(), depth = 0): Set<number> {
+  const ix = plannerIndex(gameplayDefs(world)); if (depth >= B.planMaxDepth || stock(item) > 0 || ix.nodes.has(item) || ix.animal.has(item)) return out;
+  const r = (ix.recipes.get(item) ?? []).find((x) => x.ingredients.every((g) => ix.reachable.has(g.item))); if (!r) return out;
+  if (r.station) out.add(r.station);
+  for (const g of r.ingredients) chainStations(world, self, g.item, stock, out, depth + 1);
+  return out;
+}
+function saddleGoalPass(world: World, self: Entity, view: AgentWorldView, a: Agent, m: SeenMount, hp: number): void {
+  const tick = world.tick; const defs = gameplayDefs(world); let g = a.bb.get<SaddleGoal | null>("saddleGoal") ?? undefined;
+  const ban = { ...(a.bb.get<Record<number, number>>("saddleTierBans") ?? {}) };
+  const drop = (banTier: boolean): void => {
+    if (banTier && g) { ban[g.tier] = tick + B.saddleTierBanTicks; a.bb.set("saddleTierBans", ban); }
+    a.bb.set("saddleGoal", null); g = undefined;
+  };
+  if (g) {
+    const itemId = [...defs.items.values()].find((d) => d.key === g!.key)?.id ?? 0;
+    if (m.saddle >= g.tier || (itemId && countItem(world, self, itemId) > 0)) drop(false); // made (equip follows) or fitted
+    else if (tick - g.since > B.saddlePlanTimeoutTicks) drop(true); // timeout: fall back a tier
+    else if (needsLow(world, self, a, hp)) { // danger / low needs: abandon now, retry later; repeated -> fall back a tier
+      const ab = { ...(a.bb.get<Record<number, number>>("saddleAbandons") ?? {}) }; ab[g.tier] = (ab[g.tier] ?? 0) + 1; a.bb.set("saddleAbandons", ab);
+      a.bb.set("saddleRetryAt", tick + B.saddlePlanRetryTicks); drop(ab[g.tier]! >= B.saddleAbandonsToFallback);
+    }
+  }
+  if (!g && view.base && !view.saddleUp && tick >= a.bb.num("saddleRetryAt", -1e9) && tick - a.bb.num("saddleGoalScanAt", -1e9) >= B.saddleScanEveryTicks && !needsLow(world, self, a, hp)
+    && !(world.isRegistered(Worker) && world.getField(self, Worker, "owner"))) { // a hired worker works its job (the employer saddles)
+    a.bb.set("saddleGoalScanAt", tick);
+    for (const sd of [...SADDLES].sort((x, y) => y.tier - x.tier)) {
+      if (sd.tier <= m.saddle) break; if ((ban[sd.tier] ?? 0) > tick) continue;
+      const itemId = [...defs.items.values()].find((d) => d.key === sd.item)?.id; if (!itemId) continue;
+      const r = [...defs.recipes.values()].find((x) => x.output.item === itemId); if (!r) continue;
+      if (!recipeOutputUnlocked(world, self, r as never) || !stationUnlocked(world, self, r.station)) continue;
+      const stock = (id: number): number => countItem(world, self, id) + (view.bs?.storage?.counts.get(id) ?? 0);
+      if (![...chainStations(world, self, itemId, stock)].every((k) => view.bs?.stations.has(k))) continue; // needs a station the base lacks
+      // affordable = the backward chain (bag + own base storage, recipes, gather, hunt, stations) resolves within planMaxDepth
+      const plan = makePlan({ world, self, defs, base: view.base, ...(view.bs ? { bs: view.bs } : {}), fails: {}, priority: [{ key: sd.item, count: 1 }], onlyPriority: true, maxDepth: B.planMaxDepth });
+      if (plan.goal === "idle") continue;
+      g = { key: sd.item, tier: sd.tier, since: tick }; a.bb.set("saddleGoal", g); break;
+    }
+  }
+  if (g) view.saddleGoal = g;
+}
+
 /** Fill the ADR-321 mount sensors (call after the plan sensors: the base stations come from view.bs). */
 export function fillMountSensors(world: World, self: Entity, view: AgentWorldView, a: Agent): void {
   if (!world.isRegistered(Mount) || !world.has(self, Transform)) return;
@@ -167,7 +278,9 @@ export function fillMountSensors(world: World, self: Entity, view: AgentWorldVie
     const tick = world.tick;
     if (tick - a.bb.num("saddleScanAt", -1e9) >= B.saddleScanEveryTicks) { a.bb.set("saddleScanAt", tick); a.bb.set("saddlePlan", saddlePlan(world, self, view, view.mount) ?? null); }
     const sp = a.bb.get<SaddlePlan | null>("saddlePlan"); if (sp) view.saddleUp = sp;
+    saddleGoalPass(world, self, view, a, view.mount, hp);
   } else if (skill && !isRiding(world, self)) { const tt = tameTarget(world, self, a, hp); if (tt) view.tameMount = tt; }
+  foodSensors(world, self, view, a, hp);
   if (view.mount?.bagFree) { const v = readSlots(world, self); let free = 0; for (let i = 0; i < v.addLimit; i++) if (!v.item(i) || !v.count(i)) free++; view.invFree = free; } // saddlebag overflow only
 }
 
@@ -184,6 +297,11 @@ export function mountBehaviors(): GameBehavior[] {
         { name: "candidate", weight: B.tameUtility, curve: { type: "step", at: 0.5 }, input: (c) => on(!!c.world.tameMount && !c.world.mount && !!c.world.mountSkill && calm(c)) },
       ],
       run: (c, o) => tameRun(c, o) },
+    { name: "fetch_mount_food", inertia: 0.4, traits: { industriousness: 0.3 },
+      considerations: [
+        { name: "stored", weight: B.fetchFoodUtility, curve: { type: "step", at: 0.5 }, input: (c) => on(!!c.world.mountFood && calm(c)) },
+      ],
+      run: (c, o) => fetchFoodRun(c, o) },
     { name: "saddle_up", inertia: 0.3, traits: { industriousness: 0.6 },
       considerations: [
         { name: "plan", weight: B.saddleUtility, curve: { type: "step", at: 0.5 }, input: (c) => on(!!c.world.saddleUp && !!c.world.mount && c.self.tick - c.bb.num("saddleAt", -1e9) >= B.saddleCooldownTicks) },
@@ -215,6 +333,12 @@ function tameRun(c: Ctx, o: Out): boolean | void {
   if (d > B.feedReach) { goTo(c, o, t.x, t.y, d > 6 ? 0.85 : B.approachSpeed); return; }
   stop(o); toward(o, c.self.x, c.self.y, t.x, t.y, 0);
   if (tick - c.bb.num("tameFeedAt", -1e9) >= B.feedEveryTicks) { o.actions.push(`mfeed:${t.id}:${t.item}`); c.bb.set("tameFeedAt", tick); }
+}
+/** ADR-323: walk to the allowed box and withdraw just the needed liked food (ADR-250 open -> withdraw -> close). */
+function fetchFoodRun(c: Ctx, o: Out): boolean | void {
+  const f = c.world.mountFood; if (!f) return false;
+  if (goTo(c, o, f.x, f.y) > 2.2) return; stop(o);
+  if (containerSeq(c, o, f.piece, storageWithdrawActions(f.piece as Entity, f.item, f.count))) { c.bb.set("foodFetchAt", c.self.tick); c.bb.set("foodScan", null); c.bb.set("tameScanAt", -1e9); return false; }
 }
 function saddleRun(c: Ctx, o: Out): boolean | void {
   const p = c.world.saddleUp, m = c.world.mount; if (!p || !m) return false;
@@ -259,7 +383,7 @@ function tendRun(c: Ctx, o: Out): boolean | void {
 const DISMOUNT_NOW = new Set(["sleep", "rest", "drive", "vehicle_service", "hitch", "deploy_vehicle", "leave_base", "warm_up", "cool_down", "work_hold"]);
 /** Task behaviours: ride there, dismount within taskDismountTiles of the work spot (gather, combat, craft, build, chores). */
 const DISMOUNT_TASK = new Set(["gather", "hunt", "skin", "defend", "work_defend", "craft", "build", "base_work", "stash", "refuel", "tend_fire", "repair", "reclaim",
-  "equip", "stall_trade", "tame_pet", "tame_livestock", "feed_trough", "work_farm", "work_maintain", "work_craft", "work_forage", "clan_stock", "trip"]);
+  "equip", "stall_trade", "fetch_mount_food", "tame_pet", "tame_livestock", "feed_trough", "work_farm", "work_maintain", "work_craft", "work_forage", "clan_stock", "trip"]);
 /** Action verbs that need feet on the ground (blocked while riding, or crafting / combat by policy). */
 const FOOT_ACTIONS = /^(gather|attack|build|craft|door|fire|upgrade|repair|reclaim|terrain|sleep|venter|tame|dye)(:|$)/;
 /** Recent goTo goal (base_behaviors.goTo records it every call), else undefined. */

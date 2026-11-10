@@ -3870,3 +3870,31 @@ Tests: apps/client/test/adr322_mount_acts.test.ts (anchor pairing for all specie
 body frameMeta seat = riderSeat, frame / fps pairing, act -> rider map vs acts.riderAnim, actSeat = sheet seat anchors,
 act sheets on mount / fore / saddles, wild mount-sheet archetypes, swim water anchors + clip), packages/render/test/
 adr322_ride_lazy.test.ts (real registry: every cz_ride page lazy, none eager, none prefetched).
+
+## ADR-323: AI humans stock mount food from allowed storage and plan saddle materials (SurVivaZ)
+
+Context: ADR-321 bots only tamed / fed with liked food already in the bag and only crafted a saddle with every ingredient
+on hand.
+
+Decision:
+- Food (mount_behaviors foodSensors / fetch_mount_food): when taming (a tameable animal is near but no liked food is on hand)
+  or feeding the own hurt mount, the bot looks for its species' liked foods (love > like > ok) in base storage within
+  `storageRadius` (scan every `scanEveryTicks`, cached) and withdraws only `tameFoodCount` / `feedFoodCount` + `foodBuffer`
+  minus what it carries (ADR-250 open -> withdraw -> close; the server re-checks reach and ADR-207).
+  `mayTakeFromStorage`: inside a claim every covering zone must be zoneOwnedBy the bot (its own claim, its clan / tribe's, or
+  its employer's for a hired worker) and canUseBaseStorage must agree; an unclaimed box counts only within
+  `homeStorageTiles` of its own planner base, or of the employer's work home (Worker.homeX/Y) for a hired worker.
+  Everything else (strangers' claims, stray boxes) is never touched. With nothing stored, the liked foods go into the bot's
+  gather needs (bb "mountNeeds" -> computeGoalSensors), so the normal gather / harvest pick forages them.
+- Saddle chain (saddleGoalPass + planner): with an own mount and a base, every `saddleScanEveryTicks` the bot picks the best
+  unlocked saddle tier whose recipe chain only needs stations the base already has (chainStations, depth-capped) and that
+  the planner can resolve within `planMaxDepth`. The goal goes to the planner as a priority item goal right after the
+  survival pre-goals (PlanInput.priority / maxDepth), so the existing behaviours do the work: withdraw from own base storage,
+  hand / station crafts (craft, base_work), gather leaves and hunt. When the saddle is in the bag, ADR-321 saddle_up equips it.
+  Timeout (`saddlePlanTimeoutTicks`) bans the tier for `saddleTierBanTicks` (falls back a tier); danger / low needs (hp <
+  minHp, hunger or thirst < 30 %, zombie within safeTiles) abandons it for `saddlePlanRetryTicks`, and
+  `saddleAbandonsToFallback` abandons of one tier ban it too. Hired workers do not run the chain (they work their job).
+- Deterministic (no rng, tick cooldowns, sorted storage), budgeted (storage scan and tier pick on cooldowns; one planner pass
+  per tier candidate per scan). Knobs: mounts.json "bots".
+
+Tests: packages/gameplay/test/adr323_ai_mount_supplies.test.ts.

@@ -162,6 +162,8 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
     if (hungry) for (const id of ix.foods) needs.add(id);
     delete view.gatherNode;
   }
+  { // ADR-323: liked food for taming / feeding the mount that no allowed storage holds -> forage it with the normal gather pick
+    const mn = a.bb.get<number[]>("mountNeeds"); if (mn?.length) { for (const id of mn) { needs.add(id); jobItems?.add(id); } view.needs = [...needs]; } }
   // gather target from memory (bounded), skipping banned / empty / tool-locked nodes; wanted yields win within ~20 tiles
   const ban = bans(a.bb); const tool = heldTool(world, self, defs); let best: GoalSensors["gatherNode"], bs = Infinity;
   // ADR-217: best tool of each kind in the bag (trees are worked with the axe, not fists) -> switch to it for that node

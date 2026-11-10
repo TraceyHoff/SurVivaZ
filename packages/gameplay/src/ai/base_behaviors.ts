@@ -1,3 +1,4 @@
+import { MOUNT_BOTS } from "../mount_defs.js";
 import { editIndex, isUnderground } from "../terrain_depth.js";
 import { walkerWaypoint } from "../systems/creature_nav.js";
 import { planTerrainBase } from "./terrain_base.js";
@@ -78,7 +79,8 @@ export function fillPlanSensors(world: World, self: Entity, view: AgentWorldView
   }
   if (mem.earth && base && (mem.earth.x !== base.x || mem.earth.y !== base.y)) delete mem.earth;
   const earthActive = mem.earth && !mem.earth.done && !mem.earth.abandoned;
-  const plan = makePlan({ ...(mem.earth ? { earth: mem.earth } : {}), world, self, defs, ...(base ? { base } : {}), ...(bs ? { bs } : {}), fails: mem.fails, hungry, freezing, evening, winter, ...(mem.snooze ? { snooze: mem.snooze } : {}) }); view.plan = plan; if (earthActive) markAiDirty(a, tick); a.bb.set("planGoal", plan.goal); a.bb.set("planStep", plan.step);
+  const sg = a.bb.get<{ key: string } | null>("saddleGoal"); // ADR-323: the AI's saddle material chain (mount_behaviors.saddleGoalPass)
+  const plan = makePlan({ ...(sg ? { priority: [{ key: sg.key, count: 1 }], maxDepth: MOUNT_BOTS.planMaxDepth } : {}), ...(mem.earth ? { earth: mem.earth } : {}), world, self, defs, ...(base ? { base } : {}), ...(bs ? { bs } : {}), fails: mem.fails, hungry, freezing, evening, winter, ...(mem.snooze ? { snooze: mem.snooze } : {}) }); view.plan = plan; if (earthActive) markAiDirty(a, tick); a.bb.set("planGoal", plan.goal); a.bb.set("planStep", plan.step);
   { // patience: a goal with no step and no leaf gathered for GOAL_PATIENCE ticks is snoozed half a day (persisted), like a player giving up on reeds
     let leafN = 0; for (let i = 0; i < slots.items.length; i++) if (slots.items[i] && plan.leaves.includes(slots.items[i]!)) leafN += slots.counts[i] ?? 0;
     const gs = a.bb.get("goalSeen") as { g: string; last: number; n: number } | undefined;

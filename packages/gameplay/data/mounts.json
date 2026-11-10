@@ -33,7 +33,7 @@
     "dismountOffset": 0.9
   },
   "bots": {
-    "$comment": "ADR-321 AI-human mount behaviour (ai/mount_behaviors.ts). Ticks at 20 Hz; distances in tiles; hp as a 0..1 fraction.",
+    "$comment": "ADR-321 AI-human mount behaviour (ai/mount_behaviors.ts). Ticks at 20 Hz; distances in tiles; hp as a 0..1 fraction. ADR-323: storage* / *Food* = liked food fetched from own / employer / clan storage (count needed + foodBuffer); planMaxDepth / saddlePlan* = the saddle material chain (recipe depth cap, timeout -> lower tier, retry after danger / low needs).",
     "seekRadius": 24,
     "scanEveryTicks": 40,
     "ownScanEveryTicks": 100,
@@ -67,7 +67,19 @@
     "tameUtility": 1.3,
     "saddleUtility": 0.6,
     "tendUtility": 0.5,
-    "feedUtility": 0.7
+    "feedUtility": 0.7,
+    "storageRadius": 24,
+    "homeStorageTiles": 5,
+    "tameFoodCount": 6,
+    "feedFoodCount": 2,
+    "foodBuffer": 2,
+    "fetchFoodUtility": 0.8,
+    "foodFetchCooldownTicks": 100,
+    "planMaxDepth": 6,
+    "saddlePlanTimeoutTicks": 12000,
+    "saddlePlanRetryTicks": 600,
+    "saddleAbandonsToFallback": 2,
+    "saddleTierBanTicks": 24000
   },
   "species": [
     {
