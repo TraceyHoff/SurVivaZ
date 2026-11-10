@@ -155,6 +155,7 @@ const stop = (o: { moveX: number; moveY: number }): void => { o.moveX = 0; o.mov
 /** Door-aware walk: crossing the base wall goes through the door (open, pass, close behind) like a player. Returns the distance to (tx, ty). */
 export function goTo(c: Ctx, o: { moveX: number; moveY: number; aimX: number; aimY: number; actions: string[] }, tx: number, ty: number, s = 0.85): number {
   const b = c.world.base, door = c.world.bs?.door; const d = Math.hypot(tx - c.self.x, ty - c.self.y);
+  c.bb.set("navGoalX", tx); c.bb.set("navGoalY", ty); c.bb.set("navGoalAt", c.self.tick); // ADR-321: trip length for mountPolicy
   if (b && door) {
     const inS = insideBase(b, c.self.x, c.self.y), inT = insideBase(b, tx, ty);
     const shut = c.bb.get<number>("doorShut");
@@ -437,5 +438,7 @@ export function baseReturnRun(c: Ctx, o: { moveX: number; moveY: number; aimX: n
 const worldRef = new WeakMap<Agent, World>();
 export function bindAgentWorld(a: Agent, w: World): void { worldRef.set(a, w); }
 const worldOf = (c: Ctx): World | undefined => worldRef.get(c.agent);
+/** ADR-321: the world an agent was bound to (fillGoalSensors), for policies that probe terrain / structures live. */
+export const agentWorld = worldOf;
 import { GameplayConfig } from "../config.js";
 const gdefs = (c: Ctx): GameDefs => worldOf(c)!.getResource(GameplayConfig)!.defs;

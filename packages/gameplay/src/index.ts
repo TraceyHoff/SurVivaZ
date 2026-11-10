@@ -81,6 +81,7 @@ export * from "./party.js";
 export * from "./ai/party_behaviors.js";
 export * from "./ai/clan_behaviors.js";
 export * from "./ai/vehicle_behaviors.js";
+export * from "./ai/mount_behaviors.js";
 export * from "./ai/social_memory.js";
 export * from "./ai/planner.js";
 export * from "./ai/base_behaviors.js";

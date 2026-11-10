@@ -22,6 +22,8 @@ export interface MountSpecies {
 export interface SaddleDef { tier: number; item: string; name: string; slots: number; defense: number; durability: number }
 export const MOUNT_SCALE: Readonly<typeof raw.scale> = raw.scale;
 export const MOUNT_TUNING: Readonly<typeof raw.tuning> = raw.tuning;
+/** ADR-321: AI-human mount behaviour knobs (seek / tame / ride / dismount / saddle / upkeep). */
+export const MOUNT_BOTS: Readonly<typeof raw.bots> = raw.bots;
 export const MOUNT_SPECIES: readonly MountSpecies[] = raw.species as MountSpecies[];
 export const SADDLES: readonly SaddleDef[] = raw.saddles as SaddleDef[];
 /** Pixels per real metre at the character scale (1x): the player is playerHeightPx tall for playerHeightM. */

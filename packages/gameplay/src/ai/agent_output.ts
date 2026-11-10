@@ -18,6 +18,7 @@ import { StockStallCmd } from "../economy/stall.js";
 import { requestEmote } from "../expression.js";
 import { VehicleEnterCmd, VehicleExitCmd, VehicleHitchCmd, VehicleStationCmd, VehicleUnhitchCmd } from "../vehicles.js";
 import { VehicleDeployCmd, VehicleRefuelCmd, VehicleRepairCmd } from "../vehicle_craft.js";
+import { MountDismountCmd, MountFeedCmd, MountRepairCmd, MountRideCmd, MountSaddleCmd } from "../mount_commands.js";
 
 export function actionIntent(action: string): BotIntent | undefined {
   const [k, ...rest] = action.split(":"); const n = rest.map(Number); if (n.some((v) => !Number.isFinite(v))) return undefined;
@@ -71,6 +72,7 @@ export function actionCommand(action: string): AgentCommand | undefined {
   const party = partyActionCommand(action); if (party !== null) return party;
   const clan = clanActionCommand(action); if (clan !== null) return clan;
   const veh = vehicleActionCommand(action); if (veh !== null) return veh;
+  const mnt = mountActionCommand(action); if (mnt !== null) return mnt;
   if (action.startsWith("skill:")) { const n = Number(action.slice(6)); return Number.isInteger(n) && n >= 0 ? { type: UnlockSkillCmd.name, payload: { node: n } } : undefined; } // ADR-113
   if (action.startsWith("tame:")) { const [, a, b] = action.split(":"); const t = Number(a), i = Number(b); return Number.isInteger(t) && t > 0 && Number.isInteger(i) && i > 0 ? { type: PetOfferCmd.name, payload: { target: t, item: i } } : undefined; } // ADR-145
   { const [k, ...r] = action.split(":"); const n = r.map(Number); const ok = n.every((v) => Number.isInteger(v) && v >= 0) && n.length >= 1; // ADR-203 container / fire
@@ -152,7 +154,22 @@ function vehicleActionCommand(action: string): AgentCommand | undefined | null {
     default: return null;
   }
 }
-const COMMAND_ACTIONS = new Set(["terrain", "venter", "vexit", "vhitch", "vunhitch", "vstation", "vrefuel", "vrepair", "vdeploy", "ccreate", "cinvite", "caccept", "cleave", "cpromote", "cdemote", "ckick", "cperms", "cgoal", "cstock", "eat", "drink", "craft", "build", "open", "buy", "pinvite", "paccept", "pdecline", "pleave", "pkick", "skill", "equip", "repair", "upgrade", "copen", "cclose", "cdeposit", "fire", "cwithdraw", "wear", "door", "drop", "dye"]);
+/**
+ * ADR-321 mount action strings: "mfeed:<animal>:<item>" (tame a wild one / heal the own mount) | "mride:<mount>" | "mdismount"
+ * | "msaddle:<mount>:<slot>" | "mrepair:<mount>". The server re-validates (checkFeed / checkRide / checkSaddle / checkRepair).
+ */
+function mountActionCommand(action: string): AgentCommand | undefined | null {
+  const [k, ...rest] = action.split(":"); const n = rest.map(Number); const ok = (c: number) => n.length >= c && n.every((v) => Number.isInteger(v) && v >= 0);
+  switch (k) {
+    case "mfeed": return ok(2) && n[1]! > 0 ? { type: MountFeedCmd.name, payload: { target: n[0]!, item: n[1]! } } : undefined;
+    case "mride": return ok(1) ? { type: MountRideCmd.name, payload: { target: n[0]! } } : undefined;
+    case "mdismount": return { type: MountDismountCmd.name, payload: {} };
+    case "msaddle": return ok(2) ? { type: MountSaddleCmd.name, payload: { target: n[0]!, slot: n[1]! } } : undefined;
+    case "mrepair": return ok(1) ? { type: MountRepairCmd.name, payload: { target: n[0]! } } : undefined;
+    default: return null;
+  }
+}
+const COMMAND_ACTIONS = new Set(["mfeed", "mride", "mdismount", "msaddle", "mrepair", "terrain", "venter", "vexit", "vhitch", "vunhitch", "vstation", "vrefuel", "vrepair", "vdeploy", "ccreate", "cinvite", "caccept", "cleave", "cpromote", "cdemote", "ckick", "cperms", "cgoal", "cstock", "eat", "drink", "craft", "build", "open", "buy", "pinvite", "paccept", "pdecline", "pleave", "pkick", "skill", "equip", "repair", "upgrade", "copen", "cclose", "cdeposit", "fire", "cwithdraw", "wear", "door", "drop", "dye"]);
 /**
  * Moves the command-type actions (eat, drink, craft, build, open, buy) out of out.actions and into out.commands, in order.
   Movement and gather/attack/sleep stay

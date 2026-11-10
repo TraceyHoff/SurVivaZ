@@ -3805,3 +3805,41 @@ Updated tests (deliberate changes):
 - **Rendering.** Saddle overlay `mount_saddle_<art>_<leather|reinforced|iron|steel>` (28 dedicated sheets, Art fafe447e), drawn between the mount and the rider with the mount's anim and facing. Saddle icons: `saddle_<tier>` in nature_icons.
 
 **Validation.** `adr320_saddles.test.ts` (tier table, 3-slot basic, rising stats, items + recipes; bareback; equip → 3 slots + 10 armor on mount and rider; stranger can't open the bag; swap returns the steel saddle with its durability; bag_too_full / bag_not_empty; unsaddle; wear; broken = no defense; repair cost + restore; rider / mount damage split; recipe + repair gating; node names).
+
+## ADR-321: AI humans tame, ride and keep mounts on their own (SurVivaZ)
+
+**Context.** ADR-319/320 let AI humans tame and ride through the same commands as players, but no behaviour used them. The question "can AI humans decide to tame and ride on their own?" needs utility behaviours in the existing survivor planner, not a new AI.
+
+**Decision.** `packages/gameplay/src/ai/mount_behaviors.ts`, built like `vehicle_behaviors.ts`:
+- **Sensors** (`fillMountSensors`, run after the plan sensors in `buildAgentView`): `mount` (own mount: hp, saddle, wear, free bag slots, riding / busy, a liked food when it is below `feedBelowHp`), `mountSkill` (Horsemanship), `tameMount` (best wild target), `saddleUp` (next saddle step) and `invFree`. "Own" means `Mount.owner === mountOwnerIdFor(self)` (the employer for a hired worker) and `mayUseMount`. Tribe-mates' and strangers' mounts are never treated as own.
+- **tame_mount**: needs no mount, Horsemanship, a liked food in the bag, and calm (hp ≥ `minHp`, fed, no zombie within `safeTiles`).
+  - Picks targets with a spatial-hash radius query (`seekRadius` 24), at most every `scanEveryTicks` (40). Score is gallop + hp/60 − 0.15 × distance, ties broken by entity id.
+  - Skips kickers (species with an attack) while hp < `kickerMinHp`. Also skips animals inside a claim it does not own, and animals someone else is taming.
+  - It holds the food (`equip`, which lures), walks up and sends `mfeed` every `feedEveryTicks`.
+  - When progress drops (a spook) it steps back for `backoffTicks`. When kicked to low hp it gives up.
+  - After `giveUpTicks` (60 s) it gives up and bans the animal for `banTicks`.
+  - Its single consideration is weighted `tameUtility` 1.3, so a calm bot takes the chance before another resource trip.
+- **mountPolicy** wraps every survivor behaviour, next to `stancePolicy`. `goTo` records the nav goal (`navGoal*` bb).
+  - **Mounting:** it mounts when the goal is > `longTripTiles` (25) away and its mount is within `fetchRadius` (8, detouring to it) and not the wrong way. It also mounts when fleeing with the mount within `fleeMountRadius`.
+  - **Dismounting:** it gets off on arrival (< `arriveTiles` 4, or still for `idleDismountTicks`). It also gets off before a base-interior goal, when `rideClearanceBlocked` is hit ahead (doorway / low ceiling), at once for sleep / rest / vehicles, within `taskDismountTiles` for task behaviours, and on any foot action (gather / attack / craft / build / door …).
+  - After a dismount it waits `remountCooldownTicks` before mounting again. Fleeing riders stay on.
+- **saddle_up**:
+  - Equips a better saddle from the bag (never downgrades).
+  - Otherwise crafts the best unlocked saddle it can pay for in its bag, here or at its base station (`craft:`).
+  - Otherwise repairs a saddle below `repairBelow` when `checkRepair` allows.
+- **tend_mount**: feeds a hurt mount, and fetches a mount more than `homeRadius` from home (walks to it, rides it home, gets off). With ≤ `bagOverflowFreeSlots` free slots it deposits surplus into the saddlebag (`copen` / `cdeposit` / `cclose`). A dead mount drops out of the sensors, so `tame_mount` replaces it.
+- **Commands:** action strings `mfeed:<t>:<item>`, `mride:<t>`, `mdismount`, `msaddle:<t>:<slot>`, `mrepair:<t>` become the ADR-319 / ADR-320 net commands (`agent_output.ts`). The server re-validates everything (reach, skill, ownership).
+- **Determinism and budget:** no rng, tick cooldowns on the bb, sorted candidates. Own-mount lookup is cached (rescan every `ownScanEveryTicks`); the saddle plan is cached `saddleScanEveryTicks`.
+- **Tuning:** all knobs live in `data/mounts.json` → `bots` (`MOUNT_BOTS`).
+- **Bandits:** gameplay has no hostile-human faction yet. Any future one inherits the same rule: only mounts `mayUseMount` allows.
+
+**Validation.** `adr321_ai_mounts.test.ts`:
+- action strings, and the behaviours in the registry;
+- end-to-end seek → lure → feed → tame, plus the same through the full `survivorController`;
+- determinism; species preference, the hurt-kicker skip, foreign claims, and skill / food gates;
+- spook back-off and the give-up timeout with ban;
+- long-trip auto mount → faster arrival → dismount, staying on foot for short trips, no far fetch, and the flee mount;
+- the doorway clearance dismount and remount cooldown, a donkey riding through, and the building dismount; task dismounts but no flee dismount;
+- saddle equip with no downgrade, craft at the workbench, then equip and repair; saddlebag overflow;
+- strangers' and tribe-mates' mounts ignored, a worker using and taming for its employer;
+- feeding a hurt mount, fetching a strayed mount home, and replacement after death.
