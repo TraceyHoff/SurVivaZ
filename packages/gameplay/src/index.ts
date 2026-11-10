@@ -83,6 +83,7 @@ export * from "./ai/party_behaviors.js";
 export * from "./ai/clan_behaviors.js";
 export * from "./ai/vehicle_behaviors.js";
 export * from "./ai/mount_behaviors.js";
+export * from "./ai/mount_preference.js"; // ADR-339: tame a mount of the bot's own choice
 export * from "./ai/travel.js";
 export * from "./ai/social_memory.js";
 export * from "./ai/planner.js";
@@ -120,6 +121,9 @@ export * from "./animal_skills.js"; // Task 15: per-animal skill trees
 export * from "./recruitment.js"; // Task 22: AI-human recruitment (hire / jobs / multiplayer toggle)
 export * from "./dye.js"; // Task 25: dye system (DyeCmd, SlotDye, brush rule)
 export * from "./ai/hire_behaviors.js"; // Task 22: hired-worker sensors + job behaviors
+export * from "./ai/claim_build.js"; // ADR-337: claim / repair / rebuild abandoned structures, build own home
+export * from "./ai/defence.js"; // ADR-338: defend own claimed territory
+export * from "./ai/life.js"; // ADR-336: wants / personality / moods
 export * from "./inventory_ops.js"; // ADR-204
 export * from "./stance.js"; // ADR-244
 export * from "./building/terrain-hatch.js"; // ADR-299

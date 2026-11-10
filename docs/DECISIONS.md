@@ -4212,3 +4212,160 @@ ogg) on the live build. Nothing was verified on a real phone.
 
 **Honest cuts.** Default (v1) players lose nothing — the sample was never fetched for them. The v2s preview is gone until/unless the sample is re-included or served another way. Nothing verified on a real phone.
 
+## ADR-339: AI humans tame a mount of their own choice (SurVivaZ)
+
+**Context.** ADR-321/323 gave AI humans tame/ride/saddle/look-after-mount behaviour, and mounts can die;
+the missing piece of the user's Task 37 question 4 was "of their choice" — no preference existed, so a
+bot tamed whichever rideable animal scored best on gallop/hp/distance. Feeding preference already
+existed (`bestMountFood` is love-first) and no re-tame gap existed (`fillMountSensors` only computes
+`tameMount` in the no-own-mount branch), so the only gap was the tame-target pick itself.
+
+**Decision.** `packages/gameplay/src/ai/mount_preference.ts` derives a bot's liked species deterministically
+from its own PlayerId (`fnv1a("mount:<playerId>")` over `MOUNT_SPECIES`, plus the species' first love
+food), stored as a tuning knob `preferredSpeciesBonus: 10` in the `bots` section of
+`packages/gameplay/data/mounts.json`. `pickTameTarget` in `ai/mount_behaviors.ts` takes a
+`preferredSpecies` parameter (default 0 = no bonus, old behaviour) and adds the bonus to the ADR-321
+score; both call sites (`tameTarget` and the `foodSensors` pre-fetch) pass
+`preferredMount(playerIdOf(world, self)).species` — the bot's OWN taste, while tames are still
+recorded under the employer via `mountOwnerIdFor`, so a hired worker keeps its own preference. The
+bonus (10) provably dominates the max inter-species score spread (gallop 3.2 + hp/60 2.83 + distance
+3.6 = 9.63), so a liked species in `seekRadius` always wins; the fallback is unchanged when the
+liked species is absent. No keep-alive guard and no feeding change were needed (verified: no re-tame
+gap; love-first feeding already exists). No new `AgentWorldView` field.
+
+**Validation.** New `packages/gameplay/test/adr339_mount_preference.test.ts` (11 tests) for the
+preference derivation and scoring; new `packages/gameplay/test/adr339_mount_wiring.test.ts` (3 tests)
+proving the wiring through `fillMountSensors`: liked species wins at equal distance, plain ADR-321
+pick when the liked species is absent, no tame target while the bot's own mount lives and a liked
+target again after it dies. Neighbours re-run green: adr321/adr323/adr327 (38/38). Typecheck with
+pinned TypeScript 5.9.3: `packages/gameplay` clean.
+
+**Honest cuts.** A bot whose liked species never spawns near it tames exactly as before (no
+preference is visible). Nothing verified on a real phone.
+## ADR-336: AI humans have their own lives, wants and moods when idle (SurVivaZ)
+
+**Context.** Bots already had goals/planner, homesteading, travel, clan-stay vs roam — but no
+wants/aspirations/personality layer: nothing made one bot differ from another when it had nothing to
+do, and nothing let a bot act like a person (eat a favourite food, make a keepsake, visit water,
+socialize, tend a garden, rest). The user's Task 37 questions 1–2.
+
+**Decision.** `packages/gameplay/src/ai/life.ts` + data `packages/gameplay/data/ai_life.json` add:
+personality derived deterministically from the bot's stable identity id (core traits from
+`rollTraits` + curiosity/rhythm/favourite food/keepsake from `fnv1a` streams — same technique as
+the Task 25 dye colour and Task 22 recruitment wanted-item; the local `fnv1a` copy was replaced
+with the identical one from `@engine/core` because `vehicle_craft.ts`/`vehicles.ts` already
+export that name); six data-driven wants (favourite food, keepsake craft, visit water, socialize,
+tend garden, rest); pure moods (`deriveMood`: weary > lonely > restless > cheerful > content);
+routines gated by rhythm → day-phase. The layer runs ONLY when the bot is otherwise idle: hired
+bots only under the ADR-327 `view.hire.idle` flag, unhired bots only when `makePlan` returns
+`"idle"` with no step/leaves/hunt, no danger within 12 tiles, and hunger ≥ 55 / thirst ≥ 55 /
+hp ≥ 0.5, not cold. Wired in `packages/gameplay/src/agents.ts`: `fillLifeSensors` is the LAST
+sensor in `buildAgentView` (it must see the final `view.plan` / `view.hire.idle` / `view.travel` /
+`view.farm` / `view.mount`) and `lifeBehaviors()` (`life_want`) joins `survivorRegistry` after
+`hireBehaviors()`. Persistence is a separate `identity.aiLife` record (`lifeStateOf` /
+`flushAiLife`, 300-tick debounce) flushed from `apps/client/src/local.ts` next to
+`flushAiMemory`/`flushSocialMemory` (removal, periodic, shutdown); `game.agents.put`
+shallow-merges partials so `{ aiLife }` never clobbers `ai` / `social`. No `planner.ts` change was
+needed. Behaviours only move the bot and emit the action strings / commands a human client sends;
+the server validates reach, recipes and costs as for players.
+
+**Validation.** New `packages/gameplay/test/adr336_ai_life.test.ts` (33 tests) for personality
+determinism, moods, routines, the idle gate, want picks and the persistence round-trip; new
+`packages/gameplay/test/adr336_life_wiring.test.ts` (4 tests) proving the wiring through the real
+view: an idle hired worker gets `eat_favourite` and `life_want` emits `eat:<slot>` (completion
+recorded in life state), a Follow worker gets no want, the registry carries `life_want`.
+Neighbours re-run green: adr252/adr327/adr259/task22 recruitment (61/61). Typecheck with pinned
+TypeScript 5.9.3: `packages/gameplay` clean; `apps/client` shows only the 3 pre-existing
+`src/tutorial/overlay.ts` errors from the missing `input_glyphs.json`, zero in `local.ts`.
+
+**Honest cuts.** `visit_water` rarely fires for spawn-homed bots: a step-2 scan of [-150,150]² in
+the seed-42 test world found no `nearWater` tile, so bots homed near spawn have no water within
+the search radius (the slice tests use a fake lake). Nothing verified on a real phone.
+## ADR-338: AI humans defend their own claimed territory with barbed wire and turrets (SurVivaZ)
+
+**Context.** The Defend job existed and `barbed_wire` + arrow/bolt/flame turrets existed as pieces,
+but AI humans had no claims of their own and never chose to build defences — the user's Task 37
+question 5. Defence is deliberately NOT in `makePlan` (planner.ts was off-limits for this slice);
+`planDefence` + `hasSurplus` are reusable if that changes later.
+
+**Decision.** `packages/gameplay/src/ai/defence.ts` + data `packages/gameplay/data/ai_defence.json`
+add: threat as a pure `assessThreat` over sightings (1) / kills (2) / livestock losses (3) / recent
+close attack (+2) in a 1-day window (24000 ticks), levels from thresholds [1,3,6]; builds only at
+level ≥ 2 AND with surplus (after paying cost, reserve wood 12 / stone 8 / planks 4 remains, and no
+cost item on the plan's gather leaves). Wire first along the claim perimeter (max 8, ring at
+radius − 2), then one turret of each kind cheapest first (arrow → bolt → flame, max 3, diagonal
+offsets around the base anchor). Every candidate passes a ghost preview (`snapPlacement` +
+`validatePlacement`, cost/range ignored). Hired workers and bots without their own claim get no
+target. Wired in `packages/gameplay/src/agents.ts`: `fillDefenceSensors` runs after
+`fillHireSensors` (it needs `view.base` / `view.bs` / `view.plan` and skips hired workers) and
+`defenceBehaviors()` (`build_defence`) joins `survivorRegistry` after `hireBehaviors()`; the
+behaviour withdraws missing materials from base storage first, then emits the standard `build:`
+action, and scores only when a target exists, the planner has no step, the bot is not hired, and
+no zombie is close. Threat memory is a separate `identity.defence` record (`defenceMemoryOf` /
+`flushDefenceMemory`, 300-tick debounce) flushed from `apps/client/src/local.ts` next to
+`flushAiMemory` / `flushSocialMemory` / `flushAiLife`. Two real bugs were fixed in-slice: a missing
+`cclose` after the final withdraw, and close being bare `cclose` (not `cclose:<id>`).
+
+**Validation.** New `packages/gameplay/test/adr338_ai_defence.test.ts` (27 tests) for threat
+assessment, surplus gating, wire-before-turret ordering, placement inside the bot's own claim,
+one-piece-at-a-time and no-claim → no-plan; new
+`packages/gameplay/test/adr338_defence_wiring.test.ts` (7 tests) proving the wiring through the
+real view: a threatened bot with its own claim and surplus gets a `barbed_wire` target, no target
+at level 0/1, none without a claim, none when hired, the registry carries `build_defence`, and
+threat events persist through `flushDefenceMemory`. Neighbours re-run green:
+adr252/adr310/adr315/adr259/adr221 (70/70). Typecheck with pinned TypeScript 5.9.3:
+`packages/gameplay` clean; `apps/client` shows only the 3 pre-existing
+`src/tutorial/overlay.ts` errors from the missing `input_glyphs.json`, zero in `local.ts`.
+
+**Honest cuts.** Defence is not in `makePlan`, so it cannot compete with planner goals — it only
+fires when the planner has no step. No turret ammo stocking; kills only count when witnessed;
+livestock loss is a head-count drop. Nothing verified on a real phone.
+## ADR-337: AI humans claim and build — repair/rebuild abandoned structures or build their own home (SurVivaZ)
+
+**Context.** Seeded abandoned structures (ADR-300/301), the Claim Flag (ADR-310/315) and the
+build systems (`BASE_SLOTS` 2×2 hut, `pickBaseSite`) all existed, but no AI ever used them — the
+user's Task 37 question 3. Hired bots never claim.
+
+**Decision.** `packages/gameplay/src/ai/claim_build.ts` + data `packages/gameplay/data/ai_claim.json`
+add: `chooseClaim` is deterministic — nearest suitable ruin within 12 tiles (unclaimed, intact ≥ 0.5,
+damaged ≤ 0.7, no claim overlap via `siteClaimOk`, ghost-placeable flag slot), else `pickBaseSite`
+new site with a per-bot variant (`homestead` / `garden` / `fenced` / `workshop`,
+`variants[PlayerId % 4]`), far ruin as fallback. The stage machine is recomputed per sense tick:
+ruin = flag → reclaim → repair (hp < 60%, own-claim + skill gate, exact server repair cost) →
+rebuild from the regenerated planned layout (`planAbandonedSite` pure in seed/origin/kind/rot;
+20-tick cache) → done, `BASE_SLOTS` fallback when no rotation matches. New = flag →
+`mem.base` handoff to the planner (ladder builds hut) → variant extras → done. Ruin homes never
+get `mem.base` (the planner would build `BASE_SLOTS` over the ruin); the ruin marker is the home
+record. Flag cost is 10 wood + 10 stone + 2 dye (`pieces.json`), not "10 logs" as the brief said.
+Wired in `packages/gameplay/src/agents.ts` (`claimBuildBehaviors()` after `autonomyBehaviors()`),
+`packages/gameplay/src/ai/autonomy.ts` (`fillClaimSensors` in `computeGoalSensors` after
+`bindAgentWorld` and BEFORE the `fillPlanSensors` block, its leaves merged into `needs` after it;
+`"claimTarget"` / `"claimPlan"` added to `SENSOR_KEYS`; the legacy reclaim sensor is gated so it
+does not double-drive a ruin the claim layer owns) and `packages/gameplay/src/ai/base_behaviors.ts`
+(claim materials merged into the planner priority chain after the saddle goal).
+Coordinator fix (caught by the ADR-252 live test during the full gate): the wiring as first
+landed starved the homestead ladder two ways, and the live bots built no campfire/box/workbench,
+no earthworks and no 2×2 base in 3000 ticks. (1) Claim materials fed into `makePlan`'s priority
+chain became the plan GOAL — the bot's goal read "dye" (flag) then "clay" (flower-bed extra) and it
+wandered gathering while its hut stayed unbuilt. The priority merge is removed: claim materials
+join the gather `needs` only (the sensor still publishes them on the `claimPriority` blackboard,
+pinned by the slice test), and the flag is still built promptly by the planner's own flag-first
+rule plus `claim_build` when the materials are in hand. (2) Variant extras are decoration, not
+shelter: `planOwnHome` now returns the extras plan with no step until the hut (`BASE_SLOTS`)
+stands, so a bot never spends homesteading ticks on fences / garden beds / a flower bed before
+its hut and bed exist. The slice test for flag → extras was updated to raise the hut first (and
+pins the waiting state: stage "extras", no step, before the hut). With both fixes the ADR-252
+live test passes 8/8 again. (3) Coordinator fix (caught by the ADR-321 long-trip ride test in the
+full gate): `chooseClaim` anchored its new-site pick on the bot's current position while the
+planner anchors every site pick on `view.home` — a bot 70 tiles from home claimed the ground
+under its feet, the adopted base made `return_home` walk to the base's porch 7 tiles away instead
+of riding home, and `wantsRide` never fired (trip < `longTripTiles`). `chooseClaim` now takes an
+optional home anchor and `fillClaimSensors` passes `view.home`; the ruin scan uses the same
+anchor. Pinned by a new wiring test (bot at (0,0), home (70,0): claim and adopted base within 12
+tiles of home, `return_home`'s navGoal > 30 tiles out, `wantsRide` true). Neighbours re-run green:
+adr300/adr301/adr311/adr252/modular_building/adr331 (61/61) — the ADR-331 relocated-homestead
+test failed once during wiring (see the coordinator fix above) and passes with it. Typecheck with
+pinned TypeScript 5.9.3: `packages/gameplay` clean.
+
+**Honest cuts.** Ruin homes have no full base behaviour yet (planner flag in `planner.ts` not
+built). Nothing verified on a real phone.

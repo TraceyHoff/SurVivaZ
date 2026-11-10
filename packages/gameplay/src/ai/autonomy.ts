@@ -24,6 +24,7 @@ import { nearbyAbandonedWork } from "../building/abandoned.js";
 import { resolveAttachment } from "../building/links.js";
 import travelData from "../../data/travel.json";
 import { armCraft, goTo, bindAgentWorld, fillPlanSensors, noteTripWanted } from "./base_behaviors.js";
+import { fillClaimSensors } from "./claim_build.js"; // ADR-337: claim / rebuild leaves join the planner's needs
 
 export interface GoalSensors {
   gatherNode?: { id: number; x: number; y: number; wanted: boolean };
@@ -97,7 +98,7 @@ function homeScan(world: World, defs: GameDefs, hx: number, hy: number, fireType
   }
   if (m.size > 256) m.clear(); m.set(key, r); return r;
 }
-const SENSOR_KEYS = ["plan", "base", "bs", "craftCount", "craftTicks", "huntTarget", "panel", "tripWanted", "surplus", "woodTotal", "stoneTotal", "junk", "winter", "craftRecipe", "buildPlan", "gatherNode", "gatherScanned", "waterAt", "equipSlot", "repairTarget", "reclaimTarget", "needs", "cold", "chill", "fire", "fireMissing", "woodSlot"] as const;
+const SENSOR_KEYS = ["plan", "base", "bs", "craftCount", "craftTicks", "huntTarget", "panel", "tripWanted", "surplus", "woodTotal", "stoneTotal", "junk", "winter", "craftRecipe", "buildPlan", "gatherNode", "gatherScanned", "waterAt", "equipSlot", "repairTarget", "reclaimTarget", "claimTarget", "claimPlan", "needs", "cold", "chill", "fire", "fireMissing", "woodSlot"] as const;
 const sensed = new WeakMap<Agent, { tick: number; home: string; s: Partial<GoalSensors> }>();
 export function fillGoalSensors(world: World, self: Entity, view: AgentWorldView, a: Agent): void {
   const wk = world.get(self, Worker); const order = world.getArray(self, WorkerOrder, "selections");
@@ -145,7 +146,9 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
     if (view.fire && !view.fire.lit && n < 4) { view.needs = [wood.id, ...(view.needs ?? []).filter((x) => x !== wood.id)]; } } // fuel for the night
   // ADR-252: the planner owns needs / hand crafts / base pieces (needs = leaves of the first unmet goal)
   bindAgentWorld(a, world);
+  const claimLeaves = fillClaimSensors(world, self, view, a); // ADR-337: BEFORE the plan sensors — the claim layer reserves its site and its leaves join needs below
   { const pn = fillPlanSensors(world, self, view, a, defs, slots); if (pn) { needs.clear(); for (const x of pn) needs.add(x); if (view.food === undefined && view.bs?.stations.has(1)) for (const id of ix.foods) needs.add(id); if (needs.size) view.needs = [...needs]; else delete view.needs; } }
+  if (claimLeaves) { for (const x of claimLeaves) needs.add(x); if (needs.size) view.needs = [...needs]; }
   // ADR-327: hire sensors (and an idle hired worker's saddle plan + leaves) must be installed BEFORE
   // gathering is selected, not one sensor later — the Maintain earthwork case this line originally served.
   if (world.getField(self, Worker, "owner")) fillHireSensors(world, self, view, a);
@@ -228,7 +231,7 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
         const p = world.get(work.repair, Transform);
         if (p) view.repairTarget = { id: work.repair, x: p.x, y: p.y };
       }
-      if (work.reclaim && hasOwnClaim(world, self, work.x, work.y) && GOAL_CRAFTS.some((k) => { const it = item(k); return !!it && have(it.id) > 0; })) {
+      if (work.reclaim && hasOwnClaim(world, self, work.x, work.y) && !(view.claimTarget?.kind === "ruin" && view.claimTarget.marker === work.marker) && GOAL_CRAFTS.some((k) => { const it = item(k); return !!it && have(it.id) > 0; })) { // ADR-337: the claim layer owns a ruin it targets — the legacy reclaim sensor must not double-drive it
         view.reclaimTarget = { id: work.marker, x: work.x, y: work.y };
       }
     }

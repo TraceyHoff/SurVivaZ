@@ -56,8 +56,9 @@ export function fillPlanSensors(world: World, self: Entity, view: AgentWorldView
     mem.base = { x: moved.x, y: moved.y }; claimBaseSite(world, self, mem.base); markAiDirty(a, tick);
   }
   if (!mem.base && tick - a.bb.num("sitePickAt", -1e9) >= 200) {
-    a.bb.set("sitePickAt", tick); const s = pickBaseSite(world, self, view.home, hash(a.identity.id) + mem.stats.relocations * 0.37);
-    if (s) { mem.base = s; markAiDirty(a, tick); }
+    a.bb.set("sitePickAt", tick);
+    if (view.claimTarget?.kind === "new") { mem.base = { x: view.claimTarget.x, y: view.claimTarget.y }; markAiDirty(a, tick); } // ADR-337: the claim layer already picked this site (pickBaseSite) — adopt it as the home record so the planner's ladder can start; the flag is still built first (planner flag-first rule / claim_build) before any hut piece, and ruin targets never reach here
+    else if (!view.claimTarget) { const s = pickBaseSite(world, self, view.home, hash(a.identity.id) + mem.stats.relocations * 0.37); if (s) { mem.base = s; markAiDirty(a, tick); } }
   }
   claimBaseSite(world, self, mem.base); // ADR-252: keep other agents' new sites SITE_SPACING away
   const base = mem.base; const bs = base ? scanBase(world, defs, base) : undefined;

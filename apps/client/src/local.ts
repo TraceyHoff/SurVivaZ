@@ -8,7 +8,7 @@
  */
 import { CommandRegistry, DEFAULT_TICK_HZ, FixedLoop, Owner, Transform, World, type CosmeticCatalogLike, type Agent, type AgentOutput, type Entity } from "@engine/core";
 import { Respawned, TRAVEL, markSpawnOffscreen, offscreenStep, setAiHomeLocator, spawnedOffscreen, travelKeepsHome, wantsOffscreen } from "@engine/gameplay";
-import { Animal, Dead, Health, ResourceNode, Zombie, agentOutputFrame, agentOutputIntents, applyAgentEmote, buildAgentSelf, buildAgentView, type AgentWorldView, flushSocialMemory, makeAgent, makeAgentIdentity, survivorController, HOME_MAX_DIST, aiMemoryOf, baseHome, flushAiMemory, RespawnCmd, agentStanceInput, fillStanceSensors, stanceMode, StanceMode, GameplayEdgeBits } from "@engine/gameplay";
+import { Animal, Dead, Health, ResourceNode, Zombie, agentOutputFrame, agentOutputIntents, applyAgentEmote, buildAgentSelf, buildAgentView, type AgentWorldView, flushSocialMemory, makeAgent, makeAgentIdentity, survivorController, HOME_MAX_DIST, aiMemoryOf, baseHome, flushAiMemory, flushAiLife, flushDefenceMemory, RespawnCmd, agentStanceInput, fillStanceSensors, stanceMode, StanceMode, GameplayEdgeBits } from "@engine/gameplay";
 import { ChatChannel, DirectClient, LoopbackNetwork, MultiServerTransport, NetClient, type ClientTransport, type ServerTransport } from "@engine/net";
 import { ClaimAccount, IndexedDbWorldStore, MemoryWorldStore, SetName, nameToWords, tokenToWords, type WorldStore } from "@engine/persist";
 import { detectDevice, isMobileHost, type DeviceHints } from "./p2p.js";
@@ -178,7 +178,7 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
   const putAgent = (id: string, partial: Parameters<typeof game.agents.put>[1]): unknown => game.agents.put(id, partial);
   function dropBot(clientId: number): void {
     const i = bots.findIndex((b) => b.client.clientId === clientId); if (i < 0) return;
-    const b = bots[i]!; byAgent.delete(b.agent); lodViews.delete(b); offscreen.delete(b); lodPhase.delete(b); flushSocialMemory([b.agent], putAgent, game.world.tick, true); flushAiMemory([b.agent], putAgent, game.world.tick, true); controller.remove(b.agent); b.client.close(); bots.splice(i, 1); restAt.delete(b);
+    const b = bots[i]!; byAgent.delete(b.agent); lodViews.delete(b); offscreen.delete(b); lodPhase.delete(b); flushSocialMemory([b.agent], putAgent, game.world.tick, true); flushAiMemory([b.agent], putAgent, game.world.tick, true); flushAiLife([b.agent], putAgent, game.world.tick, true); flushDefenceMemory([b.agent], putAgent, game.world.tick, true); controller.remove(b.agent); b.client.close(); bots.splice(i, 1); restAt.delete(b);
   }
   // Player/bot entity lookups (ADR-105): game.players already maps clientId -> server entity, and bots perceive the authoritative world through it.
   const serverEntityOf = (cid: number): Entity | undefined => { const p = game.players.get(cid); return p && game.world.isAlive(p.entity) ? p.entity : undefined; };
@@ -279,7 +279,7 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
     if (tick - lastRespawnTry >= 40) { lastRespawnTry = tick; for (const vp of bots) { const e = serverEntityOf(vp.client.clientId); if (e !== undefined && game.world.has(e, Dead)) sendAgentCommands(vp.client, [{ type: RespawnCmd.name, payload: {} }]); } // ADR-252: a dead bot presses Respawn like a player (server enforces respawnSeconds)
     }
     if (offscreen.size && tick % TRAVEL.offscreen.stepTicks === 0) for (const vp of offscreen) { const e = serverEntityOf(vp.client.clientId); if (e !== undefined && !game.world.has(e, Dead)) offscreenStep(game.world, e, vp.agent, TRAVEL.offscreen.stepTicks, DEFAULT_TICK_HZ); }
-    flushAiMemory(bots.map((b) => b.agent), putAgent, game.world.tick); flushSocialMemory(bots.map((b) => b.agent), putAgent, game.world.tick); // debounced social-memory write-through
+    flushAiMemory(bots.map((b) => b.agent), putAgent, game.world.tick); flushSocialMemory(bots.map((b) => b.agent), putAgent, game.world.tick); flushAiLife(bots.map((b) => b.agent), putAgent, game.world.tick); flushDefenceMemory(bots.map((b) => b.agent), putAgent, game.world.tick); // debounced social-memory write-through
   } });
   const pump = (ms: number): void => {
     for (const q of queued.splice(0)) { inflight++; connecting.push(addBot(q.x, q.y, false).catch((e) => o.log?.(`bot failed: ${String(e)}`)).finally(() => { inflight--; })); }
@@ -290,7 +290,7 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
   const server: LocalServer = {
     game, network, bots, pump,
     createTransport: () => network.createClient(),
-    async stop() { stopped = true; await Promise.allSettled(connecting); flushSocialMemory(bots.map((b) => b.agent), putAgent, game.world.tick, true); flushAiMemory(bots.map((b) => b.agent), putAgent, game.world.tick, true); for (const b of bots) b.client.close(); await game.shutdown(); serverTransport.close(); },
+    async stop() { stopped = true; await Promise.allSettled(connecting); flushSocialMemory(bots.map((b) => b.agent), putAgent, game.world.tick, true); flushAiMemory(bots.map((b) => b.agent), putAgent, game.world.tick, true); flushAiLife(bots.map((b) => b.agent), putAgent, game.world.tick, true); flushDefenceMemory(bots.map((b) => b.agent), putAgent, game.world.tick, true); for (const b of bots) b.client.close(); await game.shutdown(); serverTransport.close(); },
   };
   if (mode === "singleplayer") for (let i = 0; i < Math.min(o.bots ?? 0, maxBots); i++) { const sp = game.spawnPoints[i % game.spawnPoints.length]!; await addBot(sp.x + 1, sp.y + 1); } // dev bots over the 4 spawn points (ADR-106)
   return server;

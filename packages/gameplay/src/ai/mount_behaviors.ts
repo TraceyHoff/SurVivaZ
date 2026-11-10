@@ -29,7 +29,8 @@ import { Animal, Dead, Equipment, Health, Mount, MountTaming, Pet, Survival, Tam
 import { gameplayDefs } from "../config.js";
 import { countItem, readSlots } from "../inventory.js";
 import { animalDefs } from "../population.js";
-import { MOUNT_BOTS as B, mayUseMount, mountOfRider, mountOwnerIdFor, mountSpecies, mountSpeciesOfAnimal, saddleOfItemKey, SADDLES } from "../mount_defs.js";
+import { MOUNT_BOTS as B, mayUseMount, mountOfRider, mountOwnerIdFor, mountSpecies, mountSpeciesOfAnimal, playerIdOf, saddleOfItemKey, SADDLES } from "../mount_defs.js";
+import { preferredMount } from "./mount_preference.js"; // ADR-339: tame a mount of the bot's own choice
 import { bestMountFood, checkRepair, isRiding, liveRider, MOUNT_TAME_TOKEN, saddleInfo } from "../mounts.js";
 import { hasSkillUnlock } from "../skills/tree.js";
 import { zoneOwnedBy, zonesAt } from "../building/place.js";
@@ -114,8 +115,10 @@ function seenMount(world: World, self: Entity, m: Entity): SeenMount {
 /** MountTaming.by of this tamer (feedMount: the owner id, else the entity index). */
 const tamerId = (world: World, self: Entity): number => mountOwnerIdFor(world, self) || entityIndex(self);
 const slotOf = (v: ReturnType<typeof readSlots>, item: number): number => { for (let i = 0; i < v.slotCount; i++) if (v.item(i) === item && v.count(i)) return i; return -1; };
-/** Wild candidates: a radius query on the spatial hash (no full-world scan), scored, banned / claimed / dangerous ones skipped. */
-function pickTameTarget(world: World, self: Entity, a: Agent, hp: number, needFood = true): number {
+/** Wild candidates: a radius query on the spatial hash (no full-world scan), scored, banned / claimed / dangerous ones skipped.
+ *  ADR-339: `preferredSpecies` (0 = no preference) adds MOUNT_BOTS.preferredSpeciesBonus for the bot's liked
+ *  species, so a bot tames a mount of its own choice when one is in range; the fallback is the plain ADR-321 pick. */
+function pickTameTarget(world: World, self: Entity, a: Agent, hp: number, needFood = true, preferredSpecies = 0): number {
   const t = world.get(self, Transform)!; const ban = bans(a); const ad = animalDefs(); const tick = world.tick;
   let best = -1, bs = -Infinity;
   for (const e of installSpatialIndex(world).queryRadius(t.x, t.y, B.seekRadius)) {
@@ -127,7 +130,7 @@ function pickTameTarget(world: World, self: Entity, a: Agent, hp: number, needFo
     if (needFood && !bestMountFood(world, self, sp)) continue;
     if (zonesAt(world, p.x, p.y).some((z) => !zoneOwnedBy(world, z, self))) continue; // someone else's claim
     const tm = world.get(e, MountTaming); if (tm && tm.by !== tamerId(world, self) && tm.progress > 0 && tick - tm.lastTick < 200) continue; // someone else is taming it
-    const s = spec.gallop + spec.hp / 60 - d * 0.15;
+    const s = spec.gallop + spec.hp / 60 - d * 0.15 + (sp === preferredSpecies ? B.preferredSpeciesBonus : 0);
     if (s > bs || (s === bs && e < best)) { bs = s; best = e; }
   }
   return best;
@@ -137,7 +140,7 @@ function tameTarget(world: World, self: Entity, a: Agent, hp: number): TameTarge
   const valid = (e: number): boolean => e >= 0 && world.isAlive(e as Entity) && world.has(e as Entity, Animal) && !world.has(e as Entity, Dead) && !world.has(e as Entity, Mount) && !world.has(e as Entity, Tamed) && (bans(a)[e] ?? 0) <= tick;
   if (!valid(id)) {
     if (tick - a.bb.num("tameScanAt", -1e9) < B.scanEveryTicks) return undefined;
-    a.bb.set("tameScanAt", tick); id = pickTameTarget(world, self, a, hp); a.bb.set("tameId", id); if (id < 0) return undefined;
+    a.bb.set("tameScanAt", tick); id = pickTameTarget(world, self, a, hp, true, preferredMount(playerIdOf(world, self)).species); a.bb.set("tameId", id); if (id < 0) return undefined;
   }
   const e = id as Entity; const p = world.get(e, Transform)!; const kind = world.getField(e, Animal, "kind") ?? 0; const def = animalDefs()[kind];
   const sp = mountSpeciesOfAnimal(def?.key); const item = bestMountFood(world, self, sp); if (!item) return undefined;
@@ -212,7 +215,7 @@ function foodSensors(world: World, self: Entity, view: AgentWorldView, a: Agent,
   if (!view.mountSkill || view.tameMount || isRiding(world, self)) return;
   const tick = world.tick; let sp = a.bb.num("tameFoodSp", 0);
   if (tick - a.bb.num("tameFoodScanAt", -1e9) >= B.scanEveryTicks) {
-    a.bb.set("tameFoodScanAt", tick); const e = pickTameTarget(world, self, a, hp, false);
+    a.bb.set("tameFoodScanAt", tick); const e = pickTameTarget(world, self, a, hp, false, preferredMount(playerIdOf(world, self)).species);
     sp = e >= 0 ? mountSpeciesOfAnimal(animalDefs()[world.getField(e as Entity, Animal, "kind") ?? -1]?.key) : 0; a.bb.set("tameFoodSp", sp);
   }
   if (sp) foodPass(world, self, view, a, sp, "tame");
