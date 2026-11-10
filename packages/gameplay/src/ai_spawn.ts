@@ -6,6 +6,10 @@
  *    player (and starter point), a small `nearPlayerShare` allowed closer (never on screen); claims, water, decks skipped.
  *  - `aiRespawnPoint`: bed, then home (host hook: the AI memory base), then a distributed point. Workers and clan members
  *    keep the ADR-153 rule (installBedRespawn chains this in).
+ * ADR-326: the installed points are also the extra safe-radius centres (spawn_points.ts) — the Task 33
+ * 20-tile protection (no aggressive spawns inside, no acquire/engage of survivors inside, hordes exempt)
+ * covers the world-wide points too. No new knob: the radius is the shared SAFE_SPAWN_RADIUS, so the two
+ * sets can never drift apart.
  */
 import { Permissions, PlayerId, Transform, defineResource, type Entity, type World } from "@engine/core";
 import { CHUNK_SIZE, type GeneratedChunk } from "@engine/world";
@@ -15,7 +19,7 @@ import { ClanStatus, Dead, Survival, Worker } from "./components.js";
 import { gameplayDefs } from "./config.js";
 import { populationTile } from "./population.js";
 import { isAiHuman } from "./skills/xp.js";
-import { spawnPoints, type SpawnPointXY } from "./spawn_points.js";
+import { spawnPoints, setExtraSafeSpawnPoints, type SpawnPointXY } from "./spawn_points.js";
 import { structures } from "./building/structure.js";
 
 export const AI_SPAWN = raw as unknown as {
@@ -63,8 +67,15 @@ export function computeAiSpawnPoints(gen: GenLike, seed: number, starters: reado
 
 const AiSpawnRes = defineResource<{ points?: AiSpawnPoint[]; lazy?: () => AiSpawnPoint[]; home?: ((e: Entity) => SpawnPointXY | undefined) | undefined; n: number }>("gameplay.AiSpawn");
 const st = (w: World) => { let s = w.getResource(AiSpawnRes); if (!s) { s = { n: 0 }; w.setResource(AiSpawnRes, s); } return s; };
-/** Install the points (or a lazy builder, run on the first spawn so server start stays fast). */
-export function setAiSpawnPoints(world: World, pts: readonly AiSpawnPoint[] | (() => AiSpawnPoint[])): void { const s = st(world); if (typeof pts === "function") { s.lazy = pts; delete s.points; } else { s.points = pts.map((p) => ({ ...p })); delete s.lazy; } }
+/** Install the points (or a lazy builder, run on the first spawn so server start stays fast). ADR-326: the
+ * points are also the extra safe-radius centres in spawn_points.ts, so the Task 33 protection covers
+ * them — eagerly here, or lazily through the same builder (a lazy set is protected from the first spawn
+ * check, not only after the first bot spawns). */
+export function setAiSpawnPoints(world: World, pts: readonly AiSpawnPoint[] | (() => AiSpawnPoint[])): void {
+  const s = st(world);
+  if (typeof pts === "function") { s.lazy = pts; delete s.points; setExtraSafeSpawnPoints(world, () => aiSpawnPoints(world)); }
+  else { s.points = pts.map((p) => ({ ...p })); delete s.lazy; setExtraSafeSpawnPoints(world, s.points); }
+}
 /** AI spawn points: installed / lazily built, else the player spawn points. */
 export function aiSpawnPoints(world: World): AiSpawnPoint[] {
   const s = st(world); if (!s.points && s.lazy) { s.points = s.lazy(); delete s.lazy; }
@@ -113,9 +124,11 @@ export function pickAiSpawnPoint(world: World, key: string, salt = 0, o: { human
   return { x: p.x, y: p.y, index, near };
 }
 /** AI human respawn after the bed: home (remembered base) when homeFirst, else a distributed point. Hired workers and clan
- *  members return undefined (the caller keeps their ADR-153 rule). */
+ *  members return undefined (the caller keeps their ADR-153 rule). A Worker record with owner 0 is for hire, not hired
+ *  (recruitmentSystem gives every AI human one), so only a non-zero owner counts as hired here. */
 export function aiRespawnPoint(world: World, e: Entity): SpawnPointXY | undefined {
-  if ((world.isRegistered(Worker) && world.has(e, Worker)) || (world.isRegistered(ClanStatus) && world.has(e, ClanStatus) && (world.getField(e, ClanStatus, "clan") ?? 0) !== 0)) return undefined;
+  const hired = world.isRegistered(Worker) && world.has(e, Worker) && (world.getField(e, Worker, "owner") ?? 0) !== 0;
+  if (hired || (world.isRegistered(ClanStatus) && world.has(e, ClanStatus) && (world.getField(e, ClanStatus, "clan") ?? 0) !== 0)) return undefined;
   const s = st(world); const t = world.get(e, Transform);
   if (AI_SPAWN.respawn.homeFirst) { const h = s.home?.(e); if (h && (!t || Math.hypot(h.x - t.x, h.y - t.y) <= AI_SPAWN.respawn.homeMaxDist) && !blocked(world, h.x, h.y)) return h; }
   const p = pickAiSpawnPoint(world, "respawn", (s.n++) * 7919 + e, { exclude: e }); return { x: p.x, y: p.y };

@@ -146,12 +146,17 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
   // ADR-252: the planner owns needs / hand crafts / base pieces (needs = leaves of the first unmet goal)
   bindAgentWorld(a, world);
   { const pn = fillPlanSensors(world, self, view, a, defs, slots); if (pn) { needs.clear(); for (const x of pn) needs.add(x); if (view.food === undefined && view.bs?.stations.has(1)) for (const id of ix.foods) needs.add(id); if (needs.size) view.needs = [...needs]; else delete view.needs; } }
-  // Owner earthwork leaves must be installed BEFORE gathering is selected, not one sensor later.
-  if (world.getField(self, Worker, "owner") && world.getField(self, Worker, "job") === WorkerJob.Maintain) fillHireSensors(world, self, view, a);
+  // ADR-327: hire sensors (and an idle hired worker's saddle plan + leaves) must be installed BEFORE
+  // gathering is selected, not one sensor later — the Maintain earthwork case this line originally served.
+  if (world.getField(self, Worker, "owner")) fillHireSensors(world, self, view, a);
   // ADR-259: employment replaces the personal building ladder, never survival food needs.
   const worker = world.get(self, Worker); const selected = Array.from(world.getArray(self, WorkerOrder, "selections") ?? []).filter(Boolean);
   const hungry = view.food === undefined && (world.getField(self, Survival, "hunger") ?? 100) < 55;
   let jobItems: Set<number> | undefined;
+  // ADR-327: leaves / hunt of the active saddle plan (built by the fillHireSensors call above, on the
+  // employer's base) — the gather pick may serve them like job items when the worker is idle.
+  const sgGoal = a.bb.get<{ key: string } | null>("saddleGoal");
+  const saddleLeaves = new Set(view.plan && sgGoal && view.plan.goal === sgGoal.key ? [...view.plan.leaves, ...view.plan.hunt] : []);
   if (worker?.owner) {
     needs.clear();
     if (worker.job === WorkerJob.Gather && selected.length) jobItems = new Set(selected);
@@ -160,6 +165,7 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
     }
     if (worker.job === WorkerJob.Maintain && view.plan) jobItems = new Set(view.plan.leaves);
     if (jobItems) for (const id of jobItems) needs.add(id);
+    if (sgGoal && view.plan?.goal === sgGoal.key) for (const id of saddleLeaves) { needs.add(id); (jobItems ??= new Set()).add(id); }
     if (hungry) for (const id of ix.foods) needs.add(id);
     delete view.gatherNode;
   }
@@ -182,7 +188,7 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
     const foodNode = hungry && def.yields.some((y) => ix.foods.includes(y.item));
     if (worker?.owner) {
       if (jobItems && !def.yields.some((y, i) => jobItems.has(y.item) && (!bare || i === 0)) && !foodNode) continue;
-      if (worker.job !== WorkerJob.Gather && worker.job !== WorkerJob.Craft && !(worker.job === WorkerJob.Maintain && view.plan) && !foodNode) continue;
+      if (worker.job !== WorkerJob.Gather && worker.job !== WorkerJob.Craft && !(worker.job === WorkerJob.Maintain && view.plan) && !foodNode && !def.yields.some((y) => saddleLeaves.has(y.item))) continue; // ADR-327: a saddle leaf is gatherable even for Defend / Farm / Follow jobs
     }
     const wanted = def.yields.some((y) => needs.has(y.item));
     if (!wanted && needs.size && def.yields[0] && have(def.yields[0].item) >= 8) continue; // stocked up: explore for what the goal needs

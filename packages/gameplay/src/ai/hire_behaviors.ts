@@ -24,7 +24,8 @@ import { planTerrainBase } from "./terrain_base.js";
  */
 import { Transform, evalCurve, type AgentContext, type AgentOutput, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
-import { BuildPiece, Crop, Dead, ResourceNode, Worker, WorkerJob, WorkerOrder, Worn, Zombie } from "../components.js";
+import { BuildPiece, Crop, Dead, Health, ResourceNode, Survival, Worker, WorkerJob, WorkerOrder, Worn, Zombie } from "../components.js";
+import { MOUNT_BOTS } from "../mount_defs.js";
 import { GameplayConfig } from "../config.js";
 import { countItem, exchangeItems, readSlots } from "../inventory.js";
 import { pieceCost, tribeOf } from "../building/place.js";
@@ -93,6 +94,8 @@ export function hireCraftPick(world: World, self: Entity, defs: GameDefs): numbe
  * Hired-worker sensors. Runs after fillGoalSensors, so it overrides what the planner computed for the bot's own
  * base: home/base/bs become the owner's, the plan is dropped, and surplus is recomputed against the owner's
  * storage. A bot that is not hired (owner 0) is left exactly as the planner left it.
+ * ADR-327: the one exception to dropping the plan is an idle hired worker's saddle-material chain (see the
+ * block at the end of this function): its plan is built here, on the employer's base scan.
  */
 /** Task 28 (was the hired-Farm sensor; now shared): harvest / water / plant / till around `anchor`. Returns
  * undefined when there is nothing to do. Unhired bots garden their own base with the same sensor. */
@@ -133,6 +136,42 @@ export function computeFarmSensor(world: World, self: Entity, defs: GameDefs, an
   }
   if (harvest || water || soil || tillTarget) return { ...(harvest ? { harvest } : {}), ...(water ?? soil ? { tend: water ?? soil! } : {}), ...(tillTarget ? { till: tillTarget } : {}) };
   return undefined;
+}
+
+/** ADR-327: pending employer job work for a hired worker, from the hire sensors just set. `saddleLeaves` =
+ *  the leaves / hunt of the saddle plan being considered: a gather node wanted only for those is the saddle
+ *  chain itself, not job work. A Follow worker always has pending work (its duty is proximity: any saddle
+ *  trip would abandon the owner), so it never runs the chain. `view.plan` here is a Maintain shelter / earth
+ *  plan or nothing — a saddle plan never sits there, it is built after this check. */
+function hireWorkPending(world: World, self: Entity, view: AgentWorldView, defs: GameDefs, saddleLeaves?: ReadonlySet<number>): boolean {
+  const job = view.hire?.job;
+  if (job === WorkerJob.Follow) return true;
+  if (view.defend !== undefined || view.farm !== undefined || view.repair !== undefined) return true;
+  if (view.craftRecipe !== undefined || view.hire?.supply !== undefined) return true;
+  const p = view.plan;
+  if (p && (p.step !== undefined || p.leaves.length > 0 || p.hunt.length > 0)) return true;
+  const gn = view.gatherNode;
+  if (gn?.wanted && (job === WorkerJob.Gather || job === WorkerJob.Craft)) {
+    const kind = world.getField(gn.id as Entity, ResourceNode, "kind");
+    const yields = kind === undefined ? [] : (defs.resources.get(kind)?.yields.map((y) => y.item) ?? []);
+    if (yields.some((item) => !(saddleLeaves?.has(item) ?? false))) return true; // yields a job / food item (or an unknown node): job work
+  }
+  return false;
+}
+/** ADR-327: survival needs met for the saddle chain — the same danger thresholds ADR-323 abandons on
+ *  (mount_behaviors needsLow: hp < minHp, hunger / thirst < 30, zombie within safeTiles). Kept as a twin
+ *  here because hire_behaviors cannot import mount_behaviors (import cycle via autonomy). */
+function hireSaddleNeedsMet(world: World, self: Entity, agent: Agent): boolean {
+  const hp = world.get(self, Health); const frac = hp ? hp.hp / Math.max(1, hp.max) : 1;
+  if (frac < MOUNT_BOTS.minHp) return false;
+  const sv = world.get(self, Survival); if (sv && (sv.hunger < 30 || sv.thirst < 30)) return false;
+  const t = world.get(self, Transform); if (!t) return false;
+  const z = agent.memory.nearest("zombie", t.x, t.y, 0.3);
+  return !(z && Math.hypot(t.x - z.x, t.y - z.y) < MOUNT_BOTS.safeTiles);
+}
+/** ADR-327: may this hired worker run the saddle chain right now (low priority: no job work, needs met)? */
+function hireSaddleIdle(world: World, self: Entity, view: AgentWorldView, agent: Agent, defs: GameDefs, saddleLeaves?: ReadonlySet<number>): boolean {
+  return !hireWorkPending(world, self, view, defs, saddleLeaves) && hireSaddleNeedsMet(world, self, agent);
 }
 
 export function fillHireSensors(world: World, self: Entity, view: AgentWorldView, agent?: Agent): void {
@@ -245,6 +284,26 @@ export function fillHireSensors(world: World, self: Entity, view: AgentWorldView
           if (missing > 0 && stored > 0) { view.hire.supply = { item: g.item, count: Math.min(missing, stored) }; break; }
         }
       }
+    }
+  }
+  // ADR-327: the saddle-material chain for an idle hired worker (LOW priority: only when hireSaddleIdle
+  // says no job work is pending and needs are met). The plan is built here, on the EMPLOYER's base scan
+  // (view.base / view.bs were re-anchored above), so withdraw / craft / gather all read the employer's
+  // stations and storage — the planner never sees the worker's own base, and storage access still goes
+  // through mayTakeFromStorage (own / employer / clan only). view.hire.idle is the flag saddleGoalPass
+  // (mount_behaviors, which runs after this in buildAgentView) reads when picking a new tier.
+  if (agent) {
+    const sg = agent.bb.get<{ key: string } | null>("saddleGoal");
+    let saddlePlan: ReturnType<typeof makePlan> | undefined;
+    if (sg && view.base && view.bs) {
+      saddlePlan = makePlan({ world, self, defs, base: view.base, bs: view.bs, fails: aiMemoryOf(agent).fails, priority: [{ key: sg.key, count: 1 }], onlyPriority: true, maxDepth: MOUNT_BOTS.planMaxDepth });
+    }
+    const idle = hireSaddleIdle(world, self, view, agent, defs, saddlePlan ? new Set([...saddlePlan.leaves, ...saddlePlan.hunt]) : undefined);
+    view.hire.idle = idle;
+    if (idle && saddlePlan && saddlePlan.goal !== "idle") {
+      view.plan = saddlePlan; view.needs = [...saddlePlan.leaves, ...saddlePlan.hunt];
+      const step = saddlePlan.step;
+      if (step?.k === "craft" && step.station === StationKind.None) { view.craftRecipe = step.recipe; view.craftCount = step.count; view.craftTicks = step.ticks; }
     }
   }
 }

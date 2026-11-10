@@ -130,7 +130,7 @@ describe("Task 22: AI-human recruitment", () => {
     const { w, p, bot } = setup();
     giveWanted(w, p, bot, 1); expect(G.hireWorker(w, p, bot)).toBe(G.WorkerFail.None);
     const v = agentView(w, bot);
-    expect(v.world.hire).toEqual({ job: G.WorkerJob.Gather, owner: 7, ax: 0, ay: 0 });
+    expect(v.world.hire).toEqual({ job: G.WorkerJob.Gather, owner: 7, ax: 0, ay: 0, idle: true }); // ADR-327: idle (no job work, needs met) — the saddle chain may run
     expect(v.world.home).toEqual({ x: 0, y: 0 });
     expect(v.world.plan).toBeUndefined();
     expect(v.world.tripWanted).toBeUndefined();

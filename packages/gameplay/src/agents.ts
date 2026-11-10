@@ -38,7 +38,10 @@ export interface AgentWorldView extends AgentSensors, GoalSensors, StanceSensors
   /** ADR-113: best affordable skill node for this personality (undefined = no points / nothing affordable). */
   skillPick?: number;
   /** Task 22: hired-worker sensors (fillHireSensors; absent for unhired bots and humans). */
-  hire?: { job: number; owner: number; ax: number; ay: number; supply?: { item: number; count: number } };
+  hire?: { job: number; owner: number; ax: number; ay: number; supply?: { item: number; count: number };
+    /** ADR-327: no pending employer job work and survival needs met — the hired worker may run the
+     *  saddle-material chain (fillHireSensors sets this; saddleGoalPass reads it). Absent = not idle. */
+    idle?: boolean };
   /** Task 25: dye this (hair / worn / held) — set by fillAgentSensors when the bot holds a dye, a paint brush in its
    *  hotbar, and a dye target; instantChores turns it into a `dye:<kind>:<slot>:<palette>:<index>` command. */
   dye?: { kind: number; slot: number; palette: number; index: number };
@@ -99,7 +102,7 @@ export function buildAgentView(world: World, self: Entity, a: Agent, home: { x: 
   }
   const tod = timeOfDay(world);
   const view: AgentWorldView = { seen, home, playerName }; fillAgentSensors(world, self, view, (sv?.hunger ?? 100) < 50); fillPartySensors(world, self, view); fillClanSensors(world, self, view); if ((treesOf(world, self) ?? []).some((t) => t.points > 0)) { // ADR-221: per-tree points since ADR-209 (global points is always 0)
-    const p = pickSkillNode(world, self, a.identity.traits); if (p !== undefined) view.skillPick = p; } fillVehicleSensors(world, self, view); fillStanceSensors(world, self, view); fillGoalSensors(world, self, view, a); fillMountSensors(world, self, view, a); fillHireSensors(world, self, view, a); fillTravelSensors(world, self, view, a); observeSocialMemory(world, self, a);
+    const p = pickSkillNode(world, self, a.identity.traits); if (p !== undefined) view.skillPick = p; } fillVehicleSensors(world, self, view); fillStanceSensors(world, self, view); fillGoalSensors(world, self, view, a); fillHireSensors(world, self, view, a); fillMountSensors(world, self, view, a); fillTravelSensors(world, self, view, a); observeSocialMemory(world, self, a); // ADR-327: hire before mount — the saddle gate reads the hire sensors (idle flag) and the employer's base scan, both set by fillHireSensors
   return {
     self: { x: t.x, y: t.y, facing, hp: hp ? hp.hp / Math.max(1, hp.max) : 1, hunger: (sv?.hunger ?? 100) / 100, thirst: (sv?.thirst ?? 100) / 100, stamina: sv ? sv.stamina / Math.max(1, sv.maxStamina) : 1, tick: world.tick, dayT: sunFractionOf(tod), phase: currentPhaseKey(world) },
     world: view,

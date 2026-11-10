@@ -219,6 +219,9 @@ function foodSensors(world: World, self: Entity, view: AgentWorldView, a: Agent,
 }
 
 // ---- ADR-323: saddle material chain (the planner backward-chains it; this picks the tier and keeps it honest) -------
+// ADR-327: hired workers pick a tier on the same terms, but only when fillHireSensors flagged them idle
+// (hire.idle: no pending employer job work, needs met). The goal-maintenance below (timeout -> fall back
+// a tier, danger / low needs -> abandon) already applies to hired goals unchanged.
 const needsLow = (world: World, self: Entity, a: Agent, hp: number): boolean => {
   const sv = world.get(self, Survival); const t = world.get(self, Transform)!; const z = a.memory.nearest("zombie", t.x, t.y, 0.3);
   return hp < B.minHp || (!!sv && (sv.hunger < 30 || sv.thirst < 30)) || (!!z && dist(t.x, t.y, z.x, z.y) < B.safeTiles);
@@ -249,7 +252,7 @@ function saddleGoalPass(world: World, self: Entity, view: AgentWorldView, a: Age
     }
   }
   if (!g && view.base && !view.saddleUp && tick >= a.bb.num("saddleRetryAt", -1e9) && tick - a.bb.num("saddleGoalScanAt", -1e9) >= B.saddleScanEveryTicks && !needsLow(world, self, a, hp)
-    && !(world.isRegistered(Worker) && world.getField(self, Worker, "owner"))) { // a hired worker works its job (the employer saddles)
+    && !(world.isRegistered(Worker) && world.getField(self, Worker, "owner") && view.hire?.idle !== true)) { // ADR-327: a hired worker runs the chain only when idle (fillHireSensors sets hire.idle: no pending job work, needs met — it runs before this in buildAgentView, on the employer's base scan); Follow is never idle
     a.bb.set("saddleGoalScanAt", tick);
     for (const sd of [...SADDLES].sort((x, y) => y.tier - x.tier)) {
       if (sd.tier <= m.saddle) break; if ((ban[sd.tier] ?? 0) > tick) continue;

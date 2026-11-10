@@ -17,6 +17,26 @@ export const CROWD_RADIUS = 24;
  * AI humans can get started without constantly dying. Larger than the legacy zombie spawner's 16-tile
  * minimum spawn distance, so a fresh arrival is never in immediate danger. */
 export const SAFE_SPAWN_RADIUS = 20;
+/** ADR-326: extra safe-radius centres beyond the installed world spawn points — the ADR-325 world-wide AI
+ * spawn points, synced in by ai_spawn.ts when they are installed or lazily materialised. Same radius, same
+ * rules (no aggressive spawns inside; zombies / aggressive animals do not acquire or engage survivors
+ * inside; horde zombies exempt): one radius, one predicate, every enforcement site (legacy zombie
+ * spawner, zombie acquire, population spawn gate, animal engage) reads inSpawnSafeRadius. The resource
+ * lives here, not in ai_spawn.ts, because that module imports this one — a resource defined there would
+ * need a second defineResource key here, and resource keys are object identity, so it would never match. */
+const ExtraSafePointsRes = defineResource<{ points: SpawnPointXY[]; lazy?: (() => SpawnPointXY[]) | undefined }>("gameplay.ExtraSafeSpawnPoints");
+/** Install extra safe-radius centres (ADR-326), eagerly or as a lazy builder run on first read. */
+export function setExtraSafeSpawnPoints(world: World, points: readonly SpawnPointXY[] | (() => SpawnPointXY[])): void {
+  if (typeof points === "function") world.setResource(ExtraSafePointsRes, { points: [], lazy: points });
+  else world.setResource(ExtraSafePointsRes, { points: points.map((p) => ({ x: p.x, y: p.y })) });
+}
+/** The extra safe-radius centres, materialising a lazy provider on first read — so a lazily installed set
+ * is protected from the first spawn check, not only after the first bot spawns. */
+export function extraSafeSpawnPoints(world: World): SpawnPointXY[] | undefined {
+  const s = world.getResource(ExtraSafePointsRes); if (!s) return undefined;
+  if (s.lazy) { s.points = s.lazy().map((p) => ({ x: p.x, y: p.y })); delete s.lazy; }
+  return s.points.length ? s.points.map((p) => ({ ...p })) : undefined;
+}
 /** The authority-installed spawn points, if any (else undefined). The pvp.json fallback is NOT a configured
  * spawn location — a bare world that never installed points (tests, dev) has no safe radius, so zombie and
  * animal behaviour there is unchanged; live servers always install points (server game.ts). */
@@ -24,12 +44,13 @@ export function installedSpawnPoints(world: World): SpawnPointXY[] | undefined {
   const s = world.getResource(SpawnPointsRes);
   return s && s.points.length ? s.points.map((p) => ({ ...p })) : undefined;
 }
-/** True when (x, y) lies within SAFE_SPAWN_RADIUS of any installed world spawn point. */
+/** True when (x, y) lies within SAFE_SPAWN_RADIUS of any installed world spawn point, or of any ADR-326
+ * extra safe centre (the ADR-325 world-wide AI spawn points). */
 export function inSpawnSafeRadius(world: World, x: number, y: number): boolean {
-  const pts = installedSpawnPoints(world); if (!pts) return false;
   const r2 = SAFE_SPAWN_RADIUS * SAFE_SPAWN_RADIUS;
-  for (const p of pts) { const dx = x - p.x, dy = y - p.y; if (dx * dx + dy * dy <= r2) return true; }
-  return false;
+  const within = (pts: readonly SpawnPointXY[]): boolean => { for (const p of pts) { const dx = x - p.x, dy = y - p.y; if (dx * dx + dy * dy <= r2) return true; } return false; };
+  const pts = installedSpawnPoints(world); if (pts && within(pts)) return true;
+  const extra = extraSafeSpawnPoints(world); return !!extra && within(extra);
 }
 /** Default jitter radius around the chosen point (tiles; spawn patches are clear for >= 2 tiles). */
 export const SPAWN_JITTER = 2;

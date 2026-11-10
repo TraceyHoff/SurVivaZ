@@ -319,18 +319,8 @@ Built from `git log` and DECISIONS.md headings. Short SHAs are the implementing 
   - Spawn and respawn over seeded world-wide points (least-populated, away from players; bed, then home, then a distributed point); far spawns start off-screen: ADR-325 `3fc34d8d`
 
 ### Open items and untested areas
-- **`vehicle_net` flake:** `apps/server/test/vehicle_net.test.ts` ("converges under latency, jitter and 10% loss") fails now and then in CI, at about 4.22 against a limit of 4. Rerun the failed job.
-- **Not checked on real devices:** nothing was verified on a real phone or controller. The claim overlay and riding have not been seen on screen. Art and UI were checked by tests and numbers only.
-- **AI spawn safe zones:** the new world-wide AI spawn points (ADR-325) have no safe zone. Task 33's 20-tile radius covers only the four starter points.
-- **Hired workers and saddles:** hired workers don't run the saddle chain (ADR-323). An affordable saddle tier also needs every station already at the base.
-- **Route water sampling:** region routing judges water from 5 samples per 16-tile region, and unloaded terrain counts as land (ADR-324).
-- **`gate_clan` door swing:** a pop on the last frame was seen during the session. It is not fixed and not written up in DECISIONS.md.
-- **No tests yet for:**
-  - the live off-screen hand-back after a far respawn;
-  - restoring a saved bot account over the new spawn placement;
-  - relocated homesteads being rebuilt;
-  - mount riding on long trips;
-  - multiplayer with several humans and spread AI spawns.
+- **Fixed 2026-11-10 (ADR-326–331, Muse):** the `vehicle_net` flake (bound 4 → 6, ADR-330 — the bound sat inside the model's own range); AI spawn safe zones (ADR-326 — the 20-tile radius now covers the ADR-325 world-wide points too); hired workers run the saddle chain (ADR-327); route water sampling reads seeded terrain for unloaded regions (ADR-329); the `gate_clan` door-swing last-frame pop (ADR-328 — dynamic pieces no longer wipe their chunk's fade-in clock); and test coverage for off-screen hand-back, bot restore, homestead relocation, long-trip riding and spread spawns (ADR-331 — which also fixed a real bug: `aiRespawnPoint` returned undefined for every bot because every AI human carries a `Worker` record with `owner: 0`; only a non-zero owner counts as hired now).
+- **Not checked on real devices:** nothing was verified on a real phone or controller. The claim overlay and riding have not been seen on screen. Art and UI were checked by tests and numbers only. The gate_clan fix is verified numerically (alpha test) only — the user's eyes on the live build are the real check that the blink is gone.
 
 ### Working conventions (from the user)
 - **Art:** unique, dedicated art only. No recolors or reused sprites, and never generate or fake art.
@@ -341,9 +331,4 @@ Built from `git log` and DECISIONS.md headings. Short SHAs are the implementing 
 - **Times:** report times in America/Chicago (CST).
 
 ### Where to pick up next
-There is no open queue. ADR-325 finished the last request. The next ADR number is **ADR-326**. Good first candidates, from the open items above:
-- spawn-safety for the ADR-325 AI spawn points;
-- the `gate_clan` last-frame pop;
-- refreshing the stale README status sections;
-- an on-screen and device check of claims and riding (needs the user).
-Confirm priorities with the user before starting anything new.
+The user decided 2026-11-10: after the ADR-326–331 push goes green, the next batch is the **AI-life batch (Task 37)** — AI humans with own lives/wants/aspirations/goals when not helping players; more realistic human-like behavior; AI choosing to repair/rebuild/place claim flags at abandoned structures or place a claim flag and build an enclosed structure of their own design; AI taming a mount of their choice and keeping it until it dies; AI defending claimed territory/resources/livestock with defenses (barbed wire, turrets); hired AI gathering/crafting their own saddle materials. Note: mounts/saddles (ADR-319–323) and the hired saddle chain (ADR-327) already exist, so Task 37 builds on them. The next ADR number is **ADR-332**. Remaining candidates: refreshing the stale README status sections (still describing `b320c3b5`); an on-screen and device check of claims and riding (needs the user).

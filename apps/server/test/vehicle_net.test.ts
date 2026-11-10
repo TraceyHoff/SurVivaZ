@@ -62,8 +62,14 @@ describe("vehicle prediction + reconciliation", () => {
     A.io.buttons = 0; s.tick(300); expect(s.w.getField(car.v, Vehicle, "speed")).toBe(0); // coast to a stop
     const a = s.pos(A.c.world, cv), b = s.pos(s.w, car.v);
     expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeLessThan(0.05);
-    // ahead of the server by ~RTT at speed, never wildly off
-    expect(maxErr).toBeLessThan(4);
+    // ahead of the server by ~RTT at speed, never wildly off. ADR-330: the bound is the lead in ticks x one tick
+    // of travel at top speed (car_offroad 13 tiles/s x boost 1.3 = 16.9 tiles/s, so 0.845 tiles/tick). The
+    // lead is RTT-max (80+20 ms each way = 200 ms = 4 ticks = 3.38 tiles) plus the server input queue running
+    // 1-3 ticks deeper after a loss burst / late snapshots (one input per tick, no catch-up, ADR-191); the
+    // observed worst case is 5 ticks = 4.225 tiles, so 4 was inside the model's own range. 6 tiles covers
+    // ~7 ticks of lead; a real prediction failure would be far larger and would also trip the < 0.05 final
+    // convergence and snaps == 0 assertions above.
+    expect(maxErr).toBeLessThan(6);
     expect(A.c.stats.snaps).toBe(0);
   });
   it("a large server correction snaps instead of sliding", async () => {

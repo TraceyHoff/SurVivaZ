@@ -484,6 +484,9 @@ export class SpriteBatch {
   tierFallbacks = 0; crackOverlays = 0;
   private statics = new Map<string, StaticChunk>();
   private staticScratch = new Map<string, number[]>();
+  /** ADR-328: chunk keys with a piece drawn dynamically this frame (swinging door, faded occluder), cleared per
+   * gather — a chunk emptied only because its pieces went dynamic must not be deleted (see the rebuild loop). */
+  private dynamicChunkKeys = new Set<string>();
   // per-frame scratch reused across frames (no allocations in the gather/sort hot paths)
   private pieceChecks = new Map<string, number>(); private pieceTmp: number[] = [];
   private pieceParts: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean }[] = [];
@@ -1117,7 +1120,7 @@ export class SpriteBatch {
     this.coverNext.clear(); this.tierFallbacks = 0; this.streamFallbacks = 0; this.crackOverlays = 0;
     const focusFront = hasFocus ? (() => { const pr = viewRect(Math.floor(fwx), Math.floor(fwy), 1, 1, vq); return pr.x + pr.y + pr.w + pr.h; })() : 0;
     const scratch = this.staticScratch; for (const v of scratch.values()) v.length = 0;
-    const checksums = this.pieceChecks; checksums.clear(); let lastCx = NaN, lastCy = NaN, lastVis = true; this.culledChunks = 0;
+    const checksums = this.pieceChecks; checksums.clear(); this.dynamicChunkKeys.clear(); let lastCx = NaN, lastCy = NaN, lastVis = true; this.culledChunks = 0;
     // ADR-197: deck neighbour map (every non-ghost deck, not chunk-culled: a visible piece's neighbour may be off screen)
     const decks = this.decks; decks.clear();
     for (let k = 0; k < bp.size; k++) {
@@ -1248,6 +1251,9 @@ export class SpriteBatch {
           o[27] = occT; for (let q = 0; q < INSTANCE_FLOATS; q++) tmp.push(o[q]!); this.crackOverlays++;
         }
         if (dynamic) {
+          // ADR-328: remember the chunk even when the piece is off screen (below): it is empty of static
+          // pieces only while this piece is dynamic, and deleting it would reset its fade-in clock.
+          this.dynamicChunkKeys.add(this.chunkKeyOf(Math.floor(ax / CHUNK_SIZE), Math.floor(ay / CHUNK_SIZE)));
           if (sx < rect.x0 - 512 || sx > rect.x1 + 512 || sy < rect.y0 - 256 || sy > rect.y1 + 1024) continue;
           for (let j = 0; j < tmp.length; j += INSTANCE_FLOATS) this.pushOcc(tmp, j, occT, cx.style.occlusion.mode);
         } else {
@@ -1265,7 +1271,19 @@ export class SpriteBatch {
     for (const [ck, list] of scratch) {
       const sum = (checksums.get(ck) ?? 0) ^ list.length;
       let sc = this.statics.get(ck);
-      if (list.length === 0) { if (sc) { this.gl.deleteBuffer(sc.vbo); this.gl.deleteVertexArray(sc.vao); this.statics.delete(ck); } scratch.delete(ck); continue; }
+      if (list.length === 0) {
+        if (sc && this.dynamicChunkKeys.has(ck)) {
+          // ADR-328: every static piece in this chunk is dynamic this frame (a swinging door, a faded
+          // occluder) — keep the chunk alive but empty instead of deleting it, so its fade-in clock
+          // (born) survives the swing and the piece does not blink back in on the swing's last frame.
+          // The key stays in scratch, so the chunk keeps its `seen` while the swing plays; a chunk
+          // emptied by demolition (no dynamic piece) is still dropped below.
+          if (sc.count !== 0) { sc.count = 0; sc.checksum = sum; sc.maxZ = 0; this.staticRebuilds++; }
+          sc.seen = this.frameNo;
+          continue;
+        }
+        if (sc) { this.gl.deleteBuffer(sc.vbo); this.gl.deleteVertexArray(sc.vao); this.statics.delete(ck); } scratch.delete(ck); continue;
+      }
       if (!sc || sc.checksum !== sum) {
         const gl = this.gl;
         if (!sc) { const vbo = gl.createBuffer()!; const [cxs, cys] = ck.split(",").map(Number) as [number, number]; sc = { vbo, vao: this.makeVao(vbo), count: 0, checksum: 0, cx: cxs, cy: cys, maxZ: 0, seen: 0, born: cx.now }; this.statics.set(ck, sc); }

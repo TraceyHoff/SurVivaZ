@@ -3969,3 +3969,184 @@ Tests:
 - packages/gameplay/test/adr325_ai_spawn.test.ts
 - apps/client/test/adr325_ai_spawn_live.test.ts
 - The ADR-202/203/252 fixtures pin aiSpawn "starters".
+
+## ADR-326: Safe spawn radius around world-wide AI spawn points (SurVivaZ)
+- Problem: Task 33 put a 20-tile safe radius (SAFE_SPAWN_RADIUS) around the four installed starter spawn points only — no aggressive spawns inside, zombies / aggressive animals do not acquire or engage survivors inside, horde zombies exempt. ADR-325 added world-wide AI spawn points (up to 40 Vogel-spiral points plus up to 12 beside abandoned sites), and those had no safe zone at all: an AI human spawning at a world point could land straight into zombies or a wolf pack.
+- Decision: the same 20-tile radius, same rules, extended to the ADR-325 points. No new knob: the radius is the shared SAFE_SPAWN_RADIUS in spawn_points.ts, not a second value in data/ai_spawn.json, so the two point sets can never drift apart (the JSON $comment records this).
+
+Mechanism (packages/gameplay/src/spawn_points.ts, packages/gameplay/src/ai_spawn.ts):
+- spawn_points.ts owns an "extra safe centres" resource (setExtraSafeSpawnPoints / extraSafeSpawnPoints). inSpawnSafeRadius now checks the installed starter points plus the extra centres.
+- ai_spawn.ts setAiSpawnPoints forwards its points into that resource — eagerly when installed eagerly, or lazily through the same builder when installed lazily. A lazy set is therefore protected from the first spawn check, not only after the first bot spawns (the builder runs once, on first read, and is cached).
+- The resource lives in spawn_points.ts rather than ai_spawn.ts because ai_spawn.ts imports spawn_points.ts: a resource key defined in ai_spawn.ts would need a second defineResource call here, and resource keys are object identity, so it would never match.
+- No enforcement site changed: the legacy zombie spawner, zombie acquire, the population spawn gate and animal engage all already read inSpawnSafeRadius, so they all pick up the AI points with no edits (zombies.ts, population.ts untouched).
+- Bare worlds are unchanged: with no points installed anywhere there is still no safe radius (Task 33 rule); AI points that fall back to the starters add nothing beyond the installed starter points.
+
+Tests:
+- packages/gameplay/test/adr326_ai_spawn_safety.test.ts (9 tests): the predicate covers world / site / starter-source AI points out to 20 tiles and nothing beyond, with no starter points installed; a lazy install is protected before any bot spawns and builds once; the legacy zombie spawner spawns around but never inside a world point; a zombie does not acquire a survivor inside; a horde zombie still chases inside (exempt); a wolf does not engage inside (with a no-AI-points control that does attack); the population spawner spawns nothing in a chunk fully covered by AI points (with a control that does spawn).
+- Neighbouring suites re-run green: adr325_ai_spawn, task33_craft_death_safe_water, animals, population, spawn_points, task35_seed_safe_zone, task35_water_resources (51 tests).
+
+## ADR-329: Route water sampling uses seeded terrain for unloaded regions (SurVivaZ)
+
+Context (ADR-324): regionCost sampled water through inWater, which reads the loaded TileMap: an unloaded chunk
+returns tile 0, and a world with no TerrainRes at all returns false, so both read as dry land. Region routes
+therefore planned straight across unloaded lakes and through unloaded regions as if they were cheap dry land, and
+only discovered the water when the chunk streamed in and the local nav had to cope.
+
+Decision (packages/gameplay/src/ai/travel.ts, no travel.json change):
+- Each region-cost sample resolves through regionSampleWater: loaded terrain wins (a TerrainRes with a loaded()
+  hook — terrainFromTileMap — is consulted first, so shovel edits and flowing water, which only touch loaded
+  ground per ADR-263, are honoured), and unloaded terrain is read from the seeded ProceduralGenerator instead of
+  assumed land. A TerrainRes without a loaded() hook (test stubs, replicas) is treated as loaded, as before.
+- The generator is `new ProceduralGenerator({ seed: world.seed })` with the default bands — the same generator the
+  server builds its chunks from (apps/server/src/game.ts) — cached per world, so its tileAt is the generated tile
+  at any (tx, ty) whether or not the chunk is loaded. Water is the movement swimTiles set (data/movement.json
+  [1, 8]); worlds without a GameplayConfig fall back to that same set.
+- Nothing else changes: the 5 samples per 16-tile region, the 1 + waterCostMul x wet-share cost (Infinity when
+  all 5 are wet), the regionCostTtlTicks cache, the region-grid A* and the per-tick plan budget are untouched, so
+  routes stay deterministic (no rng: same seed -> same route) and budgeted. A re-plan after the TTL picks up a
+  chunk that has since loaded, with any edits in it.
+- Honest cut: the seeded lookup is the generated terrain, not player edits in unloaded (persisted) chunks — edits
+  can only be made on loaded ground, so an unloaded chunk has no edits a route could miss while it stays
+  unloaded; once it loads, the loaded path (and the TTL expiry) takes over.
+
+Tests: packages/gameplay/test/adr329_route_water.test.ts (a seeded all-water region costs Infinity with no chunk
+loaded; every unloaded region's cost matches the seeded terrain, never silently cheap dry land; a route across a
+seeded lake detours around the all-water region; loaded terrain wins over the seed in both directions; same seed
+-> same route and costs on fresh worlds). The ADR-324 off-screen test now measures coarse progress along the route
+instead of x displacement, because a detouring route advances the same 2.6 tiles/s along its legs while its x lags.
+
+## ADR-328: gate_clan door swing last-frame pop (SurVivaZ)
+
+**Context.** ADR-314 swings doors on the render clock (11 fps for `gate_clan`: swing1..4, then the piece's own open art). The swing step math is exact — steps change at 0 / 91 / 182 / 273 ms and the rest frame shows at 364 ms — and the frame geometry is identical across closed, swing1, swing4 and open (same 160x256 rect and anchor in every rotation), so the pop was not an off-by-one in frame indexing, an easing overshoot, or an art mismatch. What was seen instead, on the last frame of a `gate_clan` swing, was the gate blinking out and fading back in as open. The cause is one layer down, in the static chunk buffers (`SpriteBatch`, `packages/render/src/sprites.ts`): a swinging door is drawn dynamically, so it leaves its chunk's static list, and a newly created chunk fades in from alpha 0 over `chunkFadeIn` (0.35 s) from its `born` clock (`drawStatic`). A clan gate stands alone at a claim perimeter, so it is the piece most likely to be the only static piece in its 32x32 chunk; doors in walls share a chunk with other pieces and never hit this.
+
+**Root cause.** During the swing the gate's chunk has an empty scratch list, and the rebuild loop deleted every chunk with an empty list as demolished. The chunk (with its `born`) was therefore gone by the second swing frame. When the swing ended and the gate returned to the static path, the chunk was recreated with `born = now`, so `drawStatic` drew the open gate at alpha 0 on that frame and ramped it to 1 over 0.35 s — the last-frame pop. The same blink would hit any lone piece that goes dynamic and returns (a faded occluder, a lit fire going out), not only swinging doors.
+
+**Decision.** `SpriteBatch` now tracks, per gather, the chunk keys that had a piece drawn dynamically (`dynamicChunkKeys`, cleared each frame, recorded before the off-screen skip). In the rebuild loop, a chunk whose list is empty but whose key is dynamic is kept alive but empty (count 0, checksum updated, `maxZ` 0, `seen` refreshed, `born` preserved) instead of being deleted; its key stays in scratch, so it keeps its `seen` while the swing plays. No VBO re-upload is needed for the empty chunk — a count of 0 draws nothing, so the stale buffer contents are never visible. A chunk emptied by demolition (no dynamic piece) is still deleted in the same frame as before, and a genuinely new chunk still fades in from `born`. No change to swing timing, door art, the swing tracker, or the Canvas2D path (which has no static chunks and was never affected).
+
+**Validation.** New `apps/client/test/adr328_gate_clan_pop.test.ts` drives `SpriteBatch.prepare` + `drawStatic` with a mock GL that captures the `uAlphaMul` uniform, a lone `gate_clan` and a `DoorView` swing: it failed before the fix (alpha 0 on the frame the swing ends, opening and closing) and passes after, and also asserts the swing actually played (dynamic instances visible through swing4) and the gate returned to static. The harness itself is validated by the baseline frames (a brand-new chunk fades in from 0; a settled chunk draws at 1). `apps/client/test/adr314_doors.test.ts` 10/10 and the full `packages/render/test` suite 475/475 pass; typecheck with the pinned TypeScript 5.9.3 is clean for `packages/render` (the client typecheck shows only the pre-existing local better-sqlite3 gap in `packages/persist`).
+
+**Not changed.** Swing steps and timing, door art and frame geometry, the chunk fade-in for genuinely new chunks, demolition chunk deletion, and the Canvas2D renderer. Not verified visually — no GL in the VM; the numeric alpha test is the verification, and the user's eyes on the live build are the real check that the blink is gone.
+
+## ADR-330: vehicle_net convergence flake (SurVivaZ)
+
+**Test.** `apps/server/test/vehicle_net.test.ts`, "driver predicts its vehicle; converges to the server under latency, jitter and 10% loss" (ADR-102): a client drives a `car_offroad` at full boost for 80 ticks under `{ latencyMs: 80, jitterMs: 20, loss: 0.1 }` and asserts the client's predicted position never strays more than 4 tiles from the server's (`maxErr < 4`), then converges to < 0.05 with 0 snaps after coasting to a stop. CI failed it intermittently at ~4.22.
+
+**Reproduction.** Reproduced locally on the first run (4.224988912613346), and in 5 of 20 repeated runs of the single test pre-fix — every failure the bit-identical value 4.224988912613346, 15 passes. An instrumented copy of the test (temporary file, deleted after use) sampled the error per tick: maxErr takes only the values 2.535 / 3.38 / 4.225 across 14 runs — exactly 3 / 4 / 5 ticks of travel at top speed. The better-sqlite3 server-test load gap did NOT block this test locally: it loads and runs.
+
+**Diagnosis — two causes, neither a netcode bug.**
+1. The bound was inside the model's own range. One tick at top speed is `13 tiles/s x 1.3 boost x 0.05 s = 0.845` tiles. The client's steady-state lead is the round trip: `(80 + 0..20) ms` each way, so RTT 160–200 ms = 3.2–4 ticks; the measured plateau is exactly 3.38 tiles = 200 ms x 16.9 tiles/s. On top of that the server applies one input per tick with no catch-up (ADR-191), so a loss burst or late snapshots leave its input queue 1–3 ticks deeper — each extra tick adds 0.845 tiles. The observed worst case is 5 ticks = 4.225 tiles, above the limit of 4. Prediction/reconciliation itself is exact: the final convergence (< 0.05) and `snaps == 0` assertions passed in every trajectory, failing runs included — the client is correctly ahead by RTT + queueing, not diverging.
+2. The run-to-run flip is wall-clock chunk loading shifting the loopback RNG. `ChunkManager.update()` budgets loads by wall time (`performance.now()`, `maxLoadTimeMs: 2`, `apps/server/src/game.ts`), so which tick each chunk loads (and streams to the client via TileSync) varies with machine load. The `LoopbackNetwork` shares one seeded RNG across all links, so a one-message difference in per-tick traffic (observed: 54–57 messages sent before the drive; three distinct RNG states at drive start) re-rolls every later jitter/loss draw, and the lead lands on 3, 4, or 5 ticks. Two runs with the identical RNG state at drive start still diverged mid-drive (3.38 vs 4.225), because chunk streaming continues as the vehicle moves into new chunks. The chunk time budget is intentional production frame pacing and was not changed.
+
+**Fix (test only).** `expect(maxErr).toBeLessThan(4)` → `toBeLessThan(6)`, with the derivation in the test comment. 6 tiles is ~7.1 ticks of lead at top speed: RTT-max (4 ticks, 3.38 tiles) plus 3 ticks of loss/queue excursion, covering the observed 5-tick worst case (4.225) with 2 ticks of headroom. A real prediction failure would be far larger and would also trip the independent final-convergence (< 0.05) and `snaps == 0` assertions, so the test still guards what it claims to guard. No production code changed.
+
+**Validation.** Full `apps/server/test/vehicle_net.test.ts`: 9/9 pass. The fixed test repeated 10/10 pass (pre-fix it failed 5/20). Typecheck with the pinned TypeScript 5.9.3 for `apps/server`: 8 errors, all pre-existing local-environment gaps (missing `@types/ws`, missing `better-sqlite3` types) in files this change does not touch; zero errors in `vehicle_net.test.ts`.
+
+**Honest cuts.** The wall-clock chunk-budget nondeterminism remains, so the test's maxErr still varies run to run (2.535–4.225 observed); the bound absorbs it rather than removing it. The bound is set from the observed worst case plus the mechanism, not an exhaustive sweep: a pathological alignment (RTT-max plus a 4-tick excursion, ~6.76 tiles) could in principle exceed 6, but it was never observed in ~35 runs and would need a multi-packet loss burst at top speed.
+
+## ADR-327: Hired workers run the saddle-material chain (SurVivaZ)
+
+**Context.** ADR-323 left hired workers out of the saddle chain ("they work their job"): a hired worker never
+planned saddle materials, even though unhired AI did (liked-food fetch plus saddle-material planning with a
+tier pick, a depth cap, timeout fallback and danger abandon). A second part of the gap: an affordable saddle
+tier needs every station already at the base — for a hired worker, that base is the employer's, not its own.
+
+**Decision.** A hired worker runs the saddle chain as a LOW-priority goal, only when it has no pending job
+work and its survival needs are met, and it never abandons or delays employer job work for the chain:
+- **Idle gate** (`fillHireSensors`, `view.hire.idle`): no pending job work — no defend / farm / repair target,
+  no craft recipe or craft-supply fetch, no Maintain shelter / earth plan with a step or leaves, and no wanted
+  gather node for a Gather / Craft job (a node wanted only for saddle leaves is the chain itself, not job
+  work) — and needs met on the same danger thresholds ADR-323 abandons on (hp < `minHp`, hunger or thirst
+  < 30, zombie within `safeTiles`). A Follow worker is never idle: its duty is proximity, so any saddle trip
+  would abandon the owner.
+- **Employer's base:** `buildAgentView` now runs `fillHireSensors` before `fillMountSensors`, so the saddle
+  tier pick (`saddleGoalPass`) reads the hire sensors and the employer's base scan (`view.base` / `view.bs`
+  re-anchored by `fillHireSensors`) — stations must already stand at the employer's base, and the plan's
+  stock counts are the employer's storage. The saddle plan itself is built in `fillHireSensors` (on the
+  employer's base), because that function deletes the planner's own-base plan for hired workers; when the
+  worker is not idle, or the goal is unresolvable, no plan is left behind.
+- **Same rules as unhired bots:** storage access still goes through `mayTakeFromStorage` (own / employer /
+  clan storage only — a stranger's claimed box is never counted or withdrawn from); the timeout
+  (`saddlePlanTimeoutTicks` -> tier ban -> fall back a tier) and the danger / low-needs abandon
+  (`saddleAbandonsToFallback` abandons -> fall back) run on the existing `saddleGoalPass` paths unchanged.
+  Danger / low needs also drops the hired worker's saddle plan the same tick, because the idle gate in
+  `fillHireSensors` re-checks needs before building it.
+- **Gather leg:** the early `fillHireSensors` call in `computeGoalSensors` now runs for every hired worker
+  (it previously ran only for Maintain), so an idle worker's saddle leaves reach the gather pick like job
+  items (added to `needs` / `jobItems`, and the hired gather guard lets saddle-leaf nodes through for
+  Defend / Farm jobs — Follow never has a saddle plan, so the exception is vacuous there). No new knobs in
+  `data/mounts.json`, no new commands.
+
+**Validation.** New `packages/gameplay/test/adr327_hired_saddle_chain.test.ts` (12 tests): an idle hired
+worker with the employer's mount plans saddle materials from the employer's stations + storage and runs the
+chain end to end (withdraw hide -> craft rope / leather / thread / saddle -> equip); no stations at the
+employer's base means no goal; pending Craft work, a Defend zombie at the anchor, and Follow all block the
+chain; a stranger's claimed box is never counted (hide becomes a gather / hunt leaf instead) while the
+employer's box is withdrawn from; timeout falls back a tier; danger abandons the goal and the plan, retries
+later, and falls back after repeated abandons; determinism and the `planMaxDepth` cap. One existing
+assertion updated for the intentional sensor change: `task22_recruitment.test.ts` now expects `hire` to
+carry `idle: true` for an idle Gather worker. Full `packages/gameplay/test` suite 1564 passed / 3 skipped;
+typecheck with the pinned TypeScript 5.9.3 is clean for `packages/gameplay` (the client typecheck shows
+only the pre-existing local gaps — missing `peerjs` / `ws` / `better-sqlite3` types — in files this change
+does not touch).
+
+**Honest cuts.** Follow workers never run the chain (a deliberate call, not an oversight — see above). The
+gather leg only serves saddle leaves while the saddle plan is active; a hired worker whose job work appears
+mid-gather finishes the current think tick's walk before the job behaviour retakes over (the plan itself is
+dropped at once). Not verified on a live server with players or on a real phone — the end-to-end test drives
+the behaviours through the same commands a live worker would send, but no live playtest has watched a hired
+worker saddle its mount.
+
+## ADR-331: Test coverage for off-screen hand-back, bot restore, homestead relocation, long-trip riding and spread spawns (SurVivaZ)
+
+**Context.** Grok's ADR-324/325 handoff listed five areas as untested: the live off-screen hand-back after
+a far respawn; restoring a saved bot account over the new spawn placement; relocated homesteads being rebuilt;
+mount riding on long trips; multiplayer with several humans and spread AI spawns. This ADR adds the coverage
+only — no production behaviour was intended to change — and the live tests caught one real bug (below).
+
+**Tests.**
+- `packages/gameplay/test/adr331_open_items_coverage.test.ts` (8 tests):
+  - *Far respawn hand-back (gameplay half):* a bot that dies and respawns at a distributed point far from every
+    human steps off-screen along its route (offscreenPlan picks the goal, offscreenStep moves it), then hands back
+    when a human comes near — `spawnedOffscreen` clears, the same route object and leg continue in full sim, and
+    the bot walks it to the goal.
+  - *Saved bot restore:* a JSON-restored identity keeps its base, travel route/leg and off-screen flag; respawn
+    honours the restored home (bed -> home -> distributed point) and, with no restored home, lands on a
+    distributed point, never a starter.
+  - *Relocated homestead rebuild:* a free AI's relocate trip (picked every `relocateEvery` explorations) drops its
+    old base on arrival and bumps `stats.relocations`; the next sense picks a new site 5..9 tiles from the new home,
+    and the planner rebuilds the campfire -> basic storage box -> workbench ladder there (claim planted first, ADR-310).
+  - *Long-trip riding:* a bot with its own horse mounts at once (inside `mountReach`) and rides for the bulk of a
+    400-tile trip (`rode / samples > 0.8`), dismounting on arrival; a short trip does not mount (`longTripTiles`);
+    a riding horse is stopped and dismounted at a doorway edge (`dismountReason` "clearance", donkeys still fit).
+  - *Spread spawns:* with four humans spread across the world, 120 picks still spread over >= 90% of the eligible
+    world-wide points (high entropy, bounded pile-ups), stay >= `minPlayerDist` from every human (or >=
+    `onScreenTiles` for the low near share), never use a starter point except in the near share, and cover >= 6 of
+    8 sectors; deterministic for the same seed and human spread.
+  - *For-hire respawn regression (the bug below):* a Worker record with `owner: 0` still gets the distributed
+    respawn; only `owner != 0` (actually hired) keeps the ADR-153 nearest-starter rule.
+- `apps/client/test/adr331_open_items_coverage.test.ts` (2 live tests on the real local server):
+  - *Live hand-back after a far respawn:* a bot is killed, respawns far from the human (retrying a near-share pick),
+    starts off-screen (`spawnedOffscreen`, no chunk streaming); a human teleporting next to it hands it back
+    (flag clears, chunk streams again), and it keeps travelling in full sim (along-route progress / displacement;
+    strict route/leg continuity is the gameplay test's job — a live bot also gathers and may be out of stamina, so
+    the live tail waits for progress, not speed).
+  - *Live saved-account restore:* a bot's AiMemory base is saved, the server restarts on the same store, the
+    restored bot keeps its base, does not land on a starter point, and respawns at its remembered home.
+
+**Bug found by the live tests (fixed here, one line).** `aiRespawnPoint` (`packages/gameplay/src/ai_spawn.ts`)
+returned undefined for any bot carrying a Worker record, intending "hired workers keep the ADR-153 rule". But
+`recruitmentSystem` gives *every* AI human a Worker record with `owner: 0` (for hire, not hired), so on a live
+server no bot ever took the ADR-325 distributed respawn — every bot respawned at the nearest starter point. The
+live tests failed exactly there (respawn on top of the human; 809 tiles from the restored home). The guard now
+requires a non-zero owner, matching every other "hired" check in the codebase (`travelMode`, `fillHireSensors`,
+`mount_behaviors`), and the for-hire regression test pins it. No other site used the bare `has(e, Worker)` test.
+
+**Validation.** `packages/gameplay/test/adr331_open_items_coverage.test.ts` 8/8; `apps/client/test/adr331_open_items_coverage.test.ts`
+2/2 (twice); neighbours re-run green: adr324, adr325, adr326, adr327, adr325 live, task33 safe spawn, spawn_points,
+population, adr321, adr323, task22 recruitment, adr259 worker orders, adr252 (155 tests across those suites).
+Typecheck with the pinned TypeScript 5.9.3: `packages/gameplay` clean; `apps/client` shows only the pre-existing
+local gaps (missing `peerjs` / `@types/ws` / `better-sqlite3` types, `input_glyphs.json`), zero errors in the new files.
+
+**Honest cuts.** The live hand-back test waits for route progress rather than asserting speed: a live bot gathers
+en route and can be out of stamina, so its along-route advance varies run to run (chunk-load timing shifts the
+loopback RNG, as ADR-330 describes). Nothing was verified on a real phone.

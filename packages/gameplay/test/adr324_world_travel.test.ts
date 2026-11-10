@@ -20,6 +20,22 @@ type Ctx = AgentContext<G.AgentWorldView>;
 const ctxOf = (r: Rig): Ctx => { const v = G.buildAgentView(r.w, r.p, r.a, r.home)!; return { self: v.self, bb: r.a.bb, memory: r.a.memory, traits: r.a.identity.traits, rng: r.a.rng, agent: r.a, world: v.world }; };
 const out = (): AgentOutput => ({ ...idleOutput(), actions: [] as string[] });
 const pos = (r: Rig): { x: number; y: number } => r.w.get(r.p, Transform)!;
+/** Distance from `from` to `p` along the route polyline, plus p's distance off the polyline. ADR-329: routes now detour
+ *  around seeded lakes, so coarse progress is measured along the route, not as x displacement (a detouring bot
+ *  advances the same 2.6 tiles/s along its legs while its x can lag). Legs advance within waypointArriveTiles of a
+ *  waypoint, so corner cuts keep the off-polyline gap < 3 and the along-route measure within a few tiles of the
+ *  distance actually walked. */
+function alongRoute(route: { x: number; y: number }[], from: { x: number; y: number }, p: { x: number; y: number }): { along: number; off: number } {
+  let base = 0, bestOff = Infinity, bestAlong = 0, px = from.x, py = from.y;
+  for (const wp of route) {
+    const dx = wp.x - px, dy = wp.y - py, len2 = dx * dx + dy * dy, len = Math.sqrt(len2);
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((p.x - px) * dx + (p.y - py) * dy) / len2)) : 0;
+    const off = Math.hypot(p.x - (px + dx * t), p.y - (py + dy * t));
+    if (off < bestOff) { bestOff = off; bestAlong = base + len * t; }
+    base += len; px = wp.x; py = wp.y;
+  }
+  return { along: bestAlong, off: bestOff };
+}
 function move(r: Rig, o: AgentOutput): void {
   let bits = 0; const len = Math.hypot(o.moveX, o.moveY);
   if (len > 1e-6) { if (o.moveX > 0.38 * len) bits |= G.GameplayActions.MoveRight; else if (o.moveX < -0.38 * len) bits |= G.GameplayActions.MoveLeft; if (o.moveY > 0.38 * len) bits |= G.GameplayActions.MoveDown; else if (o.moveY < -0.38 * len) bits |= G.GameplayActions.MoveUp; }
@@ -96,7 +112,9 @@ describe("ADR-324 off-screen simulation", () => {
     const far = [{ x: -2000, y: 0 }]; expect(G.wantsOffscreen(r.a, 0, 0, far)).toBe(true); expect(G.wantsOffscreen(r.a, 0, 0, [{ x: 20, y: 0 }])).toBe(false);
     r.w.set(r.p, G.Survival, { hunger: 10 });
     for (let i = 0; i < 20; i++) expect(G.offscreenStep(r.w, r.p, r.a, T.offscreen.stepTicks)).toBe("moved");
-    const p1 = { ...pos(r) }; expect(p1.x).toBeGreaterThan(18 * T.offscreen.speedTilesPerSec); expect(p1.x).toBeLessThanOrEqual(20 * T.offscreen.speedTilesPerSec + 1e-3); // 20 s of coarse walking
+    const p1 = { ...pos(r) }; const m1 = alongRoute(tr.route!, { x: 0, y: 0 }, p1);
+    expect(m1.off).toBeLessThan(3); // on the route, not teleported off it
+    expect(m1.along).toBeGreaterThan(18 * T.offscreen.speedTilesPerSec); expect(m1.along).toBeLessThanOrEqual(20 * T.offscreen.speedTilesPerSec + 8); // 20 s of coarse walking (+ corner-cut slack on the polyline measure)
     expect(r.w.get(r.p, G.Survival)!.hunger).toBeGreaterThanOrEqual(T.offscreen.needsFloor);
     const leg = mem(r).travel!.leg;
     // reload: the identity (with AiMemory) goes through JSON like game.agents, a fresh agent picks up the same trip
@@ -104,8 +122,9 @@ describe("ADR-324 off-screen simulation", () => {
     expect((aiMemoryOf(a2) as unknown as Mem).travel?.leg).toBe(leg);
     expect(G.offscreenStep(r2.w, r2.p, a2, T.offscreen.stepTicks)).toBe("moved");
     const p2 = pos(r2); expect(Math.hypot(p2.x - p1.x, p2.y - p1.y)).toBeCloseTo(T.offscreen.speedTilesPerSec, 2); // one more coarse second, no jump
+    const m2 = alongRoute(tr.route!, { x: 0, y: 0 }, p2); expect(m2.off).toBeLessThan(3); expect(m2.along).toBeGreaterThan(m1.along); // still on the route, further along
     // hand-back: full sim walks on toward the same waypoint, then to the goal
-    const c = ctxOf(r2); const wp = G.currentWaypoint(c.world.travel!, c.self.x, c.self.y)!; expect(wp.x).toBeGreaterThan(p2.x);
+    const c = ctxOf(r2); const wp = G.currentWaypoint(c.world.travel!, c.self.x, c.self.y)!; expect(Math.hypot(wp.x - p2.x, wp.y - p2.y)).toBeGreaterThan(0);
     const res = travelFor(r2, 1, 12000); expect(res.done).toBe(1); expect(pos(r2).x).toBeGreaterThan(400 - T.arriveTiles - 0.5);
   });
 });

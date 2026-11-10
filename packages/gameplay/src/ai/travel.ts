@@ -20,10 +20,13 @@
  * Deterministic (FNV hashes of the agent id, no rng), server-authoritative (the host writes the authoritative world).
  */
 import { Transform, type Agent, type AgentContext, type AgentOutput, type Entity, type Traits, type World } from "@engine/core";
+import { ProceduralGenerator } from "@engine/world";
 import raw from "../../data/travel.json";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
 import { AbandonedSite, ClanStatus, Riding, StallHeader, Survival, Worker } from "../components.js";
+import { GameplayConfig } from "../config.js";
 import { inWater } from "../systems/movement.js";
+import { TerrainRes } from "../world.js";
 import { goTo } from "./base_behaviors.js";
 import { aiMemoryOf, markAiDirty } from "./planner.js";
 
@@ -66,13 +69,36 @@ export const regionOf = (x: number, y: number): { rx: number; ry: number } => ({
 const rkey = (rx: number, ry: number): number => ((rx + 32768) & 0xffff) * 65536 + ((ry + 32768) & 0xffff);
 const centre = (rx: number, ry: number): { x: number; y: number } => ({ x: (rx + 0.5) * R(), y: (ry + 0.5) * R() });
 const costCache = new WeakMap<World, Map<number, { c: number; at: number }>>();
-/** Region traversal cost: 1 + waterCostMul x the wet share of 5 samples; Infinity when every sample is water. Unknown
- *  (not streamed) terrain reads as land: the local nav finds the way once the chunk is there. */
+/** Seeded generator for a world, cached per world: `new ProceduralGenerator({ seed })` with the default bands is the
+ *  same generator the server builds its chunks from (apps/server/src/game.ts), so its tileAt is the generated tile
+ *  at any (tx, ty) whether or not the chunk is loaded. Pure function of the world seed: no rng, same seed -> same tile. */
+const seededGenCache = new WeakMap<World, ProceduralGenerator>();
+const seededGenerator = (world: World): ProceduralGenerator => {
+  let g = seededGenCache.get(world); if (!g) seededGenCache.set(world, (g = new ProceduralGenerator({ seed: world.seed })));
+  return g;
+};
+/** Swim tiles when there is no GameplayConfig to read them from (bare worlds): data/movement.json swimTiles [1, 8]. */
+const DEFAULT_SWIM_TILES: ReadonlySet<number> = new Set([1, 8]);
+/** One region-cost sample: is (x, y) water? Loaded terrain wins (shovel edits and flowing water included: they only
+ *  touch loaded ground, ADR-263); unloaded terrain is read from the seeded generator instead of assuming land, so an
+ *  unloaded lake is wet and an unloaded shore is dry exactly as the chunk will generate. A TerrainRes without a
+ *  loaded() hook (test stubs, replicas) is treated as loaded, as before. */
+export function regionSampleWater(world: World, x: number, y: number): boolean {
+  const tx = Math.floor(x), ty = Math.floor(y);
+  const terrain = world.getResource(TerrainRes);
+  if (terrain && (terrain.loaded?.(tx, ty) ?? true)) return inWater(world, x, y);
+  const swim = world.getResource(GameplayConfig)?.defs.movement.swimTiles ?? DEFAULT_SWIM_TILES;
+  return swim.has(seededGenerator(world).tileAt(tx, ty));
+}
+/** Region traversal cost: 1 + waterCostMul x the wet share of 5 samples; Infinity when every sample is water.
+ *  Samples resolve through regionSampleWater, so unloaded regions are costed from the seeded terrain, never
+ *  silently as cheap dry land. Cached with regionCostTtlTicks like before; a re-plan after the TTL picks up a
+ *  chunk that has since loaded (and any edits in it). */
 export function regionCost(world: World, rx: number, ry: number): number {
   let m = costCache.get(world); if (!m) costCache.set(world, (m = new Map())); const k = rkey(rx, ry); const c = m.get(k);
   if (c && world.tick - c.at < T.regionCostTtlTicks && world.tick >= c.at) return c.c;
   const s = R(); const x0 = rx * s, y0 = ry * s; let wet = 0;
-  for (const [fx, fy] of [[0.5, 0.5], [0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]] as const) if (inWater(world, x0 + fx * s, y0 + fy * s)) wet++;
+  for (const [fx, fy] of [[0.5, 0.5], [0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]] as const) if (regionSampleWater(world, x0 + fx * s, y0 + fy * s)) wet++;
   const v = wet === 5 ? Infinity : 1 + T.waterCostMul * (wet / 5); if (m.size > 65536) m.clear(); m.set(k, { c: v, at: world.tick }); return v;
 }
 /** Seed a region's cost (scenario/test hook; it expires with regionCostTtlTicks like a sampled one). */
