@@ -1,4 +1,6 @@
 import { describe, expect, test } from "vitest";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { SoundBank, playableFormats, BUSES, type SoundBankJson } from "../src/audio/bank.js";
 import bank from "../src/audio/bank.json";
 const J: SoundBankJson = { version: 1, basePath: "art/pack/", formats: ["ogg", "m4a", "mp3"], sounds: {
@@ -31,5 +33,28 @@ describe("ADR-117 sound bank", () => {
     const sounds = (bank as unknown as SoundBankJson).sounds; expect(Object.keys(sounds).length).toBeGreaterThan(200);
     for (const [k, d] of Object.entries(sounds)) { expect(k).toMatch(/^[a-z0-9_.]+$/); expect(BUSES).toContain(d.bus); expect(d.synth, k).toBeTruthy(); expect(d.maxVoices).toBeGreaterThan(0); }
     for (const k of ["music.menu", "music.explore", "music.night", "music.combat.low", "music.combat.high"]) expect(sounds[k]?.bus).toBe("music");
+  });
+});
+
+describe("ADR-334 m4a-only audio", () => {
+  const shipped = bank as unknown as SoundBankJson;
+  test("shipped bank formats are m4a-first with no ogg", () => {
+    expect(shipped.formats).toEqual(["m4a", "mp3"]);
+    expect(shipped.formats).not.toContain("ogg");
+  });
+  test("shipped bank resolves to .m4a first and never .ogg", () => {
+    const b = new SoundBank(shipped);
+    for (const [k, d] of Object.entries(shipped.sounds)) for (const f of d.files ?? []) {
+      const urls = b.urlsFor(f, "");
+      expect(urls[0], k).toMatch(/\.m4a$/);
+      expect(urls.some((u) => u.endsWith(".ogg")), k).toBe(false);
+    }
+    expect(b.resolve("footstep", "")!.urls[0]).toMatch(/\.m4a$/);
+  });
+  test("every bank-referenced file has an m4a twin on disk", () => {
+    const pack = fileURLToPath(new URL("../../../packages/assets/pack/", import.meta.url));
+    const missing: string[] = [];
+    for (const d of Object.values(shipped.sounds)) for (const f of d.files ?? []) if (!existsSync(pack + f + ".m4a")) missing.push(f);
+    expect(missing).toEqual([]);
   });
 });

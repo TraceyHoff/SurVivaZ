@@ -15,7 +15,7 @@ export interface SoundBankJson { version: number; basePath: string; formats: Aud
 export interface Resolved { key: string; def: SoundDef; /** Index into def.files (-1 = synth placeholder). */ variant: number; urls: string[]; pitch: number; gain: number }
 
 const MIME: Record<AudioFormat, string> = { ogg: 'audio/ogg; codecs="vorbis"', opus: 'audio/ogg; codecs="opus"', m4a: 'audio/mp4; codecs="mp4a.40.2"', mp3: "audio/mpeg" };
-/** Formats the browser can play, in bank preference order (ogg/opus first, m4a/mp3 fallback for Safari). */
+/** Formats the browser can play, in bank preference order (ADR-334: m4a first; ogg dropped — every bank file ships as m4a). */
 export function playableFormats(prefs: readonly AudioFormat[], canPlay: (mime: string) => string): AudioFormat[] {
   const ok = prefs.filter((f) => { try { return canPlay(MIME[f]) !== ""; } catch { return false; } });
   return ok.length ? ok : [...prefs];
