@@ -8,7 +8,7 @@ import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSig
 /** Authoritative game server: world + gameplay + streaming chunks + persistence + NetServer sessions. */
 import { ChannelRegistry, CommandRejected, DEFAULT_TICK_HZ, FixedLoop, installCommandHandlers, cosmeticsHashes, type CosmeticCatalogLike, Membership, Owner, PlayerId, Season, SEASON_COUNT, TimeOfDay, Transform, World, type Entity, type PermissionsRes } from "@engine/core";
 import { CHUNK_SIZE, ChunkManager, ProceduralGenerator, computeSpawnPoints, chunkKeyOf, type BuildingGrid, type PopulationSpawner } from "@engine/world";
-import { spawnPoints, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
+import { computeAiSpawnPoints, pickAiSpawnPoint, setAiSpawnPoints, spawnPoints, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
   appearanceServerHooks, applyReplication, installStallBuyHook, installViewBonus, setHitValidator, installPvp, installBedRespawn, installCraftQueue, installExpressionCommands, installVehicleCommands, installVehicleCraftCommands, installVehicleGuard, requestEmote, CraftQueue, CraftQueuesRes, playerNames, stallListing, listingRevision, stallOf, tillOf, StallHeader, StallOwnerKind, installMapMarkerCommands, MapMarker } from "@engine/gameplay";
 import { AppearanceServer, ChatServer, NameSync, NetServer, StallResult, StallServer, TileSync, validateHit, type ClientSession, type ServerTransport, type StallHooks } from "@engine/net";
 import { createAgentStore, type AgentIdentityStore } from "./agents.js";
@@ -91,6 +91,8 @@ export interface GameServerOptions {
   devBots?: boolean;
   /** ADR-295: only room-code hosts opt in; resolve their own client id at join time. */
   joinNearClient?: () => number | undefined;
+  /** ADR-325: "world" (default) spreads AI humans over the seeded world-wide AI spawn points; "starters" keeps the ADR-106 starter-point placement (test fixtures). */
+  aiSpawn?: "world" | "starters";
   /** Throttle deltas for distant owned entities (P2P mobile host bandwidth; ADR-102). */
   distantThrottle?: { nearTiles: number; interval: number };
   /** Chat (net ChatServer over core ChannelRegistry): local radius in tiles (default 48), per-player token bucket (default core 5 burst, 0.05/tick). */
@@ -165,6 +167,10 @@ export function createGameServer(o: GameServerOptions): GameServer {
   const generator = new ProceduralGenerator({ seed });
   // Four far-apart starter-biome spawn points, deterministic per seed (ADR-106).
   setSpawnPoints(world, o.spawnPoints?.length ? o.spawnPoints : computeSpawnPoints(generator));
+  // ADR-325: AI humans spawn over world-wide seeded points (built lazily on the first bot spawn); explicit spawnPoints
+  // (tests / custom maps) keep AI humans on those points.
+  const worldAiSpawn = o.aiSpawn !== "starters"; // ADR-325 (fixtures may keep the ADR-106 starter placement)
+  if (!o.spawnPoints?.length && worldAiSpawn) setAiSpawnPoints(world, () => computeAiSpawnPoints(generator, seed, spawnPoints(world), gameplayDefs(world).worldgen.unwalkableTiles));
   const persist = o.store ? new WorldPersistence({
     world, store: o.store, generator, tickHz, log,
     ...(o.buildings ? { buildings: o.buildings } : {}),
@@ -188,7 +194,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   const players = new Map<number, Player>();
   let petCorner = false; // ADR-145 sandbox pet corner placed
   // Spawn points chosen by the population spawner for virtual players still connecting. Always empty in multiplayer.
-  const pendingSpots: { x: number; y: number }[] = [];
+  const pendingSpots: { x: number; y: number }[] = []; let botSpawnN = 0; // ADR-325 pick salt
   const agents = createAgentStore(o.store, { tick: () => world.tick, log });
   let closing = false; // after shutdown() the save is final: disconnects no longer write
   const removeEntity = (e: Entity): void => { if (world.isAlive(e)) world.destroy(e); };
@@ -497,7 +503,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
     ...(o.buildings ? { buildings: o.buildings } : {}),
     humanBots: mode.humanBots && o.virtualPlayers ? {
       // human bots start at the least crowded world spawn point (ADR-106), not where the spawner rolled
-      spawn: (_x, _y, kind?: string) => { const { x, y } = pickSpawnPoint(world, "bot", pendingSpots.length); pendingSpots.push({ x, y }); if (kind !== undefined ? o.virtualPlayers!.connect(x, y, kind) : o.virtualPlayers!.connect(x, y)) return true; pendingSpots.pop(); return false; },
+      spawn: (_x, _y, kind?: string) => { const { x, y } = worldAiSpawn ? pickAiSpawnPoint(world, "bot", botSpawnN++, { pending: pendingSpots }) : pickSpawnPoint(world, "bot", pendingSpots.length); /* ADR-325: world-wide, away from players */ pendingSpots.push({ x, y }); if (kind !== undefined ? o.virtualPlayers!.connect(x, y, kind) : o.virtualPlayers!.connect(x, y)) return true; pendingSpots.pop(); return false; },
       despawn: (e) => { for (const [cid, p] of players) if (p.entity === e && p.bot) { o.virtualPlayers!.disconnect(cid); leave(cid, "bot despawned"); break; } },
     } : undefined,
     // bots placed at a far spawn point must not be culled for being out of the player's view
@@ -512,7 +518,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   const markVirtual = (clientId: number): boolean => {
     const p = players.get(clientId); if (!mode.humanBots || !p || p.bot) return false;
     p.bot = true; markReady(world, p.entity); // bots perceive the authoritative world directly: never "loading"
-    const spot = pendingSpots.shift();
+    const spot = pendingSpots.shift() ?? (worldAiSpawn ? pickAiSpawnPoint(world, "bot.host", botSpawnN++, { exclude: p.entity }) : undefined); // ADR-325: host-added bots too
     if (spot) { world.setField(p.entity, Transform, "x", spot.x); world.setField(p.entity, Transform, "y", spot.y); }
     population?.adopt(p.entity, "human_bot"); return true;
   };

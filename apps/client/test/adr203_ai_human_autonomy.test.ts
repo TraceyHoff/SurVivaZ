@@ -10,7 +10,7 @@ const botEntities = (l: LocalServer) => new Set(l.bots.map((b) => l.game.players
 describe("AI human autonomy (ADR-203)", () => {
   let local: LocalServer; const gatheredAt: number[] = []; const crafted = new Set<string>(); let fireBy = -1; let fireHour = -1; let start = 0;
   beforeAll(async () => {
-    local = await createLocalServer({ store: new MemoryWorldStore(), seed: 11, bots: 4 });
+    local = await createLocalServer({ store: new MemoryWorldStore(), seed: 11, bots: 4, aiSpawn: "starters" }); // ADR-325: fixture keeps the ADR-106 starter placement
     const W = local.game.world; setTimeOfDay(W, 15); start = W.tick;
     const bots = botEntities(local);
     W.events.on(ItemGathered as never, (e: { entity: number }) => { if (bots.has(e.entity as never)) gatheredAt.push(W.tick - start); });

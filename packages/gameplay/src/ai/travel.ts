@@ -34,7 +34,7 @@ export interface TravelState { kind: TravelKind; x: number; y: number; since: nu
 export type TravelMode = "free" | "roam" | "stay" | "worker";
 export interface TravelSensors { travel?: TravelState; travelMode?: TravelMode }
 type Ctx = AgentContext<AgentWorldView>;
-type Mem = ReturnType<typeof aiMemoryOf> & { travel?: TravelState; visited?: number[]; travelN?: number; roamSince?: number; travelAt?: number; sent?: { x: number; y: number } };
+type Mem = ReturnType<typeof aiMemoryOf> & { travel?: TravelState; visited?: number[]; travelN?: number; roamSince?: number; travelAt?: number; sent?: { x: number; y: number }; spawnOff?: boolean };
 const memOf = (a: Agent): Mem => aiMemoryOf(a) as Mem;
 const fnv = (s: string): number => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
 const dist = (ax: number, ay: number, bx: number, by: number): number => Math.hypot(bx - ax, by - ay);
@@ -211,20 +211,22 @@ export function travelRun(c: Ctx, o: AgentOutput): boolean | void {
 // ---- off-screen coarse simulation ----------------------------------------------------------------------------------
 /** True when the host may step this bot coarsely: it is travelling on a route and no human is within fullSimTiles. */
 export function wantsOffscreen(a: Agent, x: number, y: number, humans: readonly { x: number; y: number }[]): boolean {
-  if (!humans.length || !memOf(a).travel?.route) return false;
+  const m = memOf(a); if (!humans.length || (!m.travel?.route && !m.spawnOff)) return false; // ADR-325: far spawns start off-screen
   const r2 = T.offscreen.fullSimTiles ** 2; for (const h of humans) if ((h.x - x) ** 2 + (h.y - y) ** 2 <= r2) return false;
   return true;
 }
 /** Coarse travel for `ticks` ticks along the stored route (authoritative Transform write, vitals held at needsFloor).
  *  Returns "arrived" (hand back: full sim resumes at the goal), "moved", or "idle" (no route). */
 export function offscreenStep(world: World, e: Entity, a: Agent, ticks: number, tickHz = 20): "arrived" | "moved" | "idle" {
-  const tr = memOf(a).travel; const t = world.get(e, Transform); if (!tr?.route || !t) return "idle";
+  const m = memOf(a); const t = world.get(e, Transform); if (!t) return "idle";
+  const tr = m.travel; if (!tr?.route) { offscreenPlan(world, e, a, { x: t.x, y: t.y }); return "idle"; }
+  const route = tr.route;
   const riding = world.isRegistered(Riding) && world.has(e, Riding);
   let budgetTiles = (riding ? T.offscreen.mountSpeedTilesPerSec : T.offscreen.speedTilesPerSec) * ticks / tickHz; let x = t.x, y = t.y;
   while (budgetTiles > 1e-6) {
     const wp = currentWaypoint(tr, x, y); if (!wp) break; const d = dist(x, y, wp.x, wp.y); if (d < 1e-6) break;
     const s = Math.min(d, budgetTiles); x += ((wp.x - x) / d) * s; y += ((wp.y - y) / d) * s; budgetTiles -= s;
-    if (tr.leg >= tr.route.length - 1 && dist(x, y, tr.x, tr.y) <= T.arriveTiles) break;
+    if (tr.leg >= route.length - 1 && dist(x, y, tr.x, tr.y) <= T.arriveTiles) break;
   }
   world.set(e, Transform, { x, y }); noteVisited(a, x, y, world.tick);
   if (world.isRegistered(Survival) && world.has(e, Survival)) { const sv = world.get(e, Survival)!; const f = T.offscreen.needsFloor; if (sv.hunger < f || sv.thirst < f) world.set(e, Survival, { hunger: Math.max(sv.hunger, f), thirst: Math.max(sv.thirst, f) }); } // abstract foraging on the road
@@ -232,6 +234,19 @@ export function offscreenStep(world: World, e: Entity, a: Agent, ticks: number, 
   if (dist(x, y, tr.x, tr.y) <= T.arriveTiles) { endTravel(a, world.tick, true); return "arrived"; }
   return "moved";
 }
+/** ADR-325: an off-screen bot between trips still lives on: on the travel cooldown it picks its next goal and asks the
+ *  budgeted planner for a route (no view needed; home = its remembered base, else where it stands). */
+export function offscreenPlan(world: World, e: Entity, a: Agent, at: { x: number; y: number }): void {
+  const m = memOf(a); const tick = world.tick;
+  if (m.travelAt === undefined) m.travelAt = tick;
+  if (!m.travel && (m.sent || tick - m.travelAt >= T.travelCooldownTicks)) { m.travelAt = tick; const g = pickTravelGoal(world, e, a, m.base ?? at, !!m.base); if (g) { m.travel = { ...g, pending: true }; markAiDirty(a, tick); } }
+  const tr = m.travel; if (!tr?.pending) return;
+  const r = requestRoute(world, a.identity.id, at.x, at.y, tr.x, tr.y); if (r === null) { endTravel(a, tick, false); return; }
+  if (r) { tr.route = r; tr.leg = 0; delete tr.pending; markAiDirty(a, tick); }
+}
+/** ADR-325: mark a freshly spawned bot as off-screen-eligible (it stays in the coarse sim until a human comes near). */
+export function markSpawnOffscreen(a: Agent, on: boolean): void { const m = memOf(a); if (on) m.spawnOff = true; else delete m.spawnOff; }
+export const spawnedOffscreen = (a: Agent): boolean => !!memOf(a).spawnOff;
 /** Home anchoring without the old caps: the base is kept while travelling (only a relocation drops it) and the home only
  *  re-anchors to the bot's position past homeMaxDist when it is not on a trip that should bring it back. */
 /** While on a trip's corridor (near its current or previous waypoint) the bot keeps its base and home. Off the corridor

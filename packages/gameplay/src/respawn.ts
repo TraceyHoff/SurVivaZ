@@ -8,6 +8,8 @@
 import { PlayerId, Transform, type Entity, type World } from "@engine/core";
 import { BuildPiece, LootBag, PieceOwner } from "./components.js";
 import { gameplayDefs } from "./config.js";
+import { aiRespawnPoint } from "./ai_spawn.js";
+import { isAiHuman } from "./skills/xp.js";
 import { setRespawnLocator, SPAWN_JITTER, spawnPoints, type SpawnPointXY } from "./spawn_points.js";
 
 /** Piece keys that are sleeping beds (not garden / flower beds). */
@@ -34,7 +36,8 @@ export function nearestSpawnPoint(world: World, e: Entity): SpawnPointXY | undef
   const rng = world.rngFor("spawn:pvp.respawn.near", e); const a = rng.range(0, Math.PI * 2), r = SPAWN_JITTER * Math.sqrt(rng.next());
   return { x: best.x + Math.cos(a) * r, y: best.y + Math.sin(a) * r };
 }
-export function installBedRespawn(world: World): void { setRespawnLocator(world, (e) => bedRespawnPoint(world, e) ?? nearestSpawnPoint(world, e)); }
+/** ADR-325: AI humans (not hired workers / clan members) go bed -> home -> a distributed world spawn point instead. */
+export function installBedRespawn(world: World): void { setRespawnLocator(world, (e) => bedRespawnPoint(world, e) ?? (isAiHuman(world, e) ? aiRespawnPoint(world, e) : undefined) ?? nearestSpawnPoint(world, e)); }
 
 export interface DeathBagInfo { bag: Entity; x: number; y: number }
 /** Death bags owned by PlayerId `pid`, newest (highest entity) first. */

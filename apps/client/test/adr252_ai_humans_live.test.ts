@@ -22,7 +22,7 @@ const built = new Map<number, string[]>(); const cOps = new Map<string, number>(
 describe("ADR-252 AI humans live", () => {
   beforeAll(async () => {
     cat = (await loadServerCatalog(() => {}))!;
-    local = await createLocalServer({ store: new MemoryWorldStore(), seed: 11, bots: 3, maxBots: 3, population: false, catalog: cat });
+    local = await createLocalServer({ store: new MemoryWorldStore(), seed: 11, bots: 3, maxBots: 3, population: false, catalog: cat, aiSpawn: "starters" });
     const W = local.game.world; const d = gameplayDefs(W); setTimeOfDay(W, 8);
     const bots = local.bots.map((b) => local.game.players.get(b.client.clientId)!.entity);
     const iid = (k: string) => [...d.items.values()].find((i) => i.key === k)!.id;
@@ -87,7 +87,7 @@ describe("ADR-252 AI humans live: base, bed sleep (ADR-244), defence with block"
   const completedEarthworks = new Set<string>();
   const modes = new Map<string, number>(); const pieces = new Map<number, Set<string>>(); let sleptInBed = 0; let movedAsleep = 0; let zDead = false; let botAlive = true;
   beforeAll(async () => {
-    const l = await createLocalServer({ store: new MemoryWorldStore(), seed: 11, bots: 2, maxBots: 2, population: false });
+    const l = await createLocalServer({ store: new MemoryWorldStore(), seed: 11, bots: 2, maxBots: 2, population: false, aiSpawn: "starters" }); // ADR-325: fixed starter placement (the fight arena is a starter point)
     try {
       const W = l.game.world; const d = gameplayDefs(W); setTimeOfDay(W, 8);
       const bots = l.bots.map((b) => l.game.players.get(b.client.clientId)!.entity);

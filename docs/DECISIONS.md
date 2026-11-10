@@ -3935,3 +3935,37 @@ Decision (packages/gameplay/src/ai/travel.ts, data/travel.json):
   - It is server-authoritative: the Transform moves on the authoritative world, so net relevance works as usual.
 
 Tests: packages/gameplay/test/adr324_world_travel.test.ts.
+
+## ADR-325: AI humans spawn all around the world, not by the players
+
+Context (old behaviour):
+- Seed spawn points: computeSpawnPoints (ADR-106) gave only four starter points, one per quadrant, about 48–144 tiles from the origin on the starter biome. Players join at the least crowded of those four.
+- Host bots (createLocalServer `bots`, the settings value) joined through the same player path, so they landed at a starter point.
+- Population bots (spawns.json "humans": minPlayerDistance 10, maxPlayerDistance 40, global caps) were triggered in player-active chunks but placed by pickSpawnPoint at the least crowded of the same four points.
+- Respawn (ADR-153 installBedRespawn): own bed, else the nearest of the four.
+- Result: AI humans always started and came back where the players are.
+- Abandoned sites (planAbandonedChunk) are a pure function of the seed but were never used as spawns.
+
+Decision (packages/gameplay/src/ai_spawn.ts, data/ai_spawn.json):
+- World-wide AI spawn points from the seed (computeAiSpawnPoints):
+  - a Vogel spiral of `count` points between minRadius and maxRadius, each snapped to the nearest clear 3x3 walkable patch with no resource node;
+  - plus up to `abandonedSites` spots beside seeded abandoned buildings;
+  - plus the four starters, which count as player areas.
+  - The set is built lazily on the first bot spawn.
+- pickAiSpawnPoint:
+  - A seeded (world.rngFor) weighted pick, 1 / (1 + crowd)^crowdPow. Crowd counts the live humans and bots within crowdRadius plus spawns already handed out.
+  - The point must be at least minPlayerDist from every human player and every starter point.
+  - With probability nearPlayerShare (0.05) a nearer point is allowed, but never within onScreenTiles.
+  - Claims, water and decks are skipped. If nothing qualifies, the farthest free point is used.
+- Population bots, host bots (markVirtual) and AI respawns all use it. GameServerOptions.aiSpawn "starters" keeps the old placement; only fixtures use it.
+- Respawn: own bed, then home (the remembered base via the setAiHomeLocator host hook) when homeFirst, then a distributed point. Hired workers and clan members keep the ADR-153 rule.
+- A bot that spawns or respawns more than offscreen.fullSimTiles from every human starts in the ADR-324 off-screen sim:
+  - it has no view and no chunk streaming;
+  - offscreenPlan picks its own travel goals on the cooldown and plans routes within the per-tick budget;
+  - it hands back to full sim (and the flag clears) when a human comes near.
+- Caps are unchanged (maxBots, spawns.json caps), and netcode relevance is unchanged.
+
+Tests:
+- packages/gameplay/test/adr325_ai_spawn.test.ts
+- apps/client/test/adr325_ai_spawn_live.test.ts
+- The ADR-202/203/252 fixtures pin aiSpawn "starters".

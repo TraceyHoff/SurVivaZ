@@ -59,6 +59,7 @@ export * from "./loot_labels.js";
 export * from "./loot_despawn.js";
 export * from "./spawn_points.js";
 export * from "./respawn.js";
+export * from "./ai_spawn.js";
 export * from "./combat/arms.js";
 export * from "./net_hooks.js";
 export * from "./input_hooks.js";

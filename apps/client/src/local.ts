@@ -7,7 +7,7 @@
  * mode: "multiplayer" allows human bots only when AI humans are on (Task 22 world rule; a save keeps its own value).
  */
 import { CommandRegistry, DEFAULT_TICK_HZ, FixedLoop, Owner, Transform, World, type CosmeticCatalogLike, type Agent, type AgentOutput, type Entity } from "@engine/core";
-import { TRAVEL, offscreenStep, travelKeepsHome, wantsOffscreen } from "@engine/gameplay";
+import { Respawned, TRAVEL, markSpawnOffscreen, offscreenStep, setAiHomeLocator, spawnedOffscreen, travelKeepsHome, wantsOffscreen } from "@engine/gameplay";
 import { Animal, Dead, Health, ResourceNode, Zombie, agentOutputFrame, agentOutputIntents, applyAgentEmote, buildAgentSelf, buildAgentView, type AgentWorldView, flushSocialMemory, makeAgent, makeAgentIdentity, survivorController, HOME_MAX_DIST, aiMemoryOf, baseHome, flushAiMemory, RespawnCmd, agentStanceInput, fillStanceSensors, stanceMode, StanceMode, GameplayEdgeBits } from "@engine/gameplay";
 import { ChatChannel, DirectClient, LoopbackNetwork, MultiServerTransport, NetClient, type ClientTransport, type ServerTransport } from "@engine/net";
 import { ClaimAccount, IndexedDbWorldStore, MemoryWorldStore, SetName, nameToWords, tokenToWords, type WorldStore } from "@engine/persist";
@@ -54,6 +54,8 @@ export interface LocalServerOptions {
   extraTransports?: ServerTransport[];
   /** Player cap incl. the host's own client; extra joins are rejected (ServerFull + serverFullDetail). */
   maxClients?: number; serverFullDetail?: string;
+  /** ADR-325: where AI humans spawn (default world-wide points; "starters" = the ADR-106 starter points, for fixtures). */
+  aiSpawn?: "world" | "starters";
   /** ADR-295: room-code host identity; absent for ordinary local/singleplayer servers. */
   joinNearClient?: () => number | undefined;
   /** Distant-entity delta throttle forwarded to the NetServer (P2P host; ADR-102). */
@@ -143,7 +145,7 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
     animalCapMul: animalCapMulFor(maxBots, o.lowEnd ?? lowEndQuery()),
     transport: serverTransport, ...(store ? { store } : {}), seed, mode, ...(o.devSandbox ? { devSandbox: true } : {}), ...(o.worldRules ? { worldRules: o.worldRules } : {}),
     ...(o.maxClients !== undefined ? { maxClients: o.maxClients } : {}), ...(o.serverFullDetail ? { serverFullDetail: o.serverFullDetail } : {}), ...(o.log ? { log: o.log } : {}), ...(o.catalog ? { catalog: o.catalog, randomAppearance: true } : {}),
-    ...(o.joinNearClient ? { joinNearClient: o.joinNearClient } : {}),
+    ...(o.joinNearClient ? { joinNearClient: o.joinNearClient } : {}), ...(o.aiSpawn ? { aiSpawn: o.aiSpawn } : {}),
     ...(o.population === false ? { population: false } : {}), ...(o.distantThrottle ? { distantThrottle: o.distantThrottle } : {}),
     // Task 22: the in-process bot host runs whenever AI humans are on — singleplayer always, multiplayer only
     // when the resolved host rule allows it (explicit settings override saved AI policy).
@@ -163,6 +165,10 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
     if (stopped) { client.close(); controller.remove(agent); return; }
     if (err || !ok) { controller.remove(agent); throw new Error(`virtual player failed to connect: ${String(err ?? "timeout")}`); }
     if (!game.markVirtual(client.clientId)) { controller.remove(agent); client.close(); return; } // refused (multiplayer)
+    { // ADR-325: a bot placed far from every human starts in the ADR-324 off-screen sim (hand-back when someone comes near)
+      const pe = game.players.get(client.clientId)?.entity; const t = pe !== undefined ? game.world.get(pe, Transform) : undefined;
+      if (t) { const r = TRAVEL.offscreen.fullSimTiles; markSpawnOffscreen(agent, humanPositions().every((h) => Math.hypot(h.x - t.x, h.y - t.y) > r)); }
+    }
     if (o.catalog) { const pe = game.players.get(client.clientId)?.entity; if (pe !== undefined) giveBotAppearance(game.world, pe, o.catalog, identity.id); } // ADR-252 / ADR-245: a stable look per AI human (all 18 skin tones), replicated
     client.sendCommand(ClaimAccount, tokenToWords(hex32(identity.id))); // persistent account: inventory/stats saved like a human's
     client.sendCommand(SetName, nameToWords(identity.name));
@@ -198,6 +204,10 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
   // (position, vitals) is still fresh every tick so steering stays smooth. Near bots perceive every tick.
   const lodViews = new Map<VirtualPlayer, { world: AgentWorldView; tick: number }>();
   const offscreen = new Set<VirtualPlayer>(); // ADR-324: bots on coarse off-screen travel
+  // ADR-325: a bot respawned far from every human (a distributed point) also starts off-screen
+  game.world.events.on(Respawned as never, (ev: { entity: Entity; x: number; y: number }) => { for (const vp of bots) if (serverEntityOf(vp.client.clientId) === ev.entity) { const r = TRAVEL.offscreen.fullSimTiles; if (humanPositions().every((h) => Math.hypot(h.x - ev.x, h.y - ev.y) > r)) markSpawnOffscreen(vp.agent, true); } });
+  // ADR-325: AI respawn goes bed -> home (the remembered base) -> a distributed world spawn point
+  setAiHomeLocator(game.world, (e) => { for (const vp of bots) if (serverEntityOf(vp.client.clientId) === e) { const b = aiMemoryOf(vp.agent).base; return b ? baseHome(b) : undefined; } return undefined; });
   let lodSlot = 0; const lodPhase = new Map<VirtualPlayer, number>();
   const humanPositions = (): { x: number; y: number }[] => {
     const out: { x: number; y: number }[] = [];
@@ -220,6 +230,7 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
     // not a chunk source); back in range (or arrived) it streams again and waits for its chunk before full sim resumes.
     if (wantsOffscreen(a, t.x, t.y, humans)) { if (!offscreen.has(vp)) { offscreen.add(vp); game.setStreaming(vp.client.clientId, false); } return undefined; }
     if (offscreen.has(vp)) { offscreen.delete(vp); game.setStreaming(vp.client.clientId, true); }
+    if (humans.length && spawnedOffscreen(a)) markSpawnOffscreen(a, false); // ADR-325: met a human: full sim from now on
     if (humans.length && !game.chunks.activeKeys.has(chunkKeyOf(t.x, t.y))) return undefined; // hand back once the chunk is in
     let near = humans.length === 0; // no human: everyone is "near" (headless tests keep full fidelity)
     for (const h of humans) { const dx = h.x - t.x, dy = h.y - t.y; if (dx * dx + dy * dy <= AGENT_LOD_NEAR * AGENT_LOD_NEAR) { near = true; break; } }

@@ -9,7 +9,7 @@ const botEntities = (l: LocalServer) => new Set(l.bots.map((b) => l.game.players
 
 describe("zombies hunt AI humans like players (ADR-202)", () => {
   it("a night zombie acquires an AI human outside the spawn sanctuary", async () => {
-    const local = await createLocalServer({ store: new MemoryWorldStore(), seed: 11, bots: 1, maxBots: 1, population: false });
+    const local = await createLocalServer({ store: new MemoryWorldStore(), seed: 11, bots: 1, maxBots: 1, population: false, aiSpawn: "starters" }); // ADR-325: this fixture is about the starter sanctuary
     try {
       const W = local.game.world; setTimeOfDay(W, 23);
       for (let i = 0; i < 10; i++) { local.pump(50); await Promise.resolve(); }
