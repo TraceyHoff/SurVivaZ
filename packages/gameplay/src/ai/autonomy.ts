@@ -22,6 +22,7 @@ import { bumpStat } from "./planner.js";
 import { maxHpOf } from "../building/integrity.js";
 import { nearbyAbandonedWork } from "../building/abandoned.js";
 import { resolveAttachment } from "../building/links.js";
+import travelData from "../../data/travel.json";
 import { armCraft, goTo, bindAgentWorld, fillPlanSensors, noteTripWanted } from "./base_behaviors.js";
 
 export interface GoalSensors {
@@ -51,7 +52,7 @@ export const FIRE_AFTER_GOALS = 1;
 export const STUCK_TICKS = 60;
 export const COLD_BELOW = 36.3;
 /** Hosts re-home an AI human that ends up farther than this from its home spot (spawn moved / account restored). */
-export const HOME_MAX_DIST = 48;
+export const HOME_MAX_DIST: number = travelData.homeMaxDist; // ADR-324: data knob (travel.json); travelling bots keep their home
 const BAN_TICKS = 1200;
 
 type Ctx = AgentContext<AgentWorldView>;

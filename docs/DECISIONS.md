@@ -3898,3 +3898,40 @@ Decision:
   per tier candidate per scan). Knobs: mounts.json "bots".
 
 Tests: packages/gameplay/test/adr323_ai_mount_supplies.test.ts.
+
+## ADR-324: AI humans travel the whole world (clan attachment is a preference)
+
+Context: AI humans were held near their spawn. The limits found were:
+- HOME_MAX_DIST 48: the home was re-anchored to the current position past 48 tiles.
+- The base was forgotten past 4 x 48 = 192 tiles.
+- The ADR-279 trip radius was 36 tiles.
+- The local nav goal range was about 24 tiles.
+- The unloaded/idle view was the only sim far from players (no world-scale goal, no long path).
+
+Decision (packages/gameplay/src/ai/travel.ts, data/travel.json):
+- Long-range goals (pickTravelGoal, deterministic: seed + travel count):
+  - explore a hashed direction 200 to 800 tiles out;
+  - every third goal, a POI (AbandonedSite) or trade stall (StallHeader) within poiSearchTiles in an unvisited region;
+  - relocate the homestead every relocateEvery trips (free AIs only);
+  - "sent" when ordered (orderTravel);
+  - "return" for roamers.
+- Hierarchical routes:
+  - A* over a coarse region grid (regionTiles 16, 8-neighbour, binary heap, node budget maxRegionExpand).
+  - Region cost comes from sampled water and is cached with a TTL.
+  - The route is region-centre waypoints plus the exact goal, and the local nav (goTo) walks each leg, so path length is unbounded.
+  - requestRoute allows at most maxPlansPerTick plans per world tick; there are no full-world searches.
+  - The ADR-321 mount policy treats the trip goal as the ride goal, so mounted bots ride long legs.
+- Attachment (travelMode):
+  - Hired worker: "worker", stays with the employer unless sent.
+  - No clan: "free".
+  - Clan member: "stay" when roamPreference(traits) < roamTraitMin or under a BuildBase/Defend clan order; otherwise "roam".
+  - Stay bots only take trips within clanStayRadius of the clan anchor. Roamers go out and return after roamReturnTicks.
+- The base and home are kept while on a trip's corridor (travelKeepsHome). A relocation trip drops the base on arrival.
+- Off-screen sim (apps/client/src/local.ts and GameServer.setStreaming):
+  - A bot with a route and no human within offscreen.fullSimTiles gets no view or controller and stops being a chunk source.
+  - Every offscreen.stepTicks it moves along its route at walk or mount speed (offscreenStep), with needs floored at needsFloor.
+  - When a human comes near or it arrives, it streams again and resumes full sim once its chunk is active.
+  - The state lives in AiMemory (identity.ai), so position and leg continue across reloads.
+  - It is server-authoritative: the Transform moves on the authoritative world, so net relevance works as usual.
+
+Tests: packages/gameplay/test/adr324_world_travel.test.ts.

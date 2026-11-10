@@ -1,0 +1,33 @@
+{
+  "$comment": "ADR-324 world-scale travel for AI humans (ai/travel.ts). Ticks at 20 Hz, distances in tiles. Routes: A* over a coarse region grid (regionTiles cells, water-sampled cost), then local nav (goTo / creature_nav) between region centres, so no path length cap. roam = per-AI preference from traits (roamWeights) vs roamTraitMin; clan members below it (or under a BuildBase / Defend clan order) stay within clanStayRadius of the clan anchor, roamers go and come back after roamReturnTicks; unattached AIs roam freely; hired workers only travel when sent. offscreen: bots farther than fullSimTiles from every human while travelling step coarsely along their route (no controller, not a chunk source) and hand back to full sim near a human or on arrival.",
+  "homeMaxDist": 48,
+  "regionTiles": 16,
+  "maxRegionExpand": 6000,
+  "maxPlansPerTick": 4,
+  "regionCostTtlTicks": 6000,
+  "waterCostMul": 4,
+  "exploreMinTiles": 200,
+  "exploreMaxTiles": 800,
+  "poiSearchTiles": 400,
+  "waypointArriveTiles": 2.5,
+  "arriveTiles": 4,
+  "travelUtility": 0.55,
+  "travelCooldownTicks": 1200,
+  "goalTimeoutTicks": 72000,
+  "stuckRepathTicks": 200,
+  "minHp": 0.4,
+  "minNeeds": 0.35,
+  "clanStayRadius": 40,
+  "roamTraitMin": 0.55,
+  "roamWeights": { "bravery": 0.45, "sociability": -0.35, "industriousness": 0.2, "greed": 0.3, "bias": 0.25 },
+  "roamReturnTicks": 24000,
+  "relocateEvery": 4,
+  "visitedCap": 256,
+  "offscreen": {
+    "fullSimTiles": 96,
+    "speedTilesPerSec": 2.6,
+    "mountSpeedTilesPerSec": 5.4,
+    "stepTicks": 20,
+    "needsFloor": 50
+  }
+}

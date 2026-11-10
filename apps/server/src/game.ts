@@ -132,6 +132,8 @@ export interface GameServer {
   population: PopulationSpawner | undefined;
   /** Singleplayer host: mark a joined session as a virtual player (false = refused, e.g. multiplayer). */
   markVirtual(clientId: number): boolean;
+  /** ADR-324: a virtual player stepped off-screen (coarse travel) is not a chunk streaming source; true restores it. */
+  setStreaming(clientId: number, on: boolean): void;
   stalls: StallServer; appearance: AppearanceServer | undefined;
   /** Local/party/clan/global/whisper chat with mentions + emotes; players and bots (loopback clients) both go through it. */
   chat: ChatServer;
@@ -400,7 +402,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
 
   function leave(clientId: number, why: string): void {
     const p = players.get(clientId); if (!p) return;
-    players.delete(clientId); chunks.removeSource(clientId); pendingKicks.delete(clientId);
+    players.delete(clientId); chunks.removeSource(clientId); offStream.delete(clientId); pendingKicks.delete(clientId);
     dismountOnLeave(world, p.entity); // ADR-319: off the mount before the save; the mount stays where it is
     if (deleting.delete(p.account)) persist?.untrackPlayer(p.account); // progress deleted (ADR-099): never re-save it
     else if (persist && !closing) { void persist.savePlayer(p.account, p.entity, p.name).catch((e) => log(`persist: save failed ${String(e)}`)); persist.untrackPlayer(p.account); }
@@ -476,7 +478,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   // Streaming: players are the interest sources. Runs before persist.track (registered by attach below).
   world.addSystem("postSim", "server.chunks", () => {
     // A watchtower's AOI bonus widens streaming too, so the extra chunks exist to be sent.
-    for (const [cid, p] of players) { const t = world.get(p.entity, Transform); if (t) chunks.setSource({ id: cid, x: t.x, y: t.y, radius: loadRadius + net.viewRadiusBonus(cid) }); }
+    for (const [cid, p] of players) { if (offStream.has(cid)) { chunks.removeSource(cid); continue; } const t = world.get(p.entity, Transform); if (t) chunks.setSource({ id: cid, x: t.x, y: t.y, radius: loadRadius + net.viewRadiusBonus(cid) }); }
     chunks.update();
   });
   persist?.attach(chunks);
@@ -505,6 +507,8 @@ export function createGameServer(o: GameServerOptions): GameServer {
    * Singleplayer host marks a joined session as a virtual player: it is placed at the spawner's chosen point and
    * tracked as population. Refused (false) when human bots are off for this mode (multiplayer with AI humans off).
    */
+  const offStream = new Set<number>(); // ADR-324: off-screen virtual players (no chunk streaming around them)
+  const setStreaming = (clientId: number, on: boolean): void => { if (on) offStream.delete(clientId); else if (players.get(clientId)?.bot) offStream.add(clientId); };
   const markVirtual = (clientId: number): boolean => {
     const p = players.get(clientId); if (!mode.humanBots || !p || p.bot) return false;
     p.bot = true; markReady(world, p.entity); // bots perceive the authoritative world directly: never "loading"
@@ -525,7 +529,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   const step = (dt: number): void => { const t0 = performance.now(); world.step(dt); tickTimes.push(performance.now() - t0); if (tickTimes.length > 4096) tickTimes.splice(0, 2048); };
   const loop = new FixedLoop({ tickHz, step });
   return {
-    world, net, chunks, persist, loop, permissions, players, spawnPoints: worldSpawnPoints(world), mode: mode.mode, modeConfig: mode, population, markVirtual, stalls, appearance, chat, agents, step, tickTimes,
+    world, net, chunks, persist, loop, permissions, players, spawnPoints: worldSpawnPoints(world), mode: mode.mode, modeConfig: mode, population, markVirtual, setStreaming, stalls, appearance, chat, agents, step, tickTimes,
     async shutdown() {
       if (!persist || closing) return { chunks: 0, players: 0 };
       await agents.flush();

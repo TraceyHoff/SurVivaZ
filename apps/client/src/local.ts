@@ -7,13 +7,14 @@
  * mode: "multiplayer" allows human bots only when AI humans are on (Task 22 world rule; a save keeps its own value).
  */
 import { CommandRegistry, DEFAULT_TICK_HZ, FixedLoop, Owner, Transform, World, type CosmeticCatalogLike, type Agent, type AgentOutput, type Entity } from "@engine/core";
+import { TRAVEL, offscreenStep, travelKeepsHome, wantsOffscreen } from "@engine/gameplay";
 import { Animal, Dead, Health, ResourceNode, Zombie, agentOutputFrame, agentOutputIntents, applyAgentEmote, buildAgentSelf, buildAgentView, type AgentWorldView, flushSocialMemory, makeAgent, makeAgentIdentity, survivorController, HOME_MAX_DIST, aiMemoryOf, baseHome, flushAiMemory, RespawnCmd, agentStanceInput, fillStanceSensors, stanceMode, StanceMode, GameplayEdgeBits } from "@engine/gameplay";
 import { ChatChannel, DirectClient, LoopbackNetwork, MultiServerTransport, NetClient, type ClientTransport, type ServerTransport } from "@engine/net";
 import { ClaimAccount, IndexedDbWorldStore, MemoryWorldStore, SetName, nameToWords, tokenToWords, type WorldStore } from "@engine/persist";
 import { detectDevice, isMobileHost, type DeviceHints } from "./p2p.js";
 import { MEMORY_BUDGETS } from "./memory-budget.js";
 import { createGameServer, giveBotAppearance, type GameMode, type GameServer } from "@engine/server/game";
-import { randomWorldSeed } from "@engine/world";
+import { chunkKeyOf, randomWorldSeed } from "@engine/world";
 import { Act, applyDemoInput, VEHICLE_CLIENT_OPTIONS, installDemoWorld, DEMO_COMMANDS, DEMO_EVENTS } from "@engine/server/protocol";
 
 /** Device-scaled default bot cap (ADR-105): phones get far fewer bots than desktops. */
@@ -171,7 +172,7 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
   const putAgent = (id: string, partial: Parameters<typeof game.agents.put>[1]): unknown => game.agents.put(id, partial);
   function dropBot(clientId: number): void {
     const i = bots.findIndex((b) => b.client.clientId === clientId); if (i < 0) return;
-    const b = bots[i]!; byAgent.delete(b.agent); lodViews.delete(b); lodPhase.delete(b); flushSocialMemory([b.agent], putAgent, game.world.tick, true); flushAiMemory([b.agent], putAgent, game.world.tick, true); controller.remove(b.agent); b.client.close(); bots.splice(i, 1); restAt.delete(b);
+    const b = bots[i]!; byAgent.delete(b.agent); lodViews.delete(b); offscreen.delete(b); lodPhase.delete(b); flushSocialMemory([b.agent], putAgent, game.world.tick, true); flushAiMemory([b.agent], putAgent, game.world.tick, true); controller.remove(b.agent); b.client.close(); bots.splice(i, 1); restAt.delete(b);
   }
   // Player/bot entity lookups (ADR-105): game.players already maps clientId -> server entity, and bots perceive the authoritative world through it.
   const serverEntityOf = (cid: number): Entity | undefined => { const p = game.players.get(cid); return p && game.world.isAlive(p.entity) ? p.entity : undefined; };
@@ -196,6 +197,7 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
   // (the O(entities) perception scan + sensors) only every AGENT_LOD_EVERY ticks, staggered by slot; its self state
   // (position, vitals) is still fresh every tick so steering stays smooth. Near bots perceive every tick.
   const lodViews = new Map<VirtualPlayer, { world: AgentWorldView; tick: number }>();
+  const offscreen = new Set<VirtualPlayer>(); // ADR-324: bots on coarse off-screen travel
   let lodSlot = 0; const lodPhase = new Map<VirtualPlayer, number>();
   const humanPositions = (): { x: number; y: number }[] => {
     const out: { x: number; y: number }[] = [];
@@ -208,9 +210,17 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
     // ADR-203: the server spawns / restores the bot elsewhere than addBot's (x, y) (pickSpawnPoint, saved account); a home
     // hundreds of tiles away made build / sleep / return_home walk across the map forever. Home = where the bot lives.
     // ADR-252: a bot with a base remembers it (AiMemory persists via game.agents): home = inside the base, even after a trip
-    const mem = aiMemoryOf(a); if (mem.base && Math.hypot(mem.base.x - t.x, mem.base.y - t.y) > 4 * HOME_MAX_DIST) delete mem.base;
+    // ADR-324: no range cap while travelling (the base and home are kept; only a relocation drops the base). A bot that
+    // drifted away without a trip re-anchors like before (it lives where it is now).
+    const keep = travelKeepsHome(a, t.x, t.y);
+    const mem = aiMemoryOf(a); if (!keep && mem.base && Math.hypot(mem.base.x - t.x, mem.base.y - t.y) > 4 * HOME_MAX_DIST) delete mem.base;
     if (mem.base) { const h = baseHome(mem.base); if (h.x !== vp.home.x || h.y !== vp.home.y) vp.home = h; }
-    else if (Math.hypot(vp.home.x - t.x, vp.home.y - t.y) > HOME_MAX_DIST) vp.home = { x: t.x, y: t.y };
+    else if (!keep && Math.hypot(vp.home.x - t.x, vp.home.y - t.y) > HOME_MAX_DIST) vp.home = { x: t.x, y: t.y };
+    // ADR-324 off-screen: a travelling bot far from every human is stepped coarsely by the loop (no view, no controller,
+    // not a chunk source); back in range (or arrived) it streams again and waits for its chunk before full sim resumes.
+    if (wantsOffscreen(a, t.x, t.y, humans)) { if (!offscreen.has(vp)) { offscreen.add(vp); game.setStreaming(vp.client.clientId, false); } return undefined; }
+    if (offscreen.has(vp)) { offscreen.delete(vp); game.setStreaming(vp.client.clientId, true); }
+    if (humans.length && !game.chunks.activeKeys.has(chunkKeyOf(t.x, t.y))) return undefined; // hand back once the chunk is in
     let near = humans.length === 0; // no human: everyone is "near" (headless tests keep full fidelity)
     for (const h of humans) { const dx = h.x - t.x, dy = h.y - t.y; if (dx * dx + dy * dy <= AGENT_LOD_NEAR * AGENT_LOD_NEAR) { near = true; break; } }
     const cached = lodViews.get(vp);
@@ -257,6 +267,7 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
     for (const vp of bots) { const out = outs.get(vp.agent); if (!out) continue; vp.output = out; vp.client.sendInput(sampleOf(vp)); if (out.chat) vp.client.chat.send(ChatChannel.Local, out.chat.text); if (out.emote) { const e = serverEntityOf(vp.client.clientId); if (e !== undefined) applyAgentEmote(game.world, e, out); } if (out.commands) sendAgentCommands(vp.client, out.commands); }
     if (tick - lastRespawnTry >= 40) { lastRespawnTry = tick; for (const vp of bots) { const e = serverEntityOf(vp.client.clientId); if (e !== undefined && game.world.has(e, Dead)) sendAgentCommands(vp.client, [{ type: RespawnCmd.name, payload: {} }]); } // ADR-252: a dead bot presses Respawn like a player (server enforces respawnSeconds)
     }
+    if (offscreen.size && tick % TRAVEL.offscreen.stepTicks === 0) for (const vp of offscreen) { const e = serverEntityOf(vp.client.clientId); if (e !== undefined && !game.world.has(e, Dead)) offscreenStep(game.world, e, vp.agent, TRAVEL.offscreen.stepTicks, DEFAULT_TICK_HZ); }
     flushAiMemory(bots.map((b) => b.agent), putAgent, game.world.tick); flushSocialMemory(bots.map((b) => b.agent), putAgent, game.world.tick); // debounced social-memory write-through
   } });
   const pump = (ms: number): void => {

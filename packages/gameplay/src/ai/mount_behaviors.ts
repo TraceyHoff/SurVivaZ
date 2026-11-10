@@ -390,6 +390,11 @@ const FOOT_ACTIONS = /^(gather|attack|build|craft|door|fire|upgrade|repair|recla
 export function navGoal(c: Ctx): { x: number; y: number } | undefined {
   return c.self.tick - c.bb.num("navGoalAt", -1e9) <= 2 ? { x: c.bb.num("navGoalX", 0), y: c.bb.num("navGoalY", 0) } : undefined;
 }
+/** ADR-324: a world-scale trip rides to its final goal, not to the next region waypoint the local nav walks to. */
+const tripGoal = (c: Ctx, behavior: string): { x: number; y: number } | undefined => {
+  const tr = behavior === "travel" ? c.world.travel : undefined; const g = navGoal(c);
+  return tr && g ? { x: tr.x, y: tr.y } : g;
+};
 /** Why a riding bot should get off now (undefined = keep riding). */
 export function dismountReason(c: Ctx, o: Out, behavior: string, world: World | undefined): string | undefined {
   const m = c.world.mount!; const flee = behavior === "flee"; const moving = o.moveX !== 0 || o.moveY !== 0;
@@ -400,7 +405,7 @@ export function dismountReason(c: Ctx, o: Out, behavior: string, world: World | 
   if (flee) return undefined;
   if (DISMOUNT_NOW.has(behavior)) return "task";
   if (o.actions.some((a) => FOOT_ACTIONS.test(a))) return "task";
-  const g = navGoal(c); const gd = g ? dist(c.self.x, c.self.y, g.x, g.y) : 0;
+  const g = tripGoal(c, behavior); const gd = g ? dist(c.self.x, c.self.y, g.x, g.y) : 0;
   const b = c.world.base; if (b && g && insideBase(b, g.x, g.y) && dist(c.self.x, c.self.y, b.x + 1, b.y + 1) < B.buildingDismountTiles + 1) return "building";
   if (DISMOUNT_TASK.has(behavior) && (!g || gd < B.taskDismountTiles)) return "task";
   if (g && gd < B.arriveTiles) return "arrived";
@@ -415,7 +420,7 @@ export function wantsRide(c: Ctx, o: Out, behavior: string): boolean {
   const md = dist(c.self.x, c.self.y, m.x, m.y);
   if (behavior === "flee") return md <= B.fleeMountRadius;
   if (c.self.tick - c.bb.num("dismountAt", -1e9) < B.remountCooldownTicks) return false;
-  const g = navGoal(c); if (!g || md > B.fetchRadius) return false;
+  const g = tripGoal(c, behavior); if (!g || md > B.fetchRadius) return false;
   const trip = dist(c.self.x, c.self.y, g.x, g.y); if (trip <= B.longTripTiles) return false;
   const b = c.world.base; if (b && insideBase(b, c.self.x, c.self.y)) return false; // walk out of the building first
   return dist(m.x, m.y, g.x, g.y) <= trip + md; // the mount is not the wrong way
