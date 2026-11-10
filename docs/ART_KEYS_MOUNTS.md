@@ -72,19 +72,19 @@ Pages (stream residency, placeholder `placeholder_animal_l`, PNG + KTX2 at 1x an
 |---|---|---|
 | `nature_mounts_horse_0` | 1024×768 | 2048×1536 |
 | `nature_mount_saddles_horse_0` | 1024×448 | 2048×896 |
-| `nature_mounts_donkey_0` | 1024×528 | 2048×1056 |
+| `nature_mounts_donkey_0` | 1024×544 | 2048×1088 |
 | `nature_mount_saddles_donkey_0` | 1024×352 | 2048×704 |
-| `nature_mounts_moose_0` | 1024×992 | 2048×1984 |
+| `nature_mounts_moose_0` | 1024×912 | 2048×1824 |
 | `nature_mounts_moose_1` | 1008×96 | 2016×192 |
-| `nature_mount_saddles_moose_0` | 1024×544 | 2048×1088 |
+| `nature_mount_saddles_moose_0` | 1024×528 | 2048×1056 |
 | `nature_mounts_deer_0` | 1024×592 | 2048×1184 |
-| `nature_mount_saddles_deer_0` | 1024×352 | 2048×704 |
+| `nature_mount_saddles_deer_0` | 1024×336 | 2048×672 |
 | `nature_mounts_elk_0` | 1024×704 | 2048×1408 |
-| `nature_mount_saddles_elk_0` | 1024×400 | 2048×800 |
-| `nature_mounts_bison_0` | 1024×704 | 2048×1408 |
-| `nature_mount_saddles_bison_0` | 1024×656 | 2048×1312 |
-| `nature_mounts_yak_0` | 1024×768 | 2048×1536 |
-| `nature_mount_saddles_yak_0` | 1024×592 | 2048×1184 |
+| `nature_mount_saddles_elk_0` | 1024×384 | 2048×768 |
+| `nature_mounts_bison_0` | 1024×720 | 2048×1440 |
+| `nature_mount_saddles_bison_0` | 1024×640 | 2048×1280 |
+| `nature_mounts_yak_0` | 1024×736 | 2048×1472 |
+| `nature_mount_saddles_yak_0` | 1024×560 | 2048×1120 |
 
 ## Action anims (hit / death / graze / swim)
 
@@ -106,6 +106,19 @@ The action anims do not share frame counts with `ride_idle`, so the rider plays 
 pinned each tick (doll pivot = mount pivot + actSeat - rider body seat). Moose swim also has `anchors.water`
 (`species.moose.swimWaterY[frame][facing]`): the water-surface row in px from the pivot at the seat column; clip the rider's
 pixels below it (same idea as the player swim sink). The swim pivot is the water-surface point under the moose.
+
+## Away-facing views (back-view pass)
+
+In the facings that show the mount's rump (4 back-left 3/4, 5 back, 6 back-right 3/4) every anim (idle / walk / gallop /
+hit / death / graze / swim) is drawn so a ridden mount still reads as the animal and not as a set of legs: a broad
+barrel back + two haunch lobes (rump colour where the species has one) with a crease, the tail hanging over them,
+both flanks visible either side of the rider's legs, chunkier and visually shorter hind legs (the haunches cover their
+tops), and in the straight-back view (5) the neck / head / ears / antlers / horns turn over the rider's right shoulder so
+they peek out beside it. Rump + tail are on the **base** layer (`mount_<sp>`, under the rider); in these facings the fore
+layer only keeps the head parts that are really in front of the rider in screen depth, and saddle pixels under the
+rump are cut like the fore cut. Seat / water anchors, keys, dirFrames indices, frame counts, timing and pivots are
+unchanged. Packer: `packages/assets/pack/nature/src/artpass_mounts_backfix.py` (re-renders only facings 4-6, every
+other cell keeps its exact pixels, each page is re-shelf-packed in place, KTX2 re-encoded, sha1 uniqueness re-checked).
 
 ## Rider seat anchors
 

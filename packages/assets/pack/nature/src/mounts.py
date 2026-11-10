@@ -217,6 +217,10 @@ class Mount:
         self.seed = zlib.crc32(f"mount_{species}".encode()) % 997 + fi * 3 + d * 17 + ord(anim[0])
         self.rig = Rig(None, DIR8_PHI[d], W * k / 2, feet * k, G)
         self.P = params(anim, fi, sp); self.items = []
+        # away-facing views (rump toward the camera: facings 4, 5, 6): draw a broad rump + haunches, chunkier hind legs,
+        # keep rump/tail/legs on the base layer, and turn the head a little to one side in the straight-back view so the
+        # head / ears / antlers / horns peek out beside a rider's shoulders.
+        self.away = self.rig.nv(0, 1) < -.4
         self.build()
 
     # geometry -------------------------------------------------------
@@ -243,6 +247,7 @@ class Mount:
             self.leg(i, sx, fy)
         self.tail()
         self.add(self.body_depth, self.body, "body")
+        if self.away: self.rump()
         self.neck_head()
 
     def leg(self, i, sx, fy):
@@ -256,7 +261,7 @@ class Mount:
         (hp, hv), (kp, kv), (fp, fv) = self.proj(*hip), self.proj(*knee), self.proj(*foot)
         dep = self.body_depth - .05 * G + ((hv + fv) / 2) * .001
         if P["spread"][i] > .2 and self.nv(sx, 0) > .3: dep = self.body_depth + .05 * G   # splayed near legs lie in front of the barrel
-        lw = sp["lw"] * G; furc = sp["leg"]; dark = sx < 0
+        lw = sp["lw"] * G * (1.3 if self.away else 1.0); furc = sp["leg"]; dark = sx < 0
         def draw(cv):
             base = ramp(furc)[2] if dark else None
             cv.part(capsule_pts(hp[0], hp[1], kp[0], kp[1], lw * 1.35, lw * 1.05), furc, lw=1.0 * k, shade=.3, hl=.14, base_col=base)
@@ -290,7 +295,7 @@ class Mount:
                 cv.part(circ(tp, .09 * G, .08 * G, wob=.15), "snow", lw=.9 * k, shade=.25, hl=.2)
             else:
                 cv.part(circ(tp, .07 * G, .06 * G, wob=.1), sp["fur"], lw=.9 * k, shade=.3, hl=.15)
-        self.add(tv, draw, "tail")
+        self.add(tv, draw, "tail_base" if self.away else "tail")
 
     def body(self, cv):
         sp, P, k, G = self.sp, self.P, self.k, self.G; rb, L = sp["rb"], sp["L"]; fp, rp = self.fp, self.rp
@@ -326,17 +331,42 @@ class Mount:
                     a = self.proj(side * rb * .7, y, self.zc(y) - rb * .1)[0]; b = self.proj(side * rb * .8, y + (.03 if j % 2 else -.02), self.zc(y) - rb * 1.55 - (.04 if j % 2 else 0))[0]
                     cv.part(capsule_pts(a[0], a[1], b[0], b[1], .09 * G, .05 * G), sp["skirt"], lw=.9 * k, shade=.3, hl=.1)
 
+    def rump(self):
+        """broad rump + haunches at the back end (away views only): wider than the barrel and hanging lower, so the flanks
+        show either side of a rider's legs and the upper hind legs are covered."""
+        sp, P, k, G = self.sp, self.P, self.k, self.G; rb, L = sp["rb"], sp["L"]
+        y0 = -L / 2 - rb * .15; zr = self.zc(-L / 2)
+        (cp, cv_) = self.proj(0, y0, zr - rb * .1)
+        lobes = [(side, self.proj(side * rb * .58, y0 - rb * .1, zr - rb * .3)) for side in (-1, 1)]
+        col = sp.get("rump") or sp["fur"]
+        def draw(cv):
+            # back of the barrel bulging out behind the rider
+            cv.part(circ(cp, rb * 1.18 * G, rb * 1.05 * G, wob=.05, seed=7), sp["fur"], lw=1.05 * k, shade=.24, hl=.15)
+            for side, (lp, _) in sorted(lobes, key=lambda t: t[1][1]):
+                cv.part(circ((lp[0], lp[1]), rb * .78 * G, rb * 1.08 * G, wob=.06, seed=8 + side), col, lw=1.05 * k, shade=.26, hl=.15)
+            # cute crease between the haunches
+            (a, _), (b, _) = self.proj(0, y0 - rb * .5, zr + rb * .25), self.proj(0, y0 - rb * .5, zr - rb * .9)
+            cv.line([a, b], ramp(col)[3], max(1.0 * k, .03 * G))
+            if sp.get("skirt"):   # yak fringe around the haunches
+                for j in range(-4, 5):
+                    (q, _) = self.proj(j * rb * .3, y0 - rb * .3, zr - rb * 1.05)
+                    cv.part(capsule_pts(q[0], q[1], q[0] + j * .2 * k, q[1] + rb * .55 * G, .07 * G, .045 * G), sp["skirt"], lw=.9 * k, shade=.3, hl=.1)
+        self.add(max(cv_, self.body_depth) + .005 * G, draw, "rump")
+
     def neck_head(self):
         sp, P, k, G = self.sp, self.P, self.k, self.G; rb, L = sp["rb"], sp["L"]
         nb3 = (0, L / 2 + rb * .1, self.zc(L / 2) + rb * .35)
+        # straight-back view: the whole head (snout, ears, antlers, horns) turns to look over the right shoulder
+        turn = (sp["hr"] + rb * .75) if abs(self.rig.nv(1, 0)) < .2 and self.away else 0.0
+        def hproj(x, y, z): return self.proj(x + turn, y, z)
         hc3 = (0, L / 2 + sp["neck"][0] + P["hdy"], sp["wh"] + sp["neck"][1] + P["hdz"] + P["z"] - P["pitch"] * .5)
-        (nb, nv), (hc, hv) = self.proj(*nb3), self.proj(*hc3)
+        (nb, nv), (hc, hv) = self.proj(nb3[0] + turn * .45, nb3[1], nb3[2]), hproj(*hc3)
         hr = sp["hr"]; fwd = self.nv(0, 1); self.hc3 = hc3
-        sn3 = (0, hc3[1] + sp["face"][0], hc3[2] - sp["face"][1]); (snp, snv) = self.proj(*sn3)
+        sn3 = (0, hc3[1] + sp["face"][0], hc3[2] - sp["face"][1]); (snp, snv) = hproj(*sn3)
         def neck(cv):
             cv.part(capsule_pts(nb[0], nb[1], hc[0], hc[1], sp["nw"] * 1.25 * G, sp["nw"] * .9 * G), sp["fur"], lw=1.0 * k, shade=.24, hl=.14)
             if sp.get("bell"):
-                (bp, _) = self.proj(0, hc3[1] - hr * .2, hc3[2] - hr * 1.5)
+                (bp, _) = hproj(0, hc3[1] - hr * .2, hc3[2] - hr * 1.5)
                 cv.part(circ(bp, .05 * G, .13 * G, wob=.1), sp["bell"], lw=.85 * k, shade=.3, hl=.15)
         self.add((nv + hv) / 2 - .02 * G, neck, "neck")
         if sp.get("mane"):
@@ -349,12 +379,12 @@ class Mount:
                 if sp["mane_kind"] == "flow":
                     for j, p in enumerate(pts[:-1]):
                         tip = (P["wag"] * .02, p[1] - .1 - P["flow"] * .14, p[2] - .05 + P["flow"] * .05 - (.06 if j % 2 else 0))
-                        a, b = self.proj(*p)[0], self.proj(*tip)[0]
+                        a, b = hproj(*p)[0], hproj(*tip)[0]
                         cv.part(capsule_pts(a[0], a[1], b[0], b[1], .055 * G, .028 * G), sp["mane"], lw=.9 * k, shade=.28, hl=.18)
-                    fa = self.proj(hc3[0], hc3[1] + hr * .55, hc3[2] + hr * .75)[0]; fb = self.proj(hc3[0], hc3[1] + hr * .95, hc3[2] + hr * .1)[0]
+                    fa = hproj(hc3[0], hc3[1] + hr * .55, hc3[2] + hr * .75)[0]; fb = hproj(hc3[0], hc3[1] + hr * .95, hc3[2] + hr * .1)[0]
                     if fwd > -.5: cv.part(capsule_pts(fa[0], fa[1], fb[0], fb[1], .05 * G, .03 * G), sp["mane"], lw=.85 * k, shade=.28, hl=.18)
                 else:   # brush mane: short upright crest
-                    P2 = [self.proj(*p)[0] for p in pts]; P3 = [self.proj(p[0], p[1], p[2] + .07)[0] for p in pts]
+                    P2 = [hproj(*p)[0] for p in pts]; P3 = [hproj(p[0], p[1], p[2] + .07)[0] for p in pts]
                     cv.part(hull(P2 + P3), sp["mane"], lw=.9 * k, shade=.25, hl=.15)
             self.add((nv + hv) / 2 - .01 * G, mane, "mane")
         def ears(cv, front):
@@ -364,7 +394,7 @@ class Mount:
                 elif kind == "pointy": base = (side * hr * .45, hc3[1] - hr * .35, hc3[2] + hr * .75); tip = (side * hr * .55, hc3[1] - hr * .3 - a * .06, hc3[2] + hr * .75 + el * (1 - abs(a) * .3))
                 elif kind == "deer":   base = (side * hr * .7, hc3[1] - hr * .3, hc3[2] + hr * .5); tip = (side * (hr + el * .9), hc3[1] - hr * .4, hc3[2] + hr * .6 + el * .25 - a * .05)
                 else:                  base = (side * hr * .8, hc3[1] - hr * .2, hc3[2] + hr * .35); tip = (side * (hr + el), hc3[1] - hr * .2, hc3[2] + hr * .4)
-                (bp, bv), (tp, _) = self.proj(*base), self.proj(*tip)
+                (bp, bv), (tp, _) = hproj(*base), hproj(*tip)
                 if (bv < hv) != front: continue
                 wbase = (.06 if kind == "donkey" else .045 if kind != "small" else .04) * G
                 cv.part(capsule_pts(bp[0], bp[1], tp[0], tp[1], wbase * .8, wbase * 1.1), sp.get("face_c", sp["fur"]) if sp.get("face_c") != "snow" else sp["fur"], lw=.9 * k, shade=.25, hl=.15)
@@ -378,11 +408,11 @@ class Mount:
                 b = (side * hr * .35, hc3[1] - hr * .4, hc3[2] + hr * .8)
                 if kind == "palm":
                     p = (side * (hr + .3), hc3[1] - hr * .5, hc3[2] + hr * .85 + .08)
-                    (bp, _), (pp, _) = self.proj(*b), self.proj(*p)
+                    (bp, _), (pp, _) = hproj(*b), hproj(*p)
                     cv.line([bp, pp], ramp("wood")[3], max(1.6 * k, .05 * G))
                     cv.part(circ(pp, .26 * G, .13 * G, rot=-side * .3 if self.nv(1, 0) > -2 else 0, wob=.1, seed=side + 3), "horn", lw=.95 * k, shade=.28, hl=.15)
                     for j in range(5):
-                        q = self.proj(side * (hr + .3 + (j - 2) * .1), hc3[1] - hr * .5, hc3[2] + hr * .85 + .21 - abs(j - 2) * .03)[0]
+                        q = hproj(side * (hr + .3 + (j - 2) * .1), hc3[1] - hr * .5, hc3[2] + hr * .85 + .21 - abs(j - 2) * .03)[0]
                         cv.part(circ(q, .035 * G, .06 * G, wob=0), "horn", lw=.6 * k, shade=.3, hl=.2)
                     continue
                 g = 1.45 if kind == "big" else 1.0
@@ -390,68 +420,68 @@ class Mount:
                 tines = [((side * .12 * g, hc3[1] - hr * .6, hc3[2] + hr + .16 * g), (side * .09 * g, hc3[1] + .02, hc3[2] + hr + .29 * g)),
                          ((side * .17 * g, hc3[1] - hr * .8, hc3[2] + hr + .26 * g), (side * .27 * g, hc3[1] - hr * .6, hc3[2] + hr + .33 * g))]
                 if kind == "big": tines.append(((side * .07, hc3[1] - hr * .5, hc3[2] + hr + .08), (side * .05, hc3[1] + .06, hc3[2] + hr + .16)))
-                P2 = [self.proj(*p)[0] for p in pts3]
+                P2 = [hproj(*p)[0] for p in pts3]
                 for w, c in ((max(2.0 * k, .05 * G), col[3]), (max(1.0 * k, .025 * G), col[1])):
                     cv.line(P2, c, w)
-                    for a3, b3 in tines: cv.line([self.proj(*a3)[0], self.proj(*b3)[0]], c, w)
+                    for a3, b3 in tines: cv.line([hproj(*a3)[0], hproj(*b3)[0]], c, w)
         def horns(cv):
             c = ramp("horn")
             for side in (-1, 1):
                 if sp["horns"] == "yak": pts3 = [(side * hr * .8, hc3[1] - hr * .1, hc3[2] + hr * .45), (side * (hr + .16), hc3[1] + .02, hc3[2] + hr * .55), (side * (hr + .22), hc3[1] + .05, hc3[2] + hr + .14), (side * (hr + .14), hc3[1] + .02, hc3[2] + hr + .26)]
                 else: pts3 = [(side * hr * .8, hc3[1] - hr * .1, hc3[2] + hr * .45), (side * (hr + .08), hc3[1] + .01, hc3[2] + hr * .6), (side * (hr + .1), hc3[1] + .03, hc3[2] + hr * .95)]
-                P2 = [self.proj(*p)[0] for p in pts3]
+                P2 = [hproj(*p)[0] for p in pts3]
                 cv.line(P2, c[3], max(2.4 * k, .06 * G)); cv.line(P2, c[1], max(1.3 * k, .035 * G))
         def snout(cv):
             r = sp["face"][2] * G
-            a = self.proj(0, hc3[1] + sp["hr"] * .3, hc3[2] - sp["hr"] * .1)[0]
+            a = hproj(0, hc3[1] + sp["hr"] * .3, hc3[2] - sp["hr"] * .1)[0]
             cv.part(capsule_pts(a[0], a[1], snp[0], snp[1], sp["hr"] * .72 * G, r * .95), sp.get("face_c", sp["fur"]), lw=.95 * k, shade=.22, hl=.14)
             cv.part(circ(snp, r, r * .8, wob=.02), sp["muzzle"], lw=.9 * k, shade=.22, hl=.16)
             if fwd > -.1:
                 for side in (-1, 1):
-                    (np_, _) = self.proj(side * r / G * .4, sn3[1] + r / G * .7, sn3[2] + r / G * .15)
+                    (np_, _) = hproj(side * r / G * .4, sn3[1] + r / G * .7, sn3[2] + r / G * .15)
                     cv.fill(circ(np_, r * .16, r * .12, wob=0), ramp("ink")[3])
                 if P["tongue"]:
-                    (mp, _) = self.proj(0, sn3[1] + r / G * .5, sn3[2] - r / G * .55)
+                    (mp, _) = hproj(0, sn3[1] + r / G * .5, sn3[2] - r / G * .55)
                     cv.part(circ((mp[0] + r * .15, mp[1] + r * .3), r * .3, r * .42, wob=0), "flower_pink", lw=.7 * k, shade=.25, hl=.2)
                 if P["grass"]:
-                    (mp, _) = self.proj(0, sn3[1] + r / G * .6, sn3[2] - r / G * .45)
+                    (mp, _) = hproj(0, sn3[1] + r / G * .6, sn3[2] - r / G * .45)
                     for j, (dx, dy) in enumerate(((-.5, .9), (0, 1.1), (.55, .85))):
                         cv.line([mp, (mp[0] + dx * r * (1 + .2 * self.fi), mp[1] + dy * r)], ramp("leaf")[3], max(1.4 * k, r * .22))
                         cv.line([mp, (mp[0] + dx * r * (1 + .2 * self.fi), mp[1] + dy * r)], ramp("leaf")[1], max(.7 * k, r * .11))
                 if P["mouth"]:
-                    (mp, _) = self.proj(0, sn3[1] + r / G * .55, sn3[2] - r / G * .5)
+                    (mp, _) = hproj(0, sn3[1] + r / G * .55, sn3[2] - r / G * .5)
                     cv.line([(mp[0] - r * .35, mp[1] - r * .05), (mp[0], mp[1] + r * .18), (mp[0] + r * .35, mp[1] - r * .05)], ramp("ink")[3], max(.6 * k, r * .1))
         def head(cv):
             if sp.get("antlers") and fwd < 0: antlers(cv)
             if sp.get("horns") and fwd < 0: horns(cv)
             ears(cv, True)
             if sp.get("beard"):
-                (bp, _) = self.proj(0, hc3[1] + hr * .3, hc3[2] - hr * 1.1)
+                (bp, _) = hproj(0, hc3[1] + hr * .3, hc3[2] - hr * 1.1)
                 cv.part([(bp[0] - .07 * G, bp[1] - .1 * G), (bp[0] + .07 * G, bp[1] - .1 * G), (bp[0], bp[1] + .14 * G)], sp["beard"], lw=.8 * k, shade=.3, hl=.15)
             if snv < hv: snout(cv)
             facec = sp.get("face_c", sp["fur"])
             m = cv.part(circ(hc, hr * G, hr * .95 * G, wob=.04), facec, lw=1.0 * k, shade=.22, hl=.16)
             if snv >= hv: snout(cv)
             if sp.get("facepatch") and fwd > -.3:
-                (fc, _) = self.proj(0, hc3[1] + hr * .55, hc3[2] + hr * .05)
+                (fc, _) = hproj(0, hc3[1] + hr * .55, hc3[2] + hr * .05)
                 cv.fill(circ(fc, hr * .62 * G, hr * .7 * G, wob=.08, seed=4), ramp(sp["facepatch"])[1], clip=m)
             if sp.get("blaze") and fwd > -.3:
-                a = self.proj(0, hc3[1] + hr * .75, hc3[2] + hr * .55)[0]; b = self.proj(0, sn3[1] - sp["face"][2] * .3, sn3[2] + sp["face"][2] * .5)[0]
+                a = hproj(0, hc3[1] + hr * .75, hc3[2] + hr * .55)[0]; b = hproj(0, sn3[1] - sp["face"][2] * .3, sn3[2] + sp["face"][2] * .5)[0]
                 cv.line([a, b], ramp(sp["blaze"])[1], max(1.2 * k, .05 * G))
             if fwd > -.35:
                 for side in (-1, 1):
                     an = math.radians(side * 42); vis = self.nv(math.sin(an), math.cos(an))
                     if vis > .05:
                         p3 = (hr * .9 * math.sin(an), hc3[1] + hr * .9 * math.cos(an), hc3[2] + hr * .22)
-                        (ep, _) = self.proj(*p3); r = hr * sp["eye"] * G * max(.6, vis) * .78
+                        (ep, _) = hproj(*p3); r = hr * sp["eye"] * G * max(.6, vis) * .78
                         if sp.get("eyering"): cv.fill(circ(ep, r * 1.45, r * 1.5, wob=0), ramp(sp["eyering"])[1])
                         eye(cv, ep, r, P["eyes"], k)
-                        (cp, _) = self.proj(hr * .95 * math.sin(an) * 1.02, hc3[1] + hr * .72 * math.cos(an), hc3[2] - hr * .3)
+                        (cp, _) = hproj(hr * .95 * math.sin(an) * 1.02, hc3[1] + hr * .72 * math.cos(an), hc3[2] - hr * .3)
                         cv.fill(circ(cp, r * 1.0, r * .55, wob=0), ramp("flower_pink")[1], alpha=255)
             ears(cv, False)
             for j in range(P["stars"]):   # cartoon impact stars circling the head
                 a = self.fi * 1.3 + j * 2 * math.pi / max(1, P["stars"])
-                (q, _) = self.proj(math.cos(a) * hr * 1.3, hc3[1] + math.sin(a) * hr * 1.3, hc3[2] + hr * 1.35)
+                (q, _) = hproj(math.cos(a) * hr * 1.3, hc3[1] + math.sin(a) * hr * 1.3, hc3[2] + hr * 1.35)
                 rr = .045 * G; pts = [(q[0] + rr * (1 if m % 2 == 0 else .45) * math.cos(m * math.pi / 5 - math.pi / 2), q[1] + rr * (1 if m % 2 == 0 else .45) * math.sin(m * math.pi / 5 - math.pi / 2)) for m in range(10)]
                 cv.part(pts, "gold" if "gold" in palette.RAMPS else "sun", lw=.6 * k, shade=.2, hl=.2)
             if sp.get("antlers") and fwd >= 0: antlers(cv)
@@ -548,7 +578,8 @@ class Mount:
         items = list(self.items)
         thr = self.seat_depth + .02 * self.G
         if mode == "full": sel = items
-        elif mode == "fore": sel = [it for it in items if it[3] not in ("body",) and it[0] > thr]
+        elif mode == "rear": sel = [it for it in items if it[3] in ("rump", "tail_base")]   # base parts nearer than the saddle (away views)
+        elif mode == "fore": sel = [it for it in items if it[3] not in ("body", "rump", "tail_base") and not (self.away and it[3] == "leg") and it[0] > thr]
         else:
             tier = mode.split(":")[1]
             sel = [it for it in items if it[3] == "body"]
@@ -617,6 +648,7 @@ def render_frame(species, d, anim, fi):
         full = m.draw("full"); fore = m.draw("fore")
         out.setdefault("full", []).append(full); out.setdefault("fore", []).append(fore)
         occ = fore[..., 3] > 0
+        if m.away: occ = occ | (m.draw("rear")[..., 3] > 0)   # the rump / tail hide the back of the saddle
         for t in TIERS:
             s = m.draw("saddle:" + t); s[occ] = 0; out.setdefault("saddle_" + t, []).append(s)
         if k == 1:

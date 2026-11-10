@@ -165,6 +165,18 @@ describe("rideable mounts", () => {
     expect(anchors.acts.riderAnim.death).toBeNull();
   });
 
+  it("draws the away views (facings 4-6) with a broad rump on the base layer: back view cell >= 1.25x the front view area", () => {
+    // straight-back facing 5 carries rump + haunches + tail + the head turned over the shoulder, so it reads as the animal
+    // (pre-fix the back cell was little more than the legs: as low as 1.04x the front cell)
+    const area = (r: Rect) => r.w * r.h;
+    for (const sp of Object.keys(SPECIES)) {
+      for (const [an, n] of ANIMS) {
+        const df = sprite(`mount_${sp}`).animations[an].dirFrames;
+        for (let fi = 0; fi < n; fi++) expect(area(df[fi * 8 + 5].rect) / area(df[fi * 8 + 1].rect), `${sp} ${an} f${fi}`).toBeGreaterThanOrEqual(1.25);
+      }
+    }
+  });
+
   it("adds four saddle tier icons in the nature icon sheet with ids and CSS", () => {
     for (const [i, t] of TIERS.entries()) {
       const s = man.sprites.find((x: Sprite) => x.key === `saddle_${t}`);
