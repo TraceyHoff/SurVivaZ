@@ -32,8 +32,17 @@ const threaten = (r: Rig, n = 3): void => { for (let i = 0; i < n; i++) G.noteDe
 describe("ADR-338 wiring: buildAgentView + registry", () => {
   it("a threatened bot with its own claim and surplus gets a barbed-wire target through the real view", () => {
     const r = rig(); threaten(r);
+    // ADR-341: the sensor only translates the planner's defence step, so the plan must BE
+    // defence — snooze the pre-defence ladder goals (a bot past its early game), the ADR-340
+    // isolation pattern. Without the snooze the plan is the campfire, and there is no target.
+    (aiMemoryOf(r.a) as unknown as { snooze: Record<string, number> }).snooze = {
+      axe: 10_000_000, pickaxe: 10_000_000, campfire: 10_000_000, basic_storage_box: 10_000_000,
+      wood: 10_000_000, workbench: 10_000_000, "wear:torch": 10_000_000, earthworks: 10_000_000,
+      base: 10_000_000, hearth: 10_000_000, bed: 10_000_000,
+    };
     const v = viewOf(r);
     expect(v.base).toBeDefined();
+    expect(v.plan?.goal).toBe("defence");
     expect(v.defenceTarget).toBeDefined();
     expect(v.defenceTarget!.key).toBe("barbed_wire");
     expect(v.defenceTarget!.threat).toBeGreaterThanOrEqual(2);

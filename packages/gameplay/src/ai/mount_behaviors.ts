@@ -34,13 +34,11 @@ import { preferredMount } from "./mount_preference.js"; // ADR-339: tame a mount
 import { bestMountFood, checkRepair, isRiding, liveRider, MOUNT_TAME_TOKEN, saddleInfo } from "../mounts.js";
 import { hasSkillUnlock } from "../skills/tree.js";
 import { zoneOwnedBy, zonesAt } from "../building/place.js";
-import { canUseBaseStorage } from "../building/actions.js";
-import { resolveAttachment } from "../building/links.js";
 import { AttachKind } from "../components.js";
 import { recipeOutputUnlocked, stationInRange, stationUnlocked } from "../systems/crafting.js";
 import { rideClearanceBlocked } from "../systems/movement.js";
 import { agentWorld, containerSeq, goTo } from "./base_behaviors.js";
-import { nearbyStorage, storageDepositActions, storageWithdrawActions, storedCount, type StorageInfo } from "./storage_api.js";
+import { nearbyStorage, mayTakeFromStorageAt, storageDepositActions, storageWithdrawActions, storedCount, type StorageInfo } from "./storage_api.js";
 import { aiMemoryOf, baseHome, insideBase, makePlan, plannerIndex } from "./planner.js";
 
 export interface SeenMount {
@@ -173,14 +171,14 @@ function saddlePlan(world: World, self: Entity, view: AgentWorldView, m: SeenMou
 // ---- ADR-323: liked food from allowed storage, else forage ----------------------------------------------------
 /** Storage this AI may take from: inside a claim every covering zone must be its own / its clan's (tribe) / its employer's
  *  (zoneOwnedBy), unclaimed boxes only at its own home (planner base) or, for a hired worker, its employer's home. The
- *  server's ADR-207 gate (canUseBaseStorage) must agree too. Anything else is someone else's: never touched. */
+ *  server's ADR-207 gate (canUseBaseStorage) must agree too. Anything else is someone else's: never touched.
+ *  ADR-342: the rule lives in storage_api.mayTakeFromStorageAt now (defence stocking reuses it with an explicit
+ *  home); this keeps the ADR-323/327 signature and behaviour. */
 export function mayTakeFromStorage(world: World, self: Entity, a: Agent | undefined, s: Pick<StorageInfo, "piece" | "x" | "y">): boolean {
-  const c = resolveAttachment(world, s.piece, AttachKind.Storage); if (c !== undefined && !canUseBaseStorage(world, self, c)) return false;
-  const zs = zonesAt(world, s.x, s.y); if (zs.length) return zs.every((z) => zoneOwnedBy(world, z, self));
-  const near = (x: number, y: number): boolean => dist(s.x, s.y, x, y) <= B.homeStorageTiles;
   const wk = world.isRegistered(Worker) ? world.get(self, Worker) : undefined;
-  if (wk?.owner) return near(wk.homeX, wk.homeY);
-  const base = a ? aiMemoryOf(a).base : undefined; return !!base && near(baseHome(base).x, baseHome(base).y);
+  if (wk?.owner) return mayTakeFromStorageAt(world, self, s, { x: wk.homeX, y: wk.homeY }, B.homeStorageTiles);
+  const base = a ? aiMemoryOf(a).base : undefined;
+  return mayTakeFromStorageAt(world, self, s, base ? baseHome(base) : undefined, B.homeStorageTiles);
 }
 /** Liked foods of a species, best first (love > like > ok), as item ids. */
 function likedFoods(world: World, species: number): number[] {

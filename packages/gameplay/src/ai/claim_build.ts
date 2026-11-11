@@ -269,6 +269,33 @@ function ownedRuinNear(world: World, self: Entity): RuinInfo | undefined {
   return owned[0];
 }
 /**
+ * ADR-340: the adopted ruin home of a bot that has claimed + reclaimed a ruin — the anchor the
+ * planner's base ladder runs against for behaviour goals (furnish / hearth / bed / upgrade / piece /
+ * storage), never `mem.base`, so the `base` goal that builds BASE_SLOTS can never fire over the
+ * ruin. The anchor is the ruin centre minus 1, so anchor+1 is the ruin centre (the same convention
+ * as a hut anchor+1 = hut centre): scanBase, the furnish / upgrade scans and the station slots all
+ * read from it. Undefined until the bot owns the ruin and it is reclaimed — during flag / reclaim
+ * the claim layer still owns the site, and a dropped target (or a hired bot, whose target the sensor
+ * clears) adopts nothing.
+ */
+export interface RuinHome { x: number; y: number; ox: number; oy: number; marker: Entity }
+export function ruinHomeAnchor(world: World, self: Entity, agent: Agent): RuinHome | undefined {
+  const target = agent.bb.get<ClaimTargetState>("claimTarget");
+  if (!target || target.kind !== "ruin" || target.marker === undefined) return undefined;
+  const marker = target.marker;
+  if (!world.isAlive(marker)) return undefined;
+  const pid = botPlayerId(world, self);
+  if (!pid) return undefined;
+  if ((world.getField(marker, AbandonedSite, "claimed") ?? 0) !== 1) return undefined;
+  if ((world.getField(marker, AbandonedSite, "claimedBy") ?? 0) !== pid) return undefined;
+  if (siteUnclaimed(world, marker)) return undefined;
+  const ox = world.getField(marker, AbandonedSite, "originX") ?? target.x;
+  const oy = world.getField(marker, AbandonedSite, "originY") ?? target.y;
+  const w = world.getField(marker, AbandonedSite, "width") ?? 8;
+  const h = world.getField(marker, AbandonedSite, "height") ?? 8;
+  return { x: ox + w / 2 - 1, y: oy + h / 2 - 1, ox, oy, marker };
+}
+/**
  * A claim the bot already started (restart-safe): an owned ruin, a ruin whose flag is
  * down but which is not reclaimed yet, or a new-home flag with no planner base yet.
  * The flag-derived anchor is approximate (the first flag slot's offset) — the hut lands

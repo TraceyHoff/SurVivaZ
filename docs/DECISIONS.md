@@ -4369,3 +4369,189 @@ pinned TypeScript 5.9.3: `packages/gameplay` clean.
 
 **Honest cuts.** Ruin homes have no full base behaviour yet (planner flag in `planner.ts` not
 built). Nothing verified on a real phone.
+
+## ADR-340: Ruin homes get full base behaviour (SurVivaZ)
+
+**Context.** ADR-337 deliberately withheld `mem.base` from ruin homes (the planner would build
+`BASE_SLOTS` over the ruin), so a bot living in a reclaimed ruin got none of the base ladder: no
+furnishing, no hearth, no bed, no upgrades, no base storage through the planner path.
+
+**Decision.** `PlanInput` gains `ruinBase` (`packages/gameplay/src/ai/planner.ts`), set by
+`fillPlanSensors` from the new `ruinHomeAnchor(world, self, agent)` in
+`packages/gameplay/src/ai/claim_build.ts` — the ruin centre minus 1 (anchor+1 = ruin centre, the
+hut anchor convention), defined only once the bot owns the ruin and it is reclaimed (claimedBy =
+own PlayerId, `siteUnclaimed` false); during flag / reclaim, or for hired bots (whose target the
+sensor clears), it is undefined. `makePlan` reads one `home = base ?? ruinBase` anchor: the
+`piece` (campfire / storage / workbench / furnace / anvil), `furnish`, `bed`, `upgrade`, `cook`
+and winter / evening fuel pre-goals run against it, while the `base` goal still requires `p.base`
+and never fires for a ruin home. Details: the hearth goal is satisfied by any campfire station in
+the ruin scan (the ladder's campfire piece goal builds one first; the HEARTH slot is the second
+chance when every campfire spot has failed); the bed uses `BED_SLOT` with no `complete` gate (the
+spare spots around a ruin are bare ground and all fail the ghost check with NoSupport — a bed
+needs a deck, and the ruin floor is the deck); the upgrade goal scans tiered pieces within
+`upgradeRadius` of the ruin centre instead of `bs.pieces` (ruins have no `BASE_SLOTS` pieces in
+the scan). `fillPlanSensors` (`base_behaviors.ts`) passes `ruinBase` + the ruin scan to `makePlan`
+and sets `view.bs` to the ruin scan (so warm_up, sleep-by-fire and the Task 30 `lowFire` refuel
+behaviour see the ruin's stations / storage / fires), while `view.base` stays unset — goTo's door
+logic, `insideBase` and sleep-in-bed all key on the 2x2 hut geometry, which a ruin does not have.
+A dropped ruin home deletes a stale `view.bs`. The freezing / fuel-need checks read the merged
+`homeBs` scan. Tuning knobs (`furnishRadius`, `upgradeRadius`) live in the new
+`packages/gameplay/data/ai_ruin.json`. The ADR-337 stage machine, the `mem.base` handoff for new
+builds and the claim layer's flag → reclaim → repair → rebuild → done flow are untouched; the
+earthworks ladder/light path still requires a real base (earth slots are relative to the earth
+anchor, which a ruin anchor must not reinterpret).
+
+**Validation.** New `packages/gameplay/test/adr340_ruin_base.test.ts` (15 tests): the adoption
+gate (undefined until claimed + reclaimed, anchor centres the ruin, hired / taken / new-home bots
+adopt nothing); the ladder walks straight past `base` to `bed`; the ruin bot builds its campfire
+inside the ruin, never plans a redundant hearth (the HEARTH-slot fallback is pinned with all
+campfire spots failed), beds on the ruin floor then furnishes (a standing table satisfies the
+goal), ruin storage counts toward goals and bed materials withdraw from the ruin box, the upgrade
+goal targets the lowest-tier ruin wall at the max tier; wiring through `buildAgentView` (plan +
+`view.bs` set, `view.base` / `mem.base` unset, no competing site after the cooldown), a lit low
+ruin campfire is the Task 30 refuel target, and the new-build `mem.base` handoff is unchanged.
+Two real findings while writing the tests, both fixed in the slice: the bed cannot go on spare
+spots (NoSupport — bare ground), so it uses `BED_SLOT`; and the test rig's 99 x 25 stock overflowed
+the 24-slot player bag, so the walk stocks lean (8 types x 20) and consumes craft ingredients.
+Neighbours re-run green: adr337 / adr252 / adr331 / adr321 (8 files, 82 tests). Typecheck with
+pinned TypeScript 5.9.3: `packages/gameplay` clean.
+
+**Honest cuts.** A ruin whose `BED_SLOT` is occupied retries the bed 6 times then gives up (the
+same fails mechanism as a blocked bed in a built hut) — no fallback spot search. A ruin bot with
+stale `mem.earth` from a destroyed built home keeps the old earthworks plan (pre-existing; the
+earthworks path only guards the ladder/light build against a ruin anchor). Nothing verified on a
+real phone.
+## ADR-341: Defence wired into makePlan as a first-class plan goal (SurVivaZ)
+
+**Context.** ADR-338 deliberately kept defence out of `makePlan`: `fillDefenceSensors`
+planned a target only when the planner had no step, so defence could never compete with
+planner goals. The user asked for it wired in (the Task 37 follow-up).
+
+**Decision.** `makePlan` gains a `defence` goal (`packages/gameplay/src/ai/planner.ts`,
+`GOAL_LADDER` after `bed`, before `furnish`) that calls ADR-338's `planDefence` with the
+same gating: threat level ≥ 2, own claim, surplus after the data reserve (wood 12 / stone 8 /
+planks 4, no cost item on the plan's gather leaves), wire first along the claim perimeter
+(max 8), then one turret of each kind cheapest first (max 3), every candidate through the
+ghost preview. Ranking: defence sits after tools / fire / storage / workbench / base /
+hearth / bed, and acute hunger (cook), freezing (emergency wood/stone) and winter/evening
+fuel are pre-goals that jump the queue anyway, so defence never starves shelter / food /
+water / fire — it competes with furnish and progression after that. Thirst is served by the
+`drink_water` behaviour, not the planner (unchanged). The goal emits one `build` step (the
+piece's cost joins `plan.keep`, so its materials are never junk-dropped or stashed while the
+goal is live); `buildsPiece` includes it, so a locked earlier build goal still holds it.
+`PlanInput` gains `threat` + `defenceMem`, passed by `fillPlanSensors`
+(`packages/gameplay/src/ai/base_behaviors.ts`, from `assessThreat` over
+`identity.defence`); the branch also skips hired workers itself, and needs a home anchor
+(built base or adopted ruin). Ownership: the planner owns the target. `fillDefenceSensors`
+(`packages/gameplay/src/ai/defence.ts`) still records threat events (sightings / kills /
+livestock / close attacks) and still owns `identity.defence` persistence, but no longer
+calls `planDefence` — it translates the planner's defence step into `view.defenceTarget`
+for `build_defence`, or clears it when the plan is doing anything else, so a threatened bot
+never plans two defences. `build_defence` stays the executor (withdraw from storage, then
+the standard `build:` action, `DefenceMemory` fails routing); its `planFree` consideration
+now allows the planner's own defence step, and `base_work` skips defence plans
+(consideration + run guard). Ruin homes defend too: `fillPlanSensors` publishes
+`view.ruinBase` (added to `PlanSensors` / `SENSOR_KEYS`, `view.base` stays unset per
+ADR-340) and the sensor reads `view.base ?? view.ruinBase` — without it a ruin defence
+step would be orphaned (base_work skips it, build_defence would have no target). No new
+data knobs: the goal reuses `ai_defence.json` (`buildThreatLevel`, `maxWire`,
+`maxTurrets`, `surplusReserve`, ring / offsets) as-is.
+
+**Validation.** New `packages/gameplay/test/adr341_defence_plan.test.ts` (18 tests): ladder
+position (defence after bed, before furnish); defence appears at threat ≥ 2 with surplus
+(one build step, wire inside the own claim, cost items in `plan.keep`); none at level 0/1,
+without surplus, without a claim, or when hired; ordering pinned (hungry → cook, freezing
+→ wood, unsheltered → base, thirst signals still reach `drink_water` under a defence plan);
+one step at a time (after the wire stands, the next plan is the next wire slot); a ruin
+home plans defence; `base_work` scores nothing for a defence plan while `build_defence`'s
+`planFree` allows it; wiring through the real view (plan + translated target identical in
+slot / x / y, stable across sense passes, no target while the plan is busy with the
+campfire, ruin home defends with no `mem.base` / `view.base`). Two ADR-338 tests updated
+to the new contract (the sensor no longer plans: the slice sensor test now asserts events
++ translation from a defence plan; the wiring test snoozes the pre-defence ladder goals so
+the plan IS defence). Neighbours re-run green: adr338 / adr337 / adr340 / adr252 / adr321
+(9 files, 121 tests — same as the pre-change baseline). Typecheck with pinned TypeScript
+5.9.3: `packages/gameplay` clean.
+
+**Honest cuts.** In-planner, the `hasSurplus` leaves check sees the current pass's gather
+leaves, which are empty by construction (any unmet earlier goal returns first) — later
+comfort goals do not reserve materials against defence, by design; the data reserve is the
+floor that protects them. A defence step's threat is the sensor's fresh level, which can
+differ by one sense pass from the level the planner used (events are recorded after the
+plan is made). No turret ammo stocking (ADR-338 cut, unchanged). Nothing verified on a
+real phone.
+
+**Coordinator fix (caught by the full gate).** The `planner.ts -> defence.ts` import
+created an ESM import cycle: `recruitment.ts` (entry) -> `planner.ts` -> `defence.ts` ->
+`base_behaviors.ts` -> `input.ts` -> `recruitment.ts` (still evaluating, so
+`WORKER_COMMANDS` was undefined and `COMMAND_RATES` threw "Cannot read properties of
+undefined (reading 'map')" — `esm_import_order.test.ts`, recruitment entry, failed
+standalone and in the gate). Fix: the pure planning layer moved to a new leaf module
+`packages/gameplay/src/ai/defence_plan.ts` (threat, memory, `planDefence`, turret ammo
+picking; imports only leaf modules, never `input.ts`), `planner.ts` and
+`base_behaviors.ts` import from there, and `defence.ts` keeps only sensors + behaviours
+and re-exports the moved names so existing `import * as D` users keep working.
+`fillTurretAmmoSensor` stays in `defence.ts` (it is a sensor, not pure planning).
+`esm_import_order` passes 136/136 after the fix; neighbours re-run green (15 files,
+326 tests). No behaviour change: the moved code is verbatim.
+## ADR-342: Turret ammo stocking (SurVivaZ)
+
+**Context.** Turrets (arrow / bolt / flame) existed and fired, but nothing ever stocked them:
+each turret consumes one ammo item per shot from its own 4-slot storage Container (the piece's
+Storage attachment; `defenseSystem` spends the first matching item in slot order, no ammo = idle),
+and no bot or player flow loaded them. Investigation findings: arrow_turret shoots flint_arrow /
+iron_arrow / fire_arrow, bolt_turret iron_bolt / steel_bolt, flame_turret crude_oil / lamp_oil
+(`pieces.json` `features.turret.ammo`); the target count 20 fills a single stack for every kind
+(maxStack 20–50). There was no stock/load interaction to reuse — a player loads a turret through
+the ordinary container panel (`copen` / `cdeposit` / `cclose` on the piece, the server resolving
+it to the Storage attachment), and the bot does the same, mirroring the Task 30 refuel deposit
+into a fire's container.
+
+**Decision.** `packages/gameplay/src/ai/defence.ts` + data `packages/gameplay/data/ai_defence.json`
+add `stock_turret` next to `build_defence` (same registry, `defenceBehaviors()`), with
+`fillTurretAmmoSensor` called from `fillDefenceSensors` (after the hire sensors, so the employer's
+base / `hire.idle` are available). `pickTurretAmmo` picks one turret: neediest first (least ammo,
+then nearest), below `ammoLowFraction` (0.25) of `ammoTargetCount` (20) rounds, capped by the
+turret's free stack room (a kind already inside tops its stack up; a new kind needs a free slot).
+The kind is the turret's first listed kind with surplus — only the surplus above the per-kind
+`surplusReserve` (flint/iron arrow 10, fire arrow 5, iron/steel bolt 10/5, crude/lamp oil 5) is
+deposited, and a kind on the plan's gather leaves is skipped for the next kind, so the bot never
+gives away its last arrows or spends what the ladder still needs. The source is the bag, else the
+base storage box — and only when the storage rule allows it. The rule itself moved to the storage
+API: `storage_api.mayTakeFromStorageAt` (own / clan / employer claim via `zoneOwnedBy`, or
+unclaimed within `ammoHomeTiles` of home, plus the ADR-207 `canUseBaseStorage` gate), with
+`mount_behaviors.mayTakeFromStorage` kept as a thin wrapper resolving the home from the agent, so
+ADR-323/327 keep their exact signature and behaviour (no new import cycle: `storage_api` takes
+`building/place.js` + `building/actions.js`, neither of which imports any `ai/*` module).
+Gating (the no-starvation rule): only with surplus, never while a survival need is unmet
+(Survival hunger / thirst < 30, the ADR-327 floor), never while the planner wants anything (any
+step, gather leaf or hunt target — a leaves-only plan is still planner work, caught while writing
+the wiring test), and for a hired worker only while `hire.idle`. One trip per turret
+(`ammoCooldownTicks` 600 after a trip or an empty source). The behaviour withdraws the shortfall
+from the box first (same container sequence as `build_defence`, including its pending-`cclose`
+dance), then deposits, tracking the open deposit in `ammoSeq` so the sequence finishes even
+though the turret reads full once the deposit lands. The target earmarks its ammo (the kind joins
+`plan.keep` and leaves `view.surplus`) so the bot neither junk-drops nor stashes the rounds it is
+about to load. Hired workers stock the employer's turrets from the employer's box (the claim check
+`ownClaim` / `zoneOwnedBy` covers the employer's claim); they still build nothing.
+
+**Validation.** New `packages/gameplay/test/adr342_turret_ammo.test.ts` (24 tests): data knobs and
+each turret's ammo, `turretAmmoState` counts / free slots, per-kind choice and fallback, surplus
+above the reserve only, leaves veto, low / half / full thresholds, free-slot vs stack top-up,
+neediest-first, foreign box never a source (fabricated scan + `mayTakeFromStorageAt`), sensor
+gating (busy step, gather leaves, hungry, cooldown, no claim), hired worker stocks the employer's
+turret (real employer-owned claim) and not when idle is false or absent, behaviour considerations,
+the full bag-deposit and box-withdraw-then-deposit sequences (open / deposit-or-withdraw / close,
+cooldown set, turret at 20), no-ammo cooldown, full turret left alone. New
+`packages/gameplay/test/adr342_turret_wiring.test.ts` (4 tests): the target appears through the
+real `buildAgentView` for an idle bot (ladder snoozed) and for a hired idle worker, none for a busy
+planner, and the registry carries `stock_turret` next to `build_defence`. Neighbours re-run green:
+adr341 / adr338 / adr337 / adr340 / adr252 / adr321 / adr323 / adr327 (12 files, 162 tests).
+Typecheck with pinned TypeScript 5.9.3: `packages/gameplay` clean.
+
+**Honest cuts.** The reserve can leave a turret half-full when the bot holds exactly one load
+(20 arrows = reserve 10 + deposit 10) — the bot has no ladder goal to gather more arrows, so a
+turret it cannot fill stays at what the surplus allowed. A deposit sequence open on a turret the
+sensor stops targeting (e.g. the turret is demolished mid-trip) is closed by the behaviour, but a
+withdraw sequence abandoned the same way relies on the pending-`cclose` dance on the next run.
+Nothing verified on a real phone.

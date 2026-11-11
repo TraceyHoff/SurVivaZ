@@ -195,22 +195,29 @@ describe("ADR-338 ordering and placement", () => {
 });
 
 describe("ADR-338 sensors", () => {
-  it("zombies seen inside the claim record sightings (once per cooldown), and enough threat + surplus sets a target", () => {
+  it("zombies seen inside the claim record sightings (once per cooldown), and a defence plan in the view is translated into a target", () => {
     const { w, p, agent } = fresh(); rich(w, p);
     const z = { id: 999, kind: "zombie" as const, x: BASE.x + 1, y: BASE.y + 1 };
     const view = viewFor(w, { seen: [z] });
     D.fillDefenceSensors(w, p, view, agent);
     expect(D.defenceMemoryOf(agent).events).toContainEqual({ tick: w.tick, kind: "sighting" });
     expect(D.defenceMemoryOf(agent).events).toContainEqual({ tick: w.tick, kind: "attack" }); // within attackRadius of the base
-    // sighting (1) + recent close attack (2) = level 2, and the bot is rich: a piece is planned at once
-    expect(view.defenceTarget).toBeDefined();
-    expect(D.DEFENCE_PIECE_KEYS).toContain(view.defenceTarget!.key);
+    // ADR-341: the sensor records events only — with an idle plan there is no target to translate
+    expect(view.defenceTarget).toBeUndefined();
     D.fillDefenceSensors(w, p, view, agent); // same tick: no duplicate events
     expect(D.defenceMemoryOf(agent).events.filter((e) => e.kind === "sighting")).toHaveLength(1);
     expect(D.defenceMemoryOf(agent).events.filter((e) => e.kind === "attack")).toHaveLength(1);
     steps(w, 201); // past the event cooldown: the same zombie is recorded again
     D.fillDefenceSensors(w, p, view, agent);
     expect(D.defenceMemoryOf(agent).events.filter((e) => e.kind === "sighting")).toHaveLength(2);
+    // ...and when the planner's plan IS defence, the sensor translates its step into the target
+    const wire = pid("barbed_wire");
+    const defencePlan = { goal: "defence", step: { k: "build", piece: wire, x: BASE.x + 1, y: BASE.y + 1, level: 0, rot: 0, tier: 0, slot: "wire0", stand: { x: BASE.x + 1, y: BASE.y + 1 } }, leaves: [], hunt: [], keep: new Set<number>(), blocked: [] };
+    const view2 = viewFor(w, { seen: [z], plan: defencePlan });
+    D.fillDefenceSensors(w, p, view2, agent);
+    expect(view2.defenceTarget).toBeDefined();
+    expect(view2.defenceTarget!.key).toBe("barbed_wire");
+    expect(D.DEFENCE_PIECE_KEYS).toContain(view2.defenceTarget!.key);
   });
   it("no target when threat is high but the bot is poor", () => {
     const { w, p, agent } = fresh();

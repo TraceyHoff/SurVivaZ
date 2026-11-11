@@ -13,7 +13,8 @@ import { hasShovel } from "../terrain.js";
  */
 import { Transform, seasonAt, type Agent, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
-import { AttachKind, BuildPiece, Container, DoorState, Fuel, ResourceNode, Worn } from "../components.js";
+import { AttachKind, BuildPiece, Container, DoorState, Fuel, ResourceNode, Worker, Worn } from "../components.js";
+import { planDefence, type DefenceMemory } from "./defence_plan.js"; // ADR-341: the defence goal reuses ADR-338's planDefence + surplus gating (leaf module: no input.ts cycle)
 import { resolveAttachment } from "../building/links.js";
 import { countItem, readSlots } from "../inventory.js";
 import { maxHpOf } from "../building/integrity.js";
@@ -26,6 +27,11 @@ import { bareHandsCan } from "../systems/gathering.js";
 import { nearWater } from "../systems/vitals.js";
 import { emitterSpecs, EmitterKind } from "../realism.js";
 import { animalDefs } from "../population.js";
+import ruinData from "../../data/ai_ruin.json";
+
+/** ADR-340: tuning for ruin-home base behaviour (furnish / upgrade scan radii around the ruin centre). */
+export interface RuinData { furnishRadius: number; upgradeRadius: number }
+export const RUIN_DATA: RuinData = ruinData as unknown as RuinData;
 
 /** Task 30: lit state + remaining burn (ticks) of a fired piece: the current burn plus every fuel item in its box. */
 export function fireState(world: World, defs: GameDefs, e: Entity): { lit: boolean; fuelTicks: number } {
@@ -276,7 +282,7 @@ export type Step =
   | { k: "upgrade"; piece: number; tier: number };
 export interface Plan { goal: string; step?: Step; leaves: number[]; hunt: number[]; keep: Set<number>; blocked: string[] }
 
-type Goal = { k: "earthworks" } | { k: "tool"; kind: ToolKind; tier: number; name: string } | { k: "item"; key: string; count: number; alt?: string } | { k: "piece"; key: string } | { k: "base" } | { k: "wear"; key: string } | { k: "cook" } | { k: "hearth" } | { k: "bed" } | { k: "furnish"; key: string; slot?: BaseSlot } | { k: "upgrade" };
+type Goal = { k: "earthworks" } | { k: "tool"; kind: ToolKind; tier: number; name: string } | { k: "item"; key: string; count: number; alt?: string } | { k: "piece"; key: string } | { k: "base" } | { k: "wear"; key: string } | { k: "cook" } | { k: "hearth" } | { k: "bed" } | { k: "furnish"; key: string; slot?: BaseSlot } | { k: "upgrade" } | { k: "defence" };
 export const GOAL_LADDER: readonly Goal[] = [
   { k: "tool", kind: ToolKind.Axe, tier: 1, name: "axe" }, { k: "tool", kind: ToolKind.Pickaxe, tier: 1, name: "pickaxe" },
   // ADR-252 / ADR-250: campfire -> starter storage box -> workbench (isBaseStoragePiece: any storage piece satisfies the box goal)
@@ -285,6 +291,10 @@ export const GOAL_LADDER: readonly Goal[] = [
   { k: "earthworks" }, // Yard stations stay outside the finite footprint/quarry.
   { k: "base" }, { k: "hearth" },
   { k: "bed" },
+  // ADR-341: defence is a first-class plan goal once the bot has shelter (tools, fire, storage,
+  // workbench, base, hearth, bed) — acute hunger / cold / fuel are pre-goals that jump the queue
+  // anyway, so defence never starves a need; it competes with furnish / progression after that.
+  { k: "defence" },
   // Task 28: furnish the home like a player would (table inside, light by the door, shelf + trough + salt barrel
   // in the yard), and stock animal feed so livestock can be tamed for food.
   { k: "furnish", key: "table", slot: { id: "table", key: "table", x: 1.5, y: 1.5, level: 0 } },
@@ -317,7 +327,15 @@ export interface PlanInput {
   priority?: readonly { key: string; count: number }[]; onlyPriority?: boolean;
   /** ADR-323: recursion cap of the backward chain (recipe depth); deeper = stuck. */
   maxDepth?: number;
-  earth?: TerrainBasePlan; terrainOnly?: boolean; shelterOnly?: boolean; world: World; self: Entity; defs: GameDefs; base?: { x: number; y: number }; bs?: BaseState; fails: Record<string, number>; hungry?: boolean; snooze?: Record<string, number>; freezing?: boolean; evening?: boolean; /** ADR-252 / ADR-239: winter (cold all day): fire + a day's fuel come first */ winter?: boolean }
+  earth?: TerrainBasePlan; terrainOnly?: boolean; shelterOnly?: boolean; world: World; self: Entity; defs: GameDefs; base?: { x: number; y: number }; bs?: BaseState; fails: Record<string, number>; hungry?: boolean; snooze?: Record<string, number>; freezing?: boolean; evening?: boolean; /** ADR-252 / ADR-239: winter (cold all day): fire + a day's fuel come first */ winter?: boolean;
+  /** ADR-340: adopted ruin home anchor (ruin centre minus 1, so anchor+1 is the centre — the hut
+   *  anchor convention). Behaviour goals (piece / furnish / hearth / bed / upgrade / cook / storage)
+   *  run against it via `bs` (scanned at the anchor); the `base` goal (BASE_SLOTS build) NEVER runs
+   *  for a ruin home. Set by fillPlanSensors from ruinHomeAnchor, never from mem.base. */
+  ruinBase?: { x: number; y: number };
+  /** ADR-341: threat level (assessThreat over identity.defence events) + defence memory, for the
+   *  defence goal. Set by fillPlanSensors; the goal is skipped when either is absent. */
+  threat?: number; defenceMem?: DefenceMemory }
 class Resolver {
   avail = new Map<number, number>(); inv = new Map<number, number>(); visiting = new Set<number>();
   step?: Step; leaves = new Set<number>(); hunt = new Set<number>(); keep = new Set<number>(); stuck = false; /** ADR-221: a piece / station not learned yet */ locked?: string;
@@ -373,7 +391,7 @@ class Resolver {
     this.step = { k: "upgrade", piece, tier }; return false;
   }
   obtainPiece(key: string, slot?: BaseSlot): boolean {
-    const def = this.ix.piece.get(key); const b = this.p.base; if (!def || !b) { this.stuck = true; return false; }
+    const def = this.ix.piece.get(key); const b = this.p.base ?? this.p.ruinBase; if (!def || !b) { this.stuck = true; return false; }
     if (key !== "claim_totem" && !hasOwnClaim(this.p.world, this.p.self, b.x + 1, b.y + 1)) return this.obtainPiece("claim_totem");
     if (!this.unlocked(def, slot?.tier ?? 0)) return false;
     let ok = true; for (const c of pieceCost(this.p.defs, def, slot?.tier ?? 0)) ok = this.obtain(c.item, c.count) && ok;
@@ -392,10 +410,12 @@ const standNear = (b: { x: number; y: number }, x: number, y: number): { x: numb
 };
 
 const goalName = (g: Goal): string => (g.k === "tool" ? g.name : g.k === "item" ? g.key : g.k === "piece" ? g.key : g.k === "wear" ? `wear:${g.key}` : g.k === "furnish" ? `furnish:${g.key}` : g.k);
-const buildsPiece = (g: Goal): boolean => g.k === "piece" || g.k === "base" || g.k === "hearth" || g.k === "bed" || g.k === "furnish" || g.k === "upgrade";
+const buildsPiece = (g: Goal): boolean => g.k === "piece" || g.k === "base" || g.k === "hearth" || g.k === "bed" || g.k === "furnish" || g.k === "upgrade" || g.k === "defence";
 /** One planner pass: first unmet, reachable goal of the ladder -> step + leaves. */
 export function makePlan(p: PlanInput): Plan {
   const ix = plannerIndex(p.defs); const { world, self, defs } = p; const sl = readSlots(world, self);
+  /** ADR-340: the anchor every placement / scan in the ladder reads — the built base, else the adopted ruin home. */
+  const home = p.base ?? p.ruinBase;
   const inv = new Map<number, number>(); for (let i = 0; i < sl.items.length; i++) if (sl.items[i] && sl.counts[i]) inv.set(sl.items[i]!, (inv.get(sl.items[i]!) ?? 0) + sl.counts[i]!);
   const tool = new Map<ToolKind, number>(); const allCount = (id: number): number => (inv.get(id) ?? 0) + (p.bs?.storage?.counts.get(id) ?? 0);
   for (const d of ix.tools) if (allCount(d.id) > 0) tool.set(d.tool!.kind, Math.max(tool.get(d.tool!.kind) ?? 0, d.tool!.tier));
@@ -417,7 +437,7 @@ export function makePlan(p: PlanInput): Plan {
       if (!ix.tools.some((d) => d.tool!.kind === g.kind && d.tool!.tier >= g.tier && ix.reachable.has(d.id))) { blocked.push(name); continue; } r.obtainTool(g.kind, g.tier); }
     else if (g.k === "item") { let d = ix.item.get(g.key); name = g.key; if (!d) continue; if (!ix.reachable.has(d.id)) { const a = g.alt ? ix.item.get(g.alt) : undefined; if (!a || !ix.reachable.has(a.id)) { blocked.push(name); continue; } d = a; }
       if (allCount(d.id) >= g.count) { if (d.weapon || d.tool) { r.obtain(d.id, 1); if (r.step) return out(g, r); } keepAll.add(d.id); continue; } r.obtain(d.id, g.count, false); }
-    else if (g.k === "piece") { name = g.key; const def = ix.piece.get(g.key); if (!def || !p.base) continue; if (def.station !== StationKind.None ? p.bs?.stations.has(def.station) : isBaseStoragePiece(def) ? !!p.bs?.storage : false) continue;
+    else if (g.k === "piece") { name = g.key; const def = ix.piece.get(g.key); if (!def || !home) continue; if (def.station !== StationKind.None ? p.bs?.stations.has(def.station) : isBaseStoragePiece(def) ? !!p.bs?.storage : false) continue;
       if (!pieceCost(defs, def, 0).every((c) => ix.reachable.has(c.item))) { blocked.push(name); continue; } r.obtainPiece(g.key); }
     else if (g.k === "earthworks") {
       name = "earthworks"; if (!p.earth || p.earth.done || p.earth.abandoned) continue;
@@ -427,7 +447,10 @@ export function makePlan(p: PlanInput): Plan {
         if (work?.k === "terrain") r.step = work;
         else if (work?.k === "ladder" || work?.k === "light") {
           const key = work.k === "ladder" ? "ladder" : "campfire";
-          r.obtainPiece(key, { id: `earth:${key}`, key, x: work.x - p.earth.x, y: work.y - p.earth.y, level: 0 });
+          // ADR-340: earth slots are relative to the earth anchor (= the planner base anchor); a ruin
+          // anchor must not reinterpret them, so this path needs a real base — without one the goal
+          // stalls exactly as before (the earthworks plan with no step, below).
+          if (p.base) r.obtainPiece(key, { id: `earth:${key}`, key, x: work.x - p.earth.x, y: work.y - p.earth.y, level: 0 });
         } else if (work?.k === "fuel") {
           if (woodId !== undefined && (countItem(world, work.piece, woodId) > 0 || (world.getField(work.piece, Fuel, "burnUntilTick") ?? 0) > world.tick || r.obtain(woodId, 4))) r.step = { k: "light", piece: work.piece };
         }
@@ -436,36 +459,73 @@ export function makePlan(p: PlanInput): Plan {
       if (!p.earth.done && !p.earth.abandoned) return out(g, r); // don't lay foundations before the planned earthworks
       continue;
     }
-    else if (g.k === "base") { name = "base"; if (!p.base) continue; const missing = BASE_SLOTS.filter((s) => !p.bs?.pieces.has(s.id) && (p.fails[s.id] ?? 0) < 6 && (s.key !== "door_wood" || p.bs?.pieces.has("wd")) && (s.level === 0 || BASE_SLOTS.filter((f) => f.key === "foundation").every((f) => p.bs?.pieces.has(f.id))));
+    else if (g.k === "base") { name = "base"; if (!p.base) continue; // ADR-340: ruinBase never builds BASE_SLOTS — a ruin home skips this goal entirely
+      const missing = BASE_SLOTS.filter((s) => !p.bs?.pieces.has(s.id) && (p.fails[s.id] ?? 0) < 6 && (s.key !== "door_wood" || p.bs?.pieces.has("wd")) && (s.level === 0 || BASE_SLOTS.filter((f) => f.key === "foundation").every((f) => p.bs?.pieces.has(f.id))));
       if (!missing.length) continue; const pd = (sl: BaseSlot): PieceDef | undefined => ix.piece.get(sl.key);
       const next = missing.find((sl) => { const d = pd(sl); return !!d && pieceUnlocked(world, self, d, d.tiered ? sl.tier ?? 0 : d.fixedTier); }) ?? missing[0]!; // ADR-221: walls go on while the roof tier is learned
       r.obtainPiece(next.key, next); }
-    else if (g.k === "bed") { name = "bed"; if (!p.base || !p.bs?.complete || p.bs.bed || (p.fails.bed ?? 0) >= 6) continue; const def = ix.piece.get(BED_SLOT.key); if (!def) continue;
-      if (!pieceCost(defs, def, 0).every((c) => ix.reachable.has(c.item))) { blocked.push(name); continue; } r.obtainPiece(BED_SLOT.key, BED_SLOT); }
-    else if (g.k === "furnish") { name = `furnish:${g.key}`; const def = ix.piece.get(g.key); if (!def || !p.base) continue;
+    else if (g.k === "bed") { name = "bed"; if (!home || p.bs?.bed || (p.fails.bed ?? 0) >= 6) continue; const def = ix.piece.get(BED_SLOT.key); if (!def) continue;
+      if (!pieceCost(defs, def, 0).every((c) => ix.reachable.has(c.item))) { blocked.push(name); continue; }
+      // ADR-340: a ruin has no BASE_SLOTS hut, so no `complete` gate — but the bed still goes on
+      // BED_SLOT (the ruin floor: validatePlacement needs a deck under a bed, and the spare spots
+      // around a ruin are bare ground, so they all fail the ghost check).
+      if (!p.ruinBase && (!p.base || !p.bs?.complete)) continue;
+      r.obtainPiece(BED_SLOT.key, BED_SLOT); }
+    else if (g.k === "defence") {
+      name = "defence";
+      // ADR-341: the planner owns the defence target now (ADR-338's sensor only records threat
+      // events and translates this step back into view.defenceTarget for build_defence).
+      // planDefence enforces the ADR-338 gating (threat >= buildThreatLevel, own claim, surplus
+      // after the data reserve, ghost preview). Hired bots defend nobody's land, and without a
+      // home anchor (built base or adopted ruin) there is no territory. The leaves passed here
+      // are the current pass's gather leaves: any unmet earlier goal returns first, so they are
+      // empty by construction — later comfort goals do not reserve materials against defence.
+      if (p.threat === undefined || !p.defenceMem || !home) continue;
+      if (world.isRegistered(Worker) && (world.getField(self, Worker, "owner") ?? 0) > 0) continue;
+      const t = planDefence({ world, self, defs, base: home, ...(p.bs ? { bs: p.bs } : {}), threat: p.threat, leaves: new Set<number>(), mem: p.defenceMem });
+      if (!t) continue;
+      const def = ix.piece.get(t.key);
+      if (!def) { blocked.push(name); continue; }
+      // the build step's materials are never junk-dropped / stashed while the goal is live
+      for (const c of pieceCost(defs, def, t.tier)) r.keep.add(c.item);
+      r.step = { k: "build", piece: t.piece, x: t.x, y: t.y, level: t.level, rot: t.rot, tier: t.tier, slot: t.slot, stand: t.stand };
+    }
+    else if (g.k === "furnish") { name = `furnish:${g.key}`; const def = ix.piece.get(g.key); if (!def || !home) continue;
       // Task 28: unlike stations / storage, furniture has no scanBase slot — the goal is met when a piece of
-      // this key already stands within 6 tiles of the anchor (anywhere in the yard counts as furnished).
+      // this key already stands within the furnish radius of the anchor+1 (the hut centre, or the ruin centre).
+      const fr = p.ruinBase ? RUIN_DATA.furnishRadius : 6;
       let have = false;
-      for (const e of installSpatialIndex(world).queryRadius(p.base.x + 1, p.base.y + 1, 6)) {
+      for (const e of installSpatialIndex(world).queryRadius(home.x + 1, home.y + 1, fr)) {
         if (!world.has(e, BuildPiece)) continue; const t = world.getField(e, BuildPiece, "type");
         if (t !== undefined && defs.pieces.get(t)?.key === g.key) { have = true; break; }
       }
       if (have) continue;
       if (!pieceCost(defs, def, 0).every((c) => ix.reachable.has(c.item))) { blocked.push(name); continue; } r.obtainPiece(g.key, g.slot); }
-    else if (g.k === "upgrade") { name = "upgrade"; if (!p.base || !p.bs) continue;
+    else if (g.k === "upgrade") { name = "upgrade"; if (!home || !p.bs) continue;
       // Task 28: the lowest-tier tiered hut piece, straight to the max tier (reinforced). One piece per pass;
       // the skill gate (tier token) holds the goal via Resolver.unlocked, like any locked build goal.
       const maxTier = defs.tiers.length - 1; let target: { e: Entity; def: PieceDef; tier: number } | undefined;
-      for (const e of [...p.bs.pieces.values()]) {
+      const consider = (e: Entity): void => {
         const t = world.getField(e, BuildPiece, "type"); const df = t !== undefined ? defs.pieces.get(t) : undefined;
         const tier = world.getField(e, BuildPiece, "tier") ?? 0;
-        if (!df?.tiered || tier >= maxTier) continue;
-        if (!target || tier < target.tier) target = { e, def: df, tier };
-      }
+        if (!df?.tiered || tier >= maxTier) return;
+        if (!target || tier < target.tier || (tier === target.tier && e < target.e)) target = { e, def: df, tier };
+      };
+      // ADR-340: ruins have no BASE_SLOTS pieces in the scan — the lowest-tier tiered piece standing
+      // within upgradeRadius of the ruin centre upgrades instead.
+      if (p.ruinBase) for (const e of installSpatialIndex(world).queryRadius(home.x + 1, home.y + 1, RUIN_DATA.upgradeRadius)) {
+        if (!world.has(e, BuildPiece)) continue; consider(e);
+      } else for (const e of [...p.bs.pieces.values()]) consider(e);
       if (!target) continue;
       if (!pieceCost(defs, target.def, maxTier).every((c) => ix.reachable.has(c.item))) { blocked.push(name); continue; }
       r.obtainUpgrade(target.e, target.def, maxTier); }
-    else if (g.k === "hearth") { name = "hearth"; if (!p.base || !p.bs?.complete || p.bs.hearth !== undefined || (p.fails.hearth ?? 0) >= 6) continue; r.obtainPiece(HEARTH.key, HEARTH); }
+    else if (g.k === "hearth") { name = "hearth"; if (!home || (p.fails.hearth ?? 0) >= 6) continue;
+      // ADR-340: a ruin's hearth is any campfire station in the ruin scan — the ladder's campfire piece
+      // goal (earlier) builds one, so a ruin with a fire never reaches this goal; without one the HEARTH
+      // slot is the second chance after the campfire station spots.
+      if (p.ruinBase) { if (p.bs?.stations.has(StationKind.Campfire)) continue; }
+      else if (!p.base || !p.bs?.complete || p.bs.hearth !== undefined) continue;
+      r.obtainPiece(HEARTH.key, HEARTH); }
     else if (g.k === "cook") { name = "cook"; const raw = ix.item.get("raw_meat"); const cooked = ix.item.get("cooked_meat"); if (!raw || !cooked || !p.bs?.stations.has(StationKind.Campfire) || allCount(raw.id) === 0) continue; r.obtain(cooked.id, allCount(cooked.id) + Math.min(5, allCount(raw.id)), false); }
     else if (g.k === "wear") { name = `wear:${g.key}`; const d = ix.item.get(g.key); if (!d?.wear) continue; if (worn.has(d.id)) { keepAll.add(d.id); continue; }
       if (!ix.reachable.has(d.id)) { blocked.push(name); continue; }

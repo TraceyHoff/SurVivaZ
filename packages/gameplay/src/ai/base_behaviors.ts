@@ -26,17 +26,21 @@ import { plantableBySeed } from "../farming.js";
 /** ADR-252 / ADR-247: a plantable seed / sapling (kept and stashed, never dropped as junk). */
 export const isSeedItem = (defs: GameDefs, item: number): boolean => { const k = defs.items.get(item)?.key; return !!k && plantableBySeed(k) > 0; };
 import { isWinter, BASE_SLOTS, DOOR_IN, DOOR_OUT, HEARTH_SIT, aiMemoryOf, bumpStat, insideBase, makePlan, markAiDirty, claimBaseSite, pickBaseSite, plannerIndex, scanBase, type BaseState, type Plan } from "./planner.js";
+import { assessThreat, defenceMemoryOf } from "./defence_plan.js"; // ADR-341: threat level + memory for the planner's defence goal (leaf module: no input.ts cycle)
 import { stuckOn } from "./autonomy.js";
+import { ruinHomeAnchor } from "./claim_build.js"; // ADR-340: adopted ruin home anchors the planner (the autonomy <-> claim_build cycle already exists)
 import { UpgradeCmd } from "../input.js";
 import type { AgentOutputWithCommands } from "./agent_output.js";
 
 export interface PlanSensors {
-  plan?: Plan; base?: { x: number; y: number }; bs?: BaseState; craftCount?: number; craftTicks?: number;
+  plan?: Plan; base?: { x: number; y: number }; bs?: BaseState;
+  /** ADR-341: adopted ruin home anchor (ADR-340), for the defence sensor's claim check — view.base stays unset for ruins. */
+  ruinBase?: { x: number; y: number }; craftCount?: number; craftTicks?: number;
   huntTarget?: { id: number; x: number; y: number }; panel?: { id: number }; tripWanted?: boolean;
   surplus?: { item: number; count: number }[]; woodTotal?: number; stoneTotal?: number; junk?: { item: number; count: number };
   /** ADR-252 / ADR-239: winter (the season is mostly winter): fuel and warmth all day */ winter?: boolean;
 }
-export const PLAN_SENSOR_KEYS = ["plan", "base", "bs", "craftCount", "craftTicks", "huntTarget", "panel", "tripWanted", "surplus", "woodTotal", "stoneTotal", "junk", "winter"] as const;
+export const PLAN_SENSOR_KEYS = ["plan", "base", "bs", "ruinBase", "craftCount", "craftTicks", "huntTarget", "panel", "tripWanted", "surplus", "woodTotal", "stoneTotal", "junk", "winter"] as const;
 type Ctx = AgentContext<AgentWorldView>;
 const hash = (s: string): number => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return (h >>> 0) / 4294967296; };
 const KEEP_WOOD = 12, KEEP_FOOD = 6;
@@ -68,10 +72,25 @@ export function fillPlanSensors(world: World, self: Entity, view: AgentWorldView
     if (n === 0 && (mem.fails["f00"] ?? 0) >= 4) { delete mem.base; claimBaseSite(world, self, undefined); mem.fails = {}; mem.stats.relocations++; markAiDirty(a, tick); return undefined; } // the site is unusable: pick another
     view.base = base; view.bs = bs;
   }
+  // ADR-340: a bot that claimed + reclaimed a ruin has no mem.base (ADR-337) — its adopted ruin home
+  // anchors the planner's behaviour goals instead (furnish / hearth / bed / upgrade / piece / storage),
+  // never the `base` goal that builds BASE_SLOTS over the ruin. view.base stays unset: goTo's door
+  // logic, insideBase and sleep-in-bed all key on the 2x2 hut geometry, which a ruin does not have.
+  // view.bs IS set, so the ruin's stations / storage / bed / fires drive warm_up, sleep-by-fire and
+  // the Task 30 refuel behaviour exactly like a built base's scan. A dropped ruin home (or a lost
+  // base) must not leave a stale scan behind.
+  const ruin = !mem.base ? ruinHomeAnchor(world, self, a) : undefined;
+  const rbs = ruin ? scanBase(world, defs, ruin) : undefined;
+  if (ruin && rbs) view.bs = rbs;
+  else if (!mem.base) delete view.bs;
+  // ADR-341: the ruin anchor for the defence sensor (view.base stays unset for ruins, ADR-340).
+  if (ruin) view.ruinBase = { x: ruin.x, y: ruin.y }; else delete view.ruinBase;
+  /** The base scan the planner + fuel checks read: the built base, else the adopted ruin home. */
+  const homeBs = bs ?? rbs;
   const hungry = (view as { self?: unknown }) && a.bb.num("hungerSeen", 1) < 0.5;
   const woodId = plannerIndex(defs).item.get("wood")?.id; let woodBag = 0; if (woodId !== undefined) for (let i = 0; i < slots.items.length; i++) if (slots.items[i] === woodId) woodBag += slots.counts[i] ?? 0;
   const body = world.getField(self, Survival, "bodyTemp") ?? 37; const dayT = sunFractionOf(timeOfDay(world));
-  const freezing = body < 36.4 && woodBag < 7 && !(bs?.complete) && !(bs?.stations.get(StationKind.Campfire)?.lit);
+  const freezing = body < 36.4 && woodBag < 7 && !(homeBs?.complete) && !(homeBs?.stations.get(StationKind.Campfire)?.lit);
   const winter = isWinter(world); if (winter) view.winter = true;
   const evening = dayT >= 0.45 && dayT < 0.66; // h11-h16: stock the night's fuel (NIGHT_WOOD) before the cold sets in
   if (base && !mem.earth && !bs?.pieces.size) {
@@ -81,7 +100,10 @@ export function fillPlanSensors(world: World, self: Entity, view: AgentWorldView
   if (mem.earth && base && (mem.earth.x !== base.x || mem.earth.y !== base.y)) delete mem.earth;
   const earthActive = mem.earth && !mem.earth.done && !mem.earth.abandoned;
   const sg = a.bb.get<{ key: string } | null>("saddleGoal"); // ADR-323: the AI's saddle material chain (mount_behaviors.saddleGoalPass)
-  const plan = makePlan({ ...(sg ? { priority: [{ key: sg.key, count: 1 }], maxDepth: MOUNT_BOTS.planMaxDepth } : {}), ...(mem.earth ? { earth: mem.earth } : {}), world, self, defs, ...(base ? { base } : {}), ...(bs ? { bs } : {}), fails: mem.fails, hungry, freezing, evening, winter, ...(mem.snooze ? { snooze: mem.snooze } : {}) }); view.plan = plan; if (earthActive) markAiDirty(a, tick); a.bb.set("planGoal", plan.goal); a.bb.set("planStep", plan.step);
+  // ADR-341: threat level + defence memory for the planner's defence goal (the sensor records the
+  // events; the level here is from the previous sense pass — the same lag as every other sensor).
+  const dmem = defenceMemoryOf(a); const threat = assessThreat(dmem.events, tick).level;
+  const plan = makePlan({ ...(sg ? { priority: [{ key: sg.key, count: 1 }], maxDepth: MOUNT_BOTS.planMaxDepth } : {}), ...(mem.earth ? { earth: mem.earth } : {}), world, self, defs, ...(base ? { base } : {}), ...(homeBs ? { bs: homeBs } : {}), ...(ruin ? { ruinBase: ruin } : {}), threat, defenceMem: dmem, fails: mem.fails, hungry, freezing, evening, winter, ...(mem.snooze ? { snooze: mem.snooze } : {}) }); view.plan = plan; if (earthActive) markAiDirty(a, tick); a.bb.set("planGoal", plan.goal); a.bb.set("planStep", plan.step);
   { // patience: a goal with no step and no leaf gathered for GOAL_PATIENCE ticks is snoozed half a day (persisted), like a player giving up on reeds
     let leafN = 0; for (let i = 0; i < slots.items.length; i++) if (slots.items[i] && plan.leaves.includes(slots.items[i]!)) leafN += slots.counts[i] ?? 0;
     const gs = a.bb.get("goalSeen") as { g: string; last: number; n: number } | undefined;
@@ -102,8 +124,8 @@ export function fillPlanSensors(world: World, self: Entity, view: AgentWorldView
   const needs = new Set(plan.leaves);
   const wood = ix.item.get("wood")?.id; let woodN = 0; if (wood !== undefined) for (let i = 0; i < slots.items.length; i++) if (slots.items[i] === wood) woodN += slots.counts[i] ?? 0;
   view.woodTotal = woodN; { const sw = ix.item.get("stone")?.id; view.stoneTotal = sw === undefined ? 0 : have(sw); }
-  if (st?.k === "craft" && st.station !== StationKind.None && wood !== undefined) { const s = bs?.stations.get(st.station); if (s?.fired && !s.lit && woodN < 4) needs.add(wood); }
-  if (wood !== undefined && bs?.stations.has(StationKind.Campfire) && woodN < 6) needs.add(wood);
+  if (st?.k === "craft" && st.station !== StationKind.None && wood !== undefined) { const s = homeBs?.stations.get(st.station); if (s?.fired && !s.lit && woodN < 4) needs.add(wood); }
+  if (wood !== undefined && homeBs?.stations.has(StationKind.Campfire) && woodN < 6) needs.add(wood);
   for (const h of plan.hunt) needs.add(h);
   // hunt: a passive animal in memory that drops a wanted item, only with a weapon in hand
   if (plan.hunt.length) {
@@ -234,11 +256,12 @@ const mark = (c: Ctx, k: Parameters<typeof bumpStat>[1], by = 1): void => bumpSt
 export function baseBehaviors(): GameBehavior[] {
   return [
     { name: "base_work", scheduleBonus: 0.35, inertia: 0.35, traits: { industriousness: 0.6 }, considerations: [
-        { name: "step", weight: 1.3, curve: step01, input: (c) => { const s = c.world.plan?.step; return s && (s.k !== "craft" || s.station !== StationKind.None) && cooled(c, "workFail", 120) ? 1 : 0; } },
+        { name: "step", weight: 1.3, curve: step01, input: (c) => { const s = c.world.plan?.step; return s && c.world.plan?.goal !== "defence" && (s.k !== "craft" || s.station !== StationKind.None) && cooled(c, "workFail", 120) ? 1 : 0; } },
         { name: "daylight", curve: { type: "linear", m: -0.7, b: 1 }, input: (c) => night(c.self.phase) },
         { name: "calm", curve: step01, input: (c) => (c.memory.nearest("zombie", c.self.x, c.self.y, 0.3) ? 0 : 1) }],
       run: (c, o) => {
         const s = c.world.plan?.step; const bs = c.world.bs; if (!s) return false;
+        if (c.world.plan?.goal === "defence") return false; // ADR-341: the defence build step belongs to build_defence (withdraw + build + DefenceMemory fails), not base_work
         const fail = (): false => { c.bb.set("workFail", c.self.tick); return false; };
         if (s.k === "terrain") {
           if (goTo(c, o, s.stand.x, s.stand.y) > .55) { if (stuckOn(c, s.stand.x, s.stand.y)) return fail(); return; }

@@ -15,6 +15,8 @@ import { GameplayConfig } from "../config.js";
 import { StationKind, type PieceDef } from "../defs.js";
 import { listSlots } from "../inventory.js";
 import { resolveAttachment } from "../building/links.js";
+import { zoneOwnedBy, zonesAt } from "../building/place.js";
+import { canUseBaseStorage } from "../building/actions.js";
 
 /** Plain base storage: a container piece that is not a stall, a fire/fuel slot, a station, a turret (ammo) or a feeding trough.
  *  basic_storage_box is the starter one; storage_box / large_chest / shelves / cabinets / barrels count too. */
@@ -51,6 +53,21 @@ export function nearbyStorage(world: World, e: Entity, radius: number): StorageI
 }
 /** Units of `item` in a storage piece (0 when not readable here). */
 export const storedCount = (s: StorageInfo, item: number): number => s.contents?.find((c) => c.item === item)?.count ?? 0;
+
+/**
+ * ADR-342: the shared storage-permission rule behind ADR-323/327's mayTakeFromStorage, with the
+ * home already resolved by the caller (the bot's own base centre, or its employer's home — the
+ * caller knows which base it is stocking for, so this stays free of the planner / AiMemory).
+ * Storage this AI may take from: inside a claim every covering zone must be its own / its clan's
+ * (tribe) / its employer's (zoneOwnedBy), unclaimed boxes only within `homeTiles` of home. The
+ * server's ADR-207 gate (canUseBaseStorage) must agree too. Anything else is someone else's:
+ * never touched.
+ */
+export function mayTakeFromStorageAt(world: World, self: Entity, s: Pick<StorageInfo, "piece" | "x" | "y">, home: { x: number; y: number } | undefined, homeTiles = 5): boolean {
+  const c = resolveAttachment(world, s.piece, AttachKind.Storage); if (c !== undefined && !canUseBaseStorage(world, self, c)) return false;
+  const zs = zonesAt(world, s.x, s.y); if (zs.length) return zs.every((z) => zoneOwnedBy(world, z, self));
+  return !!home && Math.hypot(s.x - home.x, s.y - home.y) <= homeTiles;
+}
 
 /** Action strings (agent_output.ts) for one deposit: open, deposit `count` of `item` from the bag, close. */
 export const storageDepositActions = (piece: Entity, item: number, count: number): string[] => [`copen:${piece}`, `cdeposit:${piece}:${item}:${count}`, "cclose"];
