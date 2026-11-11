@@ -48,6 +48,8 @@ export const enum BuildFail {
   HasDependents = 32,
   /** ADR-318: the move's source or destination is on a claim the actor has no permission on. */
   NoMovePermission = 33,
+  /** ADR-355: deposit refused — the item is not in the storage piece's accepts list. */
+  WrongStorage = 34,
 }
 export const enum DestroyCause { Damage = 1, Collapse = 2, Demolish = 3 }
 

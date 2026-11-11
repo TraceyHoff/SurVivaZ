@@ -14,6 +14,8 @@ const SUBS: [string, string][] = [["ui-kit", root + "assets/ui/kit/manifest.ui.k
   // Task 34: generated bee / owl / apiary fragment (layout only, no PNGs).
   ["task34", dir + "task34/manifest.task34.json"],
   ["task256", dir + "task256/manifest.task256.json"],
+  // ADR-356: dedicated store fragment (layout only, no PNGs).
+  ["task355", dir + "task355/manifest.task355.json"],
   // ADR-242: Art's top-level drops; they repeat building-pack keys (first wins), so only their collisions are tolerated
   ["pvp_clan", root + "assets/pvp_clan/manifest.fragment.json"], ["stalls", root + "assets/stalls/manifest.fragment.json"]];
 const TOLERATED = new Set(["pvp_clan", "stalls"]);

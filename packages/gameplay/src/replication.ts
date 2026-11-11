@@ -42,6 +42,7 @@ export const GAMEPLAY_REPLICATION: readonly Replication[] = [
   r(C.AnimalSkills, "all"), // Task 15: animal skill panels read points/nodes on every peer
   r(C.Mount, "all"), r(C.Riding, "all"), r(C.MountTaming, "all"), // ADR-319: every peer draws the rider seated on the mount
   r(C.RopeLead, "all"), // ADR-351: every peer draws the rope between holder and led animal
+  r(C.StoreFill, "all"), // ADR-356: every peer draws the store's fill state (rides the static channel with BuildPiece)
 ];
 export function replicationOf(def: ComponentDef): Replication | undefined { return GAMEPLAY_REPLICATION.find((x) => x.def === def); }
 

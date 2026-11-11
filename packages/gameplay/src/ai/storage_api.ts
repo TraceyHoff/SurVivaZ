@@ -28,6 +28,8 @@ export const STARTER_STORAGE_PIECE = "basic_storage_box";
 export interface StorageInfo {
   /** piece entity: the copen/cdeposit/cwithdraw target (the server resolves it to the Storage attachment) */
   piece: Entity; key: string; x: number; y: number; dist: number; slots: number;
+  /** ADR-355: item ids this store accepts (the piece def's accepts list); empty / absent = unrestricted. */
+  accepts?: readonly number[];
   /** filled only when the Container is readable in this world (server, or a replica while viewing) */
   free?: number; contents?: { item: number; count: number }[];
 }
@@ -39,7 +41,7 @@ export function nearbyStorage(world: World, e: Entity, radius: number): StorageI
   for (const p of world.query([BuildPiece, Transform])) {
     const def = defs.pieces.get(world.getField(p, BuildPiece, "type") ?? 0); if (!isBaseStoragePiece(def)) continue;
     const pt = world.get(p, Transform)!; const dist = Math.hypot(pt.x - t.x, pt.y - t.y); if (dist > radius) continue;
-    const info: StorageInfo = { piece: p, key: def!.key, x: pt.x, y: pt.y, dist, slots: def!.container };
+    const info: StorageInfo = { piece: p, key: def!.key, x: pt.x, y: pt.y, dist, slots: def!.container, accepts: def!.accepts };
     const c = resolveAttachment(world, p, AttachKind.Storage);
     if (c !== undefined && world.has(c, Container)) {
       const used = listSlots(world, c).filter((s) => s.item && s.count);
@@ -53,6 +55,25 @@ export function nearbyStorage(world: World, e: Entity, radius: number): StorageI
 }
 /** Units of `item` in a storage piece (0 when not readable here). */
 export const storedCount = (s: StorageInfo, item: number): number => s.contents?.find((c) => c.item === item)?.count ?? 0;
+
+/**
+ * ADR-355: the nearest base-storage piece for depositing `item` — the closest store whose def accepts it;
+ * when no matching store is in range, the closest generic store (no accepts list), so a bot is never stuck
+ * holding something it cannot store. Undefined when there is no base storage in range at all.
+ * Permission is the caller's job (mayTakeFromStorageAt / canUseBaseStorage); this is a pure lookup.
+ */
+export function nearbyStorageFor(world: World, e: Entity, item: number, radius: number): StorageInfo | undefined {
+  const all = nearbyStorage(world, e, radius);
+  return all.find((s) => s.accepts?.length && s.accepts.includes(item)) ?? all.find((s) => !s.accepts?.length);
+}
+/**
+ * ADR-355: the nearest base-storage piece that actually holds `item` (for fetching) — a matching store first,
+ * then a generic one. Undefined when no store in range holds any of it. Permission is the caller's job.
+ */
+export function storageHolding(world: World, e: Entity, item: number, radius: number): StorageInfo | undefined {
+  const holding = nearbyStorage(world, e, radius).filter((s) => storedCount(s, item) > 0);
+  return holding.find((s) => s.accepts?.length && s.accepts.includes(item)) ?? holding.find((s) => !s.accepts?.length);
+}
 
 /**
  * ADR-342: the shared storage-permission rule behind ADR-323/327's mayTakeFromStorage, with the

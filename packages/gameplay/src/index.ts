@@ -78,6 +78,7 @@ export * from "./ai/storage_api.js";
 export * from "./ai/survivor_behaviors.js";
 export * from "./ai/autonomy.js";
 export * from "./systems/stall_display.js";
+export * from "./systems/store_fill.js"; // ADR-356: store fill mirror (StoreFill, storeFillLevel, STORE_PIECE_KEYS)
 export * from "./expression.js";
 export * from "./party.js";
 export * from "./ai/party_behaviors.js";

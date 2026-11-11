@@ -3600,6 +3600,164 @@
       ]
     },
     {
+      "key": "ore_store",
+      "paintable": true,
+      "$comment": "ADR-355: resource-specific storage — holds ores only (accepts). Stone-lined bin, 12 slots like basic_storage_box. Ingots are smelted products, not ores, and do not belong here.",
+      "placement": "free",
+      "layer": 2,
+      "tier": 1,
+      "hp": 120,
+      "ground": true,
+      "category": "furniture",
+      "container": 12,
+      "accepts": [
+        "copper_ore",
+        "tin_ore",
+        "iron_ore",
+        "lead_ore",
+        "chromite_ore"
+      ],
+      "cost": [
+        {
+          "resource": "planks",
+          "amount": 6
+        },
+        {
+          "resource": "stone",
+          "amount": 4
+        },
+        {
+          "resource": "nails",
+          "amount": 2
+        }
+      ]
+    },
+    {
+      "key": "log_store",
+      "paintable": true,
+      "$comment": "ADR-355: resource-specific storage — holds logs only (wood + hardwood, accepts). 12 slots like basic_storage_box.",
+      "placement": "free",
+      "layer": 2,
+      "tier": 1,
+      "hp": 120,
+      "ground": true,
+      "category": "furniture",
+      "container": 12,
+      "accepts": [
+        "wood",
+        "hardwood"
+      ],
+      "cost": [
+        {
+          "resource": "planks",
+          "amount": 4
+        },
+        {
+          "resource": "rope",
+          "amount": 2
+        }
+      ]
+    },
+    {
+      "key": "stick_store",
+      "paintable": true,
+      "$comment": "ADR-355: resource-specific storage — holds sticks only (accepts). Woven bin, 12 slots like basic_storage_box.",
+      "placement": "free",
+      "layer": 2,
+      "tier": 1,
+      "hp": 120,
+      "ground": true,
+      "category": "furniture",
+      "container": 12,
+      "accepts": [
+        "sticks"
+      ],
+      "cost": [
+        {
+          "resource": "sticks",
+          "amount": 8
+        },
+        {
+          "resource": "fiber",
+          "amount": 4
+        }
+      ]
+    },
+    {
+      "key": "crop_store",
+      "paintable": true,
+      "$comment": "ADR-355: resource-specific storage — holds harvested crops only (accepts). Produce, not seeds: seeds stay in generic storage. 12 slots like basic_storage_box.",
+      "placement": "free",
+      "layer": 2,
+      "tier": 1,
+      "hp": 120,
+      "ground": true,
+      "category": "furniture",
+      "container": 12,
+      "accepts": [
+        "wheat",
+        "lettuce",
+        "pepper",
+        "beetroot",
+        "rice",
+        "hay",
+        "corn",
+        "potato",
+        "carrot",
+        "tomato",
+        "pumpkin",
+        "squash",
+        "beans",
+        "cabbage",
+        "onion",
+        "cotton",
+        "flax",
+        "hemp"
+      ],
+      "cost": [
+        {
+          "resource": "planks",
+          "amount": 6
+        },
+        {
+          "resource": "rope",
+          "amount": 1
+        },
+        {
+          "resource": "fiber",
+          "amount": 2
+        }
+      ]
+    },
+    {
+      "key": "stone_store",
+      "paintable": true,
+      "$comment": "ADR-355: resource-specific storage — holds masonry stock only (stone, stone_brick, clay, clay_brick; accepts). Clay counts as stone-family here: raw masonry material, kept with the stone. 12 slots like basic_storage_box.",
+      "placement": "free",
+      "layer": 2,
+      "tier": 1,
+      "hp": 120,
+      "ground": true,
+      "category": "furniture",
+      "container": 12,
+      "accepts": [
+        "stone",
+        "stone_brick",
+        "clay",
+        "clay_brick"
+      ],
+      "cost": [
+        {
+          "resource": "stone",
+          "amount": 8
+        },
+        {
+          "resource": "planks",
+          "amount": 2
+        }
+      ]
+    },
+    {
       "key": "trophy_mount",
       "paintable": true,
       "placement": "edge",

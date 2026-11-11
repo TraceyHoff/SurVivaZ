@@ -33,7 +33,7 @@ import { maxHpOf } from "../building/integrity.js";
 import { FARMING, FARM_TOOL, FarmFail, plantableBySeed, till } from "../farming.js";
 import { GOAL_CRAFTS, instantChores, stuckOn } from "./autonomy.js";
 import { crafterIdFor } from "../economy/provenance.js";
-import { containerSeq, goTo } from "./base_behaviors.js";
+import { containerSeq, goTo, storageTargetFor } from "./base_behaviors.js";
 import { storageWithdrawActions } from "./storage_api.js";
 import { scanBase } from "./planner.js";
 import { nearestClaimHostile } from "../territory.js";
@@ -333,7 +333,7 @@ export function withHireDuty(b: GameBehavior): GameBehavior {
 function farmRun(c: Ctx, o: AgentOutput): boolean | void { const f = c.world.farm; if (!f) return false;
   if (f.till && !f.harvest && !f.tend) { // till new soil (harvest / tending come first)
     const t = f.till;
-    if (t.lack) { const sb = c.world.bs?.storage; if (!sb) return false; // fetch the hoe from base storage first
+    if (t.lack) { const sb = storageTargetFor(c, t.lack.item, true); if (!sb) return false; // ADR-355: fetch the hoe from the store that holds it first (a matching store, else the base box)
       if (goTo(c, o, sb.x, sb.y) > 2.2) { if (stuckOn(c, sb.x, sb.y)) return false; return; } stop(o);
       if (containerSeq(c, o, sb.id, storageWithdrawActions(sb.id as Entity, t.lack.item, t.lack.count))) return false; return; }
     if (goTo(c, o, t.x, t.y) > 0.9) { if (stuckOn(c, t.x, t.y)) return false; return; } stop(o);
@@ -375,7 +375,7 @@ export function hireBehaviors(): GameBehavior[] {
         { name: "job", curve: step01, input: hiredJob(WorkerJob.Maintain) },
         { name: "repair", curve: step01, input: (c) => (c.world.repair ? 1 : 0) }],
       run: (c, o) => { const r = c.world.repair; if (!r) return false;
-        if (r.lack) { const sb = c.world.bs?.storage; if (!sb) return false; // fetch the missing material first
+        if (r.lack) { const sb = storageTargetFor(c, r.lack.item, true); if (!sb) return false; // ADR-355: fetch the missing material from the store that holds it first
           if (goTo(c, o, sb.x, sb.y) > 2.2) { if (stuckOn(c, sb.x, sb.y)) return false; return; } stop(o);
           if (containerSeq(c, o, sb.id, storageWithdrawActions(sb.id as Entity, r.lack.item, r.lack.count))) return false; return; }
         if (goTo(c, o, r.x, r.y) > 1.7) { if (stuckOn(c, r.x, r.y)) return false; return; } stop(o);
@@ -384,7 +384,7 @@ export function hireBehaviors(): GameBehavior[] {
         { name: "job", curve: step01, input: hiredJob(WorkerJob.Craft) },
         { name: "recipe", curve: step01, input: (c) => (c.world.craftRecipe !== undefined || c.world.hire?.supply ? 1 : 0) }],
       run: (c, o) => { const h = c.world.hire; if (!h) return false;
-        if (h.supply) { const sb = c.world.bs?.storage; if (!sb) return false;
+        if (h.supply) { const sb = storageTargetFor(c, h.supply.item, true); if (!sb) return false; // ADR-355: fetch the supply from the store that holds it first
           if (goTo(c, o, sb.x, sb.y) > 2.2) { if (stuckOn(c, sb.x, sb.y)) return false; return; } stop(o);
           if (containerSeq(c, o, sb.id, storageWithdrawActions(sb.id as Entity, h.supply.item, h.supply.count))) return false; return; }
         if (c.world.craftRecipe === undefined) return false;

@@ -10,7 +10,7 @@ import { canLootBag } from "../combat/pvp.js";
 import { isPetOwner } from "../pets.js";
 import { AttachKind, BuildPiece, PieceLink, StallHeader, Container, ContainerViewers, Dead, DoorState, IntentAction, MAX_VIEWERS, PieceStability, PlayerIntent, Tribe, Viewing } from "../components.js";
 import { gameplayDefs, isAuthority, rangeSlack } from "../config.js";
-import { secondsToTicks } from "../defs.js";
+import { pieceAccepts, secondsToTicks } from "../defs.js";
 import {
   BuildFail, BuildFailed, ContainerClosed, ContainerOpened, DestroyCause, DoorToggled, emit, PiecePainted, PieceRepaired, PieceUpgraded,
 } from "../events.js";
@@ -209,7 +209,13 @@ export function containerSystem(world: World): void {
     // stall stock and tills move only through the economy commands (stock/unstock/buy/collect)
     if (world.has(c, StallHeader) || world.getField(c, PieceLink, "kind") === AttachKind.Till) { fail(BuildFail.Locked); continue; }
     const item = it.data.item[s]!; const count = it.data.count[s]!;
-    if (action === IntentAction.Deposit) { if (transferItem(world, e, c, item, count) === 0) fail(countItem(world, e, item) ? BuildFail.Occupied : BuildFail.CannotAfford); }
+    if (action === IntentAction.Deposit) {
+      // ADR-355: a resource-specific store takes only its own family (its def's accepts list); withdraw is
+      // unaffected (anything already inside can come out) and pieces without accepts behave as before.
+      const piece = pieceOf(world, c); const def = piece !== undefined ? gameplayDefs(world).pieces.get(world.getField(piece, BuildPiece, "type") ?? 0) : undefined;
+      if (!pieceAccepts(def, item)) fail(BuildFail.WrongStorage);
+      else if (transferItem(world, e, c, item, count) === 0) fail(countItem(world, e, item) ? BuildFail.Occupied : BuildFail.CannotAfford);
+    }
     else if (item === 0) { // ADR-160 "Take all": item 0 withdraws every stack that fits
       let moved = 0; for (const sl of listSlots(world, c)) if (sl.item && sl.count) moved += transferItem(world, c, e, sl.item, sl.count);
       if (moved === 0) fail(BuildFail.CannotAfford);

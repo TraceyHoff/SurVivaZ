@@ -39,6 +39,7 @@ import { VEHICLE_DEFS_HASH, vehicleSystem } from "./vehicles.js";
 import { vehicleGuardSystem } from "./vehicle_net.js";
 import { expressionSystem, EXPRESSION_EVERY } from "./expression.js";
 import { stallDisplaySystem, STALL_DISPLAY_EVERY } from "./systems/stall_display.js";
+import { storeFillSystem, STORE_FILL_EVERY } from "./systems/store_fill.js";
 import { hordeDirectorSystem, HORDES_EVERY, setWorldRules, type WorldRulesOpts } from "./hordes.js";
 
 export * from "./spawn.js";
@@ -102,6 +103,7 @@ export const GAMEPLAY_SYSTEM_ORDER: readonly (readonly [Phase, string, number?])
   ["postSim", "gameplay.noiseDecay"],
   ["postSim", "gameplay.pruneBuffs", 20],
   ["postSim", "gameplay.stallDisplay", STALL_DISPLAY_EVERY],
+  ["postSim", "gameplay.storeFill", STORE_FILL_EVERY], // ADR-356: mirror store Container fill into StoreFill
   ["postSim", "gameplay.expression", EXPRESSION_EVERY],
   ["postSim", "gameplay.animSettle"], // ADR-107: swim + player one-shot anims
   ["postSim", "gameplay.vehicleGuard"], // server-only, no-op until installVehicleGuard (vehicle_net.ts)
@@ -143,7 +145,7 @@ export function installGameplay(world: World, options: GameplayOptions | number 
     "gameplay.spoilage": spoilageSystem, "gameplay.chunkSurface": chunkSurfaceSystem,
     "gameplay.recruitment": recruitmentSystem,
     "gameplay.clearIntents": clearIntentsSystem, "gameplay.equipmentSync": equipmentSyncSystem, "gameplay.noiseDecay": noiseDecaySystem,
-    "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
+    "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.storeFill": storeFillSystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
     "gameplay.hordes": hordeDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem, "gameplay.rope": ropeSystem, "gameplay.dung": dungSystem,
     ...installBuildingSystems(world), ...installCombatSystems(world),
   };

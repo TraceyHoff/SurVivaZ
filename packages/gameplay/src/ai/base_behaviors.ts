@@ -12,11 +12,12 @@ import { planTerrainBase } from "./terrain_base.js";
  *  - trip: outbound gathering / hunting trip 18..36 tiles from the base and back (counts trips / max distance).
  *  - refuel: keep the base fire burning through the night. - leave_base / sleep: door-aware in / out of the 2x2 base.
  */
-import { storageDepositActions, storageWithdrawActions } from "./storage_api.js";
+import { storageDepositActions, storageWithdrawActions, mayTakeFromStorageAt, nearbyStorage, storedCount, type StorageInfo } from "./storage_api.js";
 import { timeOfDay, sunFractionOf, Transform, type Agent, type AgentContext, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
-import { Animal, AttachKind, BotHome, BuildPiece, Container, Dead, Fuel, LootBag, NO_SLOT, StanceMode, Survival, Viewing, Worn } from "../components.js";
+import { Animal, AttachKind, BotHome, BuildPiece, Container, Dead, Fuel, LootBag, NO_SLOT, StanceMode, Survival, Viewing, Worker, Worn } from "../components.js";
+import { canUseBaseStorage } from "../building/actions.js";
 import { resolveAttachment } from "../building/links.js";
 import { countItem, hasBrushInHotbar, readSlots, slotFreshness } from "../inventory.js";
 import { spoilStageIndex, spoilStages } from "../food.js";
@@ -25,7 +26,7 @@ import { animalDefs } from "../population.js";
 import { plantableBySeed } from "../farming.js";
 /** ADR-252 / ADR-247: a plantable seed / sapling (kept and stashed, never dropped as junk). */
 export const isSeedItem = (defs: GameDefs, item: number): boolean => { const k = defs.items.get(item)?.key; return !!k && plantableBySeed(k) > 0; };
-import { isWinter, BASE_SLOTS, DOOR_IN, DOOR_OUT, HEARTH_SIT, aiMemoryOf, bumpStat, insideBase, makePlan, markAiDirty, claimBaseSite, pickBaseSite, plannerIndex, scanBase, type BaseState, type Plan } from "./planner.js";
+import { isWinter, BASE_SLOTS, DOOR_IN, DOOR_OUT, HEARTH_SIT, aiMemoryOf, baseHome, bumpStat, insideBase, makePlan, markAiDirty, claimBaseSite, pickBaseSite, plannerIndex, scanBase, type BaseState, type Plan } from "./planner.js";
 import { assessThreat, defenceMemoryOf } from "./defence_plan.js"; // ADR-341: threat level + memory for the planner's defence goal (leaf module: no input.ts cycle)
 import { stuckOn } from "./autonomy.js";
 import { ruinHomeAnchor } from "./claim_build.js"; // ADR-340: adopted ruin home anchors the planner (the autonomy <-> claim_build cycle already exists)
@@ -265,6 +266,39 @@ export function lowFire(c: Ctx): { id: number; key: string; x: number; y: number
 }
 const mark = (c: Ctx, k: Parameters<typeof bumpStat>[1], by = 1): void => bumpStat(c.agent, k, c.self.tick, by);
 
+/** ADR-355: the bot's own entity (set by fillPlanSensors); undefined on a bare replica context. */
+const selfEntityOf = (c: Ctx): Entity | undefined => c.agent.bb.get<Entity>("selfEntity");
+/** ADR-355: home this AI may take storage from — its employer's home when hired, else its own base. */
+const takeHomeOf = (c: Ctx): { x: number; y: number } | undefined => {
+  const w = worldOf(c); const self = selfEntityOf(c); if (!w || !self) return undefined;
+  const wk = w.isRegistered(Worker) ? w.get(self, Worker) : undefined;
+  if (wk?.owner) return { x: wk.homeX, y: wk.homeY };
+  const base = aiMemoryOf(c.agent).base; return base ? baseHome(base) : undefined;
+};
+/**
+ * ADR-355: storage target for one item — the nearest base store that accepts it (a matching store first,
+ * a generic store when there is none), each permission-checked for the bot's own / employer's base, else
+ * the scanned base box. `holding` = fetch (the store must actually hold the item); false = deposit (the
+ * store must have a free slot when that is readable). Hired workers fetch from the employer's stores
+ * under the existing permission rules, never another player's.
+ */
+export function storageTargetFor(c: Ctx, item: number, holding: boolean): { id: number; x: number; y: number } | undefined {
+  const w = worldOf(c); const self = selfEntityOf(c);
+  if (w && self) {
+    const all = nearbyStorage(w, self, MOUNT_BOTS.storageRadius);
+    const matching = (s: StorageInfo): boolean => !!s.accepts?.length && s.accepts.includes(item);
+    const wanted = holding ? all.filter((s) => storedCount(s, item) > 0) : all.filter((s) => s.free === undefined || s.free > 0);
+    for (const s of [...wanted.filter(matching), ...wanted.filter((s) => !matching(s))]) {
+      const att = resolveAttachment(w, s.piece, AttachKind.Storage);
+      const ok = holding
+        ? mayTakeFromStorageAt(w, self, s, takeHomeOf(c), MOUNT_BOTS.homeStorageTiles)
+        : att !== undefined && canUseBaseStorage(w, self, att);
+      if (ok) return { id: s.piece, x: s.x, y: s.y };
+    }
+  }
+  return c.world.bs?.storage;
+}
+
 export function baseBehaviors(): GameBehavior[] {
   return [
     { name: "base_work", scheduleBonus: 0.35, inertia: 0.35, traits: { industriousness: 0.6 }, considerations: [
@@ -294,7 +328,7 @@ export function baseBehaviors(): GameBehavior[] {
           containerSeq(c, o, s.piece, depositAndLight(s.piece, wood.id, 4)); return;
         }
         if (s.k === "wear") { if (cooled(c, "wearAt", 60)) { o.actions.push(`wear:${s.invSlot}`); c.bb.set("wearAt", c.self.tick); mark(c, "wears"); } return false; }
-        if (s.k === "withdraw") { const sb = bs?.storage; if (!sb) return fail();
+        if (s.k === "withdraw") { const sb = storageTargetFor(c, s.item, true); if (!sb) return fail(); // ADR-355: fetch from the nearest store that holds the item (a matching store first), else the scanned base box
           // Container reach is 2.5 tiles: stop as soon as the box is reachable instead of pushing to 1.6
           // through furniture — a bot approaching from behind its own workbench pinned itself at ~2.1 tiles
           // forever (the workbench blocks the last stretch, and nothing else moves it while gated on workFail).
@@ -328,10 +362,13 @@ export function baseBehaviors(): GameBehavior[] {
         { name: "surplus", curve: step01, input: (c) => (c.world.surplus && cooled(c, "stashAt", 300) ? 1 : 0) },
         { name: "full", curve: { type: "linear", m: -0.6, b: 1 }, input: (c) => Math.min(1, c.world.invSpaceFree ?? 0.5) },
         { name: "nearBase", curve: { type: "inverse" }, input: (c) => { const sb = c.world.bs?.storage; return sb ? Math.min(1, Math.hypot(sb.x - c.self.x, sb.y - c.self.y) / 24) : 1; } }],
-      run: (c, o) => { const sb = c.world.bs?.storage, sur = c.world.surplus; if (!sb || !sur) return false;
+      run: (c, o) => { const sur = c.world.surplus; if (!sur) return false;
+        // ADR-355: one stack at a time, each to the store that accepts it (ore to the ore store, crops to the
+        // crop store, ...); the scanned base box is the fallback when no matching store exists.
+        const list = sur.slice(0, 6); const k = c.bb.num("stashIdx"); const s = list[Math.min(k, list.length - 1)]!;
+        const sb = storageTargetFor(c, s.item, false); if (!sb) return false;
         if (goTo(c, o, sb.x, sb.y) > 2.2) { if (stuckOn(c, sb.x, sb.y)) { c.bb.set("stashAt", c.self.tick); return false; } return; } stop(o); // same reach-based stop as withdraw
         // one deposit per open/close cycle (ADR-250 API), one stack after another across think ticks
-        const list = sur.slice(0, 6); const k = c.bb.num("stashIdx"); const s = list[Math.min(k, list.length - 1)]!;
         if (containerSeq(c, o, sb.id, storageDepositActions(sb.id as Entity, s.item, s.count))) { mark(c, "deposits");
           if (k + 1 >= list.length) { c.bb.set("stashIdx", 0); c.bb.set("stashAt", c.self.tick); return false; } c.bb.set("stashIdx", k + 1); } } },
     { name: "hunt", inertia: 0.5, traits: { bravery: 0.6 }, considerations: [

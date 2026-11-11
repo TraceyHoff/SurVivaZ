@@ -35,7 +35,7 @@ import { HitReact, NodeRegrow, hitDirRad, Equipment, Worn, SlotDye, INVENTORY_SL
 import { Mount, Riding } from "@engine/gameplay";
 import { idleGrazing, LAYER_KEY, MOUNT_GAIT_ANIM, MOUNT_SHEET_WILD, mountActOf, mountForeKey, mountGait, mountSpriteKeyOf, riderPose, riderStartTick, saddleOverlayKey, screenNeutralShift, swimClipPx, type MountAct } from "./mount-render.js";
 import { AssetRegistry as AssetRegistryClass } from "@engine/assets";
-import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, type ResolvedSprite } from "@engine/gameplay";
+import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, StoreFill, isStorePieceKey, type ResolvedSprite } from "@engine/gameplay";
 
 /** Render-side schemas the renderer's bindings expect (view World only). */
 const VAnim = defineComponent("ViewAnimState", { state: "u8", startTick: "u32" });
@@ -79,6 +79,7 @@ import { RaidFx, useRaidBurning, type RaidPiece } from "./raid-fx.js";
 import { MANIFEST_INDEX, withCharArtFragment, loadMergedManifestWith, type ManifestFragmentRef } from "./manifest-index.js";
 import { task34AtlasSources, TASK34_ATLAS_KEYS } from "./task34-art.js";
 import { task256AtlasSources, TASK256_ATLAS_KEYS } from "./task256-art.js";
+import { task355AtlasSources, installStoreMenuIcons, TASK355_ATLAS_KEYS } from "./task355-art.js";
 import { stumpKeys } from "./stumps.js";
 /** `?cam=animal`: debug camera that follows the first ambient animal instead of the player. */
 const CAM_ANIMAL = typeof location !== "undefined" && new URLSearchParams(location.search).get("cam") === "animal";
@@ -342,6 +343,12 @@ export class IsoView {
     for (const [k, src] of await task34AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-257: unique wild lettuce / hay atlases (wheat already has nature_crops art).
     for (const [k, src] of await task256AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-356: dedicated ore / log / stick / crop / stone store atlases (fill states live in the fragment).
+    for (const [k, src] of await task355AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-357: the five store build-menu icons point at items_build frames 297–301, which are transparent
+    // in the shipped atlas (no binary could ship through the snapshot route) — paint them at runtime from
+    // the stores' own world art so the build menu shows them. Safe no-op without a canvas.
+    installStoreMenuIcons();
     // Art's customization pack (~220 paper-doll atlases, 1008x960): the renderer packs every atlas into one 2048² texture
     // array, so these alone need ~1.7 GiB of VRAM ("Texture total allocation size is too large" -> every sprite black).
     // Until Render loads outfit layers on demand, keep them out unless the array fits (?cz=1 forces them in).
@@ -358,7 +365,7 @@ export class IsoView {
     // ADR-118: count atlas/KTX2 image responses as they land (Resource Timing works for fetch and <img>); expected =
     // the eager atlases (paper-doll/streamed ones load on demand later), so the fraction stays honest and capped < 1.
     // Task 34 blob URLs carry no file extension, so the png-regex watcher never counts them; exclude them so the fraction stays honest.
-    const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[])]);
+    const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[]), ...(TASK355_ATLAS_KEYS as readonly string[])]);
     const expected = [...registry.atlases.keys()].filter((k) => !custom.includes(k) && !paintedAtlas.has(k)).length;
     const stopWatch = watchResources(/\.(png|webp|ktx2|avif|jpe?g)(\?|$)/i, (n, bytes) => onStage("atlases", countFraction(n, expected), `Loading sprite atlases (${n}/${expected}${bytes ? `, ${(bytes / 1048576).toFixed(1)} MB` : ""})`));
     try { await renderer.atlas.setRegistry(registry, sources); } finally { stopWatch(); }
@@ -834,7 +841,16 @@ export class IsoView {
       if (st >= 0) this.pieceStates.set(ve, st); else this.pieceStates.delete(ve);
       return;
     }
-    const def = pieceDef as { fired?: boolean } | undefined; if (!def?.fired) return;
+    const def = pieceDef as { fired?: boolean } | undefined;
+    if (isStorePieceKey(pieceDef?.key)) { // ADR-356: store fill state (StoreFill, mirrored by gameplay.storeFill)
+      if ((net.tick + entityIndex(e)) % 15 !== 0 && this.pieceStates.has(ve)) return; // cheap: fill changes are rare
+      const level = net.isRegistered(StoreFill) && net.has(e, StoreFill) ? net.getField(e, StoreFill, "level") ?? 0 : 0;
+      const p = net.get(e, GPiece)!;
+      const vis = buildPieceVisual(this.registry, { type: p.type, ...pieceArt(net, p.type, p.rot), tint: p.tint, paint: p.paint, damageStage: p.damageStage, state: level }, { tier: p0.tier, pieceKey: (typ) => this.pk(defs.pieces.get(typ)?.key), ...pieceVariantOpts(pieceDef?.variantNames, p0.variant) });
+      this.pieceStates.set(ve, vis.stateIndex);
+      return;
+    }
+    if (!def?.fired) return;
     if ((net.tick + entityIndex(e)) % 15 !== 0 && this.pieceStates.has(ve)) return; // cheap: lit flips are rare
     const fire = this.siblings(net, e).find((o) => net.has(o, Fuel)); const lit = fire !== undefined && net.get(fire, Fuel)!.lit === 1;
     const p = net.get(e, GPiece)!;

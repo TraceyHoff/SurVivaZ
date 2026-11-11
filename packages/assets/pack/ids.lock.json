@@ -5451,7 +5451,17 @@
     "saddle_iron": 5449,
     "saddle_leather": 5450,
     "saddle_reinforced": 5451,
-    "saddle_steel": 5452
+    "saddle_steel": 5452,
+    "build_crop_store": 5453,
+    "build_log_store": 5454,
+    "build_ore_store": 5455,
+    "build_stick_store": 5456,
+    "build_stone_store": 5457,
+    "dec_crop_store": 5458,
+    "dec_log_store": 5459,
+    "dec_ore_store": 5460,
+    "dec_stick_store": 5461,
+    "dec_stone_store": 5462
   },
   "sounds": {
     "amb_rain": 1,

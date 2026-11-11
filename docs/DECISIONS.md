@@ -5439,3 +5439,232 @@ it is not a threat classification and changing it would alter bot utility for ch
 too. No real-phone check: calm moose behaviour is verified numerically only; the
 user's eyes on the live build are the real check that a moose walked up to no longer
 charges.
+
+## ADR-355: Resource-specific storage structures (SurVivaZ)
+
+**Context.** Players and AI humans had only generic containers (basic_storage_box /
+storage_box / large_chest / salt barrels / Apiary), so ores, logs, crops and stone all
+landed in the same boxes and had to be hunted through by hand. The storage batch asks
+for one buildable piece per resource family that stores only its own kind. Fixed piece
+keys, because the art slice (ADR-356) depends on them: `ore_store`, `log_store`,
+`stick_store`, `crop_store`, `stone_store`.
+
+**Decision.** (1) Data: five tier-1 furniture pieces in `packages/gameplay/data/pieces.json`
+(188 → 193 pieces; ids 189–193 appended to `ids.lock.json` via `lock:ids`), each
+`paintable`, free placement, layer 2, hp 120, ground, 12 slots like `basic_storage_box`,
+with tier-1 costs from gatherable/craftable materials (ore: planks 6 + stone 4 + nails 2;
+log: planks 4 + rope 2; stick: sticks 8 + fiber 4; crop: planks 6 + rope 1 + fiber 2;
+stone: stone 8 + planks 2). Each carries a `$comment` noting ADR-355. (2) New optional
+PieceDef field `accepts?: string[]` (raw) / `accepts: readonly number[]` (resolved,
+`defs.ts`, empty = unrestricted): validated at load — every listed key must be a real
+item id (`itemRef`) and a non-empty list is only allowed on a container. Families:
+ore_store takes the five raw ores (`copper_ore`, `tin_ore`, `iron_ore`, `lead_ore`,
+`chromite_ore`); log_store takes `wood` + `hardwood`; stick_store takes `sticks`;
+crop_store takes harvested produce (wheat, lettuce, pepper, beetroot, rice, hay, corn,
+potato, carrot, tomato, pumpkin, squash, beans, cabbage, onion, cotton, flax, hemp —
+NOT `*_seeds`, which stay in generic storage); stone_store takes `stone`,
+`stone_brick`, `clay`, `clay_brick` (clay counts as stone-family here: raw masonry
+material, kept with the stone). Ingots are smelted products, not ores, and do not belong
+in the ore store — that boundary is pinned by test. (3) Enforcement is server-authoritative
+in `containerSystem` (`building/actions.ts`, Deposit branch, before `transferItem`):
+depositing an item not in the piece's `accepts` fails with new append-only
+`BuildFail.WrongStorage = 34` (`events.ts`; the enum previously ended at
+`NoMovePermission = 33`). Withdraw is unaffected — anything already inside can come out
+— and pieces without `accepts` behave exactly as before. The client surfaces the reason
+via `BUILD_FAIL_TEXT[34] = "Wrong store for this item"` (`apps/client/src/build-hud.ts`).
+(4) AI humans: the new stores are base storage automatically (`isBaseStoragePiece`:
+any `container > 0` piece that is not a stall/fire/station/turret/trough — verified, not
+duplicated). New lookups in `ai/storage_api.ts`: `nearbyStorageFor(world, e, item,
+radius)` (nearest accepting store, generic fallback so a bot is never stuck holding
+something it cannot store) and `storageHolding(world, e, item, radius)` (nearest store
+that actually holds the item, matching first); both are pure lookups, permission stays
+with the caller. `storageTargetFor(c, item, holding)` (`ai/base_behaviors.ts`) walks the
+candidates matching-first, permission-checks each (deposit: the server's own
+`canUseBaseStorage`; fetch: `mayTakeFromStorageAt` with the employer's home for hired
+workers, own base otherwise), and falls back to the scanned base box. Wired into the
+stash behaviour (each surplus stack goes to the store that accepts it), the planner
+`withdraw` step in `base_work`, and the three hired-worker fetch sites in
+`hire_behaviors.ts` (hoe, repair material, craft supply). Hired workers fetch ore from
+the employer's ore store under the existing permission rules — never another player's:
+a foreign claimed store is skipped even when it is the nearest one holding the item.
+No new UI (the container UI opens these like any container), no new input, no art in
+this slice (ADR-356).
+
+**Verification.** New `packages/gameplay/test/adr355_storage_stores.test.ts` (13 tests):
+data (193 pieces, the five keys/ids, 12 slots / tier 1 / furniture / `piece:<key>` gate
+tokens with no skill node, accepts lists exactly as specified, ingots excluded from the
+ore store, seeds excluded from the crop store, every other container unrestricted, and
+`loadDefs` rejecting an unknown accepts key and accepts on a non-container); deposit
+enforcement (right-family deposits succeed in all five stores, 10 wrong-family
+deposits fail with `WrongStorage = 34` and the items stay in the bag, withdraw still
+works, the generic box still takes everything); AI lookup (`nearbyStorageFor` prefers
+the matching store, falls back to generic, undefined with no storage at all;
+`storageHolding` prefers the matching store that holds the item); AI behaviour (a bot
+stashing surplus copper ore deposits it into the ore store, not the generic box; a bot
+with no matching store falls back to the generic box; a hired worker withdraws ore
+from its employer's ore store while the employer's generic box stays untouched; a hired
+worker never fetches from a stranger's claimed ore store even when it is nearest).
+13/13 pass. Neighbour suites: containers / building / farming / crafting / defs 112/112;
+AI humans / planner / mounts / defence / turret-ammo / bot crafting 142/142; AI life /
+claim-build / defence / ruin-base / homestead / saddles 146/146. Typecheck with pinned
+TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11 workspace projects (root
+`node_modules/@engine/gameplay` symlink moved aside for the run, then restored; re-run
+clean after the two cosmetic cleanups below).
+Full gate (`vitest run` from the repo root, ~19 min): **4,002 passed / 4 failed /
+3 skipped** (4,009 tests; 606 files passed, 4 failed, 2 skipped). The 4 failures: the
+known pre-existing sparse-checkout `pack.test.ts` KEYS.md ENOENT; the known flaky
+`persist` autosave benchmark (per-tick p95 59.8 ms vs the 50 ms non-PERF ceiling while
+the gate itself loaded the VM — it passes alone, and the slice touches no persist
+code); the `task25_dye` piece-count pin (188 → 193, flagged 159 → 164 — fixed
+in-slice right after the gate by updating the pin with an ADR-355 note, exactly like
+ADR-354's Task 15 pin update; the suite passes on re-run); and `adr229_build_icons`,
+which lists exactly the five new keys as missing dedicated build icons — that is
+ADR-356's art work, not a regression in this slice (see Honest cuts). After the dye-pin
+fix the expected re-run tally is 4,003 passed / 3 failed.
+
+**Honest cuts.** `adr229_build_icons` stays red until ADR-356 ships dedicated build
+icons for the five stores: the test requires `build_<key>` in both the `items_build`
+atlas manifest and the client stylesheet, and asserts both `missing` and `pending` are
+empty, so the `sprite_fallbacks.json` art-pending path cannot satisfy it — and
+pointing the new pieces at an existing sprite would violate the dedicated-art-only
+rule, so no placeholder was faked. `storageTargetFor` falls back to the scanned base box (`bs.storage`)
+when no permission-passing candidate exists, rather than to a farther matching store —
+the scanned box is the trusted base default, so a bot never walks to a foreign store,
+but an own matching store farther than the generic fallback radius is not preferred in
+that corner. The defence, travel and mount-food fetch paths were audited and left
+alone: defence/travel fetch from `bs.storage` (ammo and journey packs have no matching
+store, so the generic fallback already covers them) and mount-food already scans all
+stores via `nearbyStorage`. No real-phone check: the stores have no dedicated art yet
+(ADR-356) and the WrongStorage message has not been seen on screen.
+
+## ADR-356: Dedicated art for the five resource-specific stores (SurVivaZ)
+
+**Context.** ADR-355 shipped the five stores (`ore_store`, `log_store`, `stick_store`, `crop_store`,
+`stone_store`) with mechanics only and left `adr229_build_icons` red: the test requires a dedicated
+`build_<key>` icon for each piece in both the `items_build` atlas manifest and the client stylesheet, and
+the `sprite_fallbacks.json` art-pending path cannot satisfy it. The stores also had no world art at all
+(no `dec_*` sprite, no fallback entry), so a placed store drew nothing in the world.
+
+**Decision.** (1) World art, Task 34 precedent: new `apps/client/src/task355-art.ts` reuses the `Px`
+rasterizer from `task34-art.ts` (no fork) and paints one 1024×384 atlas per store
+(`decor_ore_store`, `decor_log_store`, `decor_stick_store`, `decor_crop_store`, `decor_stone_store`),
+8 cols × 3 rows of 128px: row = fill state (0 empty, 1 half, 2 full), cols 0–3 = rotation 0 damage
+stages 0–3, cols 4–7 = rotation 1 (narrower side view), `rotationArt: "mirror"`. Declared in the new
+`packages/assets/pack/task355/manifest.task355.json` fragment (layout only; its `image`/`ktx2` paths point
+at the real `nature_icons` atlas only because the pack test requires existing PNG + KTX2 twins, and are
+never fetched — `view.ts` merges `task355AtlasSources()` blob URLs over them before `setRegistry`, exactly
+like task34/task256). The fragment is indexed in `MANIFEST_INDEX`, served by the client art mount
+(`vite.config.ts` regex gained `task355`, which the ADR-248 server/client parity test requires), and its
+sprites are locked append-only in `pack/ids.lock.json` (`dec_*_store` 5458–5462) via `lock:ids:pack`
+(`write-lock-pack.ts` gained the fragment). Each store is its own silhouette in the game's palette with
+the 1px dark-plum outline, and damage darkens it (`k = 1 - stage * 0.16`, the Apiary rule) with cracks:
+ore_store = a stone-lined open bin with wooden corner posts and visible ore chunks (copper orange, iron
+blue-grey, tin pale, lead dull, chromite near-black) with bright glints, heaped above the rim when full;
+log_store = a log rack of upright posts and a base beam, long horizontals with ringed cut ends, the pile
+growing from bare rack to four rows; stick_store = a teepee bundle of leaning sticks tied with rope at
+the crown, feet splayed, fattening with fill (a spare rope coil on the ground when empty); crop_store = a
+slatted produce crate with side posts and a light rim, lettuce / carrots / pumpkin / tomatoes / corn
+peeking then heaped above the rim; stone_store = a dry-stone bin of three grey block courses with offset
+seams and a cap course, grey stone + tan clay + red-brown brick heaped when full. (2) Fill states use the
+existing `building.states` mechanism, not a new pipeline: the fragment declares
+`states: {empty, half, full}` per sprite (same rows as the default `frames`), and `buildPieceVisual`
+resolves the numeric state to the row. The level is mirrored server-side by a new postSim system
+`gameplay.storeFill` (`STORE_FILL_EVERY = 10`, `packages/gameplay/src/systems/store_fill.ts`) into a new
+networked component `StoreFill {level: u8}` (appended to `GAMEPLAY_COMPONENTS`, scope `"all"` in
+`GAMEPLAY_REPLICATION` — it rides the static channel with `BuildPiece`; NOT persistent, it is derived and
+recomputed on load). Buckets by filled-slot fraction: 0 slots = empty, 1–5 of 12 = half, 6–12 = full.
+postSim placement matters: client replicas only `simulate` simulation systems, so a replica that cannot
+see the viewers-scoped `Container` never clobbers the authority's level (the `stallDisplay` pattern).
+`view.ts` `syncPieceState` gained a store branch (same 15-tick stagger as the fired branch) that reads
+`StoreFill` from the net world and passes the numeric state to `buildPieceVisual`; the build ghost shows
+the default (empty) frames. (3) Build icons: `build_ore_store` … `build_stone_store` declared in
+`packages/assets/pack/items/manifest.items.json` at `items_build` frames 297–301 (the last free cells of
+the 16×19 grid; max used was 296) with matching `--cz-ipos` rules in `gameplay-panels.css`
+(60% / 66.67% / 73.33% / 80% / 86.67% × 100%) and locked ids 5453–5457. The cells are transparent in
+the shipped `items_build.png` / `@2x.png` (verified: 0 opaque pixels) and the snapshot push route carries
+text only, so the 32px icon pixels themselves await the user's art pass (same as the Apiary's frame 286
+in `d163528`): paint a small version of each world sprite into cells 297–301 (1x + @2x) and the existing
+manifest + CSS entries will light up with no code change. No `sprite_fallbacks.json` entries were needed:
+the stores now have dedicated `dec_*` art, and pointing them at another piece's sprite would violate the
+dedicated-art-only rule (the stale `apiary -> salt_barrel` entry was left alone — out of scope).
+
+**Verification.** New `packages/gameplay/test/adr356_store_fill.test.ts` (5 tests, relative imports only):
+buckets (0/1–5/6–12 of 12), the system mirroring empty → 0 / 1 slot → 1 / 6 slots → 2 / drained → 0
+for all five stores, generic containers never getting `StoreFill`, `syncStoreFill` change-only reporting,
+the postSim system in the pinned order, and `StoreFill` replicating scope `"all"`. 5/5 pass. New
+`apps/client/test/task355_art.test.ts` (4 tests): five painted atlases, distinct non-empty cells, empty ≠
+half ≠ full per store with outline present and full holding more pixels, damage stages and the narrower
+rotation differing, the merged registry resolving every `dec_*_store` sprite with `stateNames` in
+`StoreFill` order and `buildPieceVisual` frames [0, 8, 16] per level (damage stage 3 → frame 19), and
+the build icons at frames 297–301 with matching CSS positions. 4/4 pass. `adr229_build_icons` is GREEN
+(2/2) — the red test ADR-355 left behind. Neighbours: pack tests (only the known pre-existing
+sparse-checkout `KEYS.md` ENOENT), adr355 / adr242 / adr248 / adr333 / task256 75/75. Typecheck with
+pinned TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11 workspace projects (root
+`node_modules/@engine/gameplay` symlink moved aside for the run, then restored). Full gate (`vitest run`
+from the repo root, ~19 min): **4,016 passed / 2 failed / 3 skipped** (4,021 tests; 610 files passed,
+2 failed, 2 skipped). The 2 failures are the known pre-existing ones only: the sparse-checkout
+`pack.test.ts` KEYS.md ENOENT, and the flaky `persist` autosave benchmark (per-tick p95 61.7 ms vs the
+50 ms non-PERF ceiling while the gate itself loaded the VM — it passes alone, and the slice touches no
+persist code).
+
+**Honest cuts.** The build-menu tiles point at transparent atlas cells until the art pass paints frames
+297–301 in `items_build.png` + `@2x.png` (1x cell 32px at col = frame % 16, row 18; @2x cell 64px) —
+the test is green on the text declarations, but the tile will look blank, not wrong, until then. The
+world art is verified numerically only (pixel counts, outline, per-state frame differences), like Task 34:
+the user's eyes on the live build are the real check that each store reads as its own thing at a glance.
+Fill is by filled-slot fraction, so one stack of 99 ore in a single slot still reads "half" — the bin
+looks stocked, not heaped, until six slots are used. No real-phone check.
+
+## ADR-357: Runtime-painted build-menu icons for the five stores (SurVivaZ)
+
+**Context.** ADR-356 declared `build_<store>` icons at `items_build` frames 297–301 and expected a
+binary art pass to paint those cells, but the parent verified with a pixel read that the cells are fully
+transparent in the shipped atlas (0 opaque pixels vs 349 for the Apiary's frame 286) and the snapshot
+push route carries text only, so no PNG could ship the pixels from this VM. The storage batch was gated
+but held for this fix: the five stores would have shown blank tiles in the build menu while looking
+right in the world.
+
+**Decision.** Paint the menu icons at runtime from the world art that already exists, instead of waiting
+for a binary art pass. New code in `apps/client/src/task355-art.ts` (same module as the world art, same
+`Px` rasterizer — no fork): `paintStoreMenuIconPixels(store)` paints one store's half-full front cell
+(fill 1, rot 0, stage 0) at 128×128, pixel-identical to that cell of the store's painted atlas; the
+half-full state reads best at 32px (the store plus its contents, not an empty bin or a heap).
+`storeMenuIconDataUrl(store)` converts it to a PNG data URL through a document canvas (sync `toDataURL`,
+undefined when no canvas exists); `storeMenuIconsCss(urls)` builds one override rule per store —
+`[data-icon="build_<store>"]{--cz-icon:url("...");--cz-ipos:center;--cz-isize:contain}` — and
+`installStoreMenuIcons(doc?, urls?)` appends (or replaces) `<style id="task355-menu-icons">` in the
+document head. The override wins over the generated `items_build` block by document order at equal
+specificity (same `[data-icon="..."]` attribute selector), so no change to `gameplay-panels.ts`,
+`iconize()`, or the generated CSS was needed — the tiles, the ghost preview, and any other
+`build_<store>` surface all pick up the painted icon. `view.ts` calls `installStoreMenuIcons()` once
+during init, next to the `task355AtlasSources()` merge. It is a safe no-op without a canvas (returns
+false, appends nothing, never throws), so the old blank-tile behaviour is the fallback, never a crash.
+The manifest + CSS entries for frames 297–301 stay in place as the documented home for these icons;
+runtime-painted icons are the source of truth until a binary art pass paints those cells, at which point
+removing the one `installStoreMenuIcons()` call in `view.ts` lights the atlas icons up with no other
+code change. The code deliberately does not probe the atlas pixels at startup (that would need an async
+fetch + decode for five cells on every load).
+
+**Verification.** New `apps/client/test/adr357_store_menu_icons.test.ts` (5 tests, relative imports only):
+each icon is pixel-identical to its store's half-full front world cell, non-blank (> 40 opaque pixels),
+carries the 1px dark-plum outline, and is distinct across the five stores (and differs from the empty
+and full cells); the override stylesheet carries one centred, contained rule per store; install appends
+exactly one style element, replaces it on re-install, and is a safe no-op without a canvas (jsdom has
+no 2d context: `storeMenuIconDataUrl` returns undefined, install returns false, nothing appended); the
+build menu tiles for the five stores carry `data-icon="build_<store>"` + `data-bicon="1"` in the
+furniture category with the installed override matching each tile's icon key; and the manifest + CSS
+entries for frames 297–301 remain in place. 5/5 pass. Neighbours: `adr229_build_icons` 2/2,
+`task355_art` 4/4. Typecheck with pinned TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11
+workspace projects (root `node_modules/@engine/gameplay` symlink moved aside for the run, then
+restored). Full gate (`vitest run` from the repo root, ~18 min): **4,021 passed / 2 failed / 3 skipped**
+(4,026 tests; 611 files passed, 2 failed, 2 skipped). The 2 failures are the known pre-existing
+ones only: the sparse-checkout `pack.test.ts` KEYS.md ENOENT, and the flaky `persist` autosave benchmark
+(p95 58.2 ms vs the 50 ms ceiling under gate load — it passes alone, and the slice touches no persist
+code).
+
+**Honest cuts.** The icons are verified numerically only (pixel-exact against the world cells) — the
+user's eyes on the live build are the real check that each store reads as its own thing at 32px in the
+build menu. The 128px PNG data URLs (~5 × a few KB, base64) live only in a runtime `<style>` element,
+never in the shipped files. A future binary art pass painting frames 297–301 should remove the
+`installStoreMenuIcons()` call so the atlas icons take over; until then the two declarations coexist
+and the runtime one wins.

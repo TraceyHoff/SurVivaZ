@@ -500,6 +500,13 @@ export const DungTimer = defineComponent("DungTimer", { nextAt: "u32" }, { persi
  *  so mounts from older saves and fresh tames never start hungry. */
 export const MountHunger = defineComponent("MountHunger", { fedUntil: "u32" }, { persistent: true });
 
+/** ADR-356: fill level of a resource-specific store piece (0 empty, 1 half, 2 full — STORE_FILL_STATE_NAMES),
+ *  mirrored from the store's Container by gameplay.storeFill (postSim, authority-only) so every peer draws the
+ *  matching building state. Networked, scope "all" (it rides the static channel: the piece entity already has
+ *  BuildPiece). NOT persistent: it is derived state, recomputed on load the first time the system runs, so a
+ *  store from an older save starts empty and corrects itself within one cadence tick. */
+export const StoreFill = defineComponent("StoreFill", { level: "u8" }, { networked: true });
+
 export const GAMEPLAY_COMPONENTS = [
   Emitter, Buffs,
   Health, ResourceNode, Survival, VitalsState, Exposure, Dead,
@@ -555,4 +562,5 @@ export const GAMEPLAY_COMPONENTS = [
   RopeLead, // append-only (ADR-351 rope leading)
   DungTimer, // append-only (ADR-352 dung production timer; server-only, persistent)
   MountHunger, // append-only (ADR-353 mount hunger clock; server-only, persistent)
+  StoreFill, // append-only (ADR-356 store fill level; networked, derived — not persistent)
 ] as const;

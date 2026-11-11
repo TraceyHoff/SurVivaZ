@@ -15861,6 +15861,91 @@
    }
   },
   {
+   "key": "build_ore_store",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      297
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_log_store",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      298
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_stick_store",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      299
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_crop_store",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      300
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_stone_store",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      301
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
    "key": "build_trophy_mount",
    "category": "ui",
    "atlas": "items_build",

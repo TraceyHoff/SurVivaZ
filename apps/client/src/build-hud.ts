@@ -48,6 +48,7 @@ export const BUILD_FAIL_TEXT: Readonly<Record<number, string>> = {
   27: "Claim would overlap another claim", // ADR-315 BuildFail.ClaimOverlap
   28: "You don't have permission to demolish here", // ADR-317 BuildFail.NoDemolishPermission
   29: "Repair it first", 30: "Not yours", 31: "Can't move this", 32: "Something rests on it", 33: "No permission here", // ADR-318 move refusals
+  34: "Wrong store for this item", // ADR-355 BuildFail.WrongStorage
 };
 export const buildFailText = (reason: number | undefined): string => (reason && BUILD_FAIL_TEXT[reason]) || "Can't place here";
 const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
