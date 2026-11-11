@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { installPermissions, Transform, World } from "@engine/core";
-import * as G from "@engine/gameplay";
+import * as G from "../src/index.js";
 import { FINE_ROT } from "../src/building/structure.js";
 import { plantClaim } from "./helpers.js";
 
