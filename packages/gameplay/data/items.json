@@ -4995,5 +4995,7 @@
   ,{"key": "saddle_reinforced", "name": "Reinforced Saddle", "category": "resource", "maxStack": 1, "weight": 8, "tier": 2, "family": "saddle", "durability": 450}
   ,{"key": "saddle_iron", "name": "Iron Saddle", "category": "resource", "maxStack": 1, "weight": 11, "tier": 3, "family": "saddle", "durability": 600}
   ,{"key": "saddle_steel", "name": "Steel Saddle", "category": "resource", "maxStack": 1, "weight": 13, "tier": 4, "family": "saddle", "durability": 800}
+  ,{"key": "dung", "name": "Dung", "category": "resource", "maxStack": 50, "weight": 0.1}
+  ,{"key": "dung_fertilizer", "name": "Dung Fertilizer", "category": "resource", "maxStack": 30, "weight": 0.3}
   ]
 }

@@ -76,47 +76,58 @@
   "animals": {
    "animal_chicken": {
     "produce": "egg",
-    "seconds": 300
+    "seconds": 300,
+    "diet": ["wheat", "corn", "rice", "lettuce", "pumpkin", "carrot", "berries"]
    },
    "animal_duck": {
     "produce": "egg",
-    "seconds": 360
+    "seconds": 360,
+    "diet": ["wheat", "corn", "rice", "lettuce", "pumpkin"]
    },
    "animal_goose": {
     "produce": "egg",
-    "seconds": 420
+    "seconds": 420,
+    "diet": ["wheat", "corn", "rice", "lettuce", "cabbage", "pumpkin"]
    },
    "animal_turkey": {
     "produce": "egg",
-    "seconds": 420
+    "seconds": 420,
+    "diet": ["wheat", "corn", "rice", "lettuce", "pumpkin", "berries"]
    },
    "animal_cow": {
     "produce": "milk",
-    "seconds": 420
+    "seconds": 420,
+    "diet": ["hay", "wheat", "corn", "potato", "carrot", "lettuce", "beetroot", "pumpkin", "cabbage"]
    },
    "animal_goat": {
     "produce": "milk",
-    "seconds": 360
+    "seconds": 360,
+    "diet": ["hay", "wheat", "corn", "lettuce", "cabbage", "carrot", "beetroot", "pumpkin"]
    },
    "animal_sheep": {
     "produce": "wool",
-    "seconds": 480
+    "seconds": 480,
+    "diet": ["hay", "wheat", "corn", "lettuce", "cabbage", "carrot", "beetroot"]
    },
    "animal_pig": {
     "produce": "truffle",
-    "seconds": 480
+    "seconds": 480,
+    "diet": ["potato", "corn", "pumpkin", "carrot", "beetroot", "apple", "wheat", "hay", "lettuce"]
    },
    "animal_alpaca": {
     "produce": "wool",
-    "seconds": 420
+    "seconds": 420,
+    "diet": ["hay", "wheat", "corn", "lettuce", "carrot", "beetroot", "cabbage"]
    },
    "animal_bee": {
     "produce": "honey",
-    "seconds": 360
+    "seconds": 360,
+    "diet": ["hay"]
    },
    "animal_rabbit": {
     "produce": "wool",
-    "seconds": 480
+    "seconds": 480,
+    "diet": ["carrot", "lettuce", "cabbage", "wheat", "pumpkin", "beetroot", "corn", "hay"]
    }
   }
  },

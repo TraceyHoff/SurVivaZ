@@ -12,6 +12,7 @@ function baseSources(): Set<number> {
   for (const r of d.resources.values()) for (const y of r.yields) if (y.chance > 0 && y.max > 0) s.add(y.item);
   const aiText = JSON.stringify(ai);
   for (const it of d.items.values()) if (aiText.includes(`"${it.key}"`)) s.add(it.id);
+  s.add(d.itemId("dung")); // ADR-352: produced by dungSystem (data/dung.json), not gathered / crafted / looted
   return s;
 }
 function reachable(): Set<number> {

@@ -2,6 +2,8 @@ import { SelectHotbarCmd } from "../input.js";
 import { wetDrySeconds } from "../exposure-stages.js";
 import { ContainerToSlotCmd, MoveSlotCmd, SplitStackCmd } from "../inventory_ops.js";
 import { DropItemCmd, encodePetName, nearestPet, petName, PetResult, PetCommandCmd, PetGuardCmd, PetOfferCmd, PetRenameCmd } from "../pets.js";
+import { RopeLeadCmd } from "../rope_commands.js";
+import { ROPE_EVENT_TEXT, type RopeResult } from "../rope.js";
 import { AnimalSkillCmd } from "../animal_skills.js";
 import { DismissWorkerCmd, HireWorkerCmd, nearestWorker, SetWorkerJobCmd, WORKER_NO_TARGET, type WorkerJobDetails } from "../recruitment.js";
 import { DyeCmd, DyeKind, DyePalette } from "../dye.js";
@@ -611,6 +613,8 @@ function nearestOpenable(c: MenuCtx, r: number): number {
 }
 const stationDistance = (c: MenuCtx, e: Entity): number => { const a = c.world.get(c.player, Transform), b = c.world.get(e, Transform); return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : Infinity; };
 export const petOfferIntent = (target: Entity, item: number): MenuIntent => intent(PetOfferCmd, { target, item }, ["target"]);
+/** ADR-351: attach the rope to `target` (0 = release the animal currently led). */
+export const ropeLeadIntent = (target: Entity): MenuIntent => intent(RopeLeadCmd, { target }, ["target"]);
 export const petCommandIntent = (pet: Entity, cmd: number): MenuIntent => intent(PetCommandCmd, { pet, cmd }, ["pet"]);
 /** Task 22: hire an AI human (the wanted item is taken by the server as the hire completes). */
 export const hireWorkerIntent = (target: Entity): MenuIntent => intent(HireWorkerCmd, { target }, ["target"]);
@@ -701,4 +705,8 @@ export function petEventText(world: World, pet: Entity | undefined, result: numb
     case PetResult.Command: return value === 1 ? `${name} stays and guards.` : `${name} follows you.`;
     default: return "";
   }
+}
+/** ADR-351: toast text for a replicated rope event (RopeEvent: animal, result). */
+export function ropeEventText(result: number): string {
+  return ROPE_EVENT_TEXT[result as RopeResult] ?? "";
 }

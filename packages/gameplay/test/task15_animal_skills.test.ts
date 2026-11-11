@@ -156,9 +156,9 @@ describe("animal skill trees (Task 15)", () => {
 });
 
 describe("calmer moose (Task 15)", () => {
-  it("moose aggro values: range 4 -> 2, leashRange unchanged at 12", () => {
+  it("moose aggro values: range 4 -> 2, leashRange unchanged at 12; mode territorial -> defensive (ADR-354: a tameable mount must not attack on sight)", () => {
     const def = G.animalDefs().find((a) => a.key === "animal_moose")!;
-    expect(def.aggro).toMatchObject({ mode: "territorial", range: 2, leashRange: 12 });
+    expect(def.aggro).toMatchObject({ mode: "defensive", range: 2, leashRange: 12 });
   });
 
   it("a moose does not attack unprovoked at 3 tiles, retaliates when hit, and flees when badly hurt", () => {

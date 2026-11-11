@@ -6,8 +6,8 @@
  * Task 28: hay in a trough feeds hungry animals (1 hay = the usual fedSeconds); with no food at all a hungry animal
  * grazes the grass tile it stands on — 20s of grazing feeds it and depletes the tile (bare 180s, then grass regrows).
  */
-import { DEFAULT_TICK_HZ, entityIndex, Transform, type Entity, type World } from "@engine/core";
-import { Animal, AnimState, AttachKind, BuildPiece, Dead, Equipment, GrazedTile, Grazing, IntentAction, PlayerIntent, Tamed, AnimalSkills } from "../components.js";
+import { DEFAULT_TICK_HZ, entityIndex, PlayerId, Transform, type Entity, type World } from "@engine/core";
+import { Animal, AnimState, AttachKind, BuildPiece, Dead, Equipment, GrazedTile, Grazing, IntentAction, PieceOwner, PlayerIntent, Tamed, AnimalSkills, Tribe, TroughOwner, Worker } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { emit, ev } from "../events.js";
 import { addItem, canAddItem, countItem, removeItem, slotItem, takeFromSlot } from "../inventory.js";
@@ -15,7 +15,8 @@ import { animalDefs, spawnAnimal } from "../population.js";
 import { awardXp } from "./progression.js";
 import { animalSkillMods, awardAnimalXp, ensureAnimalSkills } from "../animal_skills.js";
 import { hasPerk, SKILLS, skillLevelOf, skillMod } from "./tree.js";
-import { resolveAttachment } from "../building/links.js";
+import { pieceOf, resolveAttachment } from "../building/links.js";
+import { tamedOwnerTribe } from "../territory.js";
 import { indexEntity } from "../spawn.js";
 import { TerrainRes } from "../world.js";
 
@@ -64,7 +65,8 @@ export function feedAnimal(world: World, e: Entity, dryRun = false): { fail: Tam
   return { fail: TameFail.None, tame: true, consumed: true };
 }
 
-function troughs(world: World): Entity[] {
+/** ADR-353: feeding-trough storage attachments (the entities holding the food), exported for mountSystem's trough eating. */
+export function feedingTroughs(world: World): Entity[] {
   let id: number; try { id = gameplayDefs(world).pieceId(H.trough); } catch { return []; }
   // Task 28 fix: the trough's Container lives on its storage attachment, not the piece (placePiece/spawnAttachments) —
   // the old [BuildPiece, Transform, Container] query matched NO real placed trough, so trough production never ran
@@ -96,6 +98,51 @@ function apiaries(world: World): Entity[] {
 const isBeeAnimal = (world: World, a: Entity): boolean => animalDefs()[world.get(a, Tamed)?.kind ?? -1]?.key === "animal_bee";
 /** Task 28: hay (the trough-feed item); 1 hay feeds one farm animal for the usual fedSeconds (600s). */
 export const HAY_ITEM = "hay";
+// ---- ADR-353: wider trough diets + trough ownership -------------------------------------------------------
+/** A farm-animal kind's hunger diet (skills.json `husbandry.animals[].diet`) — the crops it eats from a trough when
+ *  hungry. Hay stays first for grazers, so the old hay-only behaviour is the diet's head; the bee keeps hay only,
+ *  which preserves exactly what it ate before (its produce still needs a fed window). */
+export const farmAnimalDiet = (kindKey: string | undefined): readonly string[] => (kindKey ? H.animals[kindKey]?.diet ?? [] : []);
+/** PlayerId a tamed animal belongs to (Tamed.owner is the owner entity, not a PlayerId). A hired worker's animals
+ *  count as the employer's — the same rule as mountOwnerIdFor — otherwise a worker-tamed cow could never eat from
+ *  its employer's trough. 0 when the owner entity is gone (offline / legacy): the animal then eats only from
+ *  unowned troughs. */
+export function tamedOwnerId(world: World, a: Entity): number {
+  const owner = world.getField(a, Tamed, "owner"); if (owner === undefined || !world.isAlive(owner)) return 0;
+  if (world.isRegistered(Worker) && world.has(owner, Worker)) { const boss = world.getField(owner, Worker, "owner") ?? 0; if (boss) return boss; }
+  return world.isRegistered(PlayerId) && world.has(owner, PlayerId) ? world.getField(owner, PlayerId, "id") ?? 0 : 0;
+}
+/** The PlayerId that owns a trough's food: the piece's PieceOwner (set at placement), else a TroughOwner on the
+ *  holder itself for synthetic / directly-containered troughs. 0 = unowned (worldgen / abandoned / test trough). */
+export function troughOwnerId(world: World, holder: Entity): number {
+  const piece = world.has(holder, BuildPiece) ? holder : pieceOf(world, holder);
+  if (piece !== undefined) return world.getField(piece, PieceOwner, "player") ?? 0;
+  return world.getField(holder, TroughOwner, "player") ?? 0;
+}
+/** The tribe that owns a trough (the piece's Tribe, set at placement from the builder). */
+export function troughTribeId(world: World, holder: Entity): number {
+  const piece = world.has(holder, BuildPiece) ? holder : pieceOf(world, holder);
+  return piece !== undefined ? world.getField(piece, Tribe, "id") ?? 0 : 0;
+}
+/** May this animal eat from this trough? Its owner's trough, a clan-mate's (same tribe), or an unowned one —
+ *  never a stranger's. An ownerless animal (owner id 0) eats only from unowned troughs. */
+export function mayEatFromTrough(world: World, holder: Entity, ownerId: number, tribeId: number): boolean {
+  const own = troughOwnerId(world, holder);
+  if (own === 0) return true;
+  if (ownerId !== 0 && own === ownerId) return true;
+  return tribeId !== 0 && troughTribeId(world, holder) === tribeId;
+}
+/** First item in `holder` (a trough container) that is on `diet`, in diet order. 0 when the trough holds nothing
+ *  the animal eats — the caller then falls back to grazing / foraging, as before. */
+export function troughDietItem(world: World, holder: Entity, diet: readonly string[]): number {
+  if (!diet.length) return 0;
+  const defs = gameplayDefs(world);
+  for (const key of diet) {
+    let id = 0; try { id = defs.itemId(key); } catch { continue; }
+    if (id && countItem(world, holder, id) > 0) return id;
+  }
+  return 0;
+}
 /** Task 28 grazing: seconds of grazing one grass tile to feed, and seconds the tile stays bare before regrowing. */
 export const GRAZE_SECONDS = 20;
 export const GRASS_REGROW_SECONDS = 180;
@@ -105,7 +152,7 @@ export const HUSBANDRY_EVERY = DEFAULT_TICK_HZ; // once per second
 /** Restore Animal after load; production + breeding at troughs. */
 export function husbandrySystem(world: World): void {
   if (!isAuthority(world) || world.isReplaying) return;
-  const defs = gameplayDefs(world); const now = world.tick; const tr = troughs(world); const ap = apiaries(world);
+  const defs = gameplayDefs(world); const now = world.tick; const tr = feedingTroughs(world); const ap = apiaries(world);
   const animals = [...world.query([Tamed, Transform], [Dead])].sort((a, b) => a - b);
   for (const a of animals) if (!world.has(a, Animal)) {
     const t = world.get(a, Transform)!; world.add(a, Animal, { kind: world.get(a, Tamed)!.kind, homeX: t.x, homeY: t.y, goalX: t.x, goalY: t.y, thinkAt: now });
@@ -149,14 +196,17 @@ export function husbandrySystem(world: World): void {
     }
     // Apiary full (or no room anywhere): keep the honey, retry next husbandry tick.
   };
-  // Task 28: hay in a trough feeds hungry animals at it — 1 hay -> fed for the usual fedSeconds (600s). Runs before
-  // production so a hay-fed animal produces the same tick. Not gated on canUsePens (that gate is for settling /
-  // production / breeding); eating from a trough is feeding, like animal_feed by hand.
-  const hayId = (() => { try { return defs.itemId(HAY_ITEM); } catch { return 0; } })();
-  if (hayId) for (const a of animals) {
+  // ADR-353: a hungry animal at its owner's trough eats one item off its diet (hay first for grazers — the old
+  // hay-only path is the diet's head) and is fed for the usual fedSeconds. Runs before production so a
+  // trough-fed animal produces the same tick. Not gated on canUsePens (that gate is for settling / production /
+  // breeding); eating from a trough is feeding, like animal_feed by hand. One item per animal per tick, and a fed
+  // animal never eats again until the window lapses, so there is no double-dip with grazing below.
+  for (const a of animals) {
     const t = world.get(a, Tamed)!; if (t.fedUntil > now) continue;
     const b = atTrough(a); if (b === undefined) continue;
-    if (countItem(world, b, hayId) <= 0 || !removeItem(world, b, hayId, 1)) continue;
+    if (!mayEatFromTrough(world, b, tamedOwnerId(world, a), tamedOwnerTribe(world, a))) continue;
+    const item = troughDietItem(world, b, farmAnimalDiet(animalDefs()[t.kind]?.key));
+    if (!item || !removeItem(world, b, item, 1)) continue;
     world.set(a, Tamed, { fedUntil: now + sec(H.fedSeconds) });
   }
   for (const [b, list] of perTrough) {
@@ -200,7 +250,11 @@ export function husbandrySystem(world: World): void {
       continue;
     }
     if (terrain.tileAt(tx, ty) !== GRASS_TILE || grazed.has(key)) continue;
-    const b = atTrough(a); if (b !== undefined && hayId && countItem(world, b, hayId) > 0) continue; // hay in the trough wins
+    // ADR-353: food in the animal's own trough wins over grazing — the same ownership + diet check as the trough
+    // meal above, so a hungry animal never starts a 20 s graze while its own trough holds something it eats.
+    // A stranger's trough does not block grazing: the animal just cannot eat from it.
+    const b = atTrough(a);
+    if (b !== undefined && mayEatFromTrough(world, b, tamedOwnerId(world, a), tamedOwnerTribe(world, a)) && troughDietItem(world, b, farmAnimalDiet(animalDefs()[t.kind]?.key))) continue;
     world.add(a, Grazing, { tx, ty, doneTick: now + sec(GRAZE_SECONDS) });
   }
 }

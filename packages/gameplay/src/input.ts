@@ -29,6 +29,7 @@ import { SKILL_COMMANDS } from "./skills/progression.js";
 import { VEHICLE_CRAFT_COMMANDS, VEHICLE_CRAFT_ENTITY_FIELDS } from "./vehicle_craft.js";
 import { driveFromBits, setDriveInput, VEHICLE_COMMANDS, VEHICLE_STATE_COMMANDS, VEHICLE_ENTITY_FIELDS } from "./vehicles.js";
 import { MOUNT_COMMANDS } from "./mount_commands.js";
+import { ROPE_COMMANDS, ROPE_ENTITY_FIELDS } from "./rope_commands.js";
 import { analogMoving, GameplayEdgeBits, GameplayHoldBits, hotbarSlotFromEdges, runInputHooks } from "./input_hooks.js";
 import { HOTBAR_OFFSET } from "./components.js";
 import { ECONOMY_COMMAND_RATES, ECONOMY_COMMANDS, ECONOMY_ENTITY_FIELDS } from "./economy/stall.js";
@@ -93,6 +94,7 @@ export const COMMAND_ENTITY_FIELDS: Readonly<Record<string, readonly string[]>> 
   ...VEHICLE_CRAFT_ENTITY_FIELDS,
   ...MAP_MARKER_ENTITY_FIELDS,
   ...WORKER_ENTITY_FIELDS,
+  ...ROPE_ENTITY_FIELDS,
 };
 /** Suggested per-command rate limits (per second) for net's limiter; gameplay still enforces cooldowns. */
 export const COMMAND_RATES: Readonly<Record<string, number>> = {
@@ -135,6 +137,7 @@ export function registerGameplayCommands(reg: CommandRegistry = new CommandRegis
   for (const [d] of RECLAIM_COMMANDS) reg.register(d); // ADR-300: append-only reclaim
   for (const [d] of MOVE_COMMANDS) reg.register(d); // ADR-318: append-only move
   for (const d of MOUNT_COMMANDS) reg.register(d); // ADR-319 / ADR-320: append-only mounts + saddles
+  for (const d of ROPE_COMMANDS) reg.register(d); // ADR-351: append-only rope leading
   return reg;
 }
 

@@ -11,6 +11,7 @@ import { foodPref, mayUseMount, mountOfRider, mountSpecies, MOUNT_TUNING, saddle
 import { MountDismountCmd, MountFeedCmd, MountRenameCmd, MountRepairCmd, MountRideCmd, MountSaddleCmd, MountUnsaddleCmd } from "../mount_commands.js";
 import { hasSkillUnlock, unlockRequirement } from "../skills/tree.js";
 import { isRiding, mountName, MOUNT_TAME_TOKEN, saddleInfo, saddleRepairCost, sanitizeMountName, speciesOf } from "../mounts.js";
+import { leadInfo, type LeadInfo } from "../rope.js";
 import type { MenuIntent } from "./menus.js";
 
 export const mountRideIntent = (m: Entity): MenuIntent => ({ cmd: MountRideCmd, args: { target: m }, entities: ["target"] });
@@ -44,6 +45,8 @@ export interface MountView {
   hp: number; maxHp: number; tame: number; canTame: boolean; tameNeeds?: string; walk: number; gallop: number;
   saddle?: { name: string; tier: number; dur: number; max: number; slots: number; defense: number; used: number };
   foods: MountFoodView[]; saddles: MountSaddleChoice[]; repair: { item: number; name: string; count: number; have: number }[];
+  /** ADR-351: rope lead state for this mount. */
+  lead: LeadInfo;
 }
 /** Panel model for `m` as seen by `player` (undefined when it is not a rideable animal). */
 export function mountView(world: World, player: Entity, m: Entity): MountView | undefined {
@@ -68,6 +71,7 @@ export function mountView(world: World, player: Entity, m: Entity): MountView | 
     canTame, ...(req ? { tameNeeds: `${req.name} (${req.tree})` } : {}), walk: spec.walk, gallop: spec.gallop,
     ...(si ? { saddle: { name: defs.items.get(si.item)?.name ?? "Saddle", tier: si.tier, dur: si.dur, max: si.max, slots: si.slots, defense: si.defense, used: listSlots(world, m).length } } : {}),
     foods, saddles, repair,
+    lead: leadInfo(world, player, m),
   };
 }
 /** HUD chip text while riding (name · gait · HP). */

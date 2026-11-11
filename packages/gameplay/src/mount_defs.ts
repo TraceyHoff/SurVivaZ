@@ -17,7 +17,7 @@ export interface MountSize { withersM: number; headTopM: number; lengthM: number
 export interface MountSpecies {
   key: string; name: string; animals: { key: string }[]; art: string;
   walk: number; gallop: number; accel: number; turn: number; hp: number; tameDifficulty: number;
-  foods: Record<string, FoodPref>; traits: string[]; fallSafeBonus: number; swims: boolean; size: MountSize;
+  foods: Record<string, FoodPref>; diet: string[]; traits: string[]; fallSafeBonus: number; swims: boolean; size: MountSize;
 }
 export interface SaddleDef { tier: number; item: string; name: string; slots: number; defense: number; durability: number }
 export const MOUNT_SCALE: Readonly<typeof raw.scale> = raw.scale;
@@ -88,6 +88,14 @@ export function saddleArmorOf(world: World, e: Entity): number {
 
 /** Preference of a species for a food item key (undefined = refused). */
 export const foodPref = (species: number, itemKey: string | undefined): FoodPref | undefined => (itemKey ? mountSpecies(species)?.foods[itemKey] : undefined);
+/**
+ * ADR-353: a species' hunger diet (mounts.json `diet`) — the wider set of crops a mount eats when hungry, from a
+ * trough or by hand when already tamed. It is deliberately separate from `foods`: `foods` (love/like/ok) is the
+ * TAMING table and taming still requires a `foods` entry, while `diet` only ever satisfies hunger, never taming.
+ */
+export const mountDiet = (species: number): readonly string[] => mountSpecies(species)?.diet ?? [];
+/** True when `itemKey` is in the species' hunger diet (taming foods included: a horse eats carrots when hungry too). */
+export const mountEats = (species: number, itemKey: string | undefined): boolean => !!itemKey && mountDiet(species).includes(itemKey);
 /** ADR-319 lure: a wild mount-species animal neither flees from nor charges someone holding a food it likes in hand. */
 export function luresMount(world: World, animalKey: string | undefined, who: Entity): boolean {
   const sp = mountSpeciesOfAnimal(animalKey); if (!sp || !world.isRegistered(Equipment)) return false;

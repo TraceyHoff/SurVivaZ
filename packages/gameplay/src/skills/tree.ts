@@ -19,7 +19,7 @@ export interface SkillsData {
   treeLevels: { base: number; growth: number; early?: number[]; pointsPerLevel: number; maxLevel: number; bonusEvery: number; bonusPoints: number };
   respec: { item: string; base: number; perRespec: number; refundFraction: number };
   weaponClasses: Record<string, string[]>;
-  husbandry: { feed: string; trough: string; reach: number; troughRange: number; penRadius: number; fedSeconds: number; tameBase: number; breedSeconds: number; maxPerTrough: number; animals: Record<string, { produce: string; seconds: number }> };
+  husbandry: { feed: string; trough: string; reach: number; troughRange: number; penRadius: number; fedSeconds: number; tameBase: number; breedSeconds: number; maxPerTrough: number; animals: Record<string, { produce: string; seconds: number; diet?: string[] }> };
   branches: { key: string; name: string; icon: string }[];
   /** ADR-132: category trees (one UI tab each); every branch belongs to exactly one, prerequisites stay inside it. */
   categories: { key: string; name: string; icon: string; branches: string[] }[];

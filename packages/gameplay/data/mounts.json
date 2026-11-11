@@ -30,7 +30,9 @@
     "riderDamageShare": 0.6,
     "regenPerMinute": 6,
     "feedHeal": 10,
-    "dismountOffset": 0.9
+    "dismountOffset": 0.9,
+    "fedSeconds": 600,
+    "troughRange": 10
   },
   "bots": {
     "$comment": "ADR-321 AI-human mount behaviour (ai/mount_behaviors.ts). Ticks at 20 Hz; distances in tiles; hp as a 0..1 fraction. ADR-323: storage* / *Food* = liked food fetched from own / employer / clan storage (count needed + foodBuffer); planMaxDepth / saddlePlan* = the saddle material chain (recipe depth cap, timeout -> lower tier, retry after danger / low needs). ADR-339: preferredSpeciesBonus = score added for the bot's liked species in pickTameTarget (ai/mount_preference.ts); 10 exceeds the largest possible score spread between two species in seekRadius (gallop 3.2 + hp/60 2.83 + distance 3.6 = 9.63), so a liked species in range always wins and the pick falls back to the plain ADR-321 score otherwise.",
@@ -114,7 +116,8 @@
         "widthM": 0.65,
         "seatM": 1.45
       },
-      "art": "horse"
+      "art": "horse",
+      "diet": ["hay", "wheat", "corn", "potato", "carrot", "apple", "lettuce", "beetroot", "pumpkin", "berries"]
     },
     {
       "key": "donkey",
@@ -148,7 +151,8 @@
         "widthM": 0.5,
         "seatM": 1.1
       },
-      "art": "donkey"
+      "art": "donkey",
+      "diet": ["hay", "wheat", "corn", "carrot", "apple", "lettuce", "beetroot", "pumpkin", "potato", "berries"]
     },
     {
       "key": "deer",
@@ -183,7 +187,8 @@
         "widthM": 0.5,
         "seatM": 1.25
       },
-      "art": "deer"
+      "art": "deer",
+      "diet": ["apple", "berries", "carrot", "wheat", "corn", "lettuce", "pumpkin", "hay", "potato", "cabbage"]
     },
     {
       "key": "elk",
@@ -215,7 +220,8 @@
         "widthM": 0.6,
         "seatM": 1.35
       },
-      "art": "elk"
+      "art": "elk",
+      "diet": ["hay", "wheat", "corn", "apple", "berries", "carrot", "lettuce", "pumpkin", "potato"]
     },
     {
       "key": "moose",
@@ -248,7 +254,8 @@
         "widthM": 0.75,
         "seatM": 1.85
       },
-      "art": "moose"
+      "art": "moose",
+      "diet": ["hay", "wheat", "corn", "apple", "berries", "carrot", "lettuce", "pumpkin", "potato", "cabbage"]
     },
     {
       "key": "buffalo",
@@ -281,7 +288,8 @@
         "widthM": 0.95,
         "seatM": 1.55
       },
-      "art": "bison"
+      "art": "bison",
+      "diet": ["hay", "wheat", "corn", "potato", "carrot", "apple", "lettuce", "beetroot", "pumpkin", "cabbage"]
     },
     {
       "key": "yak",
@@ -314,7 +322,8 @@
         "lengthM": 2.6,
         "widthM": 0.85,
         "seatM": 1.4
-      }
+      },
+      "diet": ["hay", "wheat", "corn", "carrot", "apple", "berries", "lettuce", "beetroot", "pumpkin", "potato"]
     }
   ],
   "saddles": [

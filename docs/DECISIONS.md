@@ -5097,3 +5097,345 @@ sizes the overlay canvas before the idle check (pre-350 behaviour); skipping all
 only the vignette is active would save ~8 MB one-time but changes `texBytes()` behaviour — left
 as-is. No real-phone visual check: the gradient is pixel-equivalent numerically, but the user's
 eyes on the live build are the final check that the pulse reads the same.
+
+## ADR-351: Rope leading — lead tamed and wild farm animals home on a rope (SurVivaZ)
+
+**Context.** Rope already existed as an item (`rope`, resource, maxStack 30) but did nothing.
+Players and AI humans had no way to move a farm animal to their fenced-in area except taming
+in place (Task 28) or waiting for it to wander. The ask: rope in the hotbar + equipped lets
+the holder attach a rope to a nearby farm animal (tamed or wild), the animal follows, and
+arriving at the holder's fenced-in area ends the lead cleanly — with the rope *visible* in the
+world between holder and animal, for player-led and AI-human-led animals alike, and with
+release on un-equip / death and forgiving break-free rules.
+
+**Decision.** New `RopeLead { holder: u32 }` component on the led animal, appended at the end
+of `GAMEPLAY_COMPONENTS` and replicated to all (`r(C.RopeLead, "all")`) — the replicated
+component *is* the visibility mechanism: no extra net event, no sprite. Tuning lives in new
+`packages/gameplay/data/rope.json` (`attachRange 3.25, followDistance 2.2, runDistance 6,
+breakDistance 16, stuckSeconds 6, dangerRadius 5, arrivalRadius 2, scanRadius 24,
+leadSpeedMul 1`; bots `attachCooldownTicks 40, banTicks 3600, giveUpTicks 1200, leadUtility 0.9,
+minHp 0.5, safeTiles 8, scanEveryTicks 40, waitBehind 5`). Leadable farm species are the 10
+land animals (`animal_chicken/duck/goose/turkey/cow/goat/sheep/pig/alpaca/rabbit`); **bees are
+not leadable** (they fly; honey goes to the Apiary) and pets never are; all rideable mounts are
+leadable when not ridden. `checkLead` gates: holder alive, target alive with `Animal`, not a
+`Pet`, not already led, rope equipped (strictly the main hand — see below), one lead per holder,
+ownership (wild: anyone except an animal standing inside someone else's claim, so rope can't
+steal; tamed: the owner entity, or a hired worker whose `Worker.owner` PlayerId matches the
+owner's; mounts: `mayUseMount`), within `attachRange`. New reject reasons `not_leadable`,
+`no_rope`, `already_led` appended to the server `COMMAND_REJECT_REASONS`.
+`ropeSystem` (authority, every tick, after `gameplay.mounts`) walks the animal toward the
+holder via `creatureStep` — same nav as pets, so fences contain it and there are no teleports
+— walk speed below `runDistance`, `fleeSpeed` above it, stopping at `followDistance * 0.7`.
+A zombie within `dangerRadius` of the animal makes it **balk** (stop, lead stays, stuck clock
+pauses) — not a break. Break-free is distance > `breakDistance`, or the animal itself not
+moving ≥0.25 tiles for `stuckSeconds` while it should be following (fence in the way).
+Arrival: `leadDestination` is the holder's claim centre + radius (nearest `PrivilegeZone` of
+the holder's tribe), else `BotHome`, else the `Worker` hire anchor; entering the claim, or
+reaching the anchor, releases with `Arrived` and resets the animal's `Animal.homeX/homeY` to
+where it stands, so it stays. Un-equip, holder death, animal death all release with no
+dangling lead. `animalAISystem` skips led animals, otherwise wild animals would flee/wander
+against the rope. `ropeEquipped` is strictly `Equipment.mainHandItem === rope`: `equipSystem`
+leaves `HotbarSelection` pointing at the rope slot even after the same-slot Equip toggles the
+main hand off, so a selection fallback made un-equip never release — caught by test.
+AI: `fillRopeSensors` + `lead_animal` (`ai/rope_behaviors.ts`, same shape as the mount
+behaviours) — nearest leadable within `scanRadius` via the spatial hash, own tamed strays
+outside the home claim score +10 over wild animals; the bot equips the rope (`equip:<slot>`),
+walks to the animal, attaches (`rope:<target>`), walks it to the destination, releases on
+arrival at a home anchor (inside a claim the system releases on entry), gives up after
+`giveUpTicks` and bans the animal for `banTicks`. While leading, the bot **stops and waits**
+when the animal lags more than `waitBehind` tiles: the bot walks 2.6 tiles/s, a cow runs at
+2.0 and walks at 0.9, so walking on would stretch the rope past `breakDistance` (move
+magnitude is normalised away in the bot input frame, so slowing down is not an option —
+stopping is). Action strings `"rope:<target>"` / `"rope:0"` map to `RopeLeadCmd` in
+`agent_output.ts`, server-validated by `checkLead` like every other bot command.
+Client: Interact (E / pad X tap / touch "Use") with rope equipped and a leadable animal in
+reach sends `ropeLeadIntent(animal)` — wired in `main.ts` before `mountCtl.update()` so rope
+wins over riding when rope is equipped; it never releases on Interact, so gather/ride still
+work. Livestock and mount panels get Lead / Release buttons (disabled unless the rope is
+equipped, tooltip explains). The rope itself is `apps/client/src/rope-overlay.ts`: a
+pointer-events-none 2D canvas at z-index 2, same `CameraLike` pattern as the claim overlay,
+drawing one sagging line per live lead (5px dark halo + 2px tan `#D8B06A` stroke + knot dots,
+hand lifted 14px, neck 10px, `ROPE_SAG_PX = 8` at the midpoint), with a still-frame signature
+skip like the claim overlay; mounted right after `mountClaimOverlay`, hidden when a menu is
+open.
+
+**Verification.** New `packages/gameplay/test/adr351_rope_lead.test.ts` (15 tests) and
+`apps/client/test/adr351_rope_overlay.test.ts` (4 tests): attach + follow to heel distance;
+wild + tamed both leadable, bee / someone else's animal / no-rope / already-led rejected;
+release on un-equip through the real Equip intent and through the command; arrival inside
+the claim ends the lead with `Arrived` and the animal stays; break-free too far; danger balk
+(the animal stops, the lead stays, it resumes when the zombie leaves); fence-pen stuck
+break-free; holder/animal death cleanup; a led animal does not wander on its own AI; the rope
+command is registered with its entity field; a bot equips, attaches, walks a wild cow home
+and the lead releases by arrival inside the claim; the rope sensor reports target then live
+lead; `"rope:<target>"` / `"rope:0"` parse to the command. 19/19 pass. Neighbour suites:
+mounts/taming + pets/farm + inventory/equip 85/85, mounts/saddles + claims 53/53, no
+regressions. Typecheck with pinned TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11
+workspace projects. Full gate (`vitest run` from the repo root, ~22 min on this VM): **3,942
+passed / 2 failed / 3 skipped** (3,947 tests; 604 files passed, 2 failed, 2 skipped). The 2
+failures: the known pre-existing sparse-checkout `pack.test.ts` KEYS.md ENOENT, and the
+`persist` autosave benchmark (per-tick p95 61.7 ms vs the 50 ms non-PERF ceiling while the
+gate itself loaded the VM) — it passes alone in ~1 s, and the slice touches no persist code
+(`ropeSystem` early-returns with no leads), so that one is load flakiness. The gate also
+caught two stale tail assertions (`apps/server/test/task22_recruitment.test.ts`,
+`apps/server/test/adr170_vehicle_controls.test.ts`) that pin the append-only
+`GAMEPLAY_NET_COMMANDS` tail; both were extended with `...G.ROPE_COMMANDS` after the mount
+commands, the same way Task 25 extended them for dye.
+
+**Honest cuts.** Two real bugs caught by the tests, both fixed in-slice. (1) The stuck
+detector first measured the *gap to the holder closing*; a holder walking away steadily keeps
+the gap constant while the animal follows at full speed, so the lead broke free after 6s even
+though the animal was moving. It now tracks the animal's own position — a lead only breaks
+when the animal itself hasn't moved. (2) `ropePoints` computed the sagging midpoint from the
+un-lifted ground projections while the endpoints are lifted 14/10px, so the rope hung 20px
+below the visible chord instead of 8; the midpoint is now computed from the lifted endpoints.
+Deferred: bots do **not** fetch rope from storage — a bot with no rope in its bag simply never
+leads. No `RopeEventEvt` net event / toast wiring in `main.ts` (the replicated `RopeLead`
+component is the visibility mechanism; `ropeEventText` exists in gameplay for future toast
+use). A bot with no claim and no home anchor holds the rope and does other work while the
+animal follows it (no destination to walk to). No real-phone / real-controller visual check
+of the rope line — the overlay is verified numerically only; the user's eyes on the live build
+are the real check for Interact attach (keyboard E, gamepad X, touch Use), panel Lead/Release,
+arrival release inside the claim, and break-free feeling forgiving.
+
+## ADR-352: Dung and a longer-lasting fertilizer (SurVivaZ)
+
+**Context.** Animals produced eggs, milk, wool, honey and truffles, but nothing for the fields:
+the only fertilizer was bone-meal/fiber (`fertilizer`, 600 s at 1.5x), and bones mean killing
+things. The ask: all animals produce Dung a couple of times a day; dung is a short-lived pickup
+(10 s if unpicked); dung crafts into a different fertilizer that lasts a bit longer.
+
+**Decision.** New `packages/gameplay/data/dung.json`: `perDay 2` (big grazers/mounts —
+cow/horse/bison/moose/elk/yak — 3), `jitterFraction 0.25`, `despawnSeconds 10`, `dropRadius 0.8`,
+`count 1`, `excluded ["animal_bee"]`. Coverage is every animal archetype in ai.json (kind
+"animal") except the bee — farm animals, pets, mounts and wild animals, birds included; the bee
+is the only exclusion because it flies and honey is its produce (it goes to the Apiary, never to
+the ground). Production is a new persistent-but-not-networked `DungTimer { nextAt: u32 }`
+component (appended to `GAMEPLAY_COMPONENTS`, after RopeLead) driven by `dungSystem`
+(authority, every 20 ticks, after the rope system): a missing timer is seeded with a jittered
+first drop, a due timer drops and re-arms. The jitter comes from `world.rngFor("dung.next", e)`
+(seeded by world seed + tick + entity), so a herd seeded on the same tick still staggers instead
+of dropping in unison, and a restart honours the stored schedule (no backlog). Dead animals
+never produce. The drop is a plain ownerless LootBag holding 1 dung at the animal's feet (the
+generic dropped-item path: same Container / LootBag / `tagLootSource(Animal)` shape as animal
+loot, so pickup, stacking, weight, replication and persistence come for free), with
+`despawnAtTick = spawn + 10 s` — the exception to the 3-minute dropped-item rule, applying to
+dung bags only; every other bag keeps its own lifetime from `loot_despawn.ts`. The client fades
+the bag over its short life through the existing `despawnFadeAlpha` path (`syncLootFade`).
+New items `dung` (resource, maxStack 50, 0.1) and `dung_fertilizer` (resource, maxStack 30,
+0.3), ids 496/497 from the regenerated lock (append-only), and recipe `dung_fertilizer`
+(no station, 2 s: dung 2 + fiber 2 → 2 dung_fertilizer), id 383. The fertilizer lasts
+`dungFertilizerSeconds 900` (15 min) in `farming.json` vs 600 s for the old one — 50% longer,
+chosen because it is clearly longer without trivialising the bone-meal fertilizer or the
+watering cycle — at the **same** `fertilizerMul 1.5`: dung is slower-release, longer not
+stronger, so the dose is stored in the existing `Crop.fertilizerUntilTick` with no new Crop
+field, no schema migration, and the old fertilizer byte-for-byte untouched. `fertilize()` takes
+an optional seconds parameter (default 600 s); `farmUseSystem` and `farmPrompt` accept the
+`dung_fertilizer` key alongside `fertilizer`, and the XP source stays "fertilize". No new art:
+the dung bag draws the generic LootBag sprite and both items fall back to the category-generic
+icon via `resolveIcon` (adding an `icons` entry would fail `pack.test.ts`, which requires every
+icons key to exist as a pack sprite; there is no dung sprite). Pickup and fertilizing use the
+existing Interact / Use intents, so keyboard, gamepad and touch all work with no new UI.
+
+**Verification.** New `packages/gameplay/test/adr352_dung_fertilizer.test.ts` (19 tests): data
+(2/day, jitter bounds, cow/horse 3/day, herd stagger, full species coverage incl. mounts and
+wild animals, bee excluded, recipe shape); every covered species drops on schedule and the bee
+never does; a drop is 1 dung in a LootBag within `dropRadius`; production repeats on the stored
+schedule; a dead animal never produces; `DungTimer` is persistent, not networked, not
+replicated, and round-trips through the chunk codec on a tamed animal (nextAt intact, Animal
+rebuilt by husbandry); a dung bag lives exactly 10 s with an `expired` event while a dropped
+wood stack still lives its full 3 minutes; fade alpha is ~1 at spawn and decays through the
+10 s (a normal bag is unchanged: full alpha at spawn and 10 s in); picking up dung works and
+stacks; dung_fertilizer crafts through the real crafting system; dung fertilizer gives a 900 s
+dose vs 600 s for the old one at the same 1.5x growth multiplier; the Use path consumes one and
+refuses a second dose while fertilized; the dose drains, expires and can be reapplied. 19/19
+pass. Neighbour suites: farming/fertilize + loot/despawn + crafting + pets/farm 74/74;
+mounts/saddles + rope + crafting queues 81/81; no regressions. The gate also caught two
+source-model tests that enumerate how every item is obtained (`economy.test.ts` "every item has
+a gather or craft source" and `balance.test.ts` reachability + raw cost): dung is produced by a
+system, not gathered/crafted/looted, so both now list dung as a base source with an ADR-352
+comment — the same treatment as the soil/shovel and boil-source precedents already in those
+files. Typecheck with pinned
+TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11 workspace projects. Full gate (`vitest run` from the repo root, ~22 min on this VM): **3,962 passed / 2 failed / 3 skipped** (3,967 tests; 605 files passed, 2 failed, 2 skipped). The 2 failures: the known pre-existing sparse-checkout `pack.test.ts` KEYS.md ENOENT, and the `persist` autosave benchmark (per-tick p95 64.2 ms vs the 50 ms non-PERF ceiling in round 1 while the gate itself loaded the VM; rounds 2–3 were 1.81 and 4.26 ms) — it passes alone, and the slice touches no persist code, so that one is load flakiness, as in ADR-351's gate. Two earlier full gates caught real regressions that were fixed before this commit: gate 1 caught the fade-window change breaking a pinned server ADR-238 test, gate 2 caught the economy/balance source-model tests (dung had no listed obtainable source). A third gate run was killed by a runtime restart before producing output; this is the re-run after it.
+
+**Honest cuts.** Two test bugs of mine, both fixed in-slice. (1) The chunk-codec test first
+asserted `Animal` on a decoded *wild* animal — `Animal` was never persistent, so a wild animal
+round-trips as a Transform-only stray (pre-existing engine behaviour, not something this slice
+introduced) and its orphaned DungTimer is inert (`dungSystem` only reads `Animal` entities).
+The test now uses a tamed animal, whose `Animal` husbandry rebuilds after a load — which is
+also the case that matters, since tamed animals and mounts are the ones players keep. A wild
+animal's timer is still seeded on first sight, so nothing is lost in practice. (2) A dung
+bag's fade: a first attempt capped `despawnFadeAlpha`'s window at the bag's own lifetime so a
+10 s bag would spawn at full alpha — the full gate caught it (a pinned server ADR-238 test:
+a shortened-expiry bag must fade by *remaining* time, and the cap broke that). The change was
+reverted in full: dung spawns part-faded (~0.44 alpha) exactly like any other bag 10 s from
+expiry and decays to the floor — the existing dropped-item presentation, not a special case. The crop
+inspector's fertilizer fraction still divides by the 600 s bone-fertilizer dose, so a
+dung-fertilized crop reads "full" for its first 5 minutes and then drains — cosmetic, and
+fixing it properly needs a stored fertilizer kind on Crop (a schema change) for a HUD
+fraction; left as-is. Dung and dung fertilizer use the generic resource icon until dedicated
+art ships. No real-phone check: the 10-second pickup window and the fade are verified
+numerically only; the user's eyes on the live build are the real check that dung is noticeable
+enough to grab in time without being annoying.
+
+## ADR-353: Animals eat more crops and use the trough (SurVivaZ)
+
+**Context.** A mount tamed on carrots would only ever eat its taming foods, and a farm animal at a
+trough would only ever eat hay: the trough held a whole harvest the animals ignored, and a mount had
+no hunger at all (it regened unconditionally). The ask: mounts and other animals eat other crops
+besides the ones used to tame them, and a hungry animal eats from the animal trough — with taming
+untouched, ownership respected, and no faster hunger.
+
+**Decision.** Diets are data, split from taming. Mounts gain a `diet` array per species in
+`packages/gameplay/data/mounts.json` (hay/wheat/corn/potato/carrot/apple/lettuce/beetroot/pumpkin/
+berries-class lists, 9–10 items each, taming foods included: a horse eats carrots when hungry too)
+alongside the unchanged `foods` (love/like/ok) table; `mountDiet()` / `mountEats()` in
+`mount_defs.ts` read it, while `foodPref()` — the taming gate — still reads `foods` only, so a
+diet-only crop (corn for every species) is refused for taming (`not_food`, item kept) and can never
+build taming progress. Farm animals gain a `diet` per kind in `skills.json`
+`husbandry.animals` (grazers hay-first, birds grain, pigs potato-first, rabbit carrot-first; the bee
+keeps `["hay"]`, exactly what it ate before, so its fed window for honey production is unchanged),
+read by `farmAnimalDiet()`; pets gain crops in `pets.json` diets (dogs apple/berries/carrot/corn/
+potato/pumpkin, birds lettuce/rice, rabbit beetroot/corn/lettuce, turtle beetroot/corn, squirrel
+lettuce/pumpkin — cats, ferret, fox and owl are carnivores and unchanged), which flows through the
+existing `petFoodValue()` into hand-feeding, ground eating and trough eating with no pets.ts change.
+Wild animals have no diet data of their own (`ai.json` archetypes carry kind/hp/speed/perception/
+aggro/flee/wander/attack/loot only, and no wild eating system exists), so a wild animal's diet is
+its species diet, which governs it once tamed or as a mount — no dead data was added to ai.json.
+Mount hunger is a new persistent-but-not-networked `MountHunger { fedUntil: u32 }` component
+(appended to `GAMEPLAY_COMPONENTS`, after DungTimer): a clock, not a drain — every meal resets the
+same `fedSeconds 600` window (new `mounts.json` tuning knob, same 600 s as farm animals), so the
+wider diet never makes a mount hungrier faster. Fresh tames, spawned mounts and legacy mounts are
+seeded fed on first sight (the DungTimer no-backlog rule), hand-feeding a tamed mount feeds it, and
+while hungry a mount does not regen — it needs food to recover, but never loses hp to hunger
+(pets' rule: starvation floors, never kills). Trough eating: `husbandrySystem`'s hay-only block is
+now diet-aware — a hungry farm animal at a trough eats one item off its diet (hay first for
+grazers, so the old path is the diet's head) and is fed 600 s; `mountSystem` does the same for an
+unridden hungry mount at the nearest own trough within `troughRange 10` (same range as farm
+animals), healing `feedHeal` like a hand-feed. Pets already walked to their trough; they now find
+diet crops there through the unchanged `foodSources` path. Ownership is new for the feeding
+trough (the pet trough already had it): `troughOwnerId()` (the piece's `PieceOwner`, set at
+placement), `troughTribeId()`, and `mayEatFromTrough()` — owner's, clan-mate's (same tribe) or
+unowned troughs only, never a stranger's; a hired worker's animals count as the employer's
+(`tamedOwnerId()`, the `mountOwnerIdFor` rule). An empty or wrong-food trough falls back to
+grazing/foraging as before (the graze guard is the same ownership + diet check, so a stranger's
+trough never blocks grazing), and a fed animal never double-dips: one item per meal, the fed window
+blocks re-eating, and the graze loop clears `Grazing` once fed. No new UI, no new art, no input
+changes (animals eat autonomously; putting food in a trough is the existing container UI on all
+three inputs). Ridden mounts do not trough-eat (the rider steers; they hand-feed), and mounts have
+no grazing fallback — there is no wild/mount grazing system to fall back to, so a hungry mount with
+no trough food simply stays hungry (no regen) until fed.
+
+**Verification.** New `packages/gameplay/test/adr353_animal_diets_trough.test.ts` (21 tests): data
+(every mount diet wider than its taming table with a non-taming crop, all diet items resolve, the
+taming tables pinned byte-for-byte; every farm kind has a diet, bee hay-only; pet diets resolve,
+dog eats carrot, cat refuses it, treats untouched; knobs in data, windows unchanged); farm animals
+(hungry cow eats 1 corn for 600 s, hay still feeds, every kind eats a non-hay diet item, empty and
+wrong-food troughs fall back to grazing, a stranger's trough is untouched and grazed past instead,
+no double-dip — exactly 1 item, fed, no graze, and a second run eats nothing); mounts (every
+species eats corn from its owner's trough, a trough meal heals `feedHeal`, hungry mounts do not
+regen while fed mounts regen the usual 6 hp/min, stranger's trough untouched vs clan-mate's and
+unowned troughs eaten from, ridden mounts do not trough-eat, taming refuses corn and still tames
+on carrot, hand-feeding a tamed mount feeds it, `MountHunger` persistent / not networked /
+round-trips through the chunk codec); pets (hungry dog eats a carrot from its owner's pet trough,
+source 2, fullness +25; hand-feeding a carrot works; a non-food trough is untouched). 21/21 pass.
+Neighbour suites: mounts/taming + rope + dung + pets/farm 140/140, farming/crops + seed sources
+32/32, foods/vitals/crop bars/economy/balance 47/47; no regressions. Typecheck with pinned
+TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11 workspace projects. Full gate (`vitest
+run` from the repo root, ~22 min on this VM): **3,983 passed / 2 failed / 3 skipped** (3,988 tests;
+606 files passed, 2 failed, 2 skipped). The 2 failures: the known pre-existing sparse-checkout
+`pack.test.ts` KEYS.md ENOENT, and the `persist` autosave benchmark (per-tick p95 57.4 ms vs the
+50 ms non-PERF ceiling while the gate itself loaded the VM) — it passes alone in ~3 s, and the slice
+touches no persist code, so that one is load flakiness, as in ADR-351's and ADR-352's gates.
+
+**Honest cuts.** Three test bugs of mine, all fixed in-slice. (1) Four mount tests set
+`fedUntil: 0` at world tick 0 and expected hunger — but `tick > fedUntil` is false at tick 0, so a
+fresh world reads a 0-fedUntil mount as fed (the same boundary as `Tamed.fedUntil`); the tests now
+step once first, then set `fedUntil: 0`. (2) The pet-trough test ran 200 ticks and expected 1
+carrot eaten — the pet correctly ate twice (4 s eat cooldown, fullness 10 → 35 → 60), so it now
+runs 60 ticks and pins exactly one meal. (3) The fed-mount regen assertion used precision 6 and
+the pet fullness assertion was exact — both are f32/drain noise (mount hp accumulates ~1e-3 over
+1200 f32 additions; the pet's fullness drains ~0.2 while walking to the trough), so both use a
+proper tolerance now. Deferred: bots do not fetch diet foods for troughs — the AI `feed_trough`
+behaviour still deposits hay only, and `fetch_mount_food` still fetches taming foods; a player (or
+a future bot change) stocks the trough with crops. Mounts do not seek out a distant trough or
+graze: they eat when within 10 tiles of an own trough (the farm-animal pattern), and a hungry
+mount with no trough food waits, unharmed, rather than foraging. No real-phone check: trough
+eating is verified numerically only; the user's eyes on the live build are the real check that
+animals visibly eat from a stocked trough.
+
+## ADR-354: Tameable animals don't attack on sight (SurVivaZ)
+
+**Context.** Animals that are going to be tamed (the user's example: the moose) should not
+attack on sight. Audit of where aggression is decided (`animalAISystem` in
+`packages/gameplay/src/population.ts`, ai.json `aggro.mode`): `hostile` attacks anyone in
+range, `territorial` attacks anyone in range near its home, `defensive` only attacks when
+hurt, `passive` never attacks. Of the 35 species with a taming path — 9 mount animals
+(`mounts.json`: horse, donkey, deer/red_deer/stag, elk, moose, bison, yak), 17 pet species
+(`pets.json`), 11 farm kinds (`skills.json` husbandry) — 34 were already calm: passive
+(horse, donkey, deer, chicken, duck, turkey, sheep, pig, alpaca, rabbit, fox, squirrel) or
+defensive, i.e. retaliation-only (elk, bison, yak, cow, goat, goose, bee, all dogs/cats/
+birds/ferret/owl). Exactly one tameable attacked on sight: the **moose, territorial, range
+2** — Task 15 had calmed it from range 4 to 2, but anyone walking within 2 tiles of where
+it spawned was still charged. The genuinely hostile animals are the wolf (hostile, range
+2.5), the bear and the snake (territorial, ranges 5 / 1.6) — none of them tameable, all left
+unchanged. Hordes are zombies and untouched.
+
+**Decision.** Two layers, so the rule holds in data *and* in code. (1) Data: the moose's
+ai.json aggro mode is `territorial` → `defensive` (range 2, leashRange 12, attack damage
+20 all untouched), matching elk/bison/yak — it now only engages when hurt, and the Task 15
+pin on its aggro values is updated to the new mode. (2) Code: new data-only module
+`packages/gameplay/src/tameable_defs.ts` (same cycle-free pattern as `rope_defs.ts`)
+exports `TAMEABLE_ANIMAL_KEYS` — the union of mount animals, pet animals and husbandry
+kinds, derived from the same JSON the taming/husbandry systems read — and
+`isTameableAnimalKey()`. `animalAISystem`'s `wants` now requires `!isTameableAnimalKey`
+for *initiation* (the hostile / territorial / defensive-when-hurt branch); the engaged /
+retaliating branch is unchanged, so a tameable still presses its actual attacker within
+leashRange and still flees when badly hurt (scared), and each species keeps its own
+fleeRange / wander radius / idle behaviour — nothing was made to flee identically.
+`isAggressiveSpawnKind` also excludes tameables, so a tameable never counts as an
+aggressive spawn kind either. Audited and already correct, no change: turrets/traps
+(`isHostileTo` leaves alone anything without a PlayerId, so no animal is ever a turret
+target), territory defence (`nearestClaimHostile` scans zombies only), AI-human defence
+sensors (`fillDefenceSensors` records only `kind === "zombie"` sightings), pet guarding
+(`threatNear` keys off real attackers in aggro memory plus zombies), the safe-spawn
+radius (hostile mode only — wolf + zombies), and mount taming (spook/kick read
+`mounts.json` tuning and the species' attack, not aggro mode). `botSignals.enemyNear`
+still adds a flat 0.2 for *any* animal seen (chickens included) — generic unease, not a
+defence trigger, left as-is. No new UI, no art, no input changes; tuning stays in data
+JSON (ai.json mode, no new knobs needed).
+
+**Verification.** New `packages/gameplay/test/adr354_tameable_calm.test.ts` (7 tests):
+data (tameable set is exactly mounts + pets + husbandry, all 35 keys resolve in
+`animalDefs()`, no tameable is hostile/territorial, moose defensive range 2 / leash 12;
+wolf + zombies still aggressive, moose not an aggressive spawn kind); no tameable
+initiates on a nearby player over 5 s held at 1 tile (all 35 species); the moose
+specifically never attacks in 30 s at 1 tile from a player and from an AI human
+(second survivor); every tameable with an attack retaliates when hit from outside its
+aggro range but inside leashRange (1 damage → Attack state); the wolf still attacks on
+sight and a night zombie still hunts (hp drops); a moose at a live arrow turret's feet
+draws no fire (`isHostileTo` false, 0 `TurretFired` in 5 s, hp unchanged) while a
+zombie in the same spot takes all 3 shots, and `nearestClaimHostile` ignores a moose
+inside a claim but finds a zombie there; a moose still tames by feeding (Progress +
+Tamed events, owner set). 7/7 pass. Neighbour suites: mounts/taming + rope + dung +
+diets + pets/farm + Task 15 + animals + population 99/99; defences + day-calm +
+territory + safe spawns + AI defence + hordes + seed safe zone 145/145; pets/guard/
+saddles/mount-food/saddle-chain/mount-preference/AI humans 98/98; mount seek/tame +
+spook/back-off/give-up 21/21 (ADR-321, spook/back-off/give-up intact). Typecheck with
+pinned TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11 workspace projects.
+Full gate (`vitest run` from the repo root, ~24 min on this VM): **3,991 passed / 2
+failed / 3 skipped** (3,996 tests; 607 files passed, 2 failed, 2 skipped). The 2
+failures: the known pre-existing sparse-checkout `pack.test.ts` KEYS.md ENOENT, and the
+`persist` autosave benchmark (per-tick p95 58.6 ms vs the 50 ms non-PERF ceiling while
+the gate itself loaded the VM) — it passes alone in ~3 s, and the slice touches no
+persist code, so that one is load flakiness, as in ADR-351's, ADR-352's and ADR-353's
+gates.
+
+**Honest cuts.** The Task 15 moose test pinned `mode: "territorial"` — updated to
+`defensive` with an ADR-354 note, since the data change is the point of the slice; its
+behaviour assertions (no attack at 3 tiles, retaliation when hit, flee when badly hurt)
+pass unchanged. The `enemyNear` 0.2-for-any-animal signal was deliberately left alone:
+it is not a threat classification and changing it would alter bot utility for chickens
+too. No real-phone check: calm moose behaviour is verified numerically only; the
+user's eyes on the live build are the real check that a moose walked up to no longer
+charges.

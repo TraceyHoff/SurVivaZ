@@ -48,6 +48,7 @@ describe("economy data", () => {
     const gathered = new Set<number>([id("soil")]); // ADR-264: terrain digging, covered by task36_terrain.test.ts
     for (const r of d.resources.values()) for (const y of (r as unknown as { yields?: { item: number }[] }).yields ?? []) gathered.add(y.item);
     for (const a of mod.animalDefs()) for (const l of a.loot) gathered.add(d.itemId(l.item)); // ADR-110: hunting yields
+    gathered.add(id("dung")); // ADR-352: produced by dungSystem (data/dung.json), not gathered / crafted / looted
     const raw = JSON.stringify(DEFAULT_RAW_DEFS.resources);
     const missing = [...d.items.values()].filter((it) => !crafted.has(it.id) && !gathered.has(it.id) && !raw.includes(`"${it.key}"`) && it.key !== d.items.get(d.spoiledItem)?.key && it.key !== mod.KEY_ITEM && !(it.boilSource && (crafted.has(it.boilSource) || gathered.has(it.boilSource)))); // boiled variants come from the Boil action on their raw form, not a vendor/craft/gather source
     expect(missing.map((m) => m.key)).toEqual([]);

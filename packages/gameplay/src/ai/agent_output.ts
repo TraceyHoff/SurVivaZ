@@ -19,6 +19,7 @@ import { requestEmote } from "../expression.js";
 import { VehicleEnterCmd, VehicleExitCmd, VehicleHitchCmd, VehicleStationCmd, VehicleUnhitchCmd } from "../vehicles.js";
 import { VehicleDeployCmd, VehicleRefuelCmd, VehicleRepairCmd } from "../vehicle_craft.js";
 import { MountDismountCmd, MountFeedCmd, MountRepairCmd, MountRideCmd, MountSaddleCmd } from "../mount_commands.js";
+import { RopeLeadCmd } from "../rope_commands.js";
 
 export function actionIntent(action: string): BotIntent | undefined {
   const [k, ...rest] = action.split(":"); const n = rest.map(Number); if (n.some((v) => !Number.isFinite(v))) return undefined;
@@ -73,6 +74,7 @@ export function actionCommand(action: string): AgentCommand | undefined {
   const clan = clanActionCommand(action); if (clan !== null) return clan;
   const veh = vehicleActionCommand(action); if (veh !== null) return veh;
   const mnt = mountActionCommand(action); if (mnt !== null) return mnt;
+  const rope = ropeActionCommand(action); if (rope !== null) return rope;
   if (action.startsWith("skill:")) { const n = Number(action.slice(6)); return Number.isInteger(n) && n >= 0 ? { type: UnlockSkillCmd.name, payload: { node: n } } : undefined; } // ADR-113
   if (action.startsWith("tame:")) { const [, a, b] = action.split(":"); const t = Number(a), i = Number(b); return Number.isInteger(t) && t > 0 && Number.isInteger(i) && i > 0 ? { type: PetOfferCmd.name, payload: { target: t, item: i } } : undefined; } // ADR-145
   { const [k, ...r] = action.split(":"); const n = r.map(Number); const ok = n.every((v) => Number.isInteger(v) && v >= 0) && n.length >= 1; // ADR-203 container / fire
@@ -169,7 +171,18 @@ function mountActionCommand(action: string): AgentCommand | undefined | null {
     default: return null;
   }
 }
-const COMMAND_ACTIONS = new Set(["mfeed", "mride", "mdismount", "msaddle", "mrepair", "terrain", "venter", "vexit", "vhitch", "vunhitch", "vstation", "vrefuel", "vrepair", "vdeploy", "ccreate", "cinvite", "caccept", "cleave", "cpromote", "cdemote", "ckick", "cperms", "cgoal", "cstock", "eat", "drink", "craft", "build", "open", "buy", "pinvite", "paccept", "pdecline", "pleave", "pkick", "skill", "equip", "repair", "upgrade", "copen", "cclose", "cdeposit", "fire", "cwithdraw", "wear", "door", "drop", "dye"]);
+/**
+ * ADR-351 rope action strings: "rope:<animal>" attaches the rope to the animal, "rope:0" releases the
+ * animal currently led. The server re-validates (checkLead: reach, rope equipped, ownership).
+ */
+function ropeActionCommand(action: string): AgentCommand | undefined | null {
+  const [k, ...rest] = action.split(":"); const n = rest.map(Number); const ok = (c: number) => n.length >= c && n.every((v) => Number.isInteger(v) && v >= 0);
+  switch (k) {
+    case "rope": return ok(1) ? { type: RopeLeadCmd.name, payload: { target: n[0]! } } : undefined;
+    default: return null;
+  }
+}
+const COMMAND_ACTIONS = new Set(["mfeed", "mride", "mdismount", "msaddle", "mrepair", "rope", "terrain", "venter", "vexit", "vhitch", "vunhitch", "vstation", "vrefuel", "vrepair", "vdeploy", "ccreate", "cinvite", "caccept", "cleave", "cpromote", "cdemote", "ckick", "cperms", "cgoal", "cstock", "eat", "drink", "craft", "build", "open", "buy", "pinvite", "paccept", "pdecline", "pleave", "pkick", "skill", "equip", "repair", "upgrade", "copen", "cclose", "cdeposit", "fire", "cwithdraw", "wear", "door", "drop", "dye"]);
 /**
  * Moves the command-type actions (eat, drink, craft, build, open, buy) out of out.actions and into out.commands, in order.
   Movement and gather/attack/sleep stay

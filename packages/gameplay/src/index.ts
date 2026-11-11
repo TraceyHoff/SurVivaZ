@@ -57,6 +57,7 @@ export * from "./vehicle_keys.js";
 export * from "./combat/pvp.js";
 export * from "./loot_labels.js";
 export * from "./loot_despawn.js";
+export * from "./dung.js"; // ADR-352: animal dung production + dung fertilizer data
 export * from "./spawn_points.js";
 export * from "./respawn.js";
 export * from "./ai_spawn.js";
@@ -83,6 +84,7 @@ export * from "./ai/party_behaviors.js";
 export * from "./ai/clan_behaviors.js";
 export * from "./ai/vehicle_behaviors.js";
 export * from "./ai/mount_behaviors.js";
+export * from "./ai/rope_behaviors.js"; // ADR-351: lead farm animals home on a rope
 export * from "./ai/mount_preference.js"; // ADR-339: tame a mount of the bot's own choice
 export * from "./ai/travel.js";
 export * from "./ai/journey.js"; // ADR-344: distance-based journey preparation
@@ -119,6 +121,10 @@ export * from "./pets.js"; // ADR-145
 export * from "./mount_defs.js"; // ADR-319 / ADR-320
 export * from "./mount_commands.js";
 export * from "./mounts.js";
+export * from "./rope_defs.js"; // ADR-351: rope data + leadable-species helpers
+export * from "./tameable_defs.js"; // ADR-354: the single tameable-species list
+export * from "./rope_commands.js";
+export * from "./rope.js";
 export * from "./animal_skills.js"; // Task 15: per-animal skill trees
 export * from "./recruitment.js"; // Task 22: AI-human recruitment (hire / jobs / multiplayer toggle)
 export * from "./dye.js"; // Task 25: dye system (DyeCmd, SlotDye, brush rule)

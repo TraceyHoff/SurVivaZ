@@ -27,9 +27,9 @@ export type PlantType = "crop" | "bush" | "tree";
 export interface Plantable { seed: string; key: string; type: PlantType; growSeconds: number; stages: number; becomes: string; tiles: number[];
   /** ADR-247: world-spawned resource nodes of the same species (where the seed is first found). */
   wild: string[] }
-export interface FarmingData { unwateredMul: number; wateredMul: number; wateredSeconds: number; fertilizerMul: number; fertilizerSeconds: number; waterRadius: number; fertilizeRadius: number; plantReach: number; minSpacing: number; tickSeconds: number; plantables: Plantable[] }
+export interface FarmingData { unwateredMul: number; wateredMul: number; wateredSeconds: number; fertilizerMul: number; fertilizerSeconds: number; /** ADR-352: dung fertilizer lasts this long (same 1.5x mul — longer, not stronger). */ dungFertilizerSeconds: number; waterRadius: number; fertilizeRadius: number; plantReach: number; minSpacing: number; tickSeconds: number; plantables: Plantable[] }
 export const FARMING: FarmingData = raw as unknown as FarmingData;
-export const FARM_TOOL = { hoe: "hoe", wateringCan: "watering_can", fertilizer: "fertilizer" } as const;
+export const FARM_TOOL = { hoe: "hoe", wateringCan: "watering_can", fertilizer: "fertilizer", dungFertilizer: "dung_fertilizer" } as const;
 /** Crop.kind -> plantable (kind 0 = tilled soil). */
 export const plantableOf = (kind: number): Plantable | undefined => (kind > 0 ? FARMING.plantables[kind - 1] : undefined);
 export const plantableBySeed = (seed: string): number => FARMING.plantables.findIndex((p) => p.seed === seed) + 1;
@@ -135,10 +135,11 @@ export function waterFromContainer(world: World, e: Entity, slot: number): numbe
 }
 const hasHoe = (world: World, e: Entity): boolean => { const id = [...gameplayDefs(world).items.values()].find((d) => d.key === FARM_TOOL.hoe)?.id; return !!id && countItem(world, e, id) > 0; };
 const crops = (world: World, x: number, y: number, r: number): Entity[] => near(world, x, y, r).filter((o) => (world.get(o, Crop)?.kind ?? 0) > 0);
-const fertilizerTicks = (): number => Math.round(FARMING.fertilizerSeconds * DEFAULT_TICK_HZ);
-export function fertilize(world: World, x: number, y: number): boolean {
+const fertilizerTicks = (seconds: number = FARMING.fertilizerSeconds): number => Math.round(seconds * DEFAULT_TICK_HZ);
+/** ADR-352: fertilize one crop with a dose lasting `seconds` (bone fertilizer: fertilizerSeconds; dung fertilizer: dungFertilizerSeconds). */
+export function fertilize(world: World, x: number, y: number, seconds: number = FARMING.fertilizerSeconds): boolean {
   const c = near(world, x, y, FARMING.fertilizeRadius).find((o) => { const k = world.get(o, Crop); return !!k && k.kind > 0 && (!k.fertilized || k.fertilizerUntilTick <= world.tick); });
-  if (c === undefined) return false; world.set(c, Crop, { fertilized: 1, fertilizerUntilTick: world.tick + fertilizerTicks() }); return true;
+  if (c === undefined) return false; world.set(c, Crop, { fertilized: 1, fertilizerUntilTick: world.tick + fertilizerTicks(seconds) }); return true;
 }
 
 /** IntentAction.Use on a hoe / seed / sapling / watering can / fertilizer (authority; the client is corrected by replication). */
@@ -153,11 +154,11 @@ export function farmUseSystem(world: World): void {
     let r = FarmFail.None;
     if (key === FARM_TOOL.hoe) r = till(world, e, at.x, at.y);
     else if (key === FARM_TOOL.wateringCan) { if (!water(world, me.x, me.y)) r = FarmFail.NothingToTend; }
-    else if (key === FARM_TOOL.fertilizer) { if (fertilize(world, at.x, at.y) || fertilize(world, me.x, me.y)) takeFromSlot(world, e, slot); else r = FarmFail.NothingToTend; }
+    else if (key === FARM_TOOL.fertilizer || key === FARM_TOOL.dungFertilizer) { const seconds = key === FARM_TOOL.dungFertilizer ? FARMING.dungFertilizerSeconds : FARMING.fertilizerSeconds; if (fertilize(world, at.x, at.y, seconds) || fertilize(world, me.x, me.y, seconds)) takeFromSlot(world, e, slot); else r = FarmFail.NothingToTend; }
     else if (plantableBySeed(key) > 0) { r = plant(world, e, key, at.x, at.y); if (r === FarmFail.None) takeFromSlot(world, e, slot); }
     else continue;
     if (r !== FarmFail.None) emit(world, FarmFailed, { entity: e, reason: r });
-    else emit(world, XpActivity, { entity: e, source: key === FARM_TOOL.hoe ? "till" : key === FARM_TOOL.wateringCan ? "water" : key === FARM_TOOL.fertilizer ? "fertilize" : "plant", units: 1 });
+    else emit(world, XpActivity, { entity: e, source: key === FARM_TOOL.hoe ? "till" : key === FARM_TOOL.wateringCan ? "water" : key === FARM_TOOL.fertilizer || key === FARM_TOOL.dungFertilizer ? "fertilize" : "plant", units: 1 });
   }
 }
 
@@ -293,7 +294,7 @@ export function farmPrompt(world: World, e: Entity): FarmPrompt | undefined {
   const mk = (action: FarmAction, fail: FarmFail, extra: Partial<FarmPrompt> = {}): FarmPrompt => ({ action, slot, fail, label: fail ? `${action}: ${FARM_FAIL_TEXT[fail]}` : action, ...extra });
   if (key === FARM_TOOL.hoe) return mk("Till", till(world, e, at.x, at.y, true));
   if (key === FARM_TOOL.wateringCan) return mk("Water", crops(world, me.x, me.y, FARMING.waterRadius).length ? FarmFail.None : FarmFail.NothingToTend);
-  if (key === FARM_TOOL.fertilizer) return mk("Fertilize", crops(world, at.x, at.y, FARMING.fertilizeRadius).length || crops(world, me.x, me.y, FARMING.fertilizeRadius).length ? FarmFail.None : FarmFail.NothingToTend);
+  if (key === FARM_TOOL.fertilizer || key === FARM_TOOL.dungFertilizer) return mk("Fertilize", crops(world, at.x, at.y, FARMING.fertilizeRadius).length || crops(world, me.x, me.y, FARMING.fertilizeRadius).length ? FarmFail.None : FarmFail.NothingToTend);
   if (key && plantableBySeed(key) > 0) return mk("Plant", plant(world, e, key, at.x, at.y, true));
   const ripe = new Set(FARMING.plantables.map((p) => p.becomes));
   const node = near(world, at.x, at.y, 1).find((o) => { const n = world.get(o, ResourceNode); return !!n && ripe.has(defs.resources.get(n.kind)?.key ?? ""); });

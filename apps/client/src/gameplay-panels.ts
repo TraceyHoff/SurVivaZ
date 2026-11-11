@@ -25,6 +25,7 @@ import { hasDisease, iconForItem, ROADS, clanTintIndex,
   SKILLS, equipIntent, wearIntent, equipmentView, boilIntent, nearLitCampfire, holdingTorch,
   mountView, mountRideIntent, mountDismountIntent, mountFeedIntent, mountSaddleIntent, mountUnsaddleIntent, mountRepairIntent, MOUNT_SPECIES,
   petView, petsOf, petOfferIntent, petCommandIntent, petGuardIntent, animalSkillIntent, animalSkillView, petStatusLabel, dropItemIntent, splitStackIntent, moveSlotIntent, containerToSlotIntent, slotToContainerIntent, defaultSplit, HOTBAR_SIZE, PACK_SLOTS, HOTBAR_OFFSET, PET_HELP, petName, petSpecies, Pet, Animal, BuildPiece, Tamed,
+  ropeLeadIntent, ropeEquipped,
   workerView, WORKER_JOBS, WORKER_JOB_LABELS, WORKER_JOB_HELP, WORKER_HELP, hireWorkerIntent, dismissWorkerIntent,
   treeShortName, treeIndex, readSlots, SPRITE_FALLBACKS, characterSheetView, dyeView, dyeIntent, wetnessStage,
   recentBuildsView, recentCraftsView,
@@ -1027,6 +1028,13 @@ function petBody(c: MenuCtx, src: GameplaySource, kit: PanelKit, btn: Btn, send:
   if (v.livestock) {
     // Task 15: farm animals get only status + skills (Follow/Stay/Guard/bag are pet-only).
     out.push(...skillNodes(c, kit, btn, send, v));
+    // ADR-351: lead it home on a rope (rope equipped), or release the rope when leading it.
+    if (v.lead.leadable || v.lead.ledByMe) {
+      const lg = grid(); lg.dataset["role"] = "pet-lead";
+      if (v.lead.ledByMe) lg.append(btn("Release rope", "pet-release", () => send(ropeLeadIntent(0), `${v.name} released.`), { alt: true, title: "Let go of the rope — it stays here" }));
+      else lg.append(btn("Lead with rope", "pet-lead", () => send(ropeLeadIntent(v.entity), `Leading ${v.name} home.`), { disabled: !ropeEquipped(w, c.player), title: ropeEquipped(w, c.player) ? "Walk it back to your fenced-in area" : "Equip rope in your hotbar first" }));
+      out.push(lg);
+    }
     out.push(kit.para("Feed with animal feed to keep it producing. Farm animals earn skill XP when they produce and when fed."));
     return out;
   }
@@ -1146,6 +1154,13 @@ function mountBody(c: MenuCtx, src: GameplaySource, kit: PanelKit, btn: Btn, sen
     const og = grid(); og.dataset["role"] = "mount-feed";
     for (const f of v.foods) og.append(btn(`Feed ${f.name} ×${f.count}`, `mount-feed-${f.item}`, () => send(mountFeedIntent(v.entity, f.item), `Offered ${f.name}…`), { role: "offer", title: `${v.speciesName} ${MOUNT_PREF[f.pref]}`, data: { item: String(f.item), icon: f.key } }));
     if (og.childElementCount) out.push(og); else out.push(kit.para("Carry food it likes (hay, apples, carrots, wheat or berries) and hold it so it stays calm."));
+    // ADR-351: a wild mount can be led home on a rope too (no taming needed to move it).
+    if (v.lead.leadable || v.lead.ledByMe) {
+      const lg = grid(); lg.dataset["role"] = "mount-lead";
+      if (v.lead.ledByMe) lg.append(btn("Release rope", "mount-release", () => send(ropeLeadIntent(0), "Released."), { alt: true, title: "Let go of the rope — it stays here" }));
+      else lg.append(btn("Lead with rope", "mount-lead", () => send(ropeLeadIntent(v.entity), `Leading the ${v.speciesName} home.`), { disabled: !ropeEquipped(c.world, c.player), title: ropeEquipped(c.world, c.player) ? "Walk it back to your fenced-in area" : "Equip rope in your hotbar first" }));
+      out.push(lg);
+    }
     return out;
   }
   const g = grid(); g.dataset["role"] = "mount-actions";
@@ -1153,6 +1168,10 @@ function mountBody(c: MenuCtx, src: GameplaySource, kit: PanelKit, btn: Btn, sen
   else g.append(btn("Ride", "mount-ride", () => { send(mountRideIntent(v.entity), "Mounted."); kit.close(); }, { disabled: v.taken, title: v.taken ? "Someone is riding it" : "Get on (Use)" }));
   if (v.saddle) g.append(btn(`Saddlebag (${v.saddle.used}/${v.saddle.slots})`, "mount-bag", () => src.openSaddlebag?.(v.entity), { title: "Open the saddlebag" }));
   g.append(btn("Rename", "mount-rename", () => src.renameMount?.(v.entity, v.name), { alt: true, title: "Give your mount a name" }));
+  if (v.lead.leadable || v.lead.ledByMe) {
+    if (v.lead.ledByMe) g.append(btn("Release rope", "mount-release", () => send(ropeLeadIntent(0), "Released."), { alt: true, title: "Let go of the rope — it stays here" }));
+    else g.append(btn("Lead with rope", "mount-lead", () => send(ropeLeadIntent(v.entity), `Leading ${v.name} home.`), { disabled: !ropeEquipped(c.world, c.player), title: ropeEquipped(c.world, c.player) ? "Walk it back to your fenced-in area" : "Equip rope in your hotbar first" }));
+  }
   out.push(g);
   out.push(heading("Saddle"));
   const sg = grid(); sg.dataset["role"] = "mount-saddles";

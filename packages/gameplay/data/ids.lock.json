@@ -494,7 +494,9 @@
     "saddle_iron": 492,
     "saddle_leather": 493,
     "saddle_reinforced": 494,
-    "saddle_steel": 495
+    "saddle_steel": 495,
+    "dung": 496,
+    "dung_fertilizer": 497
   },
   "resources": {
     "fallen_branches": 1,
@@ -974,7 +976,8 @@
     "saddle_iron": 379,
     "saddle_leather": 380,
     "saddle_reinforced": 381,
-    "saddle_steel": 382
+    "saddle_steel": 382,
+    "dung_fertilizer": 383
   },
   "pieces": {
     "anvil": 1,

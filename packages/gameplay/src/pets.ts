@@ -23,6 +23,7 @@ import { gameplayDefs, isAuthority } from "./config.js";
 import { emit, ev, Damaged, PiecePlaced, PieceDamaged } from "./events.js";
 import { addItem, canAddItem, countItem, listSlots, moveSlotTuples, removeItem, takeFromSlot, transferItem } from "./inventory.js";
 import { animalDefs, populationTile } from "./population.js";
+import { leadInfo, type LeadInfo } from "./rope.js";
 import { animalSkillMods, animalXpToNext, ensureAnimalSkills, reconcileAnimalSkills } from "./animal_skills.js";
 import { applyDamage, setAnim } from "./combat/combat.js";
 import { awardXp } from "./skills/progression.js";
@@ -567,6 +568,8 @@ export interface PetView {
   level: number; xp: number; xpNext: number; hp: number; maxHp: number; fullness: number; loyalty: number; cmd: number; offers: PetOffer[];
   favorites: PetFavorite[];
   status: number; guard: string | undefined; livestock: boolean;
+  /** ADR-351: rope lead state for this animal (livestock only; companion pets are never leadable). */
+  lead: LeadInfo;
 }
 /** Display name for an animal kind key ("animal_dog_dachshund" -> "Dog Dachshund"). */
 export const animalDisplayName = (key: string): string => key.replace(/^animal_/, "").split("_").map((w) => w ? w[0]!.toUpperCase() + w.slice(1) : w).join(" ");
@@ -587,6 +590,7 @@ export function petView(world: World, player: Entity, e: Entity): PetView | unde
       level: sk?.level ?? 1, xp: sk?.xp ?? 0, xpNext: animalXpToNext(world, sk?.level ?? 1), hp: h?.hp ?? 0, maxHp: h?.max ?? 0, fullness: 0, loyalty: 0, cmd: 0, offers: [],
       favorites: favoriteTreats(world, PET_SPECIES.find((x) => x.animal === kind)),
       status: PetStatus.Idle, guard: undefined, livestock: true,
+      lead: leadInfo(world, player, e),
     };
   }
   if (!s) return undefined;
@@ -605,6 +609,7 @@ export function petView(world: World, player: Entity, e: Entity): PetView | unde
     favorites: favoriteTreats(world, s),
     status: world.has(e, PetStatusComp) ? world.getField(e, PetStatusComp, "status")! : p?.cmd === PetCmd.Guard ? PetStatus.Guard : p?.cmd === PetCmd.Stay ? PetStatus.Stay : PetStatus.Idle,
     guard: p?.cmd === PetCmd.Guard ? guardTargetLabel(world, e) : undefined, livestock: false,
+    lead: { leadable: false, led: false, ledByMe: false, holderId: 0 },
   };
 }
 /** Nearest pet (own first), tameable wild animal, or owned farm animal within `range` of the player. */

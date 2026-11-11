@@ -32,6 +32,8 @@ import { mountWorldTools, type WorldToolsHandle } from "./world-tools.js";
 import { syncUnderground } from "./underground.js";
 import { mountVehicleControls, type VehicleControls } from "./vehicle-controls.js";
 import { mountMountControls, type MountControls } from "./mount-controls.js";
+import { mountRopeControls, type RopeControls } from "./rope-controls.js"; // ADR-351
+import { mountRopeOverlay } from "./rope-overlay.js"; // ADR-351
 import { mountEventText, mountRejectText, mountRenameIntent } from "@engine/gameplay";
 import { mountTouchOverlay, syncTouchHidden, touchLabel, type TouchCtx } from "./touch-overlay.js";
 import { stanceMode, StanceMode, liftableNear, bedNear } from "@engine/gameplay";
@@ -158,6 +160,7 @@ const driveTouchLayout = { ...touchLayout, elements: [...touchLayout.elements,
   { id: "lights", kind: "button" as const, anchor: { x: 0.94, y: 0.4 }, radius: 20, control: "touch.btn.lights", label: "Lights" }] };
 let vehicleCtl: VehicleControls | undefined;
 let mountCtl: MountControls | undefined; // ADR-319
+let ropeCtl: RopeControls | undefined; // ADR-351
 const gameplayTouchLayout = (): typeof touchLayout => (vehicleCtl?.driving ? driveTouchLayout : touchLayout) as typeof touchLayout;
 const browserInput = attachBrowserInput(canvas, input, { ...(matchMedia("(pointer: coarse)").matches ? { virtualLayout: touchLayout } : {}), insets: () => safeAreaInsets() });
 let menus: GameMenus | undefined;
@@ -357,6 +360,7 @@ function onUiFrame(): void {
   { const id = padMenuAction(input); if (id) { menus?.open(id); return; } } // ADR-139: pad-only bindings: Select = inventory, LB+Select = crafting, RB+Select = chat
   if (input.pressed("QuickUse") && farm) { const p = session.player; if (p !== undefined && quickUseFires(safeFarmPrompt(p))) farm.trigger(); }
   if (vehicleCtl?.update()) return; // ADR-170: enter / exit (Interact), engine + headlights while driving
+  if (ropeCtl?.update()) return; // ADR-351: attach the rope to a leadable animal in reach (Interact, rope equipped)
   if (mountCtl?.update()) return; // ADR-319: get on / off (Interact), mount panel (Mount.Menu)
   if (input.pressed("Interact") && !(session.player !== undefined && stanceMode(world, session.player) >= StanceMode.Carry && stanceMode(world, session.player) !== StanceMode.Aim)) { /* ADR-244: carrying → Interact drops; asleep → wakes */ const c = menuCtx(); const t = c && interactPanel(c); if (t?.panel === "trade") menus?.openStall(t.stall); else if (t?.panel === "station") menus?.openStation(t.station, t.kind); else if (t?.panel === "pet") menus?.openPet(t.pet); else if (t?.panel === "worker") menus?.openWorker(t.worker); else if (t?.panel === "loot") menus?.openLoot(t.bag); else if (t?.panel === "storage") menus?.openStorage(t.piece); else if (t?.panel === "lootLocked") farm?.toast("That death bag belongs to another player for 60 seconds"); else if (t?.panel === "wardrobe") menus?.open("wardrobe"); else if (t?.panel === "door") sendIntent(toggleDoorIntent(t.piece)); else if (t?.panel === "claim") toggleClaimView(t.piece); else if (t) menus?.open("character"); }
 }
@@ -732,6 +736,7 @@ const compassHud = mountCompassHud({ view: () => input.viewQuarter, heading: () 
 vehicleCtl = mountVehicleControls(root, { world: () => world, player: () => session.player, send: (i) => sendIntent(i), input,
   toast: (t) => farm?.toast(t), onDrivingChange: () => { const c = browserInput.controls; if (c && !buildMode.active) c.layout = gameplayTouchLayout(); } });
 mountCtl = mountMountControls(root, { world: () => world, player: () => session.player, send: (i) => sendIntent(i), input, toast: (t) => farm?.toast(t), openMenu: (m) => menus?.openMount(m) }); // ADR-319
+ropeCtl = mountRopeControls({ world: () => world, player: () => session.player, send: (i) => sendIntent(i), input, toast: (t) => farm?.toast(t) }); // ADR-351
 worldTools = mountWorldTools(root, { world: () => world, player: () => session.player, camera: () => iso?.renderer.camera, send: (i) => sendIntent(i), hidden: () => !!menus?.nav.isOpen || buildMode.active || !!vehicleCtl?.driving, sound: (k) => audio.mixer.play(k),
   input, device: promptDevice, canvas,
   openModal: (id, el, onClose) => menus ? menus.nav.open(id, el, onClose) : (root.append(el), { close: () => el.remove() }),
@@ -758,6 +763,10 @@ mountLedgeWarning(root, { world: () => world, player: () => session.player, alph
   ground: (x, y, z) => groundZ(session.client?.tiles.tiles, x, y, z) });
 // ADR-196: build ghost validity outline + magnet snap-edge highlight (WebGL2 and Canvas2D)
 mountClaimOverlay(root, { world: () => world, player: () => session.player, view: claimView, preview: () => (buildMode.active ? buildMode.preview : undefined),
+  camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined), hidden: () => !!menus?.nav.isOpen,
+  ground: (x, y) => groundZ(session.client?.tiles.tiles, x, y, 0) });
+// ADR-351: the visible rope between a holder and the animal they lead (player-led and AI-human-led alike)
+mountRopeOverlay(root, { world: () => world,
   camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined), hidden: () => !!menus?.nav.isOpen,
   ground: (x, y) => groundZ(session.client?.tiles.tiles, x, y, 0) });
 mountSnapOverlay(root, { preview: () => (buildMode.active ? buildMode.preview : undefined), target: () => (buildMode.active ? buildMode.targetOutline : undefined), camera: () => iso?.renderer.camera ?? (ctx ? debugCamera(cam, innerWidth, innerHeight, devicePixelRatio || 1) : undefined), hidden: () => !!menus?.nav.isOpen, groundZ: () => iso?.ghostZ });

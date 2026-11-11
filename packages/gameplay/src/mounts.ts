@@ -18,7 +18,7 @@
  */
 import { DEFAULT_TICK_HZ, entityIndex, NetId, Transform, type CommandHandlers, type Entity, type World } from "@engine/core";
 import {
-  Anim, AnimState, Animal, Container, ContainerViewers, Dead, Driver, Health, IntentAction, LootBag, Mount, MOUNT_NAME_MAX, MountTaming, Pet, PlayerIntent,
+  Anim, AnimState, Animal, Container, ContainerViewers, Dead, Driver, Health, IntentAction, LootBag, Mount, MOUNT_NAME_MAX, MountHunger, MountTaming, Pet, PlayerIntent,
   Riding, Tamed, Viewing,
 } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
@@ -36,9 +36,10 @@ import { LootSource, tagLootSource } from "./loot_labels.js";
 import { lootBagInit } from "./loot_despawn.js";
 import { indexEntity } from "./spawn.js";
 import {
-  canOpenSaddlebag, foodPref, mayUseMount, mountOfRider, mountOwnerIdFor, mountSpecies, mountSpeciesOfAnimal, MOUNT_TUNING as T,
+  canOpenSaddlebag, foodPref, mayUseMount, mountDiet, mountOfRider, mountOwnerIdFor, mountSpecies, mountSpeciesOfAnimal, MOUNT_TUNING as T,
   saddleOfItemKey, saddleOfTier, saddleSlots,
 } from "./mount_defs.js";
+import { feedingTroughs, mayEatFromTrough, troughDietItem } from "./skills/husbandry.js";
 import { MountDismountCmd, MountFeedCmd, MountRenameCmd, MountRepairCmd, MountRideCmd, MountSaddleCmd, MountUnsaddleCmd } from "./mount_commands.js";
 
 /** Skill-tree token that allows taming / riding (Horsemanship node, husbandry branch). */
@@ -51,6 +52,19 @@ export const enum MountResult {
 export const MountEvent = ev<{ entity: Entity; mount: Entity; result: MountResult; value: number }>("gameplay.MountEvent");
 
 const netIdOf = (world: World, e: Entity): number => world.getField(e, NetId, "id") ?? 0;
+const sec = (s: number): number => Math.round(s * DEFAULT_TICK_HZ);
+/**
+ * ADR-353: mark a mount fed for `fedSeconds` (hand-feeding, taming, trough meals and first sight all feed).
+ * Hunger is a clock, not a drain rate: every meal resets the same window, so the wider diet never makes a mount
+ * hungrier faster — it only widens what counts as a meal.
+ */
+export function feedMountHunger(world: World, m: Entity): void {
+  const until = world.tick + sec(T.fedSeconds);
+  if (world.has(m, MountHunger)) world.set(m, MountHunger, { fedUntil: until }); else world.add(m, MountHunger, { fedUntil: until });
+}
+/** ADR-353: true when the mount's fed window has lapsed. No MountHunger record counts as fed: legacy mounts are
+ *  seeded fed on first sight in mountSystem, so they never start hungry. */
+export const mountHungry = (world: World, m: Entity): boolean => { const u = world.getField(m, MountHunger, "fedUntil"); return u !== undefined && world.tick > u; };
 const near = (world: World, a: Entity, b: Entity, r: number): boolean => { const p = world.get(a, Transform), q = world.get(b, Transform); return !!p && !!q && Math.hypot(p.x - q.x, p.y - q.y) <= r; };
 const reach = T.interactRange + 0.75;
 const itemKey = (world: World, id: number): string | undefined => gameplayDefs(world).items.get(id)?.key;
@@ -98,7 +112,7 @@ export function feedMount(world: World, actor: Entity, target: Entity, item: num
   const say = (result: MountResult, value: number): MountResult => { emit(world, MountEvent, { entity: actor, mount: target, result, value }); return result; };
   if (world.has(target, Mount)) {
     const h = world.get(target, Health)!; const hp = Math.min(h.max, h.hp + T.feedHeal * (pref === "love" ? 1.5 : pref === "like" ? 1.2 : 1));
-    world.set(target, Health, { hp }); world.set(target, Mount, { hp }); awardXp(world, actor, "husbandry"); return say(MountResult.Fed, item);
+    world.set(target, Health, { hp }); world.set(target, Mount, { hp }); feedMountHunger(world, target); awardXp(world, actor, "husbandry"); return say(MountResult.Fed, item);
   }
   const by = mountOwnerIdFor(world, actor) || entityIndex(actor);
   const cur = world.get(target, MountTaming);
@@ -126,6 +140,7 @@ export function tameMount(world: World, tamer: Entity, target: Entity): Entity {
   const hp = spec.hp; const t = world.get(target, Transform);
   world.add(target, Mount, { species: sp, kind: world.getField(target, Animal, "kind") ?? 0, owner: mountOwnerIdFor(world, tamer), tribe: tribeOf(world, tamer), hp });
   world.set(target, Health, { hp, max: hp });
+  feedMountHunger(world, target); // ADR-353: a tame is completed by feeding, so the new mount starts fed
   if (t) world.set(target, Animal, { state: AnimalState.Idle, homeX: t.x, homeY: t.y, goalX: t.x, goalY: t.y });
   ensureBag(world, target); return target;
 }
@@ -137,6 +152,7 @@ export function makeMount(world: World, animalKey: string, x: number, y: number,
   world.add(e, Transform, { x, y }).add(e, Health, { hp: spec.hp, max: spec.hp }).add(e, Animal, { kind, homeX: x, homeY: y, goalX: x, goalY: y, thinkAt: world.tick })
     .add(e, AnimState, { anim: Anim.Idle, startTick: world.tick })
     .add(e, Mount, { species: sp, kind, owner: owner ? mountOwnerIdFor(world, owner) : 0, tribe: owner ? tribeOf(world, owner) : 0, hp: spec.hp });
+  feedMountHunger(world, e); // ADR-353: a spawned mount starts fed
   ensureBag(world, e); indexEntity(world, e); return e;
 }
 function ensureBag(world: World, m: Entity): void {
@@ -344,7 +360,30 @@ export function mountSystem(world: World, dt: number): void {
     ensureBag(world, m);
     if (mm.riderNetId && liveRider(world, m) === undefined) world.set(m, Mount, { riderNetId: 0 }); // rider left (disconnect) or a reload re-issued NetIds
     if (world.has(m, Dead)) { mountDied(world, m); continue; }
-    const h = world.get(m, Health)!; let hp = h.hp; if (hp < h.max) hp = Math.min(h.max, hp + regen);
+    // ADR-353: hunger. A mount with no record is seeded fed (legacy / loaded mounts never start hungry). A hungry,
+    // unridden mount eats one item off its diet from the nearest own trough in range — the same ownership rule as
+    // farm animals (owner's, clan-mate's, or unowned; never a stranger's) — and the meal feeds it for fedSeconds
+    // and heals feedHeal, like a hand-feed. Ridden mounts do not trough-eat (the rider steers; they hand-feed).
+    // While hungry a mount does not regen: it needs food to recover, but it never loses hp to hunger (pets' rule).
+    if (!world.has(m, MountHunger)) feedMountHunger(world, m);
+    const hungry = mountHungry(world, m);
+    if (hungry && (world.getField(m, Mount, "riderNetId") ?? 0) === 0) {
+      const mt = world.get(m, Transform)!; const diet = mountDiet(mm.species);
+      let best: { att: Entity; d: number; item: number } | undefined;
+      for (const att of feedingTroughs(world)) {
+        const at = world.get(att, Transform); if (!at) continue;
+        const d = Math.hypot(at.x - mt.x, at.y - mt.y); if (d > T.troughRange) continue;
+        if (!mayEatFromTrough(world, att, mm.owner, mm.tribe)) continue;
+        const item = troughDietItem(world, att, diet); if (!item) continue;
+        if (!best || d < best.d) best = { att, d, item };
+      }
+      if (best && removeItem(world, best.att, best.item, 1)) {
+        feedMountHunger(world, m);
+        const hm = world.get(m, Health)!; if (hm.hp < hm.max) world.set(m, Health, { hp: Math.min(hm.max, hm.hp + T.feedHeal) });
+        setAnim(world, m, Anim.Eat);
+      }
+    }
+    const h = world.get(m, Health)!; let hp = h.hp; if (hp < h.max && !hungry) hp = Math.min(h.max, hp + regen);
     if (hp !== h.hp) world.set(m, Health, { hp });
     if (Math.abs(hp - mm.hp) >= 1 || (hp === h.max && mm.hp !== hp)) world.set(m, Mount, { hp });
   }

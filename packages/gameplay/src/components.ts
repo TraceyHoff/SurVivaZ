@@ -481,6 +481,25 @@ export const Riding = defineComponent("Riding", { mountNetId: "u32", species: "u
 /** ADR-319: taming progress (0..100) on a wild mount-species animal, by PlayerId `by`, last fed at `lastTick` (decays). */
 export const MountTaming = defineComponent("MountTaming", { progress: "f32", by: "u32", lastTick: "u32" }, { networked: true });
 
+/** ADR-351: a rope lead on a farm animal / mount (authority writes; networked + persistent). holder = the
+ *  leading holder's PlayerId (players and AI humans; a hired worker leads for its employer, so this is the
+ *  mountOwnerIdFor id). The client draws the visible rope between the holder entity and this animal;
+ *  ropeSystem drives the follow, the arrival release and the break-free / cleanup rules. A lead survives a
+ *  restart (holder and animal both persist); a holder who logged out releases it when the system next runs
+ *  and finds no live holder. */
+export const RopeLead = defineComponent("RopeLead", { holder: "u32" }, { networked: true, persistent: true });
+
+/** ADR-352: next dung drop for one animal (absolute tick). Persistent but NOT networked: only the authority
+ *  runs the production timer, and the drop itself is a normal replicated LootBag. A timer survives a restart
+ *  (the animal does not drop a backlog — it drops on the stored schedule). */
+export const DungTimer = defineComponent("DungTimer", { nextAt: "u32" }, { persistent: true });
+
+/** ADR-353: a tamed mount's hunger clock (absolute tick until which it is fed). Persistent but NOT networked:
+ *  only the authority runs hunger, and eating is visible through the mount's hp / animation, not the wire.
+ *  A mount with no record is seeded fed for `fedSeconds` on first sight (same no-backlog rule as DungTimer),
+ *  so mounts from older saves and fresh tames never start hungry. */
+export const MountHunger = defineComponent("MountHunger", { fedUntil: "u32" }, { persistent: true });
+
 export const GAMEPLAY_COMPONENTS = [
   Emitter, Buffs,
   Health, ResourceNode, Survival, VitalsState, Exposure, Dead,
@@ -533,4 +552,7 @@ export const GAMEPLAY_COMPONENTS = [
   AbandonedSite, // append-only (ADR-300)
   PieceBuilder, // append-only (ADR-317)
   Mount, Riding, MountTaming, // append-only (ADR-319 mounts)
+  RopeLead, // append-only (ADR-351 rope leading)
+  DungTimer, // append-only (ADR-352 dung production timer; server-only, persistent)
+  MountHunger, // append-only (ADR-353 mount hunger clock; server-only, persistent)
 ] as const;

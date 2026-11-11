@@ -14,7 +14,8 @@ describe("ADR-170: vehicles are drivable from the client on every input", () => 
     const at = GAMEPLAY_NET_COMMANDS.indexOf(G.VEHICLE_STATE_COMMANDS[0]);
     expect(GAMEPLAY_NET_COMMANDS.slice(at, at + G.VEHICLE_STATE_COMMANDS.length)).toEqual([...G.VEHICLE_STATE_COMMANDS]);
     // later ADRs append after them (ADR-204 inventory ops, Task 9 map markers); nothing is inserted before.
-    expect(GAMEPLAY_NET_COMMANDS.slice(at + G.VEHICLE_STATE_COMMANDS.length)).toEqual([...G.INVENTORY_OP_COMMANDS, ...G.MAP_MARKER_COMMANDS, ...G.DISEASE_COMMANDS.map(([d]) => d), ...G.READY_COMMANDS, ...G.ANIMAL_SKILL_COMMANDS, ...G.WORKER_COMMANDS, ...G.DYE_COMMANDS, ...G.TERRAIN_COMMANDS, ...G.HOTBAR_COMMANDS.map(([d]) => d), ...G.RECLAIM_COMMANDS.map(([d]) => d), ...G.MOVE_COMMANDS.map(([d]) => d), ...G.MOUNT_COMMANDS]);
+    // ADR-351 appended the rope command after the mount commands.
+    expect(GAMEPLAY_NET_COMMANDS.slice(at + G.VEHICLE_STATE_COMMANDS.length)).toEqual([...G.INVENTORY_OP_COMMANDS, ...G.MAP_MARKER_COMMANDS, ...G.DISEASE_COMMANDS.map(([d]) => d), ...G.READY_COMMANDS, ...G.ANIMAL_SKILL_COMMANDS, ...G.WORKER_COMMANDS, ...G.DYE_COMMANDS, ...G.TERRAIN_COMMANDS, ...G.HOTBAR_COMMANDS.map(([d]) => d), ...G.RECLAIM_COMMANDS.map(([d]) => d), ...G.MOVE_COMMANDS.map(([d]) => d), ...G.MOUNT_COMMANDS, ...G.ROPE_COMMANDS]);
     for (const c of [G.VehicleEnterCmd, G.VehicleExitCmd, G.VehicleDeployCmd]) expect(GAMEPLAY_NET_COMMANDS).toContain(c);
   });
   it("Vehicle.Engine / Vehicle.Lights are bound on keyboard, gamepad and touch", () => {

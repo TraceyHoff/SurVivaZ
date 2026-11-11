@@ -886,7 +886,7 @@
     "fovDeg": 240
    },
    "aggro": {
-    "mode": "territorial",
+    "mode": "defensive",
     "range": 2,
     "leashRange": 12
    },

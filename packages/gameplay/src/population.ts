@@ -8,10 +8,11 @@ import { LootSource, tagLootSource } from "./loot_labels.js";
 import { lootBagInit } from "./loot_despawn.js";
 import { Mount, Pet } from "./components.js";
 import { luresMount, mountSpeciesOfAnimal } from "./mount_defs.js";
+import { isTameableAnimalKey } from "./tameable_defs.js";
 import { DEFAULT_TICK_HZ, Permissions, Transform, defineResource, entityIndex, type Entity, type World } from "@engine/core";
 import { PopulationSpawner, type BuildingGrid, type ChunkKey, type PhaseKey, type PopulationHost, type SpawnEntry, type PopulationViewpoint } from "@engine/world";
 import { Zombie } from "./components.js";
-import { Anim, AnimState, Animal, Tamed, Container, ContainerViewers, Dead, Health, LootBag, Survival } from "./components.js";
+import { Anim, AnimState, Animal, Tamed, Container, ContainerViewers, Dead, Health, LootBag, RopeLead, Survival } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
 import { indexEntity } from "./spawn.js";
 import { currentPhaseKey, PopulationZombies, spawnZombie } from "./combat/zombies.js";
@@ -29,10 +30,13 @@ import { inSpawnSafeRadius } from "./spawn_points.js";
 
 /** Task 33: "aggressive" for the spawn safe radius — zombies plus animals whose ai.json aggro mode is hostile
  * (today: the wolf). Territorial / defensive animals only engage when provoked or approached, so they may spawn
- * near a spawn point; they still will not engage a survivor standing inside the radius (see animalAISystem). */
+ * near a spawn point; they still will not engage a survivor standing inside the radius (see animalAISystem).
+ * ADR-354: tameable species never count as aggressive here either, whatever ai.json says — a tameable
+ * animal must not count as a hostile anywhere (the animalAI initiation guard is the enforcement point). */
 export function isAggressiveSpawnKind(kind: string, category: string): boolean {
   if (category === "zombie") return true;
   if (category !== "animal") return false;
+  if (isTameableAnimalKey(kind)) return false;
   return animalDefs().find((a) => a.key === kind)?.aggro.mode === "hostile";
 }
 
@@ -103,6 +107,10 @@ const animAt = (world: World, e: Entity, anim: Anim): void => { if (world.has(e,
  * Animal AI (authority, every tick). Idle/wander around home; flee from living survivors in fleeRange (or once hp <= fleeHpFrac);
  * aggressive kinds (ai.json aggro) chase + bite targets within aggro.range, leash back past leashRange: hostile = anyone close,
  * territorial = close to home, defensive = only after being hurt. Death: loot bag + corpse, then removal.
+ * ADR-354: species with a taming path never initiate — a tameable animal only ever engages its actual attacker
+ * (retaliation below), never a bystander who walks up to it. The moose's ai.json mode is defensive for the same
+ * reason; the guard here is the structural rule, so a future tameable added to ai.json as territorial/hostile
+ * still cannot attack on sight. Each species keeps its own non-combat behaviour (flee ranges, wander radii).
  */
 const THREATS: number[] = []; const THREAT_LIST_MAX = 48;
 export function animalAISystem(world: World, dt: number): void {
@@ -139,6 +147,7 @@ export function animalAISystem(world: World, dt: number): void {
     const aKind = aD.kind[aSlot]!; const def = defs[aKind]; if (!def) continue;
     const owned = mountReg && world.has(e, Mount); // ADR-319: a tamed mount behaves like a domesticated animal
     if (owned && (world.getField(e, Mount, "riderNetId") ?? 0) !== 0) continue; // ridden: mountSystem moves it with its rider
+    if (world.isRegistered(RopeLead) && world.has(e, RopeLead)) continue; // ADR-351: led — ropeSystem owns its movement
     const lureable = !owned && mountSpeciesOfAnimal(def.key) > 0; // ADR-319: food in hand calms a wild mount species
     const aState = aD.state[aSlot]!; const aHomeX = aD.homeX[aSlot]!; const aHomeY = aD.homeY[aSlot]!; const aGoalX = aD.goalX[aSlot]!; const aGoalY = aD.goalY[aSlot]!; const aThinkAt = aD.thinkAt[aSlot]!;
     const tSlot = tfStore.slot(ei); const tfD = tfStore.data; const tx = tfD.x[tSlot]!; const ty = tfD.y[tSlot]!;
@@ -183,9 +192,12 @@ export function animalAISystem(world: World, dt: number): void {
     // Task 33: aggressive animals do not engage survivors standing inside a spawn safe radius. Retaliation
     // (the attacker overrides the scanned threat above) still applies, so the zone is not a free shooting
     // gallery; fleeing from a safe-zone survivor still works (only the attack decision is gated).
+    // ADR-354: a tameable species never initiates — the mode conditions below (hostile / territorial /
+    // defensive-when-hurt) only apply to non-tameables. An engaged or retaliating tameable still presses
+    // its actual attacker (the branch above), so self-defence is unchanged.
     const safeTarget = threat !== undefined && !retaliating && inSpawnSafeRadius(world, threat.x, threat.y);
     const wants = aggressive && threat && !safeTarget && ((engaged || retaliating) ? threat.d <= def.aggro.leashRange && homeD <= pressHome
-      : threat.d <= def.aggro.range && (def.aggro.mode === "hostile" || (def.aggro.mode === "territorial" && homeD <= def.aggro.leashRange) || (def.aggro.mode === "defensive" && hurt)));
+      : !isTameableAnimalKey(def.key) && threat.d <= def.aggro.range && (def.aggro.mode === "hostile" || (def.aggro.mode === "territorial" && homeD <= def.aggro.leashRange) || (def.aggro.mode === "defensive" && hurt)));
     // Task 14: tame animals defend their owner's claim. Passive farm animals have no species attack, so they
     // get a generic bite; goat/cow reuse their own attack. Movement still goes through creatureStep, so a
     // fenced-in defender strains at the fence instead of teleporting through it.

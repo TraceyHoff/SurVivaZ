@@ -29,6 +29,8 @@ import { installShaftHatchInput } from "./building/terrain-hatch.js";
 import { installAbandonedStructures } from "./building/abandoned.js";
 import { stanceSystem } from "./stance.js";
 import { installMounts, mountGateSystem, mountSystem } from "./mounts.js";
+import { ropeSystem } from "./rope.js";
+import { DUNG_EVERY, dungSystem } from "./dung.js";
 import { installBuildingSystems, BUILDING_SYSTEMS } from "./building/install.js";
 import { installCombatSystems, COMBAT_SYSTEMS } from "./combat/install.js";
 import { entityIndex } from "@engine/core";
@@ -80,6 +82,8 @@ export const GAMEPLAY_SYSTEM_ORDER: readonly (readonly [Phase, string, number?])
   ["simulation", "gameplay.husbandry", HUSBANDRY_EVERY], // ADR-113
   ["simulation", "gameplay.pets"], // ADR-145 (after animal AI)
   ["simulation", "gameplay.mounts"], // ADR-319 / ADR-320: mount follow, regen, saddlebag, death drops
+  ["simulation", "gameplay.rope"], // ADR-351: rope lead follow / balk / break / arrival (after animal AI)
+  ["simulation", "gameplay.dung", DUNG_EVERY], // ADR-352: animal dung production (after animal AI; 1 s check)
   ["simulation", "gameplay.hordes", HORDES_EVERY], // ADR-121 server director (no-op on clients / when disabled)
   ["simulation", "gameplay.stance"], // ADR-244 carry follow / block break / sleep heal / night skip (authority)
   ["simulation", "gameplay.vitals"],
@@ -140,7 +144,7 @@ export function installGameplay(world: World, options: GameplayOptions | number 
     "gameplay.recruitment": recruitmentSystem,
     "gameplay.clearIntents": clearIntentsSystem, "gameplay.equipmentSync": equipmentSyncSystem, "gameplay.noiseDecay": noiseDecaySystem,
     "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
-    "gameplay.hordes": hordeDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem,
+    "gameplay.hordes": hordeDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem, "gameplay.rope": ropeSystem, "gameplay.dung": dungSystem,
     ...installBuildingSystems(world), ...installCombatSystems(world),
   };
   installProgression(world);

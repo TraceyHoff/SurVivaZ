@@ -1,4 +1,4 @@
-import { dismountOnLeave, installMountCommands, MountEvent } from "@engine/gameplay";
+import { dismountOnLeave, installMountCommands, installRopeCommands, MountEvent } from "@engine/gameplay";
 import { MountEventEvt } from "./protocol.js";
 import { friendSpawn } from "./friend-spawn.js";
 import { giveSandboxKit, sandboxPetKit, sandboxPetCorner, sandboxSpawn } from "./sandbox.js";
@@ -279,6 +279,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   installInventoryOpCommands(world, handlers); // gameplay.splitStack / moveSlot (ADR-204)
   installPetCommands(world, handlers); // gameplay.petOffer / petCommand / petRename / dropItem (ADR-145)
   installMountCommands(world, handlers); // gameplay.mountFeed / Ride / Dismount / Saddle / Unsaddle / Repair / Rename (ADR-319 / ADR-320)
+  installRopeCommands(world, handlers); // gameplay.ropeLead (ADR-351)
   installAnimalSkillCommands(world, handlers); // gameplay.animalSkill (Task 15)
   installWorkerCommands(world, handlers); // gameplay.hireWorker / setWorkerJob / dismissWorker (Task 22)
   installDyeCommands(world, handlers); // gameplay.dye — hair / worn / held (Task 25)

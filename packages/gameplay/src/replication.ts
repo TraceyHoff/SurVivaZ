@@ -41,6 +41,7 @@ export const GAMEPLAY_REPLICATION: readonly Replication[] = [
   r(C.InShaft, "all"), // ADR-299: lid vs shaft so every peer draws the traveler at the right height
   r(C.AnimalSkills, "all"), // Task 15: animal skill panels read points/nodes on every peer
   r(C.Mount, "all"), r(C.Riding, "all"), r(C.MountTaming, "all"), // ADR-319: every peer draws the rider seated on the mount
+  r(C.RopeLead, "all"), // ADR-351: every peer draws the rope between holder and led animal
 ];
 export function replicationOf(def: ComponentDef): Replication | undefined { return GAMEPLAY_REPLICATION.find((x) => x.def === def); }
 
