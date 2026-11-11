@@ -25,6 +25,8 @@ import { pickSpawnPoint, respawnLocation } from "../spawn_points.js";
 
 export interface PvpTuning {
   bagSlots: number; bagOwnerOnlySeconds: number; respawnSeconds: number; respawnHealthFrac: number;
+  /** ADR-348: how long a friend-code guest's arrival point stays a safe centre (seconds). */
+  guestSafeSeconds: number;
   respawnHunger: number; respawnThirst: number; combatTagSeconds: number; hitConeDeg: number; spawnPoints: { x: number; y: number }[];
   /** Explosive raid rules: own-tribe structure damage multiplier, player damage multiplier, falloff at the edge. */
   explosives: { ownTribeStructureMul: number; playerDamageMul: number; edgeFalloff: number; igniteRadiusFrac: number };

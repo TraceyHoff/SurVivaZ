@@ -20,7 +20,8 @@ describe("ADR-268 Build confirms the visible snapped hologram",()=>{
     // A UI confirm / mouse press must not re-resolve the now-changed facing/aim.
     aim={mode:0,x:-1,y:0};buttons.add("Build.PlaceConfirm");const pos=w.get(p,Transform);
     bm.update();expect(sent).toHaveLength(1);
-    expect(sent[0]!.args).toMatchObject({x:ghost.request.x,y:ghost.request.y});
+    // ADR-347: the confirm sends the hologram's snapped slot, not the raw aim it was derived from.
+    expect(sent[0]!.args).toMatchObject({x:ghost.x,y:ghost.y});
     const result=G.tryPlace(w,p,sent[0]!.args as unknown as G.PlaceRequest);expect(result.ok).toBe(true);
     if(result.ok)expect(w.get(result.piece,Transform)).toMatchObject({x:ghost.x,y:ghost.y});
     expect(w.get(p,Transform)).toEqual(pos);

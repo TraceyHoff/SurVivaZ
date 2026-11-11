@@ -4884,3 +4884,216 @@ Typecheck with pinned TypeScript 5.9.3: `packages/gameplay` clean.
 25-tile loop; with the trip allowed again it gathers instead of walking the loop, and adr203 passes,
 so the stall was not pursued further — if a bot is ever seen idling on a short explore leg with no
 needs, that is a separate travel-behaviour investigation.
+
+## ADR-347: The hologram places exactly where it shows (SurVivaZ)
+
+**Context.** In building mode, a player moved the hologram to a location, tapped place, and the
+piece landed in a completely different location in front of the player a couple tiles away. Two
+root causes, both making the piece land somewhere other than the ghost. (1) Touch, portrait — the
+reported bug: `apps/client/src/build-hud.ts` `onTouchControl()` hit-tested touch controls using
+the landscape anchor with an unclamped scale, while `VirtualControls.place()`
+(`packages/input/src/touch.ts`) renders and hit-tests buttons with the portrait anchor when
+`w < h` and scale clamped to [1, 1.15]. On a 390×844 portrait phone the ✓ button renders at
+(351, 582) but was tested at (359, 675) with a 16.6 px radius — a ~93 px miss. Both the input
+layer's `pointerdown` (which fires `Build.PlaceConfirm` via `touch.btn.confirm`) and the build
+HUD's canvas `pointerdown` fired for the same tap, and since `blocked()` returned false the HUD
+treated the ✓ tap as a world tap: `setTouchPoint(screenToWorld(tap − 48px lift))` moved the ghost
+to the world point under the button, then the confirm placed it there. Landscape was unaffected
+(anchors coincide); the same leak applied to the ✗/⟳ buttons. (2) Every device: the Place/Move
+command carried the raw aim, not the ghost. `placePreviewIntent()` / `moveIntent()` sent
+`preview.request` (unsnapped aim point + requested rot) while the renderer draws the ghost at
+the snapped `preview.x/y/rot`. Magnet / snap-assist / claim bump / corner auto-fit all move the
+ghost off the request, so the server re-snapped the request to a different slot.
+
+**Decision.** (1) `onTouchControl` now resolves the portrait anchor when `w < h` and clamps
+scale to [1, 1.15], exactly matching `VirtualControls.place`/`scale`; `LayoutEl.anchor` gained
+an optional `portrait` anchor. (2) New exported `previewSlot(p)` in
+`packages/gameplay/src/ui/placement.ts` returns the ghost's snapped slot (re-attaching `FINE_ROT`
+for fine pieces, since `preview.rot` is the bare 15° step); `placePreviewIntent` and `moveIntent`
+now send it, and `BuildMode.place()` re-snaps/re-validates the ghost's slot via `previewSlot(p)`
+instead of `p.request`. Re-snapping the slot is idempotent in an unchanged world, and the server
+still re-validates it. `BuildMode.rotate()` was deliberately left alone: the fitted rot is passed
+into `rawPreview` by `fitCorner`/`magnetizeL`, so `request.rot` already equals the shown rot in
+the auto-fit cases.
+
+**Verification.** New `apps/client/test/adr347_hologram_place.test.ts` (8 tests) and
+`packages/gameplay/test/adr347_hologram_place.test.ts` (3 tests): portrait `onTouchControl`
+blocks ✓/✗/⟳ at their rendered spots (positions derived from `VirtualControls.geometry()`);
+portrait ✓ tap never moves the ghost while world taps still do; per-device
+(keyboardMouse/gamepad/touch) off-centre-aim and assist-hop confirms send the ghost's slot and
+`tryPlace` lands on the ghost; fine rug keeps `FINE_ROT|5` and the 1/16-tile slot; `moveIntent`
+sends the move ghost's slot. All 11 new tests failed before the fix and pass after; updated
+assertions in `adr268_ghost_confirm.test.ts` and `menus.test.ts` now pin the ghost coords
+(ADR-268's contract, now literally true). Neighbour suites 129 tests green. Typecheck with
+pinned TypeScript 5.9.3: `packages/gameplay` clean; client only pre-existing
+`src/tutorial/overlay.ts` errors from the sparse-checkout missing `input_glyphs.json`
+declaration, in a file untouched by this slice.
+
+**Honest cuts.** No live-phone check of the portrait ✓ tap — the fix is verified by tests
+deriving button positions from the same `VirtualControls.geometry()` the renderer uses, but the
+user's eyes on the live build are the real check that a portrait tap places exactly on the ghost.
+
+## ADR-348: Safe zones around beds, AI homes and guest arrivals (SurVivaZ)
+
+**Context.** The safe spawn radius (20 tiles, ADR-326) covered installed starter points and the
+ADR-325 world-wide AI spawn points, but three spawn point kinds had no safe zone. (1) Bed
+respawn: a bed can sit anywhere in the world, far from any spawn point. (2) AI home respawn: an
+AI human's remembered base can be anywhere. (3) Friend-code guest spawn (ADR-295): a one-shot
+arrival point near the host, anywhere in the wilderness. A player respawning at a remote bed, an
+AI human returning home, or a guest still loading in could be ambushed on arrival.
+
+**Decision.** Same 20-tile radius and same rules for every kind, through the same
+`inSpawnSafeRadius` predicate — no enforcement site changed (`zombies.ts`, `population.ts`
+untouched; they already read the predicate). `ExtraSafeSpawnPoints` in
+`packages/gameplay/src/spawn_points.ts` gains two ADR-348 mechanisms: keyed live providers via
+`addSafeSpawnCentreProvider(world, key, fn)`, re-evaluated at most once per tick (the predicate
+runs in hot paths: zombie acquire, animal engage, spawn gates), idempotent by key; and one-shot
+centres via `addTemporarySafeSpawnPoint(world, point, durationSeconds)` with a tick expiry,
+pruned on read. `setExtraSafeSpawnPoints` now preserves already-registered providers and
+temporary centres on re-install. Beds: `installBedRespawn` registers the `"beds"` provider
+(`bedSpawnPoints()`: every owned bed's beside-bed respawn point); `bedRespawnPoint` was
+refactored onto a shared `bedSpots()` scan with identical behaviour — distance still measured
+from the bed footprint, same tie-breaking; unowned beds (abandoned-site furniture) are not
+centres. AI homes: `setAiHomeLocator` registers the `"ai-homes"` provider
+(`aiHomeSafeCentres()`), mirroring `aiRespawnPoint` (blocked homes excluded; dead bots included,
+so the home stays a centre through the respawn wait); the hired/clan exclusion is factored into
+`keepsAdr153Rule()` and shared by `aiRespawnPoint` — a hired worker's or clan member's home is
+deliberately not a centre, since they keep the ADR-153 rule. On the Node server the home locator
+is never set, so no provider fires there (homes only exist in local mode). Guest arrivals: the
+server registers the arrival point as a temporary centre for `guestSafeSeconds`, one new knob in
+`packages/gameplay/data/pvp.json` (`PvpTuning.guestSafeSeconds: 300`, 5 min); the radius stays the
+shared `SAFE_SPAWN_RADIUS = 20` for every kind.
+
+**Verification.** New `packages/gameplay/test/adr348_spawn_safe_zones.test.ts` (19 tests) and
+`apps/server/test/adr348_guest_safe_zone.test.ts` (1 test): beds — predicate to 20 tiles and not
+beyond, unowned bed not a centre, demolished bed stops being one (next tick, per-tick cache
+pinned), bed-respawn refactor guard, legacy zombie spawner never spawns inside, zombie does not
+acquire, zombie retaliation re-engages after being hit, horde zombie still chases, wolf does not
+engage but retaliates when hurt, population gate (bed-covered chunk spawns nothing + control);
+homes — predicate, hired worker's home not a centre, moved home relocates the centre, zombie does
+not acquire, horde still chases; temporary centres — cover for exactly `guestSafeSeconds` then
+lapse, zombie does not acquire, horde still chases, coexist with static centres; guest join —
+real guest join near a host at (500.5, 500.5), arrival point a safe centre to 19 tiles (not 21),
+lapses after `guestSafeSeconds`, installed starter points stay protected. 20 new tests, all
+passing. Neighbour suites green (spawn points, ADR-325/326, animals, population, pvp, hordes,
+respawn, friend spawn). Typecheck with pinned TypeScript 5.9.3: `packages/gameplay` and
+`apps/server` clean.
+
+**Honest cuts.** Guest-zone expiry is time-only (300 s), not "until the guest leaves": if a
+returning player restores a saved position instead, the provisional point keeps an empty
+5-minute zone near the host — harmless, and beds cover their own respawn points. A bed
+placed/demolished mid-tick is reflected from the next tick (per-tick provider cache); invisible
+in live play since checks are per-tick anyway. No visual surface to this slice, so no live check
+is needed beyond playtesting a bed respawn in a remote base.
+
+## ADR-349: Fruit trees and crops visible in the world (SurVivaZ)
+
+**Context.** Players only saw fiber plants, trees, and berry bushes, even though wild crops and
+fruit trees were already spawning. Two reasons the world didn't read as crop-scattered. (1)
+Wild plants drew with the small, weedy `wild_*` sprites (44×64, ~420–800 opaque px, little
+produce colour) that blend into grass, while the farmed `crop_*` art is bigger and clearly shows
+produce (pixel analysis: `crop_corn` 965 opaque px with 260 red + 125 yellow vs `wild_corn` 704
+px, 0 red; `crop_tomato` 176 red vs `wild_tomato` 41). (2) Fruit trees were rare: ~3.5 per chunk
+(~90 per 25 chunks). Their fruit is already in the idle art — verified numerically, not
+visually: apple idle has 156 red px (depleted 0), cherry 114 (0), orange 294 orange px (99), and
+the idle frame differs from the bare depleted frame for all five species; gathering already
+worked through the existing interact path.
+
+**Decision.** Data-only change, no new art, no binaries. (1) `packages/gameplay/data/resources.json`:
+24 wild resources now carry `"sprite": "crop_<key>"` (e.g. `wild_corn` → `crop_corn`,
+`flax_patch` → `crop_flax`, `cotton_bush` → `crop_cotton`, `herb_patch` → `crop_herbs`). Wild
+nodes keep their key and yields, so ADR-247 (seeds only from gathering each crop's own wild
+plant) is untouched; they just draw with the mature farmed art. `wild_garden` keeps its own art
+(mixed garden, no single crop counterpart). Fruit-tree sprites unchanged — they already show
+fruit. (2) `packages/gameplay/data/worldgen.json`: grass `nodeChance` 0.045 → 0.055, sand 0.025
+→ 0.03; every wild crop listed ×2 in the grass band (wheat/hay/lettuce ×3, keeping the ADR-257
+≥2 rule); fruit trees ×2 in grass, plus pear/cherry/peach added to the forest band (apple ×2
+there), orange/aloe ×2 on sand. All knobs in data JSON. Measured density over 25 chunks per
+seed: wild plants 427–476 → 414–694 across 20 seeds (520–592 on the original 4); fruit trees
+83–110 → 194–281 (2.2–2.6×; ~8–11/chunk); total nodes +7–12% only. Every wild species and
+every fruit tree appears on every seed tested (min per-species count 2 across 20 seeds).
+Placement still avoids water (generator skips tiles 1/8, pinned by test); regrown nodes avoid
+structures/roads/players via the existing ADR-134 `clearStructures` path. Claims don't exist at
+worldgen time (player-placed later), so "not inside claims" holds structurally for new worlds —
+same as before, not a regression.
+
+**Verification.** New `packages/gameplay/test/adr349_wild_crops.test.ts` (8 tests): per-seed
+density minimums (wild ≥380, fruit ≥100 over 25 chunks, 6 seeds) + determinism per seed /
+difference across seeds; no wild nodes on water; all 24 wild resources draw as their `crop_*`
+art and resolve to real pack sprites; fruit-tree idle ≠ depleted frame for all 5 species;
+gathering an apple/pear/cherry/orange/peach tree yields its fruit via the existing gather path;
+gathering `wild_corn` yields corn + `corn_seeds` only; `seedSourceIssues` still clean; frost pass
+depletes wild corn + apple tree below 40°F while berry bush and ordinary tree survive; farming
+end-to-end (till → plant wheat → water → grow → harvest `crop_wheat`, wheat + seeds in
+inventory). 8/8 pass. Neighbour suites: gameplay + world 198 files, 1,930 passed / 3 skipped /
+0 failed; render + assets 676 passed / 1 failed (known pre-existing `pack.test.ts` KEYS.md,
+sparse-checkout only). Typecheck with pinned TypeScript 5.9.3: `packages/gameplay` clean.
+
+**Honest cuts.** Fruit visibility at phone scale: the fruit dots in the existing idle art are
+small; a render-side fruit overlay or scale bump for fruit trees could make them more obvious,
+but that touches `apps/client/src/view.ts` and was left as a follow-up, not done here. The art
+was verified numerically, not visually — the user's eyes on the live build are the real check
+that the world reads as scattered with crops. Winter: fruit trees and wild plants still die
+below 40°F per the existing Task 28 rule (frost-depleted nodes go invisible until regrown), so
+the crop-scattered look is a spring/summer/fall thing, as designed.
+
+## ADR-350: Damage pulse runs on composited DOM layers, not a canvas repaint (SurVivaZ)
+
+**Context.** The red pulsing edges when damaged stuttered. There is no DOM/CSS damage pulse —
+the only "red pulsing edges" is the canvas vignette in `FxDraw.draw()`. The pulse phase was
+already driven per render frame (`fx.step(dtReal)` in `mountFx`'s post-render `draw()`), and the
+damage path does zero per-frame DOM/layout work. The stutter is raster cost: while
+`hurt`/`lowHp`/`dread` is active the overlay canvas can never idle-skip, so every frame does a
+full-screen `clearRect` + a 256px→~1080p `drawImage` upscale of the vignette. Measured with the
+real `Fx`/`FxDraw` code against node-canvas (real 2D raster) at phone size (390×844 CSS, DPR 3 →
+979×2118 backing store), 600 frames @ 60 Hz: idle 0.005 ms mean; low-HP pulse 0.6 **48.6 ms mean
+/ 51.3 ms p95 / 100% of frames over the 16.7 ms budget**; hurt decay after one hit 14.0 ms mean /
+29% over budget; low-HP + dread 64.2 ms / 93.6 ms p95 / 100% over budget. The pulse alpha math
+itself is smooth (max frame-to-frame Δalpha 0.113 is the intended heartbeat double-thump) — the
+frames presenting it were ~3× over budget, so the thump landed in dropped-frame jumps. Caveat:
+node-canvas/Cairo is a CPU rasterizer, so absolute ms on a phone GPU will differ, but the op
+counts and the before/after ratio are implementation facts.
+
+**Decision.** The three full-screen alpha washes — hurt/low-HP vignette, dread vignette, hit
+flash — moved from the per-frame canvas repaint to three dedicated DOM layers
+(`#vfx-wash-hurt/dread/flash`, `position:absolute; inset:0; z-index:2; will-change:opacity;
+pointer-events:none`, appended after the FX canvas so they sit exactly where the canvas
+vignette sat: above the world, below the HUD at z-index 5+). Per frame only `style.opacity`
+changes (rounded to 0.001, skipped when unchanged); backgrounds change only when the wash
+colour changes (event-time, e.g. a cold hit). The alpha math is the pre-350 canvas math verbatim
+— same beat windows, coefficients, caps — only the sink changed. `syncWashes()` runs before the
+canvas idle check, so the canvas now idle-skips while the pulse runs; hurt / low-HP / dread /
+flash no longer keep the canvas awake. The `source-over` reset before the fog block was
+preserved. `shrink()` zeroes the washes; `dispose()` removes them. All tuning knobs live in new
+`apps/client/src/fx/damage.json` (normalised defensively to shipped defaults on garbage input).
+Visual equivalence: the CSS gradient reproduces the baked 256px vignette exactly — stops
+converted from canvas `[r0,r1]` parameterisation to CSS `[centre, edge]` (mid stop 0.55 →
+64.89%; core 21.98%; edge 71.09%), using explicit `rgba(r,g,b,0)` never the `transparent`
+keyword (which would darken mid-tones through black). Pixel check vs the old baked vignette at
+native size: max |Δalpha| = 0.0039 across horizontal/vertical/diagonal radii. The gradient is
+evaluated at native resolution, so it is at least as crisp as the old 256px upscale.
+
+**Verification.** Real-raster harness (fixed code, same scenarios): low-HP pulse 48.6 ms →
+**0.003 ms mean** (p95 0.014 ms, max 0.050 ms, 0/600 frames over budget, 0 canvas ops); hurt
+decay 14.0 ms → 0.001 ms; low-HP + dread 64.2 ms → 0.002 ms. New
+`apps/client/test/adr350_damage_pulse.test.ts` (5 tests): 600-frame low-HP pulse asserts zero
+canvas `drawImage`/`fillRect` (≤1 first-frame dirty `clearRect`), mean draw < 1 ms, opacity
+identical to the pinned pre-350 formula every frame with range 0.132–0.330; hurt-decay peak 0.57
+then quiet; flash/dread caps; vignette-off and `shrink()` silence; cold-hit recolours the
+background exactly once (0 rewrites over 60 frames); gradient string/geometry assertions;
+garbage JSON normalises to defaults. 5/5 pass. Neighbour suites: FX/damage neighbours 30/30;
+full `apps/client/test` + `packages/render/test` 1,203 passed, 0 failed (7 files fail at
+collection for the pre-existing sparse-checkout gap — `assets/ui/` absent in this checkout).
+Typecheck with pinned TypeScript 5.9.3: `apps/client` only the 3 pre-existing
+`src/tutorial/overlay.ts` errors (missing `input_glyphs.json` declaration), proven pre-existing
+by stashing; the new files are clean. Sim/render separation intact: no sim, input, or renderer
+code touched; `Fx.step` phase rate, hurt decay, hit-stop, and shake untouched; fog/flicker/rays/
+particles still draw on canvas exactly as before.
+
+**Honest cuts.** Flicker/fog/rays stay on the canvas: they're transient horde/nightfall layers
+(not the reported damage stutter) with non-uniform shapes (moving fog blobs, beams), not
+single-alpha washes — converting them would be scope creep with no measured need. `draw()` still
+sizes the overlay canvas before the idle check (pre-350 behaviour); skipping allocation when
+only the vignette is active would save ~8 MB one-time but changes `texBytes()` behaviour — left
+as-is. No real-phone visual check: the gradient is pixel-equivalent numerically, but the user's
+eyes on the live build are the final check that the pulse reads the same.

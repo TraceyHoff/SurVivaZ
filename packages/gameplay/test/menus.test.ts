@@ -98,7 +98,8 @@ describe("build placement preview", () => {
     const dir = G.buildPreviewFor(w, a, sel, 1, { x: 0, y: -1, mode: 0 })!;
     expect(dir.request).toMatchObject({ x: 0, y: -G.PLACE_AHEAD, rot: 1 });
     expect(G.rotateStep(w, p.id, 3, 1)).toBe(0); expect(G.rotateStep(w, p.id, 0, -1)).toBe(3);
-    expect(G.placePreviewIntent(dir)).toMatchObject({ cmd: G.PlaceCmd, args: { piece: p.id, x: 0, y: -G.PLACE_AHEAD, rot: 1 } });
+    // ADR-347: the PlaceCmd carries the ghost's snapped slot, not the raw aim (here the snapped cell centre).
+    expect(G.placePreviewIntent(dir)).toMatchObject({ cmd: G.PlaceCmd, args: { piece: p.id, x: dir.x, y: dir.y, rot: 1 } });
     // unaffordable tiered piece is invalid with a BuildFail reason
     const tiered = [...d.pieces.values()].find((x) => x.tiered)!;
     const bad = G.buildPreviewFor(w, a, { piece: tiered.id, tier: 1, variant: 0, paint: 0 }, 0, { x: 1, y: 0, mode: 1 })!;

@@ -21,7 +21,7 @@ import { buildFailText } from "./build-hud.js";
  * ADR-318 move: Build.Move (F / hold Y / HUD "Move") lifts a fully repaired own piece into the normal hologram; confirm
  * sends one server-validated MoveCmd (same entity, state kept), Cancel puts it back (nothing was sent).
  */
-import { BuildPiece, moveIntent, validateMove, snapPlacement, validatePlacement, buildPreviewFor, fineEligible, FINE_ROT, FINE_ROT_STEPS, rotationSteps, buildView, demolishIntent, gameplayDefs, moveVector, pieceFootprintOutline, pieceTargetAt, placementTarget, placePreviewIntent, reclaimIntent, repairIntent, rotateStep, structures, upgradeIntent,
+import { BuildPiece, moveIntent, validateMove, snapPlacement, validatePlacement, buildPreviewFor, fineEligible, FINE_ROT, FINE_ROT_STEPS, rotationSteps, buildView, demolishIntent, gameplayDefs, moveVector, pieceFootprintOutline, pieceTargetAt, placementTarget, placePreviewIntent, previewSlot, reclaimIntent, repairIntent, rotateStep, structures, upgradeIntent,
   type BuildPreview, type BuildSelection, type ItemCount, type MenuCtx, type MenuIntent, type PieceTarget, type PlacementAim, type SnapSegment } from "@engine/gameplay";
 import { Transform, type Entity } from "@engine/core";
 import { rotateScreenVec } from "@engine/input";
@@ -179,8 +179,12 @@ export class BuildMode {
     // movement must not resolve a different aim inside confirmation.
     const p = this.preview, c = this.o.ctx(); if (!p || !c) { this.toast = "Choose a build location"; return false; }
     const mv = this.moveFrom;
-    const sn = mv ? undefined : snapPlacement(c.world, { piece: p.piece, tier: p.tier, variant: p.variant, level: p.level, ...p.request });
-    const reason = mv ? (c.world.isAlive(mv.entity) ? validateMove(c.world, c.player, mv.entity, { x: p.request.x, y: p.request.y, level: p.level, rot: p.request.rot }) : 1)
+    // ADR-347: re-validate the slot the hologram shows (the snapped ghost), not the raw aim it was derived
+    // from — magnet / assist / bump / corner auto-fit move the ghost off the request, so judging the request
+    // could refuse a green ghost or confirm a different slot.
+    const slot = previewSlot(p);
+    const sn = mv ? undefined : snapPlacement(c.world, { piece: p.piece, tier: p.tier, variant: p.variant, level: p.level, ...slot });
+    const reason = mv ? (c.world.isAlive(mv.entity) ? validateMove(c.world, c.player, mv.entity, { ...slot, level: p.level }) : 1)
       : typeof sn === "number" ? sn : validatePlacement(c.world, c.player, sn!);
     p.reason = reason; p.valid = reason === 0;
     if (reason) { this.toast = buildFailText(reason); return false; }

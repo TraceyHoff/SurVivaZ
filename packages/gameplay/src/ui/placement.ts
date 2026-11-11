@@ -12,7 +12,7 @@ import { Placement } from "../defs.js";
 import { claimOverlap } from "../building/zones.js";
 import { BuildFail } from "../events.js";
 import { hasOwnClaim, outerCornerRots, pieceCost, pieceUnlocked, snapPlacement, validatePlacement, type Snapped } from "../building/place.js";
-import { isFineRot, isLCorner, rotParts, rotatedSize, structures, type StructureIndex } from "../building/structure.js";
+import { isFineRot, isLCorner, rotParts, rotatedSize, structures, FINE_ROT, type StructureIndex } from "../building/structure.js";
 import { maxHpOf } from "../building/integrity.js";
 import { BuildPiece, Dead, EdgeSide, PieceSlot, PrivilegeZone } from "../components.js";
 import { DemolishCmd, MoveCmd, ReclaimCmd, RepairCmd, UpgradeCmd } from "../input.js";
@@ -40,7 +40,8 @@ export interface BuildPreview {
   fine?: boolean;
   /** Snapped facing (radians), identical to the placed piece's Transform.facing. */
   facing?: number;
-  /** Unsnapped request (reach-clamped aim point + requested rot) that placePreviewIntent sends. */
+  /** Unsnapped request (reach-clamped aim point + requested rot) the ghost was derived from — the Place/Move
+   *  command sends the ghost's snapped slot, not this (ADR-347). */
   request: { x: number; y: number; rot: number };
   /** ADR-196: the ghost was pulled onto a neighbour's edge by the structural magnet. */
   magnet?: boolean;
@@ -322,9 +323,18 @@ function fitCorner(world: World, player: Entity, sel: BuildSelection, rot: numbe
   return rawPreview(world, player, sel, r, { mode: 1, x: c.x, y: c.y }, level);
 }
 
-/** PlaceCmd for a preview (raw rot as requested; the server re-snaps the same way). */
+/** ADR-347: the snapped slot the hologram shows — the Place/Move command carries this, not the raw aim, so the
+ *  piece lands exactly where the ghost was. Magnet / snap-assist / claim bump / corner auto-fit all move the
+ *  ghost off the raw request, so a command carrying the request re-snaps somewhere else (and re-snapping an
+ *  edge / triangle / opening request against a drifted replica can move it further). Re-snapping this slot is
+ *  idempotent in an unchanged world, and the server still re-validates it. Fine pieces re-attach the FINE_ROT
+ *  flag that `rot` (the bare 15° step from rotParts) drops. */
+export const previewSlot = (p: BuildPreview): { x: number; y: number; rot: number } =>
+  ({ x: p.x, y: p.y, rot: p.fine ? FINE_ROT | p.rot : p.rot });
+/** PlaceCmd for a preview: the ghost's snapped slot (ADR-347; was the raw request — the server re-snaps the
+ *  request, but the magnet / assist / bump / corner auto-fit move the ghost off it). */
 export const placePreviewIntent = (p: BuildPreview): MenuIntent =>
-  placeIntent({ piece: p.piece, tier: p.tier, variant: p.variant, paint: p.paint }, { x: p.request.x, y: p.request.y, level: p.level, rot: p.request.rot });
+  placeIntent({ piece: p.piece, tier: p.tier, variant: p.variant, paint: p.paint }, { ...previewSlot(p), level: p.level });
 
 // ---- ADR-136: targeted placed piece (contextual Repair / Upgrade / Demolish) -----------------------------------
 export interface PieceTarget {
@@ -381,8 +391,8 @@ export const repairIntent = (target: Entity): MenuIntent => ({ cmd: RepairCmd, a
 export const reclaimIntent = (target: Entity): MenuIntent => ({ cmd: ReclaimCmd, args: { target }, entities: ["target"] });
 export const upgradeIntent = (target: Entity, tier: number): MenuIntent => ({ cmd: UpgradeCmd, args: { target, tier }, entities: ["target"] });
 export const demolishIntent = (target: Entity): MenuIntent => ({ cmd: DemolishCmd, args: { target }, entities: ["target"] });
-/** ADR-318: MoveCmd for a move ghost (same raw request a PlaceCmd would send; the server re-snaps it). */
-export const moveIntent = (target: Entity, p: BuildPreview): MenuIntent => ({ cmd: MoveCmd, args: { target, x: p.request.x, y: p.request.y, level: p.level, rot: p.request.rot }, entities: ["target"] });
+/** ADR-318: MoveCmd for a move ghost (ADR-347: the ghost's snapped slot, like PlaceCmd). */
+export const moveIntent = (target: Entity, p: BuildPreview): MenuIntent => ({ cmd: MoveCmd, args: { target, ...previewSlot(p), level: p.level }, entities: ["target"] });
 
 /** World-tile outline of a placed piece, for highlighting the demolish / repair / upgrade target. */
 export function pieceFootprintOutline(world: World, e: Entity): { segments: SnapSegment[]; z: number } | undefined {

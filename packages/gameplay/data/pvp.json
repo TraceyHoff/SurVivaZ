@@ -2,6 +2,7 @@
   "bagSlots": 24,
   "bagOwnerOnlySeconds": 60,
   "respawnSeconds": 10,
+  "guestSafeSeconds": 300,
   "respawnHealthFrac": 0.5,
   "respawnHunger": 60,
   "respawnThirst": 60,

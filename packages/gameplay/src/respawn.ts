@@ -10,22 +10,38 @@ import { BuildPiece, LootBag, PieceOwner } from "./components.js";
 import { gameplayDefs } from "./config.js";
 import { aiRespawnPoint } from "./ai_spawn.js";
 import { isAiHuman } from "./skills/xp.js";
-import { setRespawnLocator, SPAWN_JITTER, spawnPoints, type SpawnPointXY } from "./spawn_points.js";
+import { setRespawnLocator, SPAWN_JITTER, spawnPoints, addSafeSpawnCentreProvider, type SpawnPointXY } from "./spawn_points.js";
 
 /** Piece keys that are sleeping beds (not garden / flower beds). */
 export const isBedKey = (key: string): boolean => key === "bed" || key.startsWith("bed_") || key === "bunk_bed";
 
+/** Every owned bed: its footprint plus the beside-bed respawn point. A bed nobody owns (abandoned-site
+ * furniture, PieceOwner.player 0) is nobody's respawn point, so it is not listed. */
+function bedSpots(world: World): { bx: number; by: number; x: number; y: number; player: number }[] {
+  if (!world.isRegistered(BuildPiece) || !world.isRegistered(PieceOwner)) return [];
+  const defs = gameplayDefs(world); const out: { bx: number; by: number; x: number; y: number; player: number }[] = [];
+  for (const b of world.query([BuildPiece, PieceOwner, Transform])) {
+    const player = world.getField(b, PieceOwner, "player") ?? 0; if (!player) continue;
+    const key = defs.pieces.get(world.getField(b, BuildPiece, "type")!)?.key; if (!key || !isBedKey(key)) continue;
+    const t = world.get(b, Transform)!; out.push({ bx: t.x, by: t.y, x: t.x + 1, y: t.y + 0.5, player }); // beside the bed, not inside its footprint
+  }
+  return out;
+}
+/** ADR-348: every owned bed's respawn point — the bed safe centres for inSpawnSafeRadius (same 20-tile
+ * radius and rules as the starter points). The list is read live, so a placed bed is protected from the
+ * next tick and a demolished bed stops being a centre. */
+export function bedSpawnPoints(world: World): SpawnPointXY[] { return bedSpots(world).map((b) => ({ x: b.x, y: b.y })); }
+
 /** Next to the nearest bed `e` owns (nearest to where they are / died), or undefined. */
 export function bedRespawnPoint(world: World, e: Entity): SpawnPointXY | undefined {
-  if (!world.isRegistered(PlayerId) || !world.isRegistered(PieceOwner) || !world.has(e, PlayerId)) return undefined;
+  if (!world.isRegistered(PlayerId) || !world.has(e, PlayerId)) return undefined;
   const pid = world.getField(e, PlayerId, "id"); if (!pid) return undefined;
-  const defs = gameplayDefs(world); const me = world.get(e, Transform);
+  const me = world.get(e, Transform);
   let best: SpawnPointXY | undefined; let bd = Infinity;
-  for (const b of world.query([BuildPiece, PieceOwner, Transform])) {
-    if (world.getField(b, PieceOwner, "player") !== pid) continue;
-    const key = defs.pieces.get(world.getField(b, BuildPiece, "type")!)?.key; if (!key || !isBedKey(key)) continue;
-    const t = world.get(b, Transform)!; const d = me ? (t.x - me.x) ** 2 + (t.y - me.y) ** 2 : 0;
-    if (d < bd) { bd = d; best = { x: t.x + 1, y: t.y + 0.5 }; } // beside the bed, not inside its footprint
+  for (const b of bedSpots(world)) {
+    if (b.player !== pid) continue;
+    const d = me ? (b.bx - me.x) ** 2 + (b.by - me.y) ** 2 : 0;
+    if (d < bd) { bd = d; best = { x: b.x, y: b.y }; }
   }
   return best;
 }
@@ -37,7 +53,11 @@ export function nearestSpawnPoint(world: World, e: Entity): SpawnPointXY | undef
   return { x: best.x + Math.cos(a) * r, y: best.y + Math.sin(a) * r };
 }
 /** ADR-325: AI humans (not hired workers / clan members) go bed -> home -> a distributed world spawn point instead. */
-export function installBedRespawn(world: World): void { setRespawnLocator(world, (e) => bedRespawnPoint(world, e) ?? (isAiHuman(world, e) ? aiRespawnPoint(world, e) : undefined) ?? nearestSpawnPoint(world, e)); }
+export function installBedRespawn(world: World): void {
+  setRespawnLocator(world, (e) => bedRespawnPoint(world, e) ?? (isAiHuman(world, e) ? aiRespawnPoint(world, e) : undefined) ?? nearestSpawnPoint(world, e));
+  // ADR-348: beds are respawn points, so each owned bed is a safe centre (same 20-tile radius, same rules).
+  addSafeSpawnCentreProvider(world, "beds", () => bedSpawnPoints(world));
+}
 
 export interface DeathBagInfo { bag: Entity; x: number; y: number }
 /** Death bags owned by PlayerId `pid`, newest (highest entity) first. */

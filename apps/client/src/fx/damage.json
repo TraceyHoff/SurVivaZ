@@ -1,0 +1,29 @@
+{
+  "dread": {
+    "alpha": 0.45,
+    "visibleAbove": 0.005
+  },
+  "flash": {
+    "cap": 0.45,
+    "visibleAbove": 0.005
+  },
+  "hurt": {
+    "beatFirstEnd": 0.12,
+    "beatSecondEnd": 0.3,
+    "beatSecondScale": 0.6,
+    "beatSecondStart": 0.2,
+    "cap": 0.85,
+    "hurtCap": 0.75,
+    "lowHpBase": 0.22,
+    "lowHpBeat": 0.33,
+    "perHurt": 0.6,
+    "visibleAbove": 0.005
+  },
+  "vignette": {
+    "innerRadiusPx": 40,
+    "midAlpha": 0.25,
+    "midStop": 0.55,
+    "outerRadiusPx": 182,
+    "sourcePx": 256
+  }
+}

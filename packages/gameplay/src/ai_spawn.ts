@@ -19,7 +19,7 @@ import { ClanStatus, Dead, Survival, Worker } from "./components.js";
 import { gameplayDefs } from "./config.js";
 import { populationTile } from "./population.js";
 import { isAiHuman } from "./skills/xp.js";
-import { spawnPoints, setExtraSafeSpawnPoints, type SpawnPointXY } from "./spawn_points.js";
+import { spawnPoints, setExtraSafeSpawnPoints, addSafeSpawnCentreProvider, type SpawnPointXY } from "./spawn_points.js";
 import { structures } from "./building/structure.js";
 
 export const AI_SPAWN = raw as unknown as {
@@ -82,7 +82,32 @@ export function aiSpawnPoints(world: World): AiSpawnPoint[] {
   return s.points?.length ? s.points : spawnPoints(world).map((p) => ({ ...p, source: "starter" as const }));
 }
 /** Host hook: an AI human's home (its remembered base), for respawn. */
-export function setAiHomeLocator(world: World, fn: ((e: Entity) => SpawnPointXY | undefined) | undefined): void { st(world).home = fn; }
+export function setAiHomeLocator(world: World, fn: ((e: Entity) => SpawnPointXY | undefined) | undefined): void {
+  st(world).home = fn;
+  // ADR-348: homes are respawn points, so each live home is a safe centre (same 20-tile radius, same rules).
+  addSafeSpawnCentreProvider(world, "ai-homes", () => aiHomeSafeCentres(world));
+}
+/** Hired workers and clan members keep the ADR-153 rule (bed -> nearest starter point): their home is
+ * not a respawn point, so it is not a safe centre either (ADR-348). A Worker record with owner 0 is for
+ * hire, not hired (recruitmentSystem gives every AI human one), so only a non-zero owner counts as hired. */
+function keepsAdr153Rule(world: World, e: Entity): boolean {
+  const hired = world.isRegistered(Worker) && world.has(e, Worker) && (world.getField(e, Worker, "owner") ?? 0) !== 0;
+  const clan = world.isRegistered(ClanStatus) && world.has(e, ClanStatus) && (world.getField(e, ClanStatus, "clan") ?? 0) !== 0;
+  return hired || clan;
+}
+/** ADR-348: the live home points of the AI humans whose respawn goes home (their own beds are covered by
+ * respawn.ts). Mirrors aiRespawnPoint minus the death-distance check — the predicate has no corpse
+ * position — and includes the dead: a dead AI human's home stays a centre through its respawn wait. A home
+ * that is blocked (claim / water / deck) is not a respawn point, so it is not a centre. */
+export function aiHomeSafeCentres(world: World): SpawnPointXY[] {
+  const s = st(world); if (!s.home) return [];
+  const out: SpawnPointXY[] = [];
+  for (const e of world.query([Survival, Transform])) {
+    if (!isAiHuman(world, e) || keepsAdr153Rule(world, e)) continue;
+    const h = s.home(e); if (h && !blocked(world, h.x, h.y)) out.push({ x: h.x, y: h.y });
+  }
+  return out;
+}
 
 /** Live human (non-AI) player positions on the authoritative world. */
 export function humanPlayerPositions(world: World): SpawnPointXY[] {
@@ -124,11 +149,9 @@ export function pickAiSpawnPoint(world: World, key: string, salt = 0, o: { human
   return { x: p.x, y: p.y, index, near };
 }
 /** AI human respawn after the bed: home (remembered base) when homeFirst, else a distributed point. Hired workers and clan
- *  members return undefined (the caller keeps their ADR-153 rule). A Worker record with owner 0 is for hire, not hired
- *  (recruitmentSystem gives every AI human one), so only a non-zero owner counts as hired here. */
+ *  members return undefined (the caller keeps their ADR-153 rule). */
 export function aiRespawnPoint(world: World, e: Entity): SpawnPointXY | undefined {
-  const hired = world.isRegistered(Worker) && world.has(e, Worker) && (world.getField(e, Worker, "owner") ?? 0) !== 0;
-  if (hired || (world.isRegistered(ClanStatus) && world.has(e, ClanStatus) && (world.getField(e, ClanStatus, "clan") ?? 0) !== 0)) return undefined;
+  if (keepsAdr153Rule(world, e)) return undefined;
   const s = st(world); const t = world.get(e, Transform);
   if (AI_SPAWN.respawn.homeFirst) { const h = s.home?.(e); if (h && (!t || Math.hypot(h.x - t.x, h.y - t.y) <= AI_SPAWN.respawn.homeMaxDist) && !blocked(world, h.x, h.y)) return h; }
   const p = pickAiSpawnPoint(world, "respawn", (s.n++) * 7919 + e, { exclude: e }); return { x: p.x, y: p.y };

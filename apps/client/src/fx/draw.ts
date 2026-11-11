@@ -4,13 +4,59 @@
  * (full light, additive particles) and one for the current day/night ambient level, re-tinted in place when the level
  * changes (no per-level canvases, no per-sprite resources: texture memory is a hard constant). The overlay backing store
  * is capped at ~1080p pixels whatever the window size/DPR (soft effects upscale invisibly) and shrunk to 1x1 when the layer
- * is off or hidden; texBytes() accounts every canvas this layer owns. Screen layers are full-screen washes only (vignette, flicker, fog roll, flash, god rays)
- * - never rectangles over characters. Canvas2D (no weather/VFX pipeline) also gets stateless rain/snow streaks and
- * flickering fire glows.
+ * is off or hidden; texBytes() accounts every canvas this layer owns. Screen layers are full-screen washes only (flicker,
+ * fog roll, god rays) - never rectangles over characters. ADR-350: the damage washes (hurt / low-HP vignette, dread
+ * vignette, hit flash) are NOT drawn here any more: they live on composited DOM layers whose only per-frame mutation is
+ * style.opacity, so the pulse no longer forces a full-screen canvas repaint every frame. Canvas2D (no weather/VFX pipeline)
+ * also gets stateless rain/snow streaks and flickering fire glows.
  */
 import { Shape, SHAPES, PF, type ParticlePool } from "./pool.js";
 import { PALETTE, C } from "./palette.js";
 import type { Fx } from "./effects.js";
+import damageJson from "./damage.json";
+
+/** ADR-350: damage-wash tuning (data JSON, not hardcoded constants). Values are the pre-350 ones: same visual
+ * strength and timing, only the presentation path changed (canvas repaint -> composited opacity). */
+export interface DamageTune {
+  vignette: { sourcePx: number; innerRadiusPx: number; outerRadiusPx: number; midStop: number; midAlpha: number };
+  hurt: { perHurt: number; hurtCap: number; lowHpBase: number; lowHpBeat: number; cap: number; beatFirstEnd: number; beatSecondStart: number; beatSecondEnd: number; beatSecondScale: number; visibleAbove: number };
+  dread: { alpha: number; visibleAbove: number };
+  flash: { cap: number; visibleAbove: number };
+}
+const DEFAULT_DAMAGE_TUNE: DamageTune = {
+  vignette: { sourcePx: 256, innerRadiusPx: 40, outerRadiusPx: 182, midStop: 0.55, midAlpha: 0.25 },
+  hurt: { perHurt: 0.6, hurtCap: 0.75, lowHpBase: 0.22, lowHpBeat: 0.33, cap: 0.85, beatFirstEnd: 0.12, beatSecondStart: 0.2, beatSecondEnd: 0.3, beatSecondScale: 0.6, visibleAbove: 0.005 },
+  dread: { alpha: 0.45, visibleAbove: 0.005 },
+  flash: { cap: 0.45, visibleAbove: 0.005 },
+};
+const num = (v: unknown, d: number): number => typeof v === "number" && Number.isFinite(v) ? v : d;
+/** Defensive normalisation: garbage in the JSON falls back to the shipped values, never to NaN. */
+export function normalizeDamageTune(raw: unknown): DamageTune {
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, Record<string, unknown>>;
+  const v = o["vignette"] ?? {}, h = o["hurt"] ?? {}, d = o["dread"] ?? {}, f = o["flash"] ?? {};
+  const dv = DEFAULT_DAMAGE_TUNE.vignette, dh = DEFAULT_DAMAGE_TUNE.hurt, dd = DEFAULT_DAMAGE_TUNE.dread, df = DEFAULT_DAMAGE_TUNE.flash;
+  return {
+    vignette: { sourcePx: num(v["sourcePx"], dv.sourcePx), innerRadiusPx: num(v["innerRadiusPx"], dv.innerRadiusPx), outerRadiusPx: num(v["outerRadiusPx"], dv.outerRadiusPx), midStop: num(v["midStop"], dv.midStop), midAlpha: num(v["midAlpha"], dv.midAlpha) },
+    hurt: { perHurt: num(h["perHurt"], dh.perHurt), hurtCap: num(h["hurtCap"], dh.hurtCap), lowHpBase: num(h["lowHpBase"], dh.lowHpBase), lowHpBeat: num(h["lowHpBeat"], dh.lowHpBeat), cap: num(h["cap"], dh.cap), beatFirstEnd: num(h["beatFirstEnd"], dh.beatFirstEnd), beatSecondStart: num(h["beatSecondStart"], dh.beatSecondStart), beatSecondEnd: num(h["beatSecondEnd"], dh.beatSecondEnd), beatSecondScale: num(h["beatSecondScale"], dh.beatSecondScale), visibleAbove: num(h["visibleAbove"], dh.visibleAbove) },
+    dread: { alpha: num(d["alpha"], dd.alpha), visibleAbove: num(d["visibleAbove"], dd.visibleAbove) },
+    flash: { cap: num(f["cap"], df.cap), visibleAbove: num(f["visibleAbove"], df.visibleAbove) },
+  };
+}
+export const DAMAGE_TUNE: DamageTune = normalizeDamageTune(damageJson);
+/**
+ * ADR-350: the CSS equivalent of the old baked 256px vignette (a radial gradient, transparent core -> colour at the
+ * edges). The old canvas stops were parameterised on [innerRadius, outerRadius] while CSS stops are parameterised on
+ * [centre, ellipse edge], so stop s maps to (inner + s * (outer - inner)) / outer of the ray: the 0.55 mid stop lands at
+ * 64.89%, not 55%. Deliberately rgba(r,g,b,0), never the `transparent` keyword: `transparent` interpolates through
+ * black and would darken the mid-tones the baked gradient never had. The gradient is evaluated at native resolution,
+ * so it is at least as crisp as the old 256px upscale.
+ */
+export function vignetteCss(col: number, tune: DamageTune = DAMAGE_TUNE): string {
+  const [r, g, b] = PALETTE[col] ?? PALETTE[0]!;
+  const v = tune.vignette, edge = (v.outerRadiusPx / v.sourcePx) * 100;
+  const core = (v.innerRadiusPx / v.outerRadiusPx) * 100, mid = ((v.innerRadiusPx + v.midStop * (v.outerRadiusPx - v.innerRadiusPx)) / v.outerRadiusPx) * 100;
+  return `radial-gradient(ellipse ${edge.toFixed(2)}% ${edge.toFixed(2)}% at center, rgba(${r},${g},${b},0) ${core.toFixed(2)}%, rgba(${r},${g},${b},${v.midAlpha}) ${mid.toFixed(2)}%, rgba(${r},${g},${b},1) 100%)`;
+}
 
 export interface CamLike { x: number; y: number; drawZoom: number }
 export interface DrawEnv {
@@ -19,7 +65,7 @@ export interface DrawEnv {
   canvasFallback: boolean; weather: { kind: number; intensity: number; windDir: number }; indoors: boolean;
   glows: Float32Array; glowCount: number; vignette: boolean; flicker: boolean;
 }
-const SPR = 32, LEVELS = 6, VIG_MAX = 4;
+const SPR = 32, LEVELS = 6;
 /** Hard cap on overlay backing-store pixels (1920x1080): ~8.3 MB whatever the window / DPR (4K at DPR 2 would be 33 MB). */
 export const FX_MAX_PIXELS = 1920 * 1080;
 /** Overlay resolution scale (backing px per CSS px) under the pixel cap. */
@@ -60,8 +106,14 @@ export class FxDraw {
   private base: Cv[] = []; private atlas: (Cv | undefined)[] = [undefined, undefined]; private slotLevel = -1; private filled = new Uint8Array(SHAPES * PALETTE.length * 2); private scratch: Cv | undefined;
   private fogKey = -1; private fogStyle = "#888";
   /** current atlas cell (set by sprite()) */ private cx = 0; private cy = 0;
-  private vig = new Map<number, Cv>(); private beam: Cv | undefined; private fogBlob: Cv | undefined;
+  private beam: Cv | undefined; private fogBlob: Cv | undefined;
   private bw = 0; private bh = 0; private dirty = true; private warmK = 0;
+  /** ADR-350: damage washes as composited DOM layers (same stacking as the canvas: z-index 2, above the world,
+   * below the HUD at z-index 5+). Only style.opacity changes per frame - no layout, no paint, no canvas work - so the
+   * pulse is a compositor blend, not a full-screen repaint. Backgrounds change only when the wash colour changes
+   * (event-time, e.g. a cold hit recolours the vignette), never per frame. */
+  private washHurt: HTMLDivElement; private washDread: HTMLDivElement; private washFlash: HTMLDivElement;
+  private washHurtCol = -1; private washFlashCol = -1; private washHurtA = -1; private washDreadA = -1; private washFlashA = -1;
   /** Bake a few tinted sprites per call (idle frames) so first-use never hitches mid-fight. Returns true when done. */
   prewarm(amb: number, max = 24): boolean {
     const level = Math.max(0, Math.min(LEVELS - 1, Math.round(Math.min(1, amb) * (LEVELS - 1))));
@@ -74,19 +126,56 @@ export class FxDraw {
     const c = document.createElement("canvas"); c.id = "vfx-fx";
     c.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2"; root.appendChild(c);
     this.canvas = c; this.g = c.getContext("2d")!;
+    // ADR-350: wash layers, appended after the canvas so they paint above it at the same z-index.
+    this.washHurt = this.wash(root, "vfx-wash-hurt", vignetteCss(C.Blood));
+    this.washDread = this.wash(root, "vfx-wash-dread", vignetteCss(C.Soot));
+    this.washFlash = this.wash(root, "vfx-wash-flash", RGB[C.Crit] ?? RGB[0]!);
+  }
+  private wash(root: HTMLElement, id: string, background: string): HTMLDivElement {
+    const el = document.createElement("div"); el.id = id;
+    el.style.cssText = "position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2;will-change:opacity;opacity:0";
+    el.style.background = background; root.appendChild(el); return el;
+  }
+  /** Opacity-only write, rounded to 0.001 and skipped when unchanged (an identical assignment still wakes the compositor). */
+  private setWash(el: HTMLDivElement, a: number, slot: "hurt" | "dread" | "flash"): void {
+    const q = Math.round(a * 1000) / 1000, last = slot === "hurt" ? this.washHurtA : slot === "dread" ? this.washDreadA : this.washFlashA;
+    if (q === last) return;
+    if (slot === "hurt") this.washHurtA = q; else if (slot === "dread") this.washDreadA = q; else this.washFlashA = q;
+    el.style.opacity = String(q);
+  }
+  /**
+   * ADR-350: the per-frame damage-wash update. The alpha math is the pre-350 canvas math verbatim (same beat windows,
+   * same coefficients, same caps) - only the sink changed, from a full-screen drawImage/fillRect to style.opacity.
+   * Runs before the canvas idle check on purpose: when the pulse is the only active layer the canvas must idle-skip
+   * while the DOM layers keep animating.
+   */
+  private syncWashes(fx: Fx, e: DrawEnv): void {
+    const t = DAMAGE_TUNE, h = t.hurt;
+    const beat = fx.pulsePhase < h.beatFirstEnd ? Math.sin((fx.pulsePhase / h.beatFirstEnd) * Math.PI)
+      : fx.pulsePhase > h.beatSecondStart && fx.pulsePhase < h.beatSecondEnd
+        ? h.beatSecondScale * Math.sin(((fx.pulsePhase - h.beatSecondStart) / (h.beatSecondEnd - h.beatSecondStart)) * Math.PI) : 0;
+    const hurtA = Math.min(h.hurtCap, fx.hurt * h.perHurt) + fx.lowHp * (h.lowHpBase + h.lowHpBeat * beat);
+    const hurt = e.vignette && hurtA > h.visibleAbove ? Math.min(h.cap, hurtA) : 0;
+    const dread = e.vignette && fx.dread > t.dread.visibleAbove ? fx.dread * t.dread.alpha : 0;
+    const flash = fx.flash > t.flash.visibleAbove ? Math.min(t.flash.cap, fx.flash) : 0;
+    // Colours change only on damage / HP-threshold events; a stale background is harmless while the layer is at 0,
+    // because the next non-zero frame re-checks the colour before writing opacity.
+    if (hurt > 0) { const col = fx.lowHp > fx.hurt ? C.Blood : fx.hurtColor; if (col !== this.washHurtCol) { this.washHurtCol = col; this.washHurt.style.background = vignetteCss(col); } }
+    if (flash > 0) { const col = fx.flashColor; if (col !== this.washFlashCol) { this.washFlashCol = col; this.washFlash.style.background = RGB[col] ?? RGB[0]!; } }
+    this.setWash(this.washHurt, hurt, "hurt"); this.setWash(this.washDread, dread, "dread"); this.setWash(this.washFlash, flash, "flash");
   }
   /** Drop the overlay backing store to 1x1 (layer off / hidden); draw() regrows it on demand. */
-  shrink(): void { if (this.bw !== 1 || this.bh !== 1) { this.canvas.width = 1; this.canvas.height = 1; this.bw = 1; this.bh = 1; this.dirty = false; } }
+  shrink(): void { if (this.bw !== 1 || this.bh !== 1) { this.canvas.width = 1; this.canvas.height = 1; this.bw = 1; this.bh = 1; this.dirty = false; } this.setWash(this.washHurt, 0, "hurt"); this.setWash(this.washDread, 0, "dread"); this.setWash(this.washFlash, 0, "flash"); }
   /** Bytes of canvas backing store this layer owns right now (overlay + atlases + baked sources). */
   texBytes(): number {
     let n = this.bw * this.bh * 4 + px4(this.atlas[0]) + px4(this.atlas[1]) + px4(this.scratch) + px4(this.beam) + px4(this.fogBlob);
-    for (let i = 0; i < this.base.length; i++) n += px4(this.base[i]); this.vig.forEach(this.vigBytes); n += this.vb; this.vb = 0; return n;
+    for (let i = 0; i < this.base.length; i++) n += px4(this.base[i]); return n;
   }
-  private vb = 0; private readonly vigBytes = (c: Cv): void => { this.vb += px4(c); };
   dispose(): void {
     this.canvas.width = 0; this.canvas.height = 0; this.canvas.remove(); this.bw = this.bh = 0;
+    this.washHurt.remove(); this.washDread.remove(); this.washFlash.remove();
     release(this.atlas[0]); release(this.atlas[1]); release(this.scratch); release(this.beam); release(this.fogBlob);
-    for (let i = 0; i < this.base.length; i++) release(this.base[i]); this.vig.forEach(release); this.vig.clear();
+    for (let i = 0; i < this.base.length; i++) release(this.base[i]);
     this.atlas[0] = this.atlas[1] = this.scratch = this.beam = this.fogBlob = undefined; this.base.length = 0; this.filled.fill(0); this.slotLevel = -1; this.warmK = 0;
   }
   /** Select (baking on first use) the atlas cell for (shape, colour, level); returns the level's atlas. */
@@ -107,21 +196,16 @@ export class FxDraw {
   }
   /** drawImage of the current atlas cell. */
   private blit(g: CanvasRenderingContext2D, img: CanvasImageSource, dx: number, dy: number, dw: number, dh: number): void { g.drawImage(img, this.cx + 0.5, this.cy + 0.5, SPR - 1, SPR - 1, dx, dy, dw, dh); }
-  private vignette(col: number): Cv {
-    let v = this.vig.get(col); if (v) return v;
-    if (this.vig.size >= VIG_MAX) { const it = this.vig.keys().next(); if (!it.done) { release(this.vig.get(it.value)); this.vig.delete(it.value); } } // bounded (event-time only)
-    v = mk(256, 256); const g = v.getContext("2d") as Ctx; const [r, gg, b] = PALETTE[col] ?? [0, 0, 0];
-    const gr = g.createRadialGradient(128, 128, 40, 128, 128, 182); gr.addColorStop(0, `rgba(${r},${gg},${b},0)`); gr.addColorStop(0.55, `rgba(${r},${gg},${b},0.25)`); gr.addColorStop(1, `rgba(${r},${gg},${b},1)`);
-    g.fillStyle = gr; g.fillRect(0, 0, 256, 256); this.vig.set(col, v); return v;
-  }
 
   /** Draw everything; returns the number of particles drawn. */
   draw(fx: Fx, e: DrawEnv): number {
+    this.syncWashes(fx, e); // ADR-350: DOM wash layers animate even when the canvas idle-skips
     const c = this.canvas, dpr = fxScale(e.w, e.h, e.dpr, this.maxPixels), bw = Math.max(1, Math.round(e.w * dpr)), bh = Math.max(1, Math.round(e.h * dpr));
     if (bw !== this.bw || bh !== this.bh) { c.width = bw; c.height = bh; this.bw = bw; this.bh = bh; }
     const g = this.g;
-    // idle skip: nothing alive and no screen layer -> leave the (already clear) canvas untouched
-    const idle = fx.pool.count === 0 && e.glowCount === 0 && fx.rays <= 0.02 && fx.flash <= 0.005 && fx.fogAmt <= 0.01 && fx.flickerDark <= 0.003 && !(e.vignette && (fx.hurt > 0.005 || fx.lowHp > 0 || fx.dread > 0.005)) && !(e.canvasFallback && e.weather.intensity > 0 && e.weather.kind >= 1 && e.weather.kind <= 3);
+    // idle skip: nothing alive and no screen layer -> leave the (already clear) canvas untouched.
+    // ADR-350: hurt / low-HP / dread / flash no longer keep the canvas awake - they live on the DOM wash layers.
+    const idle = fx.pool.count === 0 && e.glowCount === 0 && fx.rays <= 0.02 && fx.fogAmt <= 0.01 && fx.flickerDark <= 0.003 && !(e.canvasFallback && e.weather.intensity > 0 && e.weather.kind >= 1 && e.weather.kind <= 3);
     if (idle) { if (this.dirty) { g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, bw, bh); this.dirty = false; } return 0; }
     this.dirty = true; g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, bw, bh);
     const p = fx.pool, z = e.cam.drawZoom * dpr, ox = bw / 2 - e.cam.x * z, oy = bh / 2 - e.cam.y * z;
@@ -142,10 +226,8 @@ export class FxDraw {
         g.globalAlpha = a * (0.6 + 0.4 * Math.sin(e.time * 0.23 + k * 2.1)); g.setTransform(1, 0, -0.45, 1, x, 0); g.drawImage(b as CanvasImageSource, 0, 0, wdt, bh); }
       g.setTransform(1, 0, 0, 1, 0, 0);
     }
-    // flash
-    if (fx.flash > 0.005) { g.globalAlpha = Math.min(0.45, fx.flash); g.fillStyle = RGB[fx.flashColor] ?? RGB[0]!; g.fillRect(0, 0, bw, bh); }
+    // fog roll-in (horde / nightfall): back to source-over after the additive particle / glow / ray passes
     g.globalCompositeOperation = "source-over";
-    // fog roll-in (horde / nightfall)
     if (fx.fogAmt > 0.01 && !e.indoors) {
       const fb = this.fogBlob ?? (this.fogBlob = this.bakeFog()), tint = this.fogTint(e.fog);
       g.globalAlpha = 1; for (let k = 0; k < 7; k++) {
@@ -155,12 +237,7 @@ export class FxDraw {
       g.globalCompositeOperation = "source-atop"; g.globalAlpha = 0.8; g.fillStyle = tint; g.fillRect(0, 0, bw, bh); g.globalCompositeOperation = "source-over";
     }
     if (fx.flickerDark > 0.003) { g.globalAlpha = fx.flickerDark; g.fillStyle = "#05070c"; g.fillRect(0, 0, bw, bh); }
-    if (e.vignette) {
-      const beat = fx.pulsePhase < 0.12 ? Math.sin((fx.pulsePhase / 0.12) * Math.PI) : fx.pulsePhase > 0.2 && fx.pulsePhase < 0.3 ? 0.6 * Math.sin(((fx.pulsePhase - 0.2) / 0.1) * Math.PI) : 0;
-      const hurtA = Math.min(0.75, fx.hurt * 0.6) + fx.lowHp * (0.22 + 0.33 * beat);
-      if (hurtA > 0.005) { g.globalAlpha = Math.min(0.85, hurtA); g.drawImage(this.vignette(fx.lowHp > fx.hurt ? C.Blood : fx.hurtColor) as CanvasImageSource, 0, 0, bw, bh); }
-      if (fx.dread > 0.005) { g.globalAlpha = fx.dread * 0.45; g.drawImage(this.vignette(C.Soot) as CanvasImageSource, 0, 0, bw, bh); }
-    }
+    // ADR-350: hurt / dread vignettes and flash are DOM wash layers now (syncWashes, above) - no canvas work here.
     g.globalAlpha = 1;
     return n;
   }

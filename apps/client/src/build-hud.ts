@@ -18,14 +18,21 @@ export interface BuildHudOptions {
   /** True when (x, y) CSS px lands on a virtual touch control (joystick zone / button); those touches never move the ghost. */
   blocked?(x: number, y: number): boolean;
 }
-interface LayoutEl { kind: string; anchor: { x: number; y: number }; radius?: number; zone?: { x: number; y: number; w: number; h: number } }
+interface LayoutEl { kind: string; anchor: { x: number; y: number; portrait?: { x: number; y: number } }; radius?: number; zone?: { x: number; y: number; w: number; h: number } }
 /** Hit test against a touch layout (normalised anchors/zones; radii in reference px scaled to the viewport). */
 /** Build strip top on narrow screens: below the vitals panel (≈98 px) and the menu bar. */
 export const NARROW_TOP_PX = 106;
 export function onTouchControl(layout: { reference?: { w: number; h: number }; elements: readonly LayoutEl[] }, x: number, y: number, w: number, h: number): boolean {
-  const ref = layout.reference ?? { w: 844, h: 390 }; const k = Math.min(w / ref.w, h / ref.h);
-  return layout.elements.some((e) => e.zone ? x >= e.zone.x * w && x <= (e.zone.x + e.zone.w) * w && y >= e.zone.y * h && y <= (e.zone.y + e.zone.h) * h
-    : Math.hypot(x - e.anchor.x * w, y - e.anchor.y * h) <= ((e.radius ?? 24) + 8) * k);
+  const ref = layout.reference ?? { w: 844, h: 390 };
+  // ADR-347: resolve the anchor and scale exactly like VirtualControls.place (packages/input/src/touch.ts) —
+  // portrait screens use the portrait anchor, and the scale is clamped to [1, 1.15] like VirtualControls.scale.
+  // The old code always used the landscape anchor with an unclamped scale, so in portrait a tap on ✓ / ✗ / ⟳
+  // missed the test by ~90 px (and the radius shrank below the button's real hit radius) and fell through to
+  // the canvas as a world tap: the ghost jumped to the world point under the button and the confirm placed it there.
+  const portrait = w < h; const k = Math.max(1, Math.min(1.15, Math.min(w / ref.w, h / ref.h)));
+  return layout.elements.some((e) => { const a = portrait ? e.anchor.portrait ?? e.anchor : e.anchor;
+    return e.zone ? x >= e.zone.x * w && x <= (e.zone.x + e.zone.w) * w && y >= e.zone.y * h && y <= (e.zone.y + e.zone.h) * h
+      : Math.hypot(x - a.x * w, y - a.y * h) <= ((e.radius ?? 24) + 8) * k; });
 }
 export const TOUCH_LIFT_PX = 48;
 /** QA2: why the ghost is red (BuildFail codes from @engine/gameplay events; unknown codes fall back to "Can't place here"). */
