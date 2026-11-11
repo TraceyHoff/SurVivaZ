@@ -202,7 +202,7 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
   }
   view.gatherScanned = true; if (best) view.gatherNode = best;
   if (bestNeeds) view.equipSlot = bestNeeds.slot; // the inventory "Equip" a player taps before chopping
-  noteTripWanted(view, needs, !!best?.wanted);
+  noteTripWanted(view, needs, !!best?.wanted, a, world.tick); // ADR-343: also records the unmet need for resource expeditions
   // ADR-176 water: thirsty without a drink in the bag -> nearest tile next to water on a coarse 7x7 grid (2.5 tile step)
   const sv = view as { water?: number }; const thirst = (world.getField(self, Survival, "thirst") ?? 100) / 100;
   if (sv.water === undefined && thirst < 0.6) {

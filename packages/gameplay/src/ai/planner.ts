@@ -50,7 +50,21 @@ export function fireState(world: World, defs: GameDefs, e: Entity): { lit: boole
 
 // ---------------- long-term memory ----------------
 export interface AiStats { trips: number; tripMax: number; deposits: number; withdraws: number; repairs: number; refuels: number; crafts: number; stationCrafts: number; built: number; hunts: number; loots: number; wears: number; relocations: number; bestTier: number; snoozed: number }
-export interface AiMemory { v: 1; base?: { x: number; y: number }; stats: AiStats; earth?: TerrainBasePlan; hireEarth?: TerrainBasePlan; fails: Record<string, number>; blocked: string[]; snooze?: Record<string, number> }
+export interface AiMemory { v: 1; base?: { x: number; y: number }; stats: AiStats; earth?: TerrainBasePlan; hireEarth?: TerrainBasePlan; fails: Record<string, number>; blocked: string[]; snooze?: Record<string, number>;
+  /** ADR-343: the plan's unmet gather need (item ids + the tick it was last confirmed by a sensor pass) — the travel
+   *  layer's fuel for a resource expedition, readable off-screen where there is no view / plan. Cleared when the plan
+   *  no longer needs anything. */
+  resourceNeed?: { items: number[]; at: number };
+  /** ADR-343: resource-expedition destinations that failed (unreachable / timed out / gone on arrival) — prospecting
+   *  skips nodes near these until they age past resourceNeedTtlTicks. */
+  resourceBanned?: { x: number; y: number; at: number }[];
+  /** ADR-343: a resource expedition arrived — the next travel goal is a return home (set on arrival, cleared when
+   *  that return arrives). */
+  resourceReturn?: boolean;
+  /** ADR-344: a journey ended early (turned back for lack of provisions) — no new resource expedition
+   *  launches until this ages past journeyRetryCooldownTicks, so the bot does not ping-pong out and
+   *  back on an empty pantry. */
+  journeyBlocked?: { at: number } }
 const newStats = (): AiStats => ({ trips: 0, tripMax: 0, deposits: 0, withdraws: 0, repairs: 0, refuels: 0, crafts: 0, stationCrafts: 0, built: 0, hunts: 0, loots: 0, wears: 0, relocations: 0, bestTier: 0, snoozed: 0 });
 const aiDirty = new WeakMap<Agent, number>();
 /** The agent's AiMemory (identity.ai, validated / created on first use). */

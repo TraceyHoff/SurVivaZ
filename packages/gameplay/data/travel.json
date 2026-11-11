@@ -1,6 +1,11 @@
 {
-  "$comment": "ADR-324 world-scale travel for AI humans (ai/travel.ts). Ticks at 20 Hz, distances in tiles. Routes: A* over a coarse region grid (regionTiles cells, water-sampled cost), then local nav (goTo / creature_nav) between region centres, so no path length cap. roam = per-AI preference from traits (roamWeights) vs roamTraitMin; clan members below it (or under a BuildBase / Defend clan order) stay within clanStayRadius of the clan anchor, roamers go and come back after roamReturnTicks; unattached AIs roam freely; hired workers only travel when sent. offscreen: bots farther than fullSimTiles from every human while travelling step coarsely along their route (no controller, not a chunk source) and hand back to full sim near a human or on arrival.",
+  "$comment": "ADR-324 world-scale travel for AI humans (ai/travel.ts). Ticks at 20 Hz, distances in tiles. Routes: A* over a coarse region grid (regionTiles cells, water-sampled cost), then local nav (goTo / creature_nav) between region centres, so no path length cap. roam = per-AI preference from traits (roamWeights) vs roamTraitMin; clan members below it (or under a BuildBase / Defend clan order) stay within clanStayRadius of the clan anchor, roamers go and come back after roamReturnTicks; unattached AIs roam freely; hired workers only travel when sent. offscreen: bots farther than fullSimTiles from every human while travelling step coarsely along their route (no controller, not a chunk source) and hand back to full sim near a human or on arrival. ADR-343 resource expeditions: a free / roaming bot whose plan needs an item no known node near home yields (tripWanted) prospects the seeded generator for the nearest node of that kind out to prospectMaxTiles and travels to it (a round trip: on arrival it surfaces to full sim to gather, then the next goal is a return home); nodes nearer than resourceMinTiles are the local trip / gather's job, not an expedition's. ADR-345 water navigation (ai/water_crossing.ts): legs are profiled by depth (shallow = fordable on foot, deep = swim); a bot swims a short deep run when fit, rides it when its mount swims, and routes around a deep run longer than swimMaxDeepTiles (rideSwimMaxDeepTiles mounted); a mount that cannot swim only forces a re-plan around lake-scale water at planning time (a deep run over nonSwimmerPlanDeepTiles, the local nav's detour allowance — smaller water is left to the bank gate, where the local nav decides whether it can be skirted, and the gate re-plans around the leg at hand when it cannot); a cold / hurt / hungry / thirsty / low-stamina bot waits at the bank instead of crossing (waitTicks, then it re-plans around). Off-screen legs cross water at the wade / swim speed multipliers, with wetness and swim stamina costed in — never teleported across.",
   "homeMaxDist": 48,
+  "resourceMinTiles": 48,
+  "prospectMaxTiles": 1200,
+  "prospectMaxChunks": 256,
+  "resourceNeedTtlTicks": 36000,
+  "prospectCacheTtlTicks": 6000,
   "regionTiles": 16,
   "maxRegionExpand": 6000,
   "maxPlansPerTick": 4,
@@ -29,5 +34,16 @@
     "mountSpeedTilesPerSec": 5.4,
     "stepTicks": 20,
     "needsFloor": 50
+  },
+  "water": {
+    "sampleStepTiles": 2,
+    "swimMaxDeepTiles": 12,
+    "rideSwimMaxDeepTiles": 24,
+    "nonSwimmerPlanDeepTiles": 12,
+    "swimStaminaPerSec": 1.2,
+    "staminaMargin": 1.5,
+    "minStamina": 0.25,
+    "waitTicks": 1200,
+    "bankTiles": 3
   }
 }

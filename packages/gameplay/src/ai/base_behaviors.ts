@@ -167,7 +167,19 @@ export function fillPlanSensors(world: World, self: Entity, view: AgentWorldView
   return needs;
 }
 /** Called after gather selection: a trip is worth it when the plan needs something no known node near home gives. */
-export function noteTripWanted(view: AgentWorldView, needs: Set<number>, wantedKnown: boolean): void { if (view.base && needs.size && !wantedKnown) view.tripWanted = true; }
+export function noteTripWanted(view: AgentWorldView, needs: Set<number>, wantedKnown: boolean, a?: Agent, tick?: number): void {
+  if (view.base && needs.size && !wantedKnown) view.tripWanted = true;
+  // ADR-343: the same unmet need is the resource expedition's fuel — record it on the agent (persisted AiMemory) so
+  // the travel layer (and the off-screen planner, which has no view) can launch a trip to the nearest source of it;
+  // clear it when the plan no longer needs anything. Refreshed on every sensor pass while the need persists, so its
+  // age only ever matters off-screen (resourceNeedTtlTicks). A known node nearby needs no expedition: the local
+  // trip / gather handles it, so a merely-known need leaves the record alone.
+  if (a !== undefined && tick !== undefined) {
+    const mem = aiMemoryOf(a);
+    if (needs.size && !wantedKnown) { mem.resourceNeed = { items: [...needs], at: tick }; markAiDirty(a, tick); }
+    else if (needs.size === 0 && mem.resourceNeed) { delete mem.resourceNeed; markAiDirty(a, tick); }
+  }
+}
 
 // ---------------- movement helpers ----------------
 const toward = (o: { moveX: number; moveY: number; aimX: number; aimY: number }, fx: number, fy: number, tx: number, ty: number, s = 1): number => {
@@ -340,7 +352,17 @@ export function baseBehaviors(): GameBehavior[] {
         if (toward(o, c.self.x, c.self.y, s.x, s.y, 0.8) > 0.9) { if (stuckOn(c, s.x, s.y)) { c.bb.set("skinAt", undefined); return false; } return; } stop(o);
         if (cooled(c, "skinTry", 2 * CONTAINER_STEP)) { if (s.tries >= 3) { c.bb.set("skinAt", undefined); return false; } c.bb.set("skinAt", { ...s, tries: s.tries + 1 }); c.bb.set("skinTry", c.self.tick); o.actions.push("gather"); } } },
     { name: "trip", inertia: 0.6, scheduleBonus: 0.2, traits: { industriousness: 0.4, bravery: 0.3 }, considerations: [
-        { name: "want", curve: step01, input: (c) => (c.bb.get("trip") ? 1 : c.world.tripWanted && cooled(c, "tripEnd", 600) ? 0.8 : 0) },
+        { name: "want", curve: step01, input: (c) => {
+          // ADR-346: the ADR-343 route gate applies to resource expeditions only. An explore / POI / return
+          // route is undirected wandering the local trip is allowed to interrupt (base behaviour): the trip
+          // is how a bot with unmet needs gathers locally — ADR-203's campfire depends on it — and a bot on
+          // an explore route must still come home at dusk. The gate's rationale (the trip out-scores travel
+          // ~1.0 vs 0.55 and would hijack an expedition into 36-tile loops) only holds for an expedition with
+          // a destination that matters. An in-progress trip is ended only while an expedition route is active,
+          // so a stale bb.trip cannot hijack the expedition's return leg either.
+          if (c.world.travel?.route && c.world.travel.kind === "resource") { const tr = c.bb.get<{ max: number }>("trip"); if (tr) endTrip(c, tr.max); return 0; }
+          return c.bb.get("trip") ? 1 : c.world.tripWanted && cooled(c, "tripEnd", 600) ? 0.8 : 0;
+        } },
         { name: "day", curve: { type: "linear", m: -1, b: 1 }, input: (c) => (c.bb.get<{ ret: boolean }>("trip")?.ret ? 0 : night(c.self.phase)) },
         { name: "fed", curve: step01, input: (c) => (c.bb.get("trip") || (c.self.hunger > 0.5 && c.self.thirst > 0.5) ? 1 : 0) },
         { name: "warm", curve: step01, input: (c) => (c.bb.get<{ ret: boolean }>("trip")?.ret || (c.world.chill?.body ?? 37) >= 36.6 ? 1 : 0) }], // a chilled bot does not set out (and turns back)

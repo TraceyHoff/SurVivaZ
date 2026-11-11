@@ -153,7 +153,7 @@ export function referenceBehaviors(): GameBehavior[] {
         goTo(c, o, g.x, g.y, 0.7); c.bb.set("facing", Math.atan2(o.aimY, o.aimX));
       } },
     { name: "return_home", chatOnStart: "return_home", scheduleBonus: 0.4,
-      considerations: [{ name: "farFromHome", curve: { type: "logistic", k: 10, mid: 0.3 }, input: (c) => (c.bb.get("trip") ? 0 : Math.hypot(c.world.home.x - c.self.x, c.world.home.y - c.self.y) / 30) }, { name: "evening", curve: { type: "linear", m: 0.8, b: 0.2 }, input: (c) => night(c.self.phase) }],
+      considerations: [{ name: "farFromHome", curve: { type: "logistic", k: 10, mid: 0.3 }, input: (c) => (c.bb.get("trip") || (c.world.travel?.route && c.world.travel.kind === "resource") ? 0 : Math.hypot(c.world.home.x - c.self.x, c.world.home.y - c.self.y) / 30) }, { name: "evening", curve: { type: "linear", m: 0.8, b: 0.2 }, input: (c) => night(c.self.phase) }],
       run: (c, o) => { instantChores(c, o); if (c.world.base) return baseReturnRun(c, o); if (goTo(c, o, c.world.home.x, c.world.home.y) < 2 || stuckOn(c, c.world.home.x, c.world.home.y, 100)) return false; } },
     { name: "rest", chatOnStart: "rest", scheduleBonus: 0.3,
       considerations: [{ name: "night", curve: { type: "step", at: 0.5 }, input: (c) => night(c.self.phase) }, { name: "nearHome", curve: { type: "inverse" }, input: (c) => Math.hypot(c.world.home.x - c.self.x, c.world.home.y - c.self.y) / 10 }],

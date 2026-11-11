@@ -218,6 +218,30 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
   }
 
   /**
+   * ADR-343: node placements of a chunk only (no tiles / heights): the same tile loop as load(), with the same rng
+   * draws in the same order, so the placements agree exactly with what the server spawns for the chunk — prospecting
+   * reads the world without building it (a load() is ~0.75 ms/chunk; this skips the height field and tile storage).
+   * The guarantee pass runs identically (placeGuaranteedNodes shares its lazy `guaranteed` list with load()).
+   */
+  nodesInChunk(cx: number, cy: number): NodePlacement[] {
+    const nodes: NodePlacement[] = []; const seed = this.opts.seed >>> 0;
+    const rng = new Rng(fnv1a(`${cx},${cy}`, seed));
+    const occupied = new Set<number>();
+    for (let ly = 0; ly < CHUNK_SIZE; ly++) for (let lx = 0; lx < CHUNK_SIZE; lx++) {
+      const tx = cx * CHUNK_SIZE + lx, ty = cy * CHUNK_SIZE + ly;
+      const n = this.noiseAt(tx, ty);
+      const band = this.bandOf(n);
+      const i = ly * CHUNK_SIZE + lx; const tile = this.tileFromNoise(tx, ty, n, band);
+      // No land resources on water (forced features or biome). Band chance still uses biome band kinds.
+      if (tile !== 1 && tile !== 8 && band.nodeKinds?.length && rng.next() < (band.nodeChance ?? 0)) {
+        nodes.push({ tx, ty, kind: rng.pick(band.nodeKinds) }); occupied.add(i);
+      }
+    }
+    if (this.opts.guaranteeNodes !== false) this.placeGuaranteedNodes(cx, cy, nodes, occupied);
+    return nodes;
+  }
+
+  /**
    * ADR-255: every node kind listed in any band is placed at least once inside NODE_GUARANTEE_RADIUS.
    * Slot = unique angle around the origin; we walk outward until the tile's biome matches a band that lists the kind
    * (or any non-water land as a last resort). Pure function of (seed, kind) so every peer agrees.

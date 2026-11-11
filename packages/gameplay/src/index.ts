@@ -85,6 +85,8 @@ export * from "./ai/vehicle_behaviors.js";
 export * from "./ai/mount_behaviors.js";
 export * from "./ai/mount_preference.js"; // ADR-339: tame a mount of the bot's own choice
 export * from "./ai/travel.js";
+export * from "./ai/journey.js"; // ADR-344: distance-based journey preparation
+export * from "./ai/water_crossing.js"; // ADR-345: swim / ford / route-around decisions for AI humans
 export * from "./ai/social_memory.js";
 export * from "./ai/planner.js";
 export * from "./ai/base_behaviors.js";

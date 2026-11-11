@@ -4555,3 +4555,332 @@ turret it cannot fill stays at what the surplus allowed. A deposit sequence open
 sensor stops targeting (e.g. the turret is demolished mid-trip) is closed by the behaviour, but a
 withdraw sequence abandoned the same way relies on the pending-`cclose` dance on the next run.
 Nothing verified on a real phone.
+
+## ADR-343: Resource expeditions — AI humans travel far for the resources they need (SurVivaZ)
+
+**Context.** World-wide travel already existed (ADR-324: hierarchical region routes, riding long
+legs, budgeted deterministic off-screen sim), but a bot that needed a resource it could not see
+never went and got it. The investigation found the real bottleneck was not the travel range: the
+planner DOES ask for far resources (its leaves), but the gather sensor only sees agent memory
+(`sightRange` 12 tiles, `memorySeconds` 20), and the only resource-seeking movement was the
+local `trip` — 18–36 tiles, a 3600-tick (3 min) cap, random direction — after which the goal
+snoozed half a day (`GOAL_PATIENCE` 6000). Travel explore (200–800 tiles) is random-direction
+and never resource-directed, and off-screen bots never perceive, so a far trip only ended in
+gathering when the destination happened to be the resource. Verified non-bottlenecks, unchanged:
+`goalTimeoutTicks` 72000 (a 1200-tile off-screen leg is ~9k ticks), off-screen speeds 2.6 / 5.4
+tiles/s, `poiSearchTiles` 400 (POIs, not resources), `homeMaxDist` 48. Two arbitration flaws
+stood in the way as well: the local `trip` (~1.0 utility) out-scored `travel` (0.55) while
+`tripWanted`, so it would hijack an expedition into 36-tile loops, and `return_home` pulled a
+far bot home at night mid-trip.
+
+**Decision.** New `TravelKind` `"resource"` (`packages/gameplay/src/ai/travel.ts`): when a
+free/roaming bot has a fresh unmet need (`m.resourceNeed`, recorded by `noteTripWanted` in
+`packages/gameplay/src/ai/base_behaviors.ts` from the plan's leaves, cleared when the leaves
+empty), `pickTravelGoal` prospects the seeded world for the nearest node of that kind and
+travels to it — a round trip: on arrival the bot surfaces to full sim to gather (`endTravel`
+sets `m.resourceReturn` and clears `spawnOff`), then the next goal is a `return` home.
+Prospecting (`prospectResource`): placed nodes first (live, skips amount-0 depleted); else a
+seeded ring scan via the new `nodesInChunk` (`packages/world/src/generator.ts`, which mirrors
+`load()`'s node loop exactly — same order, same rng draws, same guarantee pass — so placements
+agree exactly). First ring with a hit wins (nearest within a chunk diagonal). Bounded by
+`prospectMaxChunks`, cached per (start chunk, kinds, excludes) with a TTL, deterministic (fixed
+ring / in-chunk order, no rng). `resourceKindsFor` maps items to node kinds via yields ≥ 0.15
+(iron_ore → iron_vein + chromite_vein). `fillTravelSensors` ends a resource trip early when its
+recorded items no longer intersect the live need — but NOT while a plan step is executing
+(leaves are transiently empty during build/craft steps; the planner reports only the first
+unmet goal). A failed resource trip bans its destination (cap 4) so the next prospect takes the
+next-nearest node. `travelKeepsHome` now measures the corridor to the leg segment (previous
+waypoint / origin → current waypoint) instead of the waypoint points, same limit (2 ×
+`regionTiles` = 32) — a strict relaxation, teleports still detected. Arbitration: the `trip`
+`want` consideration returns 0 while a travel route is active and ends any in-progress
+`bb.trip` (a stale trip cannot hijack the return leg); `return_home`'s `farFromHome` returns 0
+while a route is active (the logistic curve's floor is ~0.07, still far below travel's 0.55).
+Clan-stay bots and hired workers get no expeditions (stay → short loop; worker → undefined).
+New knobs in `packages/gameplay/data/travel.json`: `resourceMinTiles` 48 (trip range 36 + sight
+12; nearer nodes are the local trip / gather's job), `prospectMaxTiles` 1200, `prospectMaxChunks`
+256, `resourceNeedTtlTicks` 36000 (30 min), `prospectCacheTtlTicks` 6000. `AiMemory` gains
+`resourceNeed`, `resourceBanned`, `resourceReturn`; `TravelState` gains `items`.
+
+**Validation.** New `packages/gameplay/test/adr343_resource_expeditions.test.ts` (17 tests):
+`nodesInChunk` == `load()` (seeds 42 + 7, 6 chunks each); prospecting (placed / nearest /
+depleted / generator-deterministic / copper-undefined); goal selection (resource pick, near-node
+exclusion, stale need, ban → next-nearest, stay / worker exclusion, `noteTripWanted` record /
+clear); a 1200-tile route with a lake-wall detour; full-sim controller (the bot follows the
+resource route past 100 tiles, the trip never starts); off-screen: an 800-tile expedition to a
+resource the plan genuinely needs reaches it deterministically (same seed → same arrival) and
+comes home; early-end (a) ends a stale trip, (b) survives a mid-craft step; `travelKeepsHome`
+segment behaviour; trip / `return_home` scoring with and without a route. Three real findings
+while writing the tests, all test bugs except the last: `WOOD_RESERVE` (8) means a fresh bot's
+axe goal still leaves wood as a leaf (the craft-step rig needs 12 wood); wood yields from 10
+node kinds, not 2; and the trip's `day` consideration zeroes it at night by design, so the
+scoring test splits day / night contexts. Neighbours re-run green: adr324 / adr339 / adr341 /
+adr342 (4 files, 62 tests) + adr321 / adr323 / adr327 / adr336×2 / adr337×2 / adr338×2 /
+adr339-wiring / adr340 / adr341 / adr342×2 (14 files, 201 tests) — 263 passed, 0 failed.
+Typecheck with pinned TypeScript 5.9.3: `packages/gameplay` clean.
+
+**Honest cuts.** Journey preparation (food / water / gear by distance) and water navigation (AI
+humans swimming / fording, or routing around water) are separate later ADRs — this slice is
+distance only. Prospecting cannot find kinds the generator never places in the live bands
+(copper / tin appear only in `worldgen.json` bands, used by tests — so the bronze chain's ores
+fall back to explore; a pre-existing game gap, out of scope) or depleted nodes in unloaded
+chunks (banned + re-prospected on arrival). Iron needs a tier-2 pickaxe, so the planner
+backward-chains an iron need through the bronze chain before iron_ore itself becomes a leaf.
+Nothing verified on a real phone.
+
+## ADR-344: Distance-based journey preparation — AI humans pack for the trip (SurVivaZ)
+
+**Context.** ADR-343 sends bots on long resource expeditions, but they set out with whatever
+happened to be in the bag — a bot could walk 800 tiles for iron with no food, no water, and no
+pickaxe, and die pointlessly en route. This slice prepares the bot for the journey, sized to the
+distance, before it leaves.
+
+**Decision.** New pure planning leaf `packages/gameplay/src/ai/journey.ts` (data in
+`packages/gameplay/data/ai_journey.json`; no new art, no binaries), wired in `ai/travel.ts`:
+
+- **Estimate** (`estimateJourney`): route length via `routeTiles` (round trip ×2 for a resource
+  expedition, one-way otherwise) at the off-screen speeds from `travel.json` (foot 2.6, mounted
+  5.4 tiles/s), plus budgeted rest stops (`restEverySeconds` 300 s, each +60 s). Rests are
+  budgeted time in the estimate, not simulated stops. Riding is assumed via `willRide` (already
+  riding, or own mount + mount skill + route > `longTripTiles` 25, mirroring ADR-321 mountPolicy
+  minus the fetch-radius detail).
+- **Pack** (`planJourneyPack`, pure: bag + storage counts in, pack list out): gear first, then
+  water, then food. Needs come from the vitals drain rates (hunger 0.05/s, thirst 0.08/s) ×
+  `safetyMargin` 1.25; the bag's contents count first, then the highest-value healthy items in
+  storage (health ≥ 0 only; never food with negative thirst, e.g. bread / jerky). Only surplus
+  above the data reserve (`reserve` per item key, else `defaultReserve` 1) — the ADR-338/341
+  discipline, so the base is never starved. Never an item on the planner's gather leaves. Capped
+  by free bag slots (a kind not carried needs a free slot per stack). Gear is the required tool
+  for the destination node kind (`TravelState.nodeKind`, recorded by `pickTravelGoal` from the
+  prospect hit; fallback is the lowest tier of any node yielding the item) — the lowest adequate
+  tier, one each. Iron needs a tier-2 pickaxe, chromite a tier-4; the node-kind rule is what keeps
+  an iron trip from demanding a steel pickaxe.
+- **Departure gate.** A long trip (≥ `minPrepTiles` 100 tiles) does not start until `tr.journey`
+  is recorded (`journeyResolved` in the travel behaviour's goal consideration). The
+  `prepare_journey` behaviour (second in `travelBehaviors()` — travel stays first, ADR-324/331
+  tests depend on the order) walks to the box (`packRadiusTiles` 8, door-aware `goTo`) and
+  withdraws the pack one `containerSeq` cycle per item; the pack list is recomputed every sensor
+  pass from live bag + storage counts, so each landed withdraw shrinks it until it empties and
+  the journey records. A `journeyPacked` blackboard tally subtracts just-landed withdraws from
+  the 20-tick-cached base scan so the reserve is never double-taken. Short trips need no
+  preparation and get no turn-back rule.
+- **Never set out hungry, or without the means.** The journey is not recorded while the bot is
+  hungry / thirsty / cold (departure floors 55 / 60, mirroring autonomy's hungry cutoffs — a bot
+  the planner wants to feed first never prepares instead), nor while the planner is still
+  working the tool chain: `requiredToolChain` gives the lowest adequate tool plus its recipe
+  closure (gatherable ingredients are leaves, never expanded — the planner gathers them; only
+  craft-only items expand, via the first all-reachable recipe, the planner's own choice) and the
+  stations it needs, and the trip waits while `plan.step` targets the chain (withdraw / craft the
+  tool or a part, build its station) or `plan.leaves` hold a chain ingredient. Both waits are
+  bounded by `prepDeadlineTicks` 1200 from `tr.since`, after which the bot departs bag-only.
+  Storage is the bot's own base scan — for hired workers `fillHireSensors` re-anchors it to the
+  employer's base — plus the ADR-323/327 `mayTakeFromStorageAt` rule: never another bot's or a
+  stranger's storage. No box / box too far / box not permitted → depart bag-only immediately.
+  The first version of this slice cancelled the trip at route assignment when the tool was not
+  held; that was wrong — the planner backward-chains the tool (a fresh bot has no axe yet and
+  ADR-343's tests depart for wood exactly so) — so the cancel was replaced by the wait above,
+  and the route is assigned regardless.
+- **Turn-back.** A bot that runs out mid-trip turns back toward home (or the trip origin when it
+  has no base) instead of pressing on. Full sim (`turnBackNow`): the bag is empty of a kind and
+  that need is < 30. Off-screen: provisions drain per tick at the vitals rates, and
+  `provisionsExhausted` fires only when a provision the bot was carrying runs out (a kind that
+  started at zero was never carried — it does not turn the bot back, so a 0/0 record never
+  reroutes a return leg). A long trip that went off-screen with no journey record gets one from
+  the current bag, but only when the bag holds provisions; an empty bag travels on ADR-343's
+  abstract foraging. The turn-back sets a `return` leg home (no destination ban, no journey
+  record on the return leg) and `journeyBlocked` cools down re-launches for
+  `journeyRetryCooldownTicks` so the bot does not ping-pong. Foraging en route in full sim is the
+  existing gather / eat path; the turn-back is the backstop.
+- **needsFloor interaction (decided).** The off-screen floor (50) stays as the survival last
+  resort — abstract foraging keeps the bot alive at 50 — but it is not the plan: it does not let
+  the bot continue, which is why the turn-back keys off provision points, not vitals. The same
+  hook covers explore / poi / trade / relocate / return legs (preparation runs on route
+  assignment for any kind; return legs record bag-only, far from storage).
+
+**Validation.** New `packages/gameplay/test/adr344_journey_preparation.test.ts`: 33 passed, 0
+failed — estimate sizing (short packs little, long packs proportionally more, mounted packs
+less than foot), no-starvation (reserve untouched, never departs hungry), the tool-chain wait
+(fresh bot's wood expedition waits for the axe chain, departs once the axe is in hand; the wait
+is deadline-bounded), the end-to-end pack-and-leave (withdraws the pack from its own box, keeps
+the reserve, departs prepared and walks > 20 tiles), hired workers pack from the employer's
+storage only, and the turn-back / forage rules in full sim and off-screen. Neighbours re-run
+green: adr343 / adr324 / adr321 / adr323 / adr327 / adr336×2 / adr337×2 / adr338×2 / adr339×2 /
+adr340 / adr341 / adr342×2 (17 files, 238 tests) — 271 passed, 0 failed across all 18 files.
+Typecheck with pinned TypeScript 5.9.3: `packages/gameplay` clean. Two regressions caught by
+the neighbours in-session and fixed: the first gear design (cancel when the tool is not held)
+broke ADR-343's wood expeditions, and the first off-screen fallback (record a 0/0 journey for
+an empty bag) turned ADR-343's return leg straight back to base+1. Test-harness notes: the
+end-to-end test drives the controller with `commands: false` so `copen` / `cwithdraw` / `cclose`
+stay action strings (`survivorController` otherwise moves them into `o.commands` via
+`emitAgentCommands`, which is why the first version saw the pack complete but no transfer land);
+and the rig's box sits west of the base because a box on the east side wedges the bot against
+its south-west corner on the north-east departure (diagonal input into the corner blocks both
+axes — pre-existing nav geometry, not preparation).
+
+**Honest cuts.** Rest stops are budgeted time, not simulated stops. Off-screen preparation is
+impossible (a bot away from storage cannot pack); such trips get the turn-back rule from current
+bag contents instead. A bot that fails to mount still packs at the mounted estimate and may
+turn back early (safety net); `willRide` omits mountPolicy's fetch-radius detail. `prepared` is
+a record of coverage at departure, not a guarantee (a pantry that cannot cover a very long
+detoured route departs short and the turn-back guards it). The tool-chain wait covers the
+planner working the chain; a stuck or empty plan departs after the deadline (or immediately if
+the plan is empty). Nothing verified on a real phone.
+
+## ADR-345: Water navigation — AI humans swim / ford across where safe, route around where it is not (SurVivaZ)
+
+**Context.** Long trips cross rivers and lakes, and the route layer already knew about water
+(ADR-329: region costs from sampled water, Infinity for all-water regions; ADR-343's 1200-tile
+expedition detours around a lake wall) and mounts could swim (ADR-322). But no layer decided what
+an AI human ON FOOT does at the water. A probe (since deleted) showed the gap exactly: with a
+straight route across a 40-wide lake, the bot walked straight in at the shore and swam across —
+soaked (Wetness 255), alive, at swim speed, with no stamina cost and no danger check. The cause is
+in the layering: `walkerWaypoint` (creature_nav) blocks deep water in its A* and falls back to the
+closest reachable tile, but `goTo` then steers straight to the goal (`wp?.x ?? tx`) — and the
+movement system lets any walker enter a swim tile (swim=true at ground level) — so the A* detour
+only ever delays the swim. The region router only avoids all-water regions, so a leg through a
+partially-wet region swims straight through too. Meanwhile the exposure system already wets anyone
+in water (0.15/s, Task 33) and wet clothing loses half its insulation (Task 31) — the costs of a
+crossing existed, but nothing weighed them before entering.
+
+**Decision.** New pure decision leaf `packages/gameplay/src/ai/water_crossing.ts` (data in
+`packages/gameplay/data/travel.json` `"water"`; no new art, no binaries), wired in `ai/travel.ts`:
+
+- **Depth sampling** (`regionSampleDepth`, `legWaterProfile`): water depth at a point by the ADR-329
+  rule — loaded terrain wins (shovel edits and flowing water included), unloaded terrain from the
+  seeded generator, so an unloaded lake is deep in the middle and shallow at its shore exactly as the
+  chunk will generate. A leg's profile samples depths every `sampleStepTiles` (2): tile counts of dry
+  / shallow / deep, the longest deep run, and the distances to the first deep / first wet sample.
+  Shallow is a ford (wadeable by everyone at `wadeSpeedMul`, walk anim, no stamina cost); deep is a
+  swim (at `swimSpeedMul`). `regionCost` is unchanged (ADR-329 intact).
+- **The decision** (`decideCrossing`): ford (shallow only — always allowed, even cold: wading is
+  walking, and the exposure system already charges for it); swim (deep run ≤ `swimMaxDeepTiles` 12
+  on foot, when fit); ride (mounted — a swimming mount, moose, the only swimming species in
+  `mounts.json`, crosses deep water up to `rideSwimMaxDeepTiles` 24; any mount wades shallows);
+  around (a deep run longer than the bot or its mount can swim, or any deep water under a mount
+  that cannot swim — the strict rule, used by the bank gate and the off-screen leg-entry check, where
+  the local geometry is known); wait (the crossing is structurally fine but the bot is cold — bodyTemp under
+  `COLD_BELOW` — hurt, hungry / thirsty under the travel `minHp` / `minNeeds`, or without the
+  stamina the deep water costs: deep seconds × `swimStaminaPerSec` 1.2 × `staminaMargin` 1.5, plus a
+  `minStamina` 0.25 floor). Speeds for the estimate are the off-screen speeds (the journey.ts
+  convention); the margin absorbs a moose, whose walk is slower than the off-screen mount speed.
+- **Route time** (`checkRouteWater`, at assignment in `fillTravelSensors` and `offscreenPlan`):
+  every leg must be structurally crossable on foot or by the mount the bot will be riding (the
+  ADR-321 mountPolicy rule via `willRide` — an own mount + skill + a long route). A leg that is not
+  is re-planned around with its regions avoided (`planRegionRoute` / `requestRoute` take an optional
+  `avoid` set; the goal region is never avoided). Two re-plans; when no route around exists the
+  trip ends like any unreachable goal, and when the plan budget is spent the old route stays — the
+  bank / leg-entry gate is the backstop. The condition gate is deliberately NOT checked here: a bot
+  far from the water may recover before it arrives. For a mount that cannot swim the planning rule
+  is relaxed (`legUncrossableAtPlan`): only a deep run over `nonSwimmerPlanDeepTiles` (12, the
+  local nav's detour allowance — water wider than that along the leg is beyond what the local nav
+  can skirt within its budget) forces a re-plan; smaller water is left to the bank gate. The first
+  version used the strict rule here (any deep water under a non-swimmer) and it ended trips at
+  assignment: ADR-331's 400-tile horse trip crosses rivers the local nav skirts in seconds, and
+  each re-plan found new rivers further along, so the one-re-plan limit killed it before it started.
+  (Region legs are at most ~23 tiles, so the threshold has to sit below the leg length to fire at
+  all — a 24 threshold could never have caught the 40-wide lake, whose legs run 14–16 deep.)
+- **Bank gate** (`waterGate` in `travelRun`, before `goTo`): the water profiled is the path the bot
+  will actually walk — the local-nav waypoint (`walkerWaypoint`, the same call `goTo` makes) when
+  the world has structures, so a pond the local nav skirts is not a bank; when the local nav has no
+  path (undefined) the straight waypoint is the fallback and the profile crosses the water. (A
+  failed local nav returns undefined only once the bot has walked the reachable path — until then it
+  returns waypoints along it, so the bot walks to the bank before the gate fires.) When the water is
+  at hand — the first wet sample within `bankTiles` (3), backed off by one sample step because the
+  first-wet distance is measured to a sample that can sit a step past the first wet tile — a bot in
+  bad shape holds at the bank (the behaviour returns false, so eat / drink / warm get the ticks)
+  until it recovers or `waitTicks` (1200) pass, when it re-plans around instead of waiting forever.
+  A structurally impossible crossing re-plans around this leg at once (`rerouteAroundLeg` — the
+  leg's own regions avoided, not the whole route; the planning check already passed the later legs,
+  and they get their own gate when reached). The trigger reads the first WET sample, not the first
+  deep one: a mount that cannot swim beaches at the deep boundary (it can wade the shallows but
+  cannot press on), so the decision has to happen before the bot wades in — the first version
+  triggered on first-deep and the horse test beached exactly there. In deep water already the bot
+  presses on to the far shore, never waits in the water; in the shallows with a changed world under
+  it, a re-plan's new waypoint is on land and the leg back out is shallow / dry, so it walks out.
+- **Swimming costs stamina** (`travelRun`): deep water drains `swimStaminaPerSec` per second via the
+  existing `spendStamina` (shallow wading costs none). The pre-crossing stamina estimate is the
+  guarantee; the drain is the cost.
+- **Off-screen** (`offscreenStep`): the leg-entry check re-plans around a leg no crossing can make
+  before the bot steps into it (off-screen nothing can recover, so "wait" counts as "around"; when
+  the budget is spent the step holds and retries next). The re-plan avoids the leg's own regions
+  (`rerouteAroundLeg`): off-screen there is no local nav to skirt small water, so the strict
+  decision applies here even though the planning check left small water to the bank gate. Progress is
+  costed at the water under the bot's feet, re-sampled every tile — deep at `swimSpeedMul`, shallows at
+  `wadeSpeedMul` — never the leg's average speed (a long dry tail after a river must not dilute the swim; the first version
+  averaged and a 10-tile river cost ~1.5 s instead of ~5 s). Wetness (the exposure system's
+  `WATER_WET_PER_SEC`) and swim stamina are applied from the water the traversed segment actually
+  held, so a river crossed mid-step still soaks the bot.
+- **Dismount is NOT implemented** (deliberate cut): the task allows dismounting *or* routing around,
+  and dismounting into deep water would strand the mount — no riderless-mount recall across water
+  exists — so the bot always routes around instead; when no route exists the trip ends like any
+  unreachable goal.
+
+**Validation.** New `packages/gameplay/test/adr345_water_navigation.test.ts` (19 tests): depth
+sampling (loaded shallow / deep / land, unloaded = seeded generator everywhere); leg profiles
+(ford / river / lake / dry); the decision table (ford always, swim when fit, wait when cold /
+hurt / hungry / thirsty / low on stamina, around when too long, ride for a swimming mount, around
+for a non-swimmer in deep water, ride for a non-swimmer in shallows); full sim — a bot crosses a
+3-wide ford and arrives wet but alive, a straight route across a 40-wide lake re-plans around
+(arrives dry, never enters the water), a cold bot refuses a 10-wide river at the bank for 600
+ticks (dry, trip still live) then crosses once warm, a moose rider stays mounted across
+swimmable water, a horse rider routes around the lake and stays mounted; route assignment — a
+route forced through a lake (lake regions seeded cheap) is re-planned around at assignment, a
+horse trip across small seeded rivers is NOT ended at assignment (the ADR-331 regression: the
+trip is `sent` with the route still crossing rivers under the planning threshold), a horse trip
+is still re-planned around lake-scale water at assignment, and the same seed plans the same
+water-aware route on fresh worlds; off-screen — progress across a water leg is slower than dry
+speed (the wet leg takes ~14 calls vs ~9 dry), never faster than dry speed, the bot arrives wet
+with less stamina, and an off-screen bot re-plans around a lake it cannot cross instead of
+swimming it. The full-suite run caught the ADR-331 regression above (1 failed / 1819 passed /
+3 skipped — the horse trip ended at assignment); after the fix the neighbours re-run green:
+adr345 / adr343 / adr344 / adr324 / adr329 / adr321 / adr323 / adr327 / adr331 / adr336×2 /
+adr337×2 / adr338×2 / adr339×2 / adr340 / adr341 / adr342×2 (21 files, 303 tests) — 303 passed,
+0 failed; full `packages/gameplay/test` suite: 177 passed / 2 skipped (179 files), 1822 passed /
+3 skipped (1825 tests), 0 failed. Typecheck with pinned TypeScript 5.9.3:
+`packages/gameplay` clean.
+
+**Honest cuts.** The bank gate's local-nav branch (`walkerWaypoint` when structures exist) has no
+dedicated test — it mirrors `goTo`'s identical call, and the structure-less path (the straight
+profile, which is the real path in the open wilderness) is covered; a bot walking past a river
+near structures is the untested case. `nonSwimmerPlanDeepTiles` duplicates the local nav's
+detour allowance (`NAV.detour` in creature_nav) by convention, not by reference — the decision
+leaf stays pure (data JSON only), so if the nav constant ever changes the knob has to be retuned
+by hand. Local (non-travel) movement is untouched: a gather trip across a pond still uses
+the legacy walk-in — the travel layer is where long crossings are decided. A bot that runs out of
+stamina mid-crossing still finishes (movement never requires stamina to swim); the pre-crossing
+estimate is what keeps it out of water it cannot survive. Nothing verified on a real phone.
+
+## ADR-346: The ADR-343 route gate applies to resource expeditions only (SurVivaZ)
+
+**Context.** ADR-343 gave the travel layer ownership of long-range movement: while any route was
+active the local trip scored 0 (and an in-progress trip was ended) and `return_home`'s farFromHome
+was pinned to its logistic floor, so neither could hijack an expedition. The full gate caught a
+regression in `apps/client/test/adr203_ai_human_autonomy.test.ts` — "an AI human builds a campfire
+near home before night" — which passed 3/3 at base 5300607 and failed 1/3 with ADR-343/344/345.
+Bisect confirmed the batch as the cause. A probe (seed 11, 4 bots, 15:00 start) showed bots with
+unmet needs (stone, dye, wood) launching explore trips to far destinations instead of gathering
+locally, and no campfire built; the 5 campfires in the world were pre-existing abandoned-structure
+ones. Water profiling ruled out ADR-345's bank gate for the near-home bot (its leg was dry), and
+the journey records showed ADR-344's preparation resolving (bag-only departures), so the cause was
+ADR-343's arbitration: the local trip is the early-game gather loop — it out-scores travel (~1.0
+vs 0.55) and walks 18–36 tiles around home, letting the gather sensor find the flag/fire materials
+(dye especially) — and `return_home` is what brings a bot on an explore route home at dusk.
+
+**Decision.** Narrow both gates to resource expeditions (`travel.kind === "resource"`), the only
+kind with a destination that matters: `trip` "want" in `packages/gameplay/src/ai/base_behaviors.ts`
+and `return_home` farFromHome in `packages/gameplay/src/agents.ts`. Explore / POI / trade / return /
+sent / relocate routes restore exact base behaviour — the trip may interrupt them and `return_home`
+may fire at dusk. The expedition itself is unchanged: the trip still never starts on a resource
+route, an in-progress trip is still ended there, and `return_home` stays floored there.
+
+**Verification.** New `packages/gameplay/test/adr346_expedition_only_arbitration.test.ts` (4 tests):
+trip scores with an explore route and 0 on a resource route; `return_home` scores > 0.5 at night far
+from home on an explore route and < 0.1 on a resource route; an in-progress trip survives an explore
+route but is ended by a resource route; full-sim — a bot with unmet needs on an explore route starts
+a local trip. 4 passed, 0 failed. The regression test `adr203_ai_human_autonomy` passes 3/3 with
+the fix (was 1 failed / 2 passed). ADR-343's own pins still hold (both use resource routes).
+Typecheck with pinned TypeScript 5.9.3: `packages/gameplay` clean.
+
+**Honest cuts.** The near-home bot in the probe also sat at explore leg 0 for ~4000 ticks on a dry
+25-tile loop; with the trip allowed again it gathers instead of walking the loop, and adr203 passes,
+so the stall was not pursued further — if a bot is ever seen idling on a short explore leg with no
+needs, that is a separate travel-behaviour investigation.
