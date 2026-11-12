@@ -11,7 +11,7 @@ import { Transform, type Entity, type World } from "@engine/core";
 import { eidOfNetId } from "@engine/net";
 import {
   Driver, Vehicle, VehicleState, VehicleEnterCmd, VehicleExitCmd, VehicleEngineCmd, VehicleHeadlightsCmd, VehicleDeployCmd,
-  VEHICLE_ENGINE_ON, VEHICLE_HEADLIGHTS, VEHICLE_TUNING, vehicleDefOf, kitVehicle, type MenuIntent,
+  VEHICLE_ENGINE_ON, VEHICLE_HEADLIGHTS, VEHICLE_TUNING, vehicleDefOf, isDrawnDef, kitVehicle, type MenuIntent,
 } from "@engine/gameplay";
 
 export interface VehicleControlsDeps {
@@ -58,11 +58,17 @@ export function mountVehicleControls(root: HTMLElement, d: VehicleControlsDeps):
     const v = ridden(w, p); const now = v !== undefined;
     if (now !== driving) { driving = now; d.onDrivingChange?.(now); hud.style.display = now ? "flex" : "none"; }
     if (v !== undefined) {
-      const f = vehicleFlagsOf(w, v), eng = (f & VEHICLE_ENGINE_ON) !== 0, li = (f & VEHICLE_HEADLIGHTS) !== 0;
-      hud.dataset["engine"] = eng ? "on" : "off"; hud.dataset["lights"] = li ? "on" : "off";
-      const txt = `Engine ${eng ? "on" : "off"} · Lights ${li ? "on" : "off"}`; if (hud.textContent !== txt) hud.textContent = txt;
-      if (d.input.pressed("Vehicle.Engine")) { d.send(engineIntent(v)); return true; }
-      if (d.input.pressed("Vehicle.Lights")) { d.send(lightsIntent(v)); return true; }
+      // ADR-360: a drawn vehicle has no engine or lights — the chip says nothing true about a wagon, so hide it
+      // and ignore the engine/lights buttons there (Interact still exits). `driving` stays true: the driver steers.
+      const drawn = (() => { try { const d = vehicleDefOf(w, v); return !!d && isDrawnDef(d); } catch { return false; } })();
+      hud.style.display = drawn ? "none" : "flex";
+      if (!drawn) {
+        const f = vehicleFlagsOf(w, v), eng = (f & VEHICLE_ENGINE_ON) !== 0, li = (f & VEHICLE_HEADLIGHTS) !== 0;
+        hud.dataset["engine"] = eng ? "on" : "off"; hud.dataset["lights"] = li ? "on" : "off";
+        const txt = `Engine ${eng ? "on" : "off"} · Lights ${li ? "on" : "off"}`; if (hud.textContent !== txt) hud.textContent = txt;
+        if (d.input.pressed("Vehicle.Engine")) { d.send(engineIntent(v)); return true; }
+        if (d.input.pressed("Vehicle.Lights")) { d.send(lightsIntent(v)); return true; }
+      }
       if (d.input.pressed("Interact")) { d.send(exitIntent()); return true; }
       return false;
     }

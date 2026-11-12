@@ -1,5 +1,5 @@
 {
   "$comment": "ADR-098 vehicle storage scaling by class (Gameplay-owned; vehicles.json stays Engine Architect's). Container slots = clamp(round(storage.slots x scale[class]), 1, max[class]) when storage.slots > 0 (0 stays 0). maxWeight is unchanged from vehicles.json. max <= CONTAINER_MAX_SLOTS (96).",
-  "scale": { "bicycle": 1, "car": 1.5, "van": 2, "truck": 2.5, "camper": 2, "semi": 2, "trailer": 4 },
-  "max": { "bicycle": 6, "car": 18, "van": 40, "truck": 48, "camper": 48, "semi": 16, "trailer": 96 }
+  "scale": { "bicycle": 1, "car": 1.5, "van": 2, "truck": 2.5, "camper": 2, "semi": 2, "trailer": 4, "wagon": 3, "cart": 2, "carriage": 2, "chariot": 1 },
+  "max": { "bicycle": 6, "car": 18, "van": 40, "truck": 48, "camper": 48, "semi": 16, "trailer": 96, "wagon": 72, "cart": 12, "carriage": 24, "chariot": 4 }
 }

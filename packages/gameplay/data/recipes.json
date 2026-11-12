@@ -312,5 +312,6 @@
   ,{"key": "saddle_iron", "station": "anvil", "seconds": 12, "ingredients": [{"item": "iron_ingot", "count": 4}, {"item": "hardened_leather", "count": 3}, {"item": "leather", "count": 2}, {"item": "rope", "count": 2}], "output": {"item": "saddle_iron", "count": 1}}
   ,{"key": "saddle_steel", "station": "anvil", "seconds": 14, "ingredients": [{"item": "steel_ingot", "count": 4}, {"item": "hardened_leather", "count": 4}, {"item": "thread", "count": 4}, {"item": "rope", "count": 2}], "output": {"item": "saddle_steel", "count": 1}}
   ,{"key": "dung_fertilizer", "station": "none", "seconds": 2, "ingredients": [{"item": "dung", "count": 2}, {"item": "fiber", "count": 2}], "output": {"item": "dung_fertilizer", "count": 2}}
+  ,{"key": "harness", "station": "workbench", "seconds": 6, "ingredients": [{"item": "leather", "count": 2}, {"item": "rope", "count": 2}, {"item": "iron_ingot", "count": 1}], "output": {"item": "harness", "count": 1}}
   ]
 }

@@ -29,6 +29,9 @@ export const MANIFEST_INDEX: readonly ManifestFragmentRef[] = [
   // ADR-356: dedicated ore / log / stick / crop / stone store art (atlases painted at runtime by
   // apps/client/src/task355-art.ts; the fragment carries layout only, no PNG files).
   { name: "task355", url: "pack/task355/manifest.task355.json", optional: true },
+  // ADR-361: dedicated drawn-vehicle + harness art (atlases painted at runtime by
+  // apps/client/src/task361-art.ts; the fragment carries layout only, no PNG files).
+  { name: "task361", url: "pack/task361/manifest.task361.json", optional: true },
   // ADR-242: Art's PvP/clan drop (raid fx, clan banners/gates, nameplates, loot beams) and the stalls drop (stall art,
   // sale coins). Both repeat keys the building pack already serves; mergeManifests keeps building's (first wins).
   { name: "pvp_clan", url: "pvp_clan/manifest.fragment.json", optional: true, root: "", stream: true, dropClanPalettes: true },

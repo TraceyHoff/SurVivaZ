@@ -1,0 +1,690 @@
+{
+ "$comment": "ADR-361: dedicated drawn-vehicle + harness art. The atlases have NO image files of their own: their pixels are painted at runtime by apps/client/src/task361-art.ts (software rasterizer -> blob URL, the Task 34 / ADR-356 pattern) and the sources override in view.ts points the registry at those blob URLs, so the image/ktx2 paths below are never fetched. They point at real pack atlases only because the pack test requires every manifest atlas to name a PNG + KTX2 twin that exist on disk. Vehicle layout: one Art-direction row per def (frames [0], dirStride 1, Art order E,SE,S,SW,W,NW,N,NE); medium/large wagons use 4 cols x 2 rows so the atlas stays under the 2048px mobile cap. Harness layout: 8 cols x 1 row of 128px cells, one per direction, shared by every gait frame (frames [0,0,0,0] / [0,0,0,0,0,0]).",
+ "name": "survivaz-task361",
+ "atlases": [
+  {
+   "key": "veh_art_wagon_small",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 217,
+   "frameH": 161,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_wagon_small_covered",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 217,
+   "frameH": 194,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_wagon_medium",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 262,
+   "frameH": 184,
+   "columns": 4,
+   "rows": 2
+  },
+  {
+   "key": "veh_art_wagon_medium_covered",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 262,
+   "frameH": 217,
+   "columns": 4,
+   "rows": 2
+  },
+  {
+   "key": "veh_art_wagon_large",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 307,
+   "frameH": 207,
+   "columns": 4,
+   "rows": 2
+  },
+  {
+   "key": "veh_art_wagon_large_covered",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 307,
+   "frameH": 239,
+   "columns": 4,
+   "rows": 2
+  },
+  {
+   "key": "veh_art_cart",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 180,
+   "frameH": 143,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_carriage",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 244,
+   "frameH": 214,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_chariot",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 171,
+   "frameH": 124,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_harness_horse",
+   "image": "../nature/atlases/nature_mounts_horse_0.png",
+   "ktx2": "../nature/atlases/nature_mounts_horse_0.ktx2",
+   "frameW": 128,
+   "frameH": 128,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_harness_donkey",
+   "image": "../nature/atlases/nature_mounts_horse_0.png",
+   "ktx2": "../nature/atlases/nature_mounts_horse_0.ktx2",
+   "frameW": 128,
+   "frameH": 128,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_harness_deer",
+   "image": "../nature/atlases/nature_mounts_horse_0.png",
+   "ktx2": "../nature/atlases/nature_mounts_horse_0.ktx2",
+   "frameW": 128,
+   "frameH": 128,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_harness_elk",
+   "image": "../nature/atlases/nature_mounts_horse_0.png",
+   "ktx2": "../nature/atlases/nature_mounts_horse_0.ktx2",
+   "frameW": 128,
+   "frameH": 128,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_harness_moose",
+   "image": "../nature/atlases/nature_mounts_horse_0.png",
+   "ktx2": "../nature/atlases/nature_mounts_horse_0.ktx2",
+   "frameW": 128,
+   "frameH": 128,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_harness_bison",
+   "image": "../nature/atlases/nature_mounts_horse_0.png",
+   "ktx2": "../nature/atlases/nature_mounts_horse_0.ktx2",
+   "frameW": 128,
+   "frameH": 128,
+   "columns": 8,
+   "rows": 1
+  },
+  {
+   "key": "veh_art_harness_yak",
+   "image": "../nature/atlases/nature_mounts_horse_0.png",
+   "ktx2": "../nature/atlases/nature_mounts_horse_0.ktx2",
+   "frameW": 128,
+   "frameH": 128,
+   "columns": 8,
+   "rows": 1
+  }
+ ],
+ "sprites": [
+  {
+   "key": "wagon_small",
+   "category": "vehicle",
+   "atlas": "veh_art_wagon_small",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.6522
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    }
+   }
+  },
+  {
+   "key": "wagon_small_covered",
+   "category": "vehicle",
+   "atlas": "veh_art_wagon_small_covered",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.7113
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    }
+   }
+  },
+  {
+   "key": "wagon_medium",
+   "category": "vehicle",
+   "atlas": "veh_art_wagon_medium",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.6359
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    }
+   }
+  },
+  {
+   "key": "wagon_medium_covered",
+   "category": "vehicle",
+   "atlas": "veh_art_wagon_medium_covered",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.6866
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    }
+   }
+  },
+  {
+   "key": "wagon_large",
+   "category": "vehicle",
+   "atlas": "veh_art_wagon_large",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.6184
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    }
+   }
+  },
+  {
+   "key": "wagon_large_covered",
+   "category": "vehicle",
+   "atlas": "veh_art_wagon_large_covered",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.6736
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    }
+   }
+  },
+  {
+   "key": "cart",
+   "category": "vehicle",
+   "atlas": "veh_art_cart",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.6713
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    }
+   }
+  },
+  {
+   "key": "carriage",
+   "category": "vehicle",
+   "atlas": "veh_art_carriage",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.7056
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    }
+   }
+  },
+  {
+   "key": "chariot",
+   "category": "vehicle",
+   "atlas": "veh_art_chariot",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.6452
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    }
+   }
+  },
+  {
+   "key": "mount_harness_horse",
+   "category": "equipment",
+   "atlas": "veh_art_harness_horse",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.9
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "walk": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 8,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "gallop": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 12,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    }
+   }
+  },
+  {
+   "key": "mount_harness_donkey",
+   "category": "equipment",
+   "atlas": "veh_art_harness_donkey",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.9
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "walk": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 8,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "gallop": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 12,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    }
+   }
+  },
+  {
+   "key": "mount_harness_deer",
+   "category": "equipment",
+   "atlas": "veh_art_harness_deer",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.9
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "walk": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 8,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "gallop": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 12,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    }
+   }
+  },
+  {
+   "key": "mount_harness_elk",
+   "category": "equipment",
+   "atlas": "veh_art_harness_elk",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.9
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "walk": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 8,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "gallop": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 12,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    }
+   }
+  },
+  {
+   "key": "mount_harness_moose",
+   "category": "equipment",
+   "atlas": "veh_art_harness_moose",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.9
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "walk": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 8,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "gallop": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 12,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    }
+   }
+  },
+  {
+   "key": "mount_harness_bison",
+   "category": "equipment",
+   "atlas": "veh_art_harness_bison",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.9
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "walk": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 8,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "gallop": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 12,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    }
+   }
+  },
+  {
+   "key": "mount_harness_yak",
+   "category": "equipment",
+   "atlas": "veh_art_harness_yak",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.9
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "walk": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 8,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    },
+    "gallop": {
+     "frames": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "fps": 12,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    }
+   }
+  }
+ ],
+ "version": 1
+}

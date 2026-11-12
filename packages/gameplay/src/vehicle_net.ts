@@ -11,11 +11,11 @@
  *  - vehicleGuardSystem: server-side per-tick vehicle speed / teleport sanity check (reverts the step, reports).
  */
 import { defineResource, NetId, Transform, type Entity, type World } from "@engine/core";
-import { Driver, Hitch, Riding, Vehicle, VehicleSeats } from "./components.js";
+import { Driver, Hitch, Mount, Riding, Vehicle, VehicleSeats } from "./components.js";
 import { mountSpecies } from "./mount_defs.js";
 import { ROADS } from "./roads.js";
 import { isAuthority } from "./config.js";
-import { hitchPoint, vehicleDefOf, VEHICLE_TUNING } from "./vehicles.js";
+import { hitchPoint, mountRearPinPos, mountTowPose, vehicleDefOf, VEHICLE_TUNING } from "./vehicles.js";
 
 // ---- O(1) NetId index ---------------------------------------------------------------------------------
 interface NetIdIndex { map: Map<number, Entity>; dirty: boolean; size: number }
@@ -84,11 +84,20 @@ export function poseTrailersInHitchFrame(world: World): number {
   let posed = 0;
   for (const tr of trailers) {
     const tow = netIdEntity(world, world.getField(tr, Hitch, "parentNetId")!); if (tow === undefined || !world.has(tow, Transform)) continue;
-    const td = vehicleDefOf(world, tow), d = vehicleDefOf(world, tr); if (!td || !d) continue;
-    const tt = world.get(tow, Transform)!; const pin = hitchPoint(td, "rear", tt.x, tt.y, tt.facing);
-    const front = d.hitches.find((h) => h.at === "front"); if (!pin || !front) continue;
+    const d = vehicleDefOf(world, tr); if (!d) continue;
+    const front = d.hitches.find((h) => h.at === "front"); if (!front) continue;
+    // ADR-358: a mount tow pins to the mount's rear pin (rider pose when ridden), not a vehicle rear hitch
+    let pin: { x: number; y: number } | undefined; let towFacing: number;
+    if (world.has(tow, Mount)) {
+      const pose = mountTowPose(world, tow); if (!pose) continue;
+      pin = mountRearPinPos(pose.x, pose.y, pose.facing, pose.species); towFacing = pose.facing;
+    } else {
+      const td = vehicleDefOf(world, tow); if (!td) continue;
+      const tt = world.get(tow, Transform)!; pin = hitchPoint(td, "rear", tt.x, tt.y, tt.facing); towFacing = tt.facing;
+    }
+    if (!pin) continue;
     const t = world.get(tr, Transform)!; let h = t.facing;
-    const rel = wrap(h - tt.facing); if (Math.abs(rel) > VEHICLE_TUNING.maxArticulation) h = wrap(tt.facing + Math.sign(rel) * VEHICLE_TUNING.maxArticulation);
+    const rel = wrap(h - towFacing); if (Math.abs(rel) > VEHICLE_TUNING.maxArticulation) h = wrap(towFacing + Math.sign(rel) * VEHICLE_TUNING.maxArticulation);
     const x = pin.x - Math.cos(h) * front.offset, y = pin.y - Math.sin(h) * front.offset;
     if (x !== t.x || y !== t.y || h !== t.facing) { world.set(tr, Transform, { x, y, facing: h }); posed++; }
   }

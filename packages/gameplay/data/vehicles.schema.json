@@ -45,7 +45,11 @@
        "van",
        "camper",
        "semi",
-       "trailer"
+       "trailer",
+       "wagon",
+       "cart",
+       "carriage",
+       "chariot"
       ]
      },
      "size": {
@@ -209,7 +213,11 @@
            "van",
            "camper",
            "semi",
-           "trailer"
+           "trailer",
+           "wagon",
+           "cart",
+           "carriage",
+           "chariot"
           ]
          }
         },
@@ -277,6 +285,25 @@
        "radius": {
         "type": "number",
         "exclusiveMinimum": 0
+       }
+      }
+     },
+     "covered": {
+      "type": "boolean",
+      "description": "ADR-358: canvas cover on a wagon (same footprint as its uncovered twin). Only class wagon may set it true."
+     },
+     "drawn": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "pullMul"
+      ],
+      "description": "ADR-358: animal-drawn vehicles only. pullMul multiplies the pulling mount's current gait speed (walk/gallop); the result is capped by maxSpeed.",
+      "properties": {
+       "pullMul": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 2
        }
       }
      }

@@ -15,10 +15,13 @@
  * - Saddles: a saddle item (tiers 1-4) goes on with MountSaddleCmd and opens a saddlebag (the mount's own Container,
  *   3 / 5 / 7 / 9 slots) through the normal container UI (OpenContainer intent; ADR-303). Defense counts for rider and
  *   mount (arms.ts armorOf). Durability wears with damage taken and is repaired with MountRepairCmd (ADR-310 style).
+ * - Harness (ADR-359): a harness item goes on with MountHarnessCmd and stays until MountUnharnessCmd takes it off
+ *   (refused while the mount tows a drawn vehicle — detach first). Only a harnessed mount may hitch a drawn vehicle
+ *   (validateHitch "no_harness"); the harness itself is tack, not armor: no defense, no durability, no repair.
  */
 import { DEFAULT_TICK_HZ, entityIndex, NetId, Transform, type CommandHandlers, type Entity, type World } from "@engine/core";
 import {
-  Anim, AnimState, Animal, Container, ContainerViewers, Dead, Driver, Health, IntentAction, LootBag, Mount, MOUNT_NAME_MAX, MountHunger, MountTaming, Pet, PlayerIntent,
+  Anim, AnimState, Animal, Container, ContainerViewers, Dead, Driver, Health, Hitch, IntentAction, LootBag, Mount, MOUNT_NAME_MAX, MountHarness, MountHunger, MountTaming, Pet, PlayerIntent,
   Riding, Tamed, Viewing,
 } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
@@ -36,17 +39,17 @@ import { LootSource, tagLootSource } from "./loot_labels.js";
 import { lootBagInit } from "./loot_despawn.js";
 import { indexEntity } from "./spawn.js";
 import {
-  canOpenSaddlebag, foodPref, mayUseMount, mountDiet, mountOfRider, mountOwnerIdFor, mountSpecies, mountSpeciesOfAnimal, MOUNT_TUNING as T,
+  canOpenSaddlebag, foodPref, harnessItemOf, isHarnessed, isHarnessItem, mayUseMount, mountDiet, mountOfRider, mountOwnerIdFor, mountSpecies, mountSpeciesOfAnimal, MOUNT_TUNING as T,
   saddleOfItemKey, saddleOfTier, saddleSlots,
 } from "./mount_defs.js";
 import { feedingTroughs, mayEatFromTrough, troughDietItem } from "./skills/husbandry.js";
-import { MountDismountCmd, MountFeedCmd, MountRenameCmd, MountRepairCmd, MountRideCmd, MountSaddleCmd, MountUnsaddleCmd } from "./mount_commands.js";
+import { MountDismountCmd, MountFeedCmd, MountHarnessCmd, MountRenameCmd, MountRepairCmd, MountRideCmd, MountSaddleCmd, MountUnharnessCmd, MountUnsaddleCmd } from "./mount_commands.js";
 
 /** Skill-tree token that allows taming / riding (Horsemanship node, husbandry branch). */
 export const MOUNT_TAME_TOKEN = "mount:tame";
 export const enum MountResult {
   Progress = 1, Tamed = 2, Spooked = 3, Kicked = 4, Fed = 5, Mounted = 6, Dismounted = 7, Saddled = 8, Unsaddled = 9,
-  Repaired = 10, Blocked = 11, Died = 12, Renamed = 13, Refused = 14,
+  Repaired = 10, Blocked = 11, Died = 12, Renamed = 13, Refused = 14, Harnessed = 15, Unharnessed = 16,
 }
 /** Feedback for the acting player (toasts / panel refresh); value = progress %, item id or a blocked IntentAction. */
 export const MountEvent = ev<{ entity: Entity; mount: Entity; result: MountResult; value: number }>("gameplay.MountEvent");
@@ -139,6 +142,7 @@ export function tameMount(world: World, tamer: Entity, target: Entity): Entity {
   if (world.has(target, MountTaming)) world.remove(target, MountTaming);
   const hp = spec.hp; const t = world.get(target, Transform);
   world.add(target, Mount, { species: sp, kind: world.getField(target, Animal, "kind") ?? 0, owner: mountOwnerIdFor(world, tamer), tribe: tribeOf(world, tamer), hp });
+  if (!world.has(target, Hitch)) world.add(target, Hitch); // ADR-358: a mount tows drawn vehicles through Hitch
   world.set(target, Health, { hp, max: hp });
   feedMountHunger(world, target); // ADR-353: a tame is completed by feeding, so the new mount starts fed
   if (t) world.set(target, Animal, { state: AnimalState.Idle, homeX: t.x, homeY: t.y, goalX: t.x, goalY: t.y });
@@ -151,6 +155,7 @@ export function makeMount(world: World, animalKey: string, x: number, y: number,
   const e = world.create();
   world.add(e, Transform, { x, y }).add(e, Health, { hp: spec.hp, max: spec.hp }).add(e, Animal, { kind, homeX: x, homeY: y, goalX: x, goalY: y, thinkAt: world.tick })
     .add(e, AnimState, { anim: Anim.Idle, startTick: world.tick })
+    .add(e, Hitch) // ADR-358: a mount tows drawn vehicles through Hitch
     .add(e, Mount, { species: sp, kind, owner: owner ? mountOwnerIdFor(world, owner) : 0, tribe: owner ? tribeOf(world, owner) : 0, hp: spec.hp });
   feedMountHunger(world, e); // ADR-353: a spawned mount starts fed
   ensureBag(world, e); indexEntity(world, e); return e;
@@ -279,6 +284,48 @@ export function repairSaddle(world: World, actor: Entity, m: Entity): boolean {
   world.set(m, Mount, { saddleDur: max }); awardXp(world, actor, "repair");
   emit(world, MountEvent, { entity: actor, mount: m, result: MountResult.Repaired, value: max }); return true;
 }
+
+// ---- harness (ADR-359) --------------------------------------------------------------------------------------
+export function checkHarness(world: World, actor: Entity, m: Entity, slot: number): string | undefined {
+  if (!world.isAlive(m) || !world.has(m, Mount) || world.has(m, Dead)) return "not_mount";
+  if (!mayUseMount(world, actor, m)) return "not_owner";
+  if (!near(world, actor, m, reach)) return "too_far";
+  const v = readSlots(world, actor); if (slot >= v.slotCount || !v.count(slot)) return "no_item";
+  if (!isHarnessItem(world, v.item(slot))) return "not_harness";
+  const cur = harnessItemOf(world, m);
+  if (cur && !canReturnItem(world, actor, cur, slot, v.item(slot))) return "no_room"; // swapping needs room for the old harness
+  return undefined;
+}
+/** Puts the harness in inventory `slot` on mount `m` (swaps the old one back into the pack). Not a consumable:
+ *  the harness stays on the mount until MountUnharnessCmd takes it off. */
+export function harnessMount(world: World, actor: Entity, m: Entity, slot: number): boolean {
+  if (!isAuthority(world) || checkHarness(world, actor, m, slot)) return false;
+  const v = readSlots(world, actor); const item = v.item(slot);
+  if (takeFromSlot(world, actor, slot) !== item) return false;
+  const old = harnessItemOf(world, m); if (old) giveSaddleBack(world, actor, old, 0);
+  if (world.has(m, MountHarness)) world.set(m, MountHarness, { item }); else world.add(m, MountHarness, { item });
+  emit(world, MountEvent, { entity: actor, mount: m, result: MountResult.Harnessed, value: item }); return true;
+}
+export function checkUnharness(world: World, actor: Entity, m: Entity): string | undefined {
+  if (!world.isAlive(m) || !world.has(m, Mount)) return "not_mount";
+  if (!mayUseMount(world, actor, m)) return "not_owner";
+  if (!near(world, actor, m, reach)) return "too_far";
+  if (!isHarnessed(world, m)) return "no_harness";
+  if ((world.getField(m, Hitch, "towNetId") ?? 0) !== 0) return "hitched"; // the harness is the link: detach the vehicle first
+  if (slotsCanAdd(readSlots(world, actor), harnessItemOf(world, m), 1, gameplayDefs(world)) < 1) return "no_room";
+  return undefined;
+}
+export function unharnessMount(world: World, actor: Entity, m: Entity): boolean {
+  if (!isAuthority(world) || checkUnharness(world, actor, m)) return false;
+  const item = harnessItemOf(world, m); if (!giveSaddleBack(world, actor, item, 0)) return false;
+  world.remove(m, MountHarness);
+  emit(world, MountEvent, { entity: actor, mount: m, result: MountResult.Unharnessed, value: 0 }); return true;
+}
+/** Harness instance info for UI / tests (undefined when bare). */
+export function harnessInfo(world: World, m: Entity): { item: number; name: string } | undefined {
+  const item = harnessItemOf(world, m); if (!item) return undefined;
+  return { item, name: gameplayDefs(world).items.get(item)?.name ?? "Harness" };
+}
 // ---- names ----------------------------------------------------------------------------------------------------
 export const sanitizeMountName = (s: string): string => s.replace(/[^\x20-\x7e]/g, "").trim().slice(0, MOUNT_NAME_MAX);
 export function mountName(world: World, m: Entity): string {
@@ -302,6 +349,8 @@ export function installMountCommands(world: World, handlers: CommandHandlers): v
   handlers.on(MountDismountCmd, { validate: (_v, c) => (isRiding(world, c.actor) ? undefined : "not_riding"), handle: (_v, c) => { dismount(world, c.actor); } });
   handlers.on(MountSaddleCmd, { validate: (v, c) => checkSaddle(world, c.actor, t(v.target), v.slot), handle: (v, c) => { saddleMount(world, c.actor, t(v.target), v.slot); } });
   handlers.on(MountUnsaddleCmd, { validate: (v, c) => checkUnsaddle(world, c.actor, t(v.target)), handle: (v, c) => { unsaddleMount(world, c.actor, t(v.target)); } });
+  handlers.on(MountHarnessCmd, { validate: (v, c) => checkHarness(world, c.actor, t(v.target), v.slot), handle: (v, c) => { harnessMount(world, c.actor, t(v.target), v.slot); } });
+  handlers.on(MountUnharnessCmd, { validate: (v, c) => checkUnharness(world, c.actor, t(v.target)), handle: (v, c) => { unharnessMount(world, c.actor, t(v.target)); } });
   handlers.on(MountRepairCmd, { validate: (v, c) => checkRepair(world, c.actor, t(v.target)), handle: (v, c) => { repairSaddle(world, c.actor, t(v.target)); } });
   handlers.on(MountRenameCmd, {
     validate: (v, c) => { const m = t(v.target); if (!world.isAlive(m) || !world.has(m, Mount)) return "not_mount"; const o = world.getField(m, Mount, "owner") ?? 0; return o && mountOwnerIdFor(world, c.actor) !== o ? "not_owner" : undefined; },
@@ -394,20 +443,23 @@ export function mountSystem(world: World, dt: number): void {
     const progress = tm.progress - T.tameDecayPerSecond * dt; if (progress <= 0) world.remove(e, MountTaming); else world.set(e, MountTaming, { progress });
   }
 }
-/** Dead mount: rider off, saddle + saddlebag into an owner-tagged bag, then it is an ordinary animal corpse (meat drops). */
+/** Dead mount: rider off, saddle + harness + saddlebag into an owner-tagged bag, then it is an ordinary animal corpse (meat drops). */
 function mountDied(world: World, m: Entity): void {
   const mm = world.get(m, Mount)!; const rider = liveRider(world, m); if (rider !== undefined) dismount(world, rider, true);
   const t = world.get(m, Transform)!; const slots = listSlots(world, m);
-  if (mm.saddle || slots.length) {
+  const harness = harnessItemOf(world, m);
+  if (mm.saddle || harness || slots.length) {
     const bag = world.create();
-    world.add(bag, Transform, { x: t.x, y: t.y, z: t.z }).add(bag, Container, { slotCount: Math.max(1, slots.length + (mm.saddle ? 1 : 0)) }).add(bag, ContainerViewers)
+    world.add(bag, Transform, { x: t.x, y: t.y, z: t.z }).add(bag, Container, { slotCount: Math.max(1, slots.length + (mm.saddle ? 1 : 0) + (harness ? 1 : 0)) }).add(bag, ContainerViewers)
       .add(bag, LootBag, lootBagInit(world, mm.owner, "petDeath", LootSource.Death));
     if (slots.length) moveSlotTuples(world, m, bag, slots.map((s) => ({ slot: s.slot, count: s.count })));
     if (mm.saddle && mm.saddleItem) { const defs = gameplayDefs(world); const v = readSlots(world, bag); slotsAdd(v, mm.saddleItem, 1, defs, world.tick, mm.saddleDur); writeSlots(world, bag, v, defs); }
+    if (harness) { const defs = gameplayDefs(world); const v = readSlots(world, bag); slotsAdd(v, harness, 1, defs, world.tick, 0); writeSlots(world, bag, v, defs); } // ADR-359: the harness drops with the saddle
     tagLootSource(world, bag, LootSource.Death); indexEntity(world, bag);
   }
   for (const v of world.query([Viewing])) if (world.getField(v, Viewing, "container") === m) closeContainer(world, v);
   world.remove(m, Mount); if (world.has(m, Container)) world.remove(m, Container);
+  if (world.has(m, MountHarness)) world.remove(m, MountHarness);
   emit(world, MountEvent, { entity: 0 as Entity, mount: m, result: MountResult.Died, value: mm.species });
 }
 /** Disconnect hook (server): the rider gets off; the mount stays where it is. */
@@ -418,7 +470,7 @@ export function saddleInfo(world: World, m: Entity): { tier: number; item: numbe
   const max = gameplayDefs(world).items.get(mm.saddleItem)?.maxDurability || sd.durability;
   return { tier: mm.saddle, item: mm.saddleItem, dur: mm.saddleDur, max, slots: sd.slots, defense: mm.saddleDur > 0 ? sd.defense : 0 };
 }
-export { canOpenSaddlebag, mayUseMount };
+export { canOpenSaddlebag, mayUseMount, isHarnessed };
 /** First give-up helper for AI: count of a food this species likes in `e`'s inventory (best preference first). */
 export function bestMountFood(world: World, e: Entity, species: number): number {
   const spec = mountSpecies(species); if (!spec) return 0; const defs = gameplayDefs(world);

@@ -19,7 +19,7 @@ import { MAP_MARKER_COMMANDS, MAP_MARKER_ENTITY_FIELDS } from "./map_marker_comm
 import { READY_COMMANDS } from "./ready.js";
 import { PARTY_COMMANDS } from "./party.js";
 import { CLAN_COMMANDS, ClanDeclineCmd } from "./clan.js";
-import { CommandRegistry, defineActions, defineCommand, defineResource, type Command, type CommandDef, type Entity, type InputFrame, type World } from "@engine/core";
+import { CommandRegistry, DEFAULT_TICK_HZ, defineActions, defineCommand, defineResource, type Command, type CommandDef, type Entity, type InputFrame, type World } from "@engine/core";
 import { Driver, IntentAction, PlayerIntent } from "./components.js";
 import { CUSTOMIZATION_COMMANDS } from "./customization.js";
 import { PVP_COMMANDS } from "./combat/pvp.js";
@@ -31,6 +31,7 @@ import { driveFromBits, setDriveInput, VEHICLE_COMMANDS, VEHICLE_STATE_COMMANDS,
 import { MOUNT_COMMANDS } from "./mount_commands.js";
 import { ROPE_COMMANDS, ROPE_ENTITY_FIELDS } from "./rope_commands.js";
 import { analogMoving, GameplayEdgeBits, GameplayHoldBits, hotbarSlotFromEdges, runInputHooks } from "./input_hooks.js";
+import { DrawnDriveRes } from "./systems/movement.js";
 import { HOTBAR_OFFSET } from "./components.js";
 import { ECONOMY_COMMAND_RATES, ECONOMY_COMMANDS, ECONOMY_ENTITY_FIELDS } from "./economy/stall.js";
 
@@ -170,6 +171,9 @@ export function applyGameplayInput(world: World, e: Entity, frame: InputFrame | 
     autoSprintReady(world, e, 0, 0, 0);
     const b = driveFromBits(actions); const analog = analogMoving(frame);
     setDriveInput(world, e, analog ? frame!.moveX! : b.x, analog ? frame!.moveY! : b.y, (actions & GameplayActions.Sprint) !== 0);
+    // ADR-360: a wagon driver steers the pulling mount through the same hook applyMovementInput uses (the frame
+    // path has no dt of its own; one tick at the fixed rate, like the step that follows it).
+    if (frame) world.getResource(DrawnDriveRes)?.(world, e, actions, 1 / DEFAULT_TICK_HZ, analog ? { x: frame.moveX, y: frame.moveY } : undefined);
     world.set(e, PlayerIntent, { moving: 0, sprint: 0, charge: 0 });
   } else world.set(e, PlayerIntent, { moving: actions & MOVE || analogMoving(frame) ? 1 : 0, sprint: 0, charge: actions & GameplayHoldBits.Charge ? 1 : 0 });
   for (const c of frame?.commands ?? []) queueCommand(world, e, reg, c);

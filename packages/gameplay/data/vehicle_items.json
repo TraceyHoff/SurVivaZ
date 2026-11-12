@@ -324,6 +324,30 @@
       }
     },
     {
+      "key": "wooden_wheel",
+      "sprite": "item_wooden_wheel",
+      "name": "Wooden Wheel",
+      "category": "resource",
+      "maxStack": 8,
+      "weight": 12
+    },
+    {
+      "key": "canvas_cover",
+      "sprite": "item_canvas_cover",
+      "name": "Canvas Cover",
+      "category": "resource",
+      "maxStack": 4,
+      "weight": 6
+    },
+    {
+      "key": "wagon_frame",
+      "sprite": "item_wagon_frame",
+      "name": "Wagon Frame",
+      "category": "resource",
+      "maxStack": 2,
+      "weight": 60
+    },
+    {
       "key": "vehicle_kit_bike_basic",
       "sprite": "item_vehicle_kit_bike_basic",
       "name": "Bike Basic Kit",
@@ -588,6 +612,87 @@
       "key": "vehicle_kit_semi_trailer_flatbed",
       "sprite": "item_vehicle_kit_semi_trailer_flatbed",
       "name": "Semi Trailer Flatbed Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_wagon_small",
+      "sprite": "item_vehicle_kit_wagon_small",
+      "name": "Wagon Small Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_wagon_small_covered",
+      "sprite": "item_vehicle_kit_wagon_small_covered",
+      "name": "Covered Wagon Small Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_wagon_medium",
+      "sprite": "item_vehicle_kit_wagon_medium",
+      "name": "Wagon Medium Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_wagon_medium_covered",
+      "sprite": "item_vehicle_kit_wagon_medium_covered",
+      "name": "Covered Wagon Medium Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_wagon_large",
+      "sprite": "item_vehicle_kit_wagon_large",
+      "name": "Wagon Large Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_wagon_large_covered",
+      "sprite": "item_vehicle_kit_wagon_large_covered",
+      "name": "Covered Wagon Large Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_cart",
+      "sprite": "item_vehicle_kit_cart",
+      "name": "Cart Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_carriage",
+      "sprite": "item_vehicle_kit_carriage",
+      "name": "Carriage Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_chariot",
+      "sprite": "item_vehicle_kit_chariot",
+      "name": "Chariot Kit",
       "category": "placeable",
       "maxStack": 1,
       "weight": 8,

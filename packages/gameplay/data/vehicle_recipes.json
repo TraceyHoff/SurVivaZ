@@ -920,6 +920,174 @@
         { "item": "body_panel", "count": 12 }
       ],
       "output": { "item": "vehicle_kit_semi_trailer_flatbed", "count": 1 }
+    },
+    {
+      "key": "wooden_wheel",
+      "station": "workbench",
+      "seconds": 4,
+      "ingredients": [
+        { "item": "planks", "count": 2 },
+        { "item": "iron_ingot", "count": 1 }
+      ],
+      "output": { "item": "wooden_wheel", "count": 1 }
+    },
+    {
+      "key": "canvas_cover",
+      "station": "workbench",
+      "seconds": 5,
+      "ingredients": [
+        { "item": "cloth", "count": 4 },
+        { "item": "rope", "count": 1 }
+      ],
+      "output": { "item": "canvas_cover", "count": 1 }
+    },
+    {
+      "key": "wagon_frame",
+      "station": "workbench",
+      "seconds": 10,
+      "ingredients": [
+        { "item": "planks", "count": 6 },
+        { "item": "iron_ingot", "count": 2 },
+        { "item": "nails", "count": 4 }
+      ],
+      "output": { "item": "wagon_frame", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_cart",
+      "station": "workbench",
+      "seconds": 40,
+      "ingredients": [
+        { "item": "planks", "count": 6 },
+        { "item": "wooden_wheel", "count": 2 },
+        { "item": "axle", "count": 1 },
+        { "item": "seat", "count": 1 },
+        { "item": "hitch_coupler", "count": 1 },
+        { "item": "rope", "count": 1 }
+      ],
+      "output": { "item": "vehicle_kit_cart", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_chariot",
+      "station": "workbench",
+      "seconds": 50,
+      "ingredients": [
+        { "item": "wooden_wheel", "count": 2 },
+        { "item": "axle", "count": 1 },
+        { "item": "seat", "count": 1 },
+        { "item": "hitch_coupler", "count": 1 },
+        { "item": "planks", "count": 4 },
+        { "item": "iron_ingot", "count": 2 },
+        { "item": "rope", "count": 1 }
+      ],
+      "output": { "item": "vehicle_kit_chariot", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_wagon_small",
+      "station": "workbench",
+      "seconds": 60,
+      "ingredients": [
+        { "item": "wagon_frame", "count": 1 },
+        { "item": "wooden_wheel", "count": 2 },
+        { "item": "axle", "count": 1 },
+        { "item": "seat", "count": 1 },
+        { "item": "hitch_coupler", "count": 1 },
+        { "item": "rope", "count": 2 },
+        { "item": "planks", "count": 4 }
+      ],
+      "output": { "item": "vehicle_kit_wagon_small", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_wagon_small_covered",
+      "station": "workbench",
+      "seconds": 70,
+      "ingredients": [
+        { "item": "wagon_frame", "count": 1 },
+        { "item": "wooden_wheel", "count": 2 },
+        { "item": "axle", "count": 1 },
+        { "item": "seat", "count": 1 },
+        { "item": "hitch_coupler", "count": 1 },
+        { "item": "rope", "count": 2 },
+        { "item": "planks", "count": 4 },
+        { "item": "canvas_cover", "count": 1 }
+      ],
+      "output": { "item": "vehicle_kit_wagon_small_covered", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_wagon_medium",
+      "station": "workbench",
+      "seconds": 80,
+      "ingredients": [
+        { "item": "wagon_frame", "count": 1 },
+        { "item": "wooden_wheel", "count": 4 },
+        { "item": "axle", "count": 2 },
+        { "item": "seat", "count": 1 },
+        { "item": "hitch_coupler", "count": 1 },
+        { "item": "rope", "count": 2 },
+        { "item": "planks", "count": 4 }
+      ],
+      "output": { "item": "vehicle_kit_wagon_medium", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_wagon_medium_covered",
+      "station": "workbench",
+      "seconds": 90,
+      "ingredients": [
+        { "item": "wagon_frame", "count": 1 },
+        { "item": "wooden_wheel", "count": 4 },
+        { "item": "axle", "count": 2 },
+        { "item": "seat", "count": 1 },
+        { "item": "hitch_coupler", "count": 1 },
+        { "item": "rope", "count": 2 },
+        { "item": "planks", "count": 4 },
+        { "item": "canvas_cover", "count": 1 }
+      ],
+      "output": { "item": "vehicle_kit_wagon_medium_covered", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_wagon_large",
+      "station": "workbench",
+      "seconds": 100,
+      "ingredients": [
+        { "item": "wagon_frame", "count": 2 },
+        { "item": "wooden_wheel", "count": 4 },
+        { "item": "axle", "count": 2 },
+        { "item": "seat", "count": 1 },
+        { "item": "hitch_coupler", "count": 1 },
+        { "item": "rope", "count": 2 },
+        { "item": "planks", "count": 8 }
+      ],
+      "output": { "item": "vehicle_kit_wagon_large", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_wagon_large_covered",
+      "station": "workbench",
+      "seconds": 110,
+      "ingredients": [
+        { "item": "wagon_frame", "count": 2 },
+        { "item": "wooden_wheel", "count": 4 },
+        { "item": "axle", "count": 2 },
+        { "item": "seat", "count": 1 },
+        { "item": "hitch_coupler", "count": 1 },
+        { "item": "rope", "count": 2 },
+        { "item": "planks", "count": 8 },
+        { "item": "canvas_cover", "count": 1 }
+      ],
+      "output": { "item": "vehicle_kit_wagon_large_covered", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_carriage",
+      "station": "workbench",
+      "seconds": 120,
+      "ingredients": [
+        { "item": "wagon_frame", "count": 2 },
+        { "item": "wooden_wheel", "count": 4 },
+        { "item": "axle", "count": 2 },
+        { "item": "seat", "count": 4 },
+        { "item": "hitch_coupler", "count": 1 },
+        { "item": "cloth", "count": 6 },
+        { "item": "planks", "count": 6 }
+      ],
+      "output": { "item": "vehicle_kit_carriage", "count": 1 }
     }
   ]
 }

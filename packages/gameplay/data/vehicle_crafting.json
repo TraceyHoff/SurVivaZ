@@ -134,6 +134,17 @@
           "trailer"
         ],
         "wreckOk": true
+      },
+      "wooden_wheel": {
+        "field": 0.1,
+        "garage": 0.3,
+        "classes": [
+          "wagon",
+          "cart",
+          "carriage",
+          "chariot"
+        ],
+        "wreckOk": true
       }
     },
     "wearPerField": 0.05
@@ -257,6 +268,42 @@
     },
     "semi_trailer_flatbed": {
       "kit": "vehicle_kit_semi_trailer_flatbed",
+      "fuel": "none"
+    },
+    "wagon_small": {
+      "kit": "vehicle_kit_wagon_small",
+      "fuel": "none"
+    },
+    "wagon_small_covered": {
+      "kit": "vehicle_kit_wagon_small_covered",
+      "fuel": "none"
+    },
+    "wagon_medium": {
+      "kit": "vehicle_kit_wagon_medium",
+      "fuel": "none"
+    },
+    "wagon_medium_covered": {
+      "kit": "vehicle_kit_wagon_medium_covered",
+      "fuel": "none"
+    },
+    "wagon_large": {
+      "kit": "vehicle_kit_wagon_large",
+      "fuel": "none"
+    },
+    "wagon_large_covered": {
+      "kit": "vehicle_kit_wagon_large_covered",
+      "fuel": "none"
+    },
+    "cart": {
+      "kit": "vehicle_kit_cart",
+      "fuel": "none"
+    },
+    "carriage": {
+      "kit": "vehicle_kit_carriage",
+      "fuel": "none"
+    },
+    "chariot": {
+      "kit": "vehicle_kit_chariot",
       "fuel": "none"
     }
   },

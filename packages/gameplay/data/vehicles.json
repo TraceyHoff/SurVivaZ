@@ -1550,6 +1550,526 @@
    "collider": {
     "radius": 1.25
    }
+  },
+  {
+   "id": "wagon_small",
+   "class": "wagon",
+   "size": "s",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 1.0,
+     "y": 0.35,
+     "z": 0.3
+    },
+    {
+     "x": 1.0,
+     "y": -0.35,
+     "z": 0.3
+    }
+   ],
+   "mass": 350,
+   "maxSpeed": 6.0,
+   "accel": 0,
+   "brake": 0,
+   "turn": 1.2,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": null,
+   "health": 250,
+   "storage": {
+    "slots": 10,
+    "maxWeight": 400
+   },
+   "hitches": [
+    {
+     "at": "front",
+     "offset": 1.9,
+     "accepts": [],
+     "anchor": {
+      "x": 1.9,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 2.6,
+    "width": 1.4
+   },
+   "collider": {
+    "radius": 0.75
+   },
+   "covered": false,
+   "drawn": {
+    "pullMul": 0.7
+   }
+  },
+  {
+   "id": "wagon_small_covered",
+   "class": "wagon",
+   "size": "s",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 1.0,
+     "y": 0.35,
+     "z": 0.3
+    },
+    {
+     "x": 1.0,
+     "y": -0.35,
+     "z": 0.3
+    }
+   ],
+   "mass": 380,
+   "maxSpeed": 6.0,
+   "accel": 0,
+   "brake": 0,
+   "turn": 1.2,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": null,
+   "health": 250,
+   "storage": {
+    "slots": 10,
+    "maxWeight": 400
+   },
+   "hitches": [
+    {
+     "at": "front",
+     "offset": 1.9,
+     "accepts": [],
+     "anchor": {
+      "x": 1.9,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 2.6,
+    "width": 1.4
+   },
+   "collider": {
+    "radius": 0.75
+   },
+   "covered": true,
+   "drawn": {
+    "pullMul": 0.7
+   }
+  },
+  {
+   "id": "wagon_medium",
+   "class": "wagon",
+   "size": "m",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 1.4,
+     "y": 0.4,
+     "z": 0.3
+    },
+    {
+     "x": 1.4,
+     "y": -0.4,
+     "z": 0.3
+    }
+   ],
+   "mass": 550,
+   "maxSpeed": 5.5,
+   "accel": 0,
+   "brake": 0,
+   "turn": 1.0,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": null,
+   "health": 350,
+   "storage": {
+    "slots": 14,
+    "maxWeight": 800
+   },
+   "hitches": [
+    {
+     "at": "front",
+     "offset": 2.4,
+     "accepts": [],
+     "anchor": {
+      "x": 2.4,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 3.6,
+    "width": 1.6
+   },
+   "collider": {
+    "radius": 1.0
+   },
+   "covered": false,
+   "drawn": {
+    "pullMul": 0.62
+   }
+  },
+  {
+   "id": "wagon_medium_covered",
+   "class": "wagon",
+   "size": "m",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 1.4,
+     "y": 0.4,
+     "z": 0.3
+    },
+    {
+     "x": 1.4,
+     "y": -0.4,
+     "z": 0.3
+    }
+   ],
+   "mass": 590,
+   "maxSpeed": 5.5,
+   "accel": 0,
+   "brake": 0,
+   "turn": 1.0,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": null,
+   "health": 350,
+   "storage": {
+    "slots": 14,
+    "maxWeight": 800
+   },
+   "hitches": [
+    {
+     "at": "front",
+     "offset": 2.4,
+     "accepts": [],
+     "anchor": {
+      "x": 2.4,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 3.6,
+    "width": 1.6
+   },
+   "collider": {
+    "radius": 1.0
+   },
+   "covered": true,
+   "drawn": {
+    "pullMul": 0.62
+   }
+  },
+  {
+   "id": "wagon_large",
+   "class": "wagon",
+   "size": "l",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 1.8,
+     "y": 0.45,
+     "z": 0.3
+    },
+    {
+     "x": 1.8,
+     "y": -0.45,
+     "z": 0.3
+    }
+   ],
+   "mass": 800,
+   "maxSpeed": 5.0,
+   "accel": 0,
+   "brake": 0,
+   "turn": 0.8,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": null,
+   "health": 450,
+   "storage": {
+    "slots": 18,
+    "maxWeight": 1200
+   },
+   "hitches": [
+    {
+     "at": "front",
+     "offset": 2.9,
+     "accepts": [],
+     "anchor": {
+      "x": 2.9,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 4.6,
+    "width": 1.8
+   },
+   "collider": {
+    "radius": 1.15
+   },
+   "covered": false,
+   "drawn": {
+    "pullMul": 0.55
+   }
+  },
+  {
+   "id": "wagon_large_covered",
+   "class": "wagon",
+   "size": "l",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 1.8,
+     "y": 0.45,
+     "z": 0.3
+    },
+    {
+     "x": 1.8,
+     "y": -0.45,
+     "z": 0.3
+    }
+   ],
+   "mass": 850,
+   "maxSpeed": 5.0,
+   "accel": 0,
+   "brake": 0,
+   "turn": 0.8,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": null,
+   "health": 450,
+   "storage": {
+    "slots": 18,
+    "maxWeight": 1200
+   },
+   "hitches": [
+    {
+     "at": "front",
+     "offset": 2.9,
+     "accepts": [],
+     "anchor": {
+      "x": 2.9,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 4.6,
+    "width": 1.8
+   },
+   "collider": {
+    "radius": 1.15
+   },
+   "covered": true,
+   "drawn": {
+    "pullMul": 0.55
+   }
+  },
+  {
+   "id": "cart",
+   "class": "cart",
+   "size": "s",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 0.5,
+     "y": 0.3,
+     "z": 0.3
+    },
+    {
+     "x": 0.5,
+     "y": -0.3,
+     "z": 0.3
+    }
+   ],
+   "mass": 180,
+   "maxSpeed": 6.5,
+   "accel": 0,
+   "brake": 0,
+   "turn": 2.0,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": null,
+   "health": 180,
+   "storage": {
+    "slots": 4,
+    "maxWeight": 120
+   },
+   "hitches": [
+    {
+     "at": "front",
+     "offset": 1.5,
+     "accepts": [],
+     "anchor": {
+      "x": 1.5,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 1.8,
+    "width": 1.2
+   },
+   "collider": {
+    "radius": 0.55
+   },
+   "drawn": {
+    "pullMul": 0.9
+   }
+  },
+  {
+   "id": "carriage",
+   "class": "carriage",
+   "size": "m",
+   "seats": 4,
+   "seatAnchors": [
+    {
+     "x": 1.2,
+     "y": 0.35,
+     "z": 0.35
+    },
+    {
+     "x": 1.2,
+     "y": -0.35,
+     "z": 0.35
+    },
+    {
+     "x": -0.4,
+     "y": 0.35,
+     "z": 0.3
+    },
+    {
+     "x": -0.4,
+     "y": -0.35,
+     "z": 0.3
+    }
+   ],
+   "mass": 700,
+   "maxSpeed": 6.0,
+   "accel": 0,
+   "brake": 0,
+   "turn": 1.1,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": null,
+   "health": 300,
+   "storage": {
+    "slots": 8,
+    "maxWeight": 250
+   },
+   "hitches": [
+    {
+     "at": "front",
+     "offset": 2.2,
+     "accepts": [],
+     "anchor": {
+      "x": 2.2,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 3.2,
+    "width": 1.6
+   },
+   "collider": {
+    "radius": 0.9
+   },
+   "drawn": {
+    "pullMul": 0.65
+   }
+  },
+  {
+   "id": "chariot",
+   "class": "chariot",
+   "size": "xs",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 0.3,
+     "y": 0.3,
+     "z": 0.3
+    },
+    {
+     "x": 0.3,
+     "y": -0.3,
+     "z": 0.3
+    }
+   ],
+   "mass": 120,
+   "maxSpeed": 11.5,
+   "accel": 0,
+   "brake": 0,
+   "turn": 2.6,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": null,
+   "health": 150,
+   "storage": {
+    "slots": 2,
+    "maxWeight": 40
+   },
+   "hitches": [
+    {
+     "at": "front",
+     "offset": 1.4,
+     "accepts": [],
+     "anchor": {
+      "x": 1.4,
+      "y": 0,
+      "z": 0
+     }
+    }
+   ],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 1.6,
+    "width": 1.1
+   },
+   "collider": {
+    "radius": 0.5
+   },
+   "drawn": {
+    "pullMul": 1.2
+   }
   }
  ]
 }

@@ -6,6 +6,9 @@
  *  - MountSaddleCmd: put the saddle in inventory `slot` on `target` (swap allowed when the bag contents fit).
  *  - MountUnsaddleCmd: take the saddle off (only with an empty saddlebag). MountRepairCmd: repair the equipped saddle.
  *  - MountRenameCmd: name your mount (ASCII, MOUNT_NAME_MAX).
+ *  - MountHarnessCmd (ADR-359): put the harness in inventory `slot` on `target` (swap allowed when the old one
+ *    fits back in the pack). MountUnharnessCmd: take it off — refused while the mount tows a drawn vehicle
+ *    ("hitched": detach first). A harness is what lets a mount hitch a drawn vehicle at all (validateHitch).
  */
 import { defineCommand, type CommandDef } from "@engine/core";
 import { MOUNT_NAME_MAX } from "./components.js";
@@ -17,8 +20,11 @@ export const MountSaddleCmd = defineCommand("gameplay.mountSaddle", { target: "u
 export const MountUnsaddleCmd = defineCommand("gameplay.mountUnsaddle", { target: "u32" });
 export const MountRepairCmd = defineCommand("gameplay.mountRepair", { target: "u32" });
 export const MountRenameCmd = defineCommand("gameplay.mountRename", { target: "u32", len: "u8", text: { type: "u8", length: MOUNT_NAME_MAX } });
-export const MOUNT_COMMANDS: readonly CommandDef[] = [MountFeedCmd, MountRideCmd, MountDismountCmd, MountSaddleCmd, MountUnsaddleCmd, MountRepairCmd, MountRenameCmd];
+export const MountHarnessCmd = defineCommand("gameplay.mountHarness", { target: "u32", slot: "u8" });
+export const MountUnharnessCmd = defineCommand("gameplay.mountUnharness", { target: "u32" });
+export const MOUNT_COMMANDS: readonly CommandDef[] = [MountFeedCmd, MountRideCmd, MountDismountCmd, MountSaddleCmd, MountUnsaddleCmd, MountRepairCmd, MountRenameCmd, MountHarnessCmd, MountUnharnessCmd];
 export const MOUNT_ENTITY_FIELDS: Readonly<Record<string, readonly string[]>> = Object.fromEntries(
-  [MountFeedCmd, MountRideCmd, MountSaddleCmd, MountUnsaddleCmd, MountRepairCmd, MountRenameCmd].map((d) => [d.name, ["target"]]));
+  [MountFeedCmd, MountRideCmd, MountSaddleCmd, MountUnsaddleCmd, MountRepairCmd, MountRenameCmd, MountHarnessCmd, MountUnharnessCmd].map((d) => [d.name, ["target"]]));
 /** Reject reasons (append to the server's COMMAND_REJECT_REASONS; names already listed keep their earlier code). */
-export const MOUNT_REJECT_REASONS = ["not_mount", "not_tameable", "needs_skill", "riding", "not_riding", "mount_busy", "no_saddle", "bag_not_empty", "bag_too_full", "not_saddle", "not_food", "no_room", "full_health", "not_damaged", "already_riding", "dead", "busy", "blocked", "recipe_locked"] as const;
+export const MOUNT_REJECT_REASONS = ["not_mount", "not_tameable", "needs_skill", "riding", "not_riding", "mount_busy", "no_saddle", "bag_not_empty", "bag_too_full", "not_saddle", "not_food", "no_room", "full_health", "not_damaged", "already_riding", "dead", "busy", "blocked", "recipe_locked",
+  /* appended (ADR-359): harness + drawn-vehicle hitch */ "no_harness", "not_harness", "hitched"] as const;

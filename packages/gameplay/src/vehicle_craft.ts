@@ -25,7 +25,8 @@ import { hasSkillUnlock, skillMul } from "./skills/tree.js";
 import { itemRepairUnlocked } from "./building/place.js";
 import { readSlots, writeSlots } from "./inventory.js";
 import { addStationProvider, stationInRange } from "./systems/crafting.js";
-import { addVehicleStationHook, isParked, nearbyVehicleStationKinds, spawnVehicle, vehicleDefId, vehicleDefOf, VEHICLE_DEFS, type VehicleClass } from "./vehicles.js";
+import { addVehicleStationHook, drawnDriven, drawnTowCap, driveDrawnVehicle, isParked, nearbyVehicleStationKinds, spawnVehicle, vehicleDefId, vehicleDefOf, VEHICLE_DEFS, type VehicleClass } from "./vehicles.js";
+import { DrawnDriveRes, DrawnDrivenRes, RideTowCapRes } from "./systems/movement.js";
 
 export interface VehicleCraftRules {
   deploy: { reach: number; startFuel: number };
@@ -182,6 +183,9 @@ export function repairVehicle(world: World, actor: Entity, v: Entity, slot: numb
 // ---- camper stations -------------------------------------------------------------------------------------
 /** Install on every peer (installGameplay does): camper interiors as crafting stations + UI hook. */
 export function installVehicleCraft(world: World): void {
+  if (!world.getResource(RideTowCapRes)) world.setResource(RideTowCapRes, drawnTowCap); // ADR-358: towed drawn vehicles slow their mount
+  if (!world.getResource(DrawnDriveRes)) world.setResource(DrawnDriveRes, driveDrawnVehicle); // ADR-360: a wagon driver steers the mount
+  if (!world.getResource(DrawnDrivenRes)) world.setResource(DrawnDrivenRes, drawnDriven); // ADR-360: a driven mount does not wander
   addStationProvider(world, { name: "vehicle.interior", has: (w, e, kind) => nearbyVehicleStationKinds(w, e).has(kind) });
   addVehicleStationHook(world, { name: "survival.stations", onUse: (w, player, vehicle, st) => emit(w, VehicleStationOpened, { entity: player, vehicle, station: st.index, kind: st.kind }) });
 }

@@ -4997,5 +4997,6 @@
   ,{"key": "saddle_steel", "name": "Steel Saddle", "category": "resource", "maxStack": 1, "weight": 13, "tier": 4, "family": "saddle", "durability": 800}
   ,{"key": "dung", "name": "Dung", "category": "resource", "maxStack": 50, "weight": 0.1}
   ,{"key": "dung_fertilizer", "name": "Dung Fertilizer", "category": "resource", "maxStack": 30, "weight": 0.3}
+  ,{"key": "harness", "name": "Harness", "category": "resource", "maxStack": 1, "weight": 4, "family": "harness"}
   ]
 }

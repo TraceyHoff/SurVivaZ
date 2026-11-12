@@ -34,7 +34,11 @@ export const toWorld = (x: number, y: number, h: number, u: number, v: number): 
 /** Classes whose body hides the rider's lower half (cabin crop); bicycles show the whole rider. */
 export const hasCabin = (d: VehicleRenderDef): boolean => d.class !== "bicycle" && d.class !== "trailer";
 export const hasInterior = (d: VehicleRenderDef): boolean => d.interior.stations.length > 0;
-export const isPowered = (d: VehicleRenderDef): boolean => d.class !== "trailer";
+/** ADR-358: animal-drawn classes (gameplay vehicles.json) — engineless, so no headlamps. Render does not depend on
+ * gameplay, so the list is duplicated here; keep it in sync with DRAWN_CLASSES in gameplay vehicles.ts. */
+export const DRAWN_VEHICLE_CLASSES = ["wagon", "cart", "carriage", "chariot"] as const;
+export const isDrawnVehicleClass = (c: string): boolean => (DRAWN_VEHICLE_CLASSES as readonly string[]).includes(c);
+export const isPowered = (d: VehicleRenderDef): boolean => d.class !== "trailer" && !isDrawnVehicleClass(d.class);
 
 export interface SeatAnchor { u: number; v: number; z: number; cabin: boolean }
 /** Seat anchors from vehicles.json (ADR-101; seat 0 = driver). Verified equal to the old computed layout before it was

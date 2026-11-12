@@ -35,7 +35,7 @@
     "troughRange": 10
   },
   "bots": {
-    "$comment": "ADR-321 AI-human mount behaviour (ai/mount_behaviors.ts). Ticks at 20 Hz; distances in tiles; hp as a 0..1 fraction. ADR-323: storage* / *Food* = liked food fetched from own / employer / clan storage (count needed + foodBuffer); planMaxDepth / saddlePlan* = the saddle material chain (recipe depth cap, timeout -> lower tier, retry after danger / low needs). ADR-339: preferredSpeciesBonus = score added for the bot's liked species in pickTameTarget (ai/mount_preference.ts); 10 exceeds the largest possible score spread between two species in seekRadius (gallop 3.2 + hp/60 2.83 + distance 3.6 = 9.63), so a liked species in range always wins and the pick falls back to the plain ADR-321 score otherwise.",
+    "$comment": "ADR-321 AI-human mount behaviour (ai/mount_behaviors.ts). Ticks at 20 Hz; distances in tiles; hp as a 0..1 fraction. ADR-323: storage* / *Food* = liked food fetched from own / employer / clan storage (count needed + foodBuffer); planMaxDepth / saddlePlan* = the saddle material chain (recipe depth cap, timeout -> lower tier, retry after danger / low needs). ADR-339: preferredSpeciesBonus = score added for the bot's liked species in pickTameTarget (ai/mount_preference.ts); 10 exceeds the largest possible score spread between two species in seekRadius (gallop 3.2 + hp/60 2.83 + distance 3.6 = 9.63), so a liked species in range always wins and the pick falls back to the plain ADR-321 score otherwise. ADR-359: harness* = the bot harnessing its own mount (equip from the bag, else craft the workbench harness) when a drawn vehicle is near enough to tow.",
     "seekRadius": 24,
     "scanEveryTicks": 40,
     "ownScanEveryTicks": 100,
@@ -82,7 +82,10 @@
     "saddlePlanRetryTicks": 600,
     "saddleAbandonsToFallback": 2,
     "saddleTierBanTicks": 24000,
-    "preferredSpeciesBonus": 10
+    "preferredSpeciesBonus": 10,
+    "harnessScanEveryTicks": 40,
+    "harnessCooldownTicks": 100,
+    "harnessUtility": 0.6
   },
   "species": [
     {

@@ -18,7 +18,7 @@ describe("vehicle crafting data", () => {
       const kit = G.vehicleKitKey(v.id)!; expect(kit).toBe(`vehicle_kit_${v.id}`);
       const r = [...d.recipes.values()].find((x) => d.items.get(x.output.item)?.key === kit)!; expect(r).toBeDefined();
       expect([wb, gar]).toContain(r.station); expect(r.seconds).toBeGreaterThan(0);
-      if (v.class !== "bicycle" && v.class !== "trailer") expect(r.station).toBe(gar);
+      if (v.class !== "bicycle" && v.class !== "trailer" && !G.isDrawnDef(v)) expect(r.station).toBe(gar); // ADR-358: wooden drawn vehicles craft at the workbench
       cost.set(v.id, r.ingredients.reduce((a: number, i) => a + i.count, 0));
     }
     const avg = (s: G.VehicleSize) => { const xs = G.VEHICLE_DEFS.filter((v) => v.size === s); return xs.reduce((a, v) => a + cost.get(v.id)!, 0) / xs.length; };

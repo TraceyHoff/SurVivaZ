@@ -500,6 +500,14 @@ export const DungTimer = defineComponent("DungTimer", { nextAt: "u32" }, { persi
  *  so mounts from older saves and fresh tames never start hungry. */
 export const MountHunger = defineComponent("MountHunger", { fedUntil: "u32" }, { persistent: true });
 
+/** ADR-359: a harness on a tamed mount — the tack that lets it tow a drawn vehicle (wagon / cart / carriage /
+ *  chariot). `item` = the harness item id, returned to the owner's pack on unharness or when the mount dies.
+ *  Presence = harnessed. Networked + persistent. Its own component (not fields on Mount): Mount's schema is
+ *  frozen — the saddle fields were part of its ADR-319/320 shape — and new tack state follows the RopeLead /
+ *  MountHunger pattern of an appended component on the same entity. No durability: a harness is tack, not armor,
+ *  so it never wears and is never repaired. */
+export const MountHarness = defineComponent("MountHarness", { item: "u16" }, { networked: true, persistent: true });
+
 /** ADR-356: fill level of a resource-specific store piece (0 empty, 1 half, 2 full — STORE_FILL_STATE_NAMES),
  *  mirrored from the store's Container by gameplay.storeFill (postSim, authority-only) so every peer draws the
  *  matching building state. Networked, scope "all" (it rides the static channel: the piece entity already has
@@ -562,5 +570,6 @@ export const GAMEPLAY_COMPONENTS = [
   RopeLead, // append-only (ADR-351 rope leading)
   DungTimer, // append-only (ADR-352 dung production timer; server-only, persistent)
   MountHunger, // append-only (ADR-353 mount hunger clock; server-only, persistent)
+  MountHarness, // append-only (ADR-359 harness on a mount; networked + persistent)
   StoreFill, // append-only (ADR-356 store fill level; networked, derived — not persistent)
 ] as const;

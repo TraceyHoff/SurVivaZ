@@ -5668,3 +5668,403 @@ build menu. The 128px PNG data URLs (~5 × a few KB, base64) live only in a runt
 never in the shipped files. A future binary art pass painting frames 297–301 should remove the
 `installStoreMenuIcons()` call so the atlas icons take over; until then the two declarations coexist
 and the runtime one wins.
+
+## ADR-358: Animal-drawn vehicles — wagons, carts, carriages and transport chariot (SurVivaZ)
+
+**Context.** The wagon/vehicle batch (queued 2026-11-11 12:50 CST, behind the storage batch): realistic-looking,
+realistically sized wagons of varying sizes (covered and non-covered), carts, carriages, and a transport chariot
+that moves much faster when harnessed to a horse; a Harness item to hook up / detach (ADR-359); players/AI humans
+shown riding in the driver's seat (ADR-360); custom artwork, sprites and animations (ADR-361). This slice is the
+sim core only: defs, the drawn-movement mechanic, and crafting. The motor-vehicle system (ADR-096) already had
+everything else — append-only defs, `Hitch` links, pin-joint trailer posing, `Container` storage, kit crafting —
+so the work is extending it to a tow that is not a vehicle at all: a tamed mount.
+
+**Decision.** Nine defs appended to `data/vehicles.json` (ids 31–39, append-only; the first 30 defs are untouched):
+`wagon_small` / `wagon_small_covered`, `wagon_medium` / `wagon_medium_covered`, `wagon_large` /
+`wagon_large_covered`, `cart`, `carriage`, `chariot`. Four new classes in `VEHICLE_CLASSES`,
+`vehicles.schema.json` and `vehicle_storage.json`: `wagon`, `cart`, `carriage`, `chariot`. Covered wagons are the
+same footprint, seats and storage as their uncovered twin, differing only in the `covered` flag (new optional
+boolean, `true` only on class `wagon`) and a little extra mass for canvas + hoops. `fuel` and `stamina` are null;
+`VehicleState` is not added on spawn and engine/headlight toggles refuse with `no_controls`, so drawn vehicles have
+no engine bits on the wire. Sizes are grounded in the ADR-319 realism table (1 tile = 1 m, player 1.75 m):
+
+| def | footprint (m) | seats | storage slots / maxWeight | mass (kg) | maxSpeed | pullMul |
+|---|---|---|---|---|---|---|
+| wagon_small (± cover) | 2.6 × 1.4 | 2 | 30 / 400 | 350 (380) | 6.0 | 0.70 |
+| wagon_medium (± cover) | 3.6 × 1.6 | 2 | 42 / 800 | 550 (590) | 5.5 | 0.62 |
+| wagon_large (± cover) | 4.6 × 1.8 | 2 | 54 / 1200 | 800 (850) | 5.0 | 0.55 |
+| cart | 1.8 × 1.2 | 2 | 8 / 120 | 180 | 6.5 | 0.90 |
+| carriage | 3.2 × 1.6 | 4 | 16 / 250 | 700 | 6.0 | 0.65 |
+| chariot | 1.6 × 1.1 | 2 | 2 / 40 | 120 | 11.5 | 1.20 |
+
+(Small wagon ≈ a farm wagon, large ≈ a Conestoga-scale freight wagon, cart ≈ a single-axle farm cart, carriage ≈
+an enclosed coach — 4 seats but less cargo than a wagon of the same size — chariot ≈ a light two-wheel war/sport
+chariot. Storage slots are base × class scale from `vehicle_storage.json`: wagon 3/72, cart 2/12, carriage 2/24,
+chariot 1/4. Seat 0 is the front driver bench on every def; exact per-type seat positions are ADR-360's rendering
+concern, but the anchors exist and are sane now.)
+
+**Drawn movement — the hitch design.** The mount is the tow parent and the vehicle its trailer, reusing the
+existing `Hitch` component and the trailer pin-joint posing rather than a parallel system. `Hitch` already stores
+NetIds, so it needs no schema change: a mount carries `Hitch` (`towNetId` = the drawn vehicle's NetId; added by
+`makeMount`/`tameMount`, and lazily by `hitchVehicles` for legacy mounts) and the drawn vehicle's
+`Hitch.parentNetId` is the mount's NetId. `vehicleSystem` now treats *any* vehicle with a resolvable parent —
+vehicle or mount — as a trailer posed by its parent, and never self-drives a drawn vehicle (an unhitched drawn
+vehicle is held at speed 0 even with a driver and drive input). `stepTrailer` and `poseTrailersInHitchFrame`
+(client, after interpolation) pin the drawn vehicle's front hitch to the mount's **rear pin** — behind the mount by
+half its body length (`mounts.json` `size.lengthM` / 2) plus a 0.3-tile drawbar gap — instead of a vehicle rear
+hitch, with the same ±1.75 rad jackknife clamp. A ridden mount is posed from its rider's Transform (the rider
+already moved in the input phase; `mountSystem` snaps the mount there later the same tick), so the pin stays exact
+rather than lagging a tick; an unridden mount tows from its own Transform. `validateHitch` rejects motor tows of
+drawn vehicles and mount tows of motor trailers as `incompatible` (the drawn front hitch's `accepts` list is
+empty — mounts are not a vehicle class, so the rule is the drawn class itself, not the allowlist), and the
+compatibility check runs before the busy checks so a wrong-kind tow reports `incompatible` even when the tow is
+busy. `validateUnhitch`/`unhitchVehicle` resolve the tow by NetId (`entityByNetId`, not `vehicleByNetId`) so a
+mount tow clears both sides; a mount counts as parked when its rider's `Riding.speed` is below the parked
+threshold (`mountParked`; unridden mounts are parked). No ownership check on hitching in this slice — the
+vehicle-hitch command never had one for motor trailers either; the Harness item (ADR-359) owns the hook/detach UX.
+
+**Speed — data, not a constant.** `drawnSpeedCap(def, species, galloping) = min(def.maxSpeed, mountWalkOrGallop ×
+def.drawn.pullMul)`, with `pullMul` on the def. The cap is enforced on the mount, not the trailer:
+`installVehicleCraft` registers `drawnTowCap` as the `RideTowCap` resource (defined in `systems/movement.ts` so
+movement stays free of the vehicle module — no import cycle), and `applyRidingInput` clamps the rider's target
+speed to it, so a laden wagon slows its horse instead of being dragged faster than its cap. A chariot (cap 11.5)
+does not slow a galloping horse (9.6) at all — the multiplier above 1 means "no drag", not "faster than the horse
+can run" — while the same horse pulls a large wagon at 5.0 galloping and 2.97 walking, and a cart at its 6.5 cap.
+A mount-towed drawn vehicle reports true tiles/s in `Vehicle.speed` (per-tick displacement / dt); motor tows keep
+the legacy per-tick displacement value, untouched. The vehicle guard's powered limit already covers drawn defs
+(`maxSpeed × boostMul`); no guard change was needed.
+
+**Crafting.** Kits craft at the **workbench** (wooden vehicles, not garage) from three new parts — `wooden_wheel`
+(planks 2 + iron_ingot 1), `canvas_cover` (cloth 4 + rope 1, covered wagons only), `wagon_frame` (planks 6 +
+iron_ingot 2 + nails 4) — plus the existing `axle`, `seat`, `hitch_coupler`, `planks`, `iron_ingot`, `rope`,
+`cloth`. Nine `vehicle_kit_<id>` items (ids.lock.json 498–509 items, 384–395 recipes, append-only) and
+`vehicle_crafting.json` entries (`fuel: "none"`). Repair uses `wooden_wheel` (field 0.1, garage 0.3, `wreckOk` at
+a garage, classes wagon/cart/carriage/chariot); `repair_kit` also works (classes empty = all). Kit item sprites
+are placeholder keys in the existing `item_vehicle_kit_<id>` pattern — no art ships in this slice; dedicated art
+and build-menu icons are ADR-361's. Two neighbour tests narrowed their motor-only rules to match:
+`adr125_speeds` (the 2.5–6× sprint band) and `vehicle_craft` (garage station) now exempt drawn defs.
+
+**Render note.** `packages/render/src/vehicles/layout.ts` `isPowered` now excludes the drawn classes (duplicated
+`DRAWN_VEHICLE_CLASSES` list — render must not depend on gameplay). Without this, `VehicleView` would have shown
+a headlight cone on a moving/occupied wagon: drawn vehicles carry no `VehicleState`, and the view defaults lights
+on in that case. Wheel dust still applies (drawn vehicles kick up dust above 1.5 tiles/s); door open/close sounds
+on seat changes are left as-is for ADR-361 to revisit with the art.
+
+**Verification.** New `packages/gameplay/test/adr358_drawn_vehicles.test.ts` (16 tests, relative imports only):
+defs validate (append-only ids 31–39, drawn/fuel/cover rules, bad-def rejections); covered twins share
+footprint/seats/storage; storage grows with wagon size and a carriage carries less than a same-size wagon; the
+speed-cap table (chariot-with-horse gallop cap 11.5 beats horse walk 5.4 and wagon cap 5.0; donkey chariot 8.28);
+mount hitch rules (mount tows drawn, motor tow of drawn and mount tow of motor trailer both `incompatible`,
+`too_far`, `tow_busy`, `already_hitched`, moving-mount refusal, unhitch clears both sides); a wagon follows its
+mount on the pin joint at gallop (pin gap < 1e-3, ~5.5 tiles/s, mount–wagon separation ~3.9 tiles) and a chariot
+outruns it behind the same horse (~9.6 tiles/s, mount unslowed); a walking horse pulls the wagon at ~3.35
+tiles/s; a drawn vehicle never self-drives with a driver and drive input; `poseTrailersInHitchFrame` re-pins a
+stale drawn vehicle onto its mount (predicted entities untouched); crafting (every drawn kit at the workbench,
+`validateVehicleCraft` clean, deploy records the crafter and spawns with no `VehicleState`/fuel, `wooden_wheel`
+field + wreck-at-garage repair, engine toggles `no_controls`). Neighbours: `vehicles`, `vehicle_craft`,
+`vehicle_net`, `vehicle_state`, `adr125_speeds`, `adr319_mounts`, `adr321_ai_mounts`, `adr323_ai_mount_supplies`,
+`adr339_mount_preference/wiring`, `vehicle_keys`, `balance`, `gameplay`, `adr127_move_normalize`,
+`adr351_rope_lead`, `adr352_dung_fertilizer`, `adr353_animal_diets_trough`, `adr354_tameable_calm`,
+`adr344_journey_preparation`, render `vehicles` — all green (67 + 88 + 76 + 19 across the runs, no failures).
+Typecheck with pinned TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11 workspace projects (root
+`node_modules/@engine/gameplay` symlink moved aside for the run, then restored). No package-name self-imports in
+new test files (grep confirms; the only `@engine/gameplay` mention in the touched files is a pre-existing comment
+in render's `layout.ts`). World schema hash with default gameplay installed: **0xde24c45e** (was 0x029aeedf — the
+defs salt changed; no component was added, so saves stay compatible). Full gate (`pnpm vitest run` from the repo root,
+2026-11-11 ~23:00 CST): **4,037 passed / 2 failed / 3 skipped** (616 files: 612 passed, 2 failed, 2 skipped) — the 2
+failures are the known pre-existing ones (pack.test.ts missing `assets/building/KEYS.md` in this checkout; persist
+autosave bench timing flake at 61.1 ms p95 vs a 50 ms threshold). New suite 16/16 in the gate.
+
+**Honest cuts.** Not this slice (ADR-359/360/361 own them): the Harness equipment item and hook/detach UX; the
+visible seated driver pose and driver-steers-the-mount input routing (note for ADR-360: while a driver sits in
+seat 0 of a harnessed wagon, drive input must route to the pulling mount — today the mount's own rider drives and
+a wagon driver cannot move anything); dedicated vehicle art and build-menu icons (kit sprites are placeholder
+keys). An unridden mount tows from its own Transform, so a wandering mount's wagon lags one tick behind the pin
+(the ridden case is exact). Hitching has no ownership check yet (same as motor trailers). A drawn vehicle's
+`Vehicle.speed` is true tiles/s while motor-towed trailers keep the legacy per-tick displacement value — the two
+conventions now differ by design, and a future cleanup should unify them.
+
+## ADR-359: Harness equipment — hook up / detach for animal-drawn vehicles (SurVivaZ)
+
+**Context.** ADR-358 built the drawn vehicles and the pin-joint hitch but left two gaps: hitching had no
+ownership check and no harness requirement, and there was no hook/detach UX. This slice closes both: a Harness
+equipment item that equips to a mount (not the player), a harness gate on drawn-vehicle hitching, detach via the
+existing `vehicleUnhitch`, and AI humans that harness and hitch their own mounts. The visible seated driver pose
+and driver-steers-the-mount input routing are ADR-360's; dedicated harness/vehicle art and build-menu icons are
+ADR-361's.
+
+**Decision — where harness state lives.** A new `MountHarness {item: u16}` component, appended to
+`GAMEPLAY_COMPONENTS` after `StoreFill` (networked + persistent, `r(C.MountHarness, "all")` in
+`GAMEPLAY_REPLICATION` so every peer sees which mounts are harnessed — the mount panel and riding HUD read it on
+the replica). It sits beside the saddle fields on `Mount` rather than inside it: `Mount`'s schema is frozen (the
+saddle fields were part of its ADR-319/320 shape), and new tack state follows the `RopeLead`/`MountHunger`
+pattern of an appended component on the same entity. No durability: a harness is tack, not armor — it never wears
+and is never repaired, so `giveSaddleBack(..., 0)` is correct (`slotsAdd` defaults durability to the item's
+`maxDurability ?? 0`).
+
+**Decision — mirror the saddle pattern.** Same command shape (`gameplay.mountHarness {target, slot}` /
+`gameplay.mountUnharness {target}`, appended to `MOUNT_COMMANDS` + `MOUNT_ENTITY_FIELDS`, so they flow
+automatically into `input.ts` registration and the server's `GAMEPLAY_NET_COMMANDS`), same validation shape
+(owner, near, item-is-harness, return-to-inventory on unequip), same event pattern (`MountResult.Harnessed = 15` /
+`Unharnessed = 16`, delivered at end of tick), same client panel placement (mount panel, beside the Saddle
+section), same AI action-string pattern (`mharness:<mount>:<slot>` / `munharness:<mount>`, in
+`COMMAND_ACTIONS`).
+
+**The item.** `harness` in `items.json` (id 510, append-only): name "Harness", category `resource`, maxStack 1,
+weight 4, `family: "harness"`. Data-driven: `isHarnessItem` / `harnessItemId` in `mount_defs.ts` read the family,
+so a future variant just works. Recipe (id 396): workbench, 6 s, leather 2 + rope 2 + iron_ingot 1 — cheaper
+than `saddle_leather` (leather 4 + rope 2 + thread 2, 8 s), because it is tack, not a seat. No skill node:
+`hasSkillUnlock` returns true when no node grants `item:harness`, so it is craftable by default.
+
+**Hook up.** `validateHitch`'s drawn branch returns `no_harness` for an unharnessed mount tow (new rejection
+reason, alongside `not_harness` for equipping a non-harness item and `hitched` for unequipping while towing).
+Gating order in the drawn branch: dead → no_hitch → moving → **no_harness** → too_far → actor_too_far. The
+hitch itself reuses ADR-358's `Hitch` + pin joint unchanged; mount + vehicle then move as one unit (proved, not
+reimplemented). Detach reuses `vehicleUnhitch` (no new command): the vehicle stays parked at speed 0 and the
+mount keeps its harness. Unequip-while-hitched is **rejected** (`hitched` — detach first), mirroring the
+unsaddle "empty the bag first" gating. `mountDied` drops the harness into the death loot bag and removes
+`MountHarness`, like the saddle.
+
+**Client.** `mountBody` in `gameplay-panels.ts`: a harness line in the status head ("Harness on · towing X /
+ready to pull") and a new "Harness" section after Saddle with Put on / Remove harness / Detach / Hook up buttons
+(hook-up disabled unless harnessed; remove disabled while towing). Same shell-button list on keyboard, gamepad,
+and touch via the Mount menu (U / LB+X / "Mount") — no separate input path. `mountView` gains `harness?`,
+`harnesses[]`, `towing?`, `drawn[]` (parked unhitched drawn vehicles within 4 tiles of the mount); `ridingHud`
+appends ` · towing <Label>`; `vehicleLabel` humanizes def ids ("wagon_medium" → "Wagon Medium").
+`mountRejectText` also covers `gameplay.vehicleHitch` `no_harness`/`incompatible` (main.ts funnels rejections
+through it). The harness icon falls back to the category icon automatically via `sprite_fallbacks.json`
+`categoryIcons` — no art ships in this slice (ADR-361).
+
+**AI.** `harnessPlan` in `mount_behaviors.ts` (new `HarnessPlan` type, `harnessUp` sensor on a 40-tick scan
+cadence, `harness_up` behavior weight 0.6, calm, 100-tick cooldown): equip a harness from the bag, else craft one
+at the workbench when unlocked + affordable (station in range or at the base station). Gated on a nearby drawn
+vehicle — a bot never crafts a harness speculatively; `fillVehicleSensors` runs before `fillMountSensors` in
+`buildAgentView`. `hitch_drawn` / `unhitch_drawn` in `vehicle_behaviors.ts` (reuse the `VEHICLE_CRAFT.bots`
+knobs: minIndustriousnessToHitch 0.5, hitchWhenInvFreeBelow 0.2, seekRadius 30, arriveDistance 6): `drawnPair`
+picks the bot's own harnessed mount, not towing/busy, plus a parked unhitched drawn vehicle within 10 tiles;
+`drawnTowDone` = towing AND (invSpaceFree ≥ hitchWhenInvFreeBelow + 0.3 OR at the drive goal within
+arriveDistance). The hitch run rides the mount to a staging point (front hitch + heading × (lengthM/2 + 0.3
+drawbar gap)) via an approach point 3 tiles behind staging, so the final leg runs along the vehicle's heading
+and the mount arrives facing it — the rear pin trails the facing, not the path. It dismounts as soon as the pin
+sits on the front hitch (`pinAligned`, the server's `hitchRange`), and re-approaches after an overshoot or a
+stalled final leg instead of circling. A bot without a harness never hitches a drawn vehicle. `SeenMount` gains
+`harness` and `towing?`; `MOUNT_SENSOR_KEYS` gains `harnessUp`; `mounts.json` bots gain `harnessScanEveryTicks`
+40, `harnessCooldownTicks` 100, `harnessUtility` 0.6.
+
+**Test harness note.** The ADR-359 AI tests pass analog movement (`applyMovementInput(..., {x: o.moveX, y:
+o.moveY})`) like a production bot: the bits-only conversion quantises to 8 iso diagonals and cannot ride a mount
+onto a 1.5-tile pin. The ADR-358 `horse()` helper now harnesses the horse (the new gate requires it) — an
+intentional behavior change, documented in the helper comment.
+
+**Verification.** New `packages/gameplay/test/adr359_harness.test.ts` (18 tests, relative imports only): item +
+recipe (id 510 / 396, append-only, cheaper than a saddle); equip/unequip/swap/stranger/death/replication
+(`MountHarness` replicates + persists); hook-up with harness succeeds for all 9 drawn classes; hook-up without
+harness is rejected `no_harness`; detach frees the vehicle (parked, speed 0) and the mount keeps its harness;
+unequip-while-hitched is rejected `hitched`; harnessed mount + vehicle move as one unit (pin gap, ~5.5 tiles/s);
+mountView/HUD text; event + reject text; AI action strings + registry; AI `harness_up` equips from the bag and
+crafts at the workbench; AI `hitch_drawn`/`unhitch_drawn` end-to-end; AI without a harness never hitches.
+Neighbours (281 passed, 0 failed across three runs): `vehicles`, `vehicle_net`, `vehicle_craft`,
+`vehicle_state`, `adr319_mounts`, `adr320_saddles`, `adr358_drawn_vehicles`, `adr321_ai_mounts`,
+`adr323_ai_mount_supplies`, `vehicle_keys` (101); `adr339_mount_preference/wiring`, `adr344_journey_preparation`,
+`adr351_rope_lead`, `adr352_dung_fertilizer`, `adr353_animal_diets_trough`, `adr354_tameable_calm`,
+`adr127_move_normalize`, `balance`, server `adr170_vehicle_controls`, server `task22_recruitment` (137); client
+`gameplay-panels`, `adr319_mount_render`, `adr322_mount_acts`, `vehicle_bandwidth` (43). Typecheck with pinned
+TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11 workspace projects (root
+`node_modules/@engine/gameplay` symlink moved aside for the run, then restored). No package-name self-imports in
+new test files (grep confirms). World schema hash with default gameplay installed: **0xb629eab2** (was
+0xde24c45e — the new `MountHarness` component; no mount carried a harness before this slice, so there is no
+legacy harness state to migrate). Full gate (`pnpm vitest run` from the repo root, 2026-11-11 ~17:30 CST):
+**4,055 passed / 2 failed / 3 skipped** (617 files: 613 passed, 2 failed, 2 skipped) — the 2 failures are the
+known pre-existing ones (pack.test.ts missing `assets/building/KEYS.md` in this checkout; persist autosave bench
+timing flake — it passes on re-run, p95 1.6–3.2 ms vs the 50 ms threshold). New suite 18/18 in the gate.
+
+**Honest cuts.** Not this slice (ADR-360/361 own them): the visible seated driver pose and driver-steers-the-mount
+input routing; dedicated harness/vehicle art and build-menu icons (the harness icon is the category fallback).
+The ADR-358 `horse()` helper change means ADR-358's mount-hitch tests now exercise the harnessed path only —
+the unharnessed rejection is covered by ADR-359's own tests. A bot that owns a harness but no drawn vehicle
+never crafts one speculatively (by design), so the harness only appears once a vehicle exists.
+
+## ADR-360: Driver-seat riding for animal-drawn vehicles (SurVivaZ)
+
+**Context.** ADR-358 built the drawn vehicles and the pin-joint hitch, ADR-359 the harness gate — but a wagon
+driver in seat 0 could not move anything: the mount's own rider drove, and a seated driver was cargo. This slice
+closes that gap: the seat-0 driver steers the pulling mount, the vehicle follows on the pin joint, the driver
+renders on the bench, and AI humans drive their hitched wagons. Dedicated vehicle/harness art and build-menu
+icons are ADR-361's.
+
+**Decision — input-phase hook, not a sim-phase driver (Design A).** `applyMovementInput`'s Driver branch calls
+the `DrawnDrive` resource hook (registered by `installVehicleCraft` alongside the ADR-358 `RideTowCap`), and
+`driveDrawnVehicle` in `vehicles.ts` moves the mount with the same `applyRidingMotion` a mounted rider gets —
+so the mount moves in the input phase exactly like a ridden mount's rider does, and `mountTowPose` / `stepTrailer`
+see the moved mount the same tick. The alternative (a sim-phase `DriveInputs` in `vehicleSystem`, Design B) would
+have moved the mount a phase later and split the funnel; Design A keeps one funnel for players (server +
+prediction), bots, and tests. `applyRidingInput` is now a thin wrapper over `applyRidingMotion(world, mover,
+species, speed, hurt, actions, dt, analog, owner)` — identical motion logic, with the auto-sprint run-up and
+`PlayerIntent` writes only when the input owner is the moved entity. The production frame path
+(`applyGameplayInput`) calls the hook too (one tick at the fixed rate); the server/client funnel
+(`applyDemoInput`) now passes the driver's real buttons + analog instead of `0` (harmless for motor drivers —
+the branch ignores them there).
+
+**Decision — precedence: the mount's own rider wins.** If a mount has a live rider AND someone sits in the
+wagon's seat 0, the rider's input steers and the wagon driver's is dropped (the rider is on the animal and their
+input runs first in the same input phase). The state can arise — `checkRide` blocks the driver from mounting, not
+a second player from riding — so it is a rule, not an unreachable case, and it is tested (rider west beats driver
+east). `RideTowCap` is re-keyed from the rider to the **mount** for the same reason: a wagon driver steers the
+same mount a rider would, and `drawnTowCap` now resolves the tow from the mount's `Hitch.towNetId`.
+
+**Speed, stamina, and state.** Sprint is the gallop (a motor vehicle's boost). Driving never builds an
+auto-sprint run-up (ADR-289) and never drains the driver's stamina. The driven speed lives in a sim-local
+`DrawnDriveSpeeds` resource (`Map<Entity, number>`, like `DriveInputs`) — never replicated or persisted, so a
+reload or rejoin ramps up from 0; it is cleared on exit, unhitch, rider takeover, and a dead mount. The hook sets
+the mount's gait anim (Walk/Run by the same `walk + 0.3` threshold as a ridden mount) on authority only, and
+skips Hurt/Eat — a laden wagon caps a galloping horse at 5.5, below the run threshold, so it walks; a chariot
+horse at 9.6 runs. The animal AI must not fight the driver: `drawnDriven(world, mount)` (seat 0 occupied) makes
+`population.ts` skip the mount, like a ridden one — through the existing `isDrawnDriven` helper in movement.ts,
+not a direct import (the population ↔ vehicle import cycle). No new component: the world schema hash is unchanged
+at **0xb629eab2**.
+
+**Enter / exit coherence.** Exit restores Idle, frees the seat, and places the driver on the vehicle's left side
+(the motor rule, `width/2 + 0.6`). Dismounting the mount while it tows leaves the tow intact, and the driver can
+then climb into the wagon — with one honest wrinkle: the dismount spot (beside the mount, 0.9 tiles) sits just
+outside a medium wagon's enter reach (4.0 vs 3.8), so the player walks up to the bench first (tested as the real
+flow, not a teleport). Exiting while hitched leaves the hitch; re-entering ramps the driven speed up from 0.
+There is no eject-on-wreck anywhere (motor rule): a wrecked wagon refuses entry (`wrecked`), keeps its driver
+seated, and the mount still pulls it, like a motor trailer.
+
+**Client.** `VehicleView.sync` already returned `RiderPlacement[]` (seat anchor, quantized facing, depth-nudged)
+for any def with seat anchors — but `syncVehicles` discarded the return value, so motor-vehicle riders rendered
+at the vehicle centre, not their seats. This slice applies the placements in `syncVehicles` via the exported pure
+helper `applyVehicleRiderPlacements` (net world → view entity by NetId, Transform + PrevTransform so the rider
+does not interpolate from the centre), for **all** vehicles — one shared path, no fork, and motor riders move to
+their seats too. The placement is world-space, so all four view rotations land the same spot; the `vehicle` anim
+chain is forced for any `Driver` (`driverVe`), so the seated pose does not depend on the sim AnimState. The
+engine/lights HUD chip (`vehicle-controls.ts`) hides for drawn defs and ignores the engine/lights buttons there
+(Interact still exits); `driving` stays true, so the touch driving layout is unchanged.
+
+**AI.** New `drive_drawn` behavior in `vehicle_behaviors.ts` (same knobs as `drive`: bravery 0.25, drive 25 tiles,
+arrive within 6; gallops when farther than 18 from the goal): enter the towed wagon's driver seat (`venter:<id>:0`),
+steer toward the drive goal through `AgentOutput`, exit when arrived and parked. `pickRide` excludes drawn classes
+(motor/bicycle only) and the `drive` behavior returns false for a drawn vehicle it somehow rides, so the two
+behaviors never fight; `drive_drawn` sits **after** `vehicle_service` in the array because `vehicle_craft.test.ts`
+destructures `[drive, vehicle_service]` by position. `"drive_drawn"` joins `DISMOUNT_NOW` in `mount_behaviors.ts`,
+so a riding bot gets off its mount to climb into the wagon. The AI test harness's `apply` gains the
+`VehicleEnterCmd` / `VehicleExitCmd` cases the ADR-359 harness lacked.
+
+**Verification.** New `packages/gameplay/test/adr360_driver_seat.test.ts` (17 tests, relative imports only):
+seat-0 pose per def in all 8 directions (Sit, facing = vehicle heading) + carriage 4-seat passengers; driver
+steers the mount (pin gap < 1e-3, wagon_medium gallop 5.5, chariot 9.6, walk 3.35); passenger input moves nothing;
+unhitched wagon stays put; rider-vs-driver precedence; population AI does not fight the driver (goal set west,
+driver steers east); exit/dismount/re-enter/wreck coherence; `drive_drawn` registry + `pickRide` exclusion +
+mount-policy dismount + end-to-end bot drive (enters, hauls to (30, 0), arrives, exits, still hitched); schema
+hash unchanged; driven speed sim-local and cleared on exit. New `packages/render/test/adr360_drawn_riders.test.ts`
+(4 tests): all 9 drawn defs × 8 directions at their seat anchors (screen px), off-grid heading quantization,
+carriage 4 / chariot 2, no headlights at full dark even with a driver. New
+`apps/client/test/adr360_drawn_driver_render.test.ts` (7 tests, jsdom): placement helper lands the rider in all 8
+headings and all 4 rotations, skips unknown riders, HUD chip hidden for a wagon (engine/lights ignored, Interact
+still exits) and shown for a motor vehicle. Neighbours (348 passed, 0 failed): `vehicles`, `vehicle_net`,
+`vehicle_craft`, `vehicle_state`, `vehicle_keys`, `adr358_drawn_vehicles`, `adr359_harness` (89); `adr319_mounts`,
+`adr320_saddles`, `adr321_ai_mounts`, `adr323_ai_mount_supplies`, `adr327_hired_saddle_chain`,
+`adr339_mount_preference/wiring`, `adr344_journey_preparation`, `adr351_rope_lead`, `adr352_dung_fertilizer`,
+`adr353_animal_diets_trough`, `adr354_tameable_calm`, `adr127_move_normalize`, `balance` (188); render
+`vehicles`, client `gameplay-panels`, `adr319_mount_render`, `adr322_mount_acts`, `vehicle_bandwidth`, server
+`adr170_vehicle_controls` (71). Typecheck with pinned TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11
+workspace projects (root `node_modules/@engine/gameplay` symlink moved aside for the run, then restored). No
+package-name self-imports in new test files (grep confirms). Full gate (`pnpm vitest run` from the repo root,
+2026-11-11 ~18:26 CST): **4,083 passed / 2 failed / 3 skipped** (620 files: 616 passed, 2 failed, 2 skipped) —
+the 2 failures are the known pre-existing ones (pack.test.ts missing `assets/building/KEYS.md` in this checkout;
+persist autosave bench timing flake). New suites 28/28 in the gate.
+
+**Honest cuts.** Not this slice (ADR-361 owns it): dedicated vehicle/harness art and build-menu icons — the
+wagon driver sits on the bench with the fallback sprite. The `vehicle` anim chain has no moving/idle variants, so
+a wagon driver plays the same seated pose moving or idle (mount riders get `ride_<gait>`). A fresh player has no
+`AnimState` until they act (added lazily by gather/consume/stance), so `vehicleSystem` only sets Sit when the
+component is present — the client forces the driver pose regardless, and the tests add it like
+`vehicle_state.test.ts` does. The dismount spot can land just outside a medium wagon's enter reach (see above) —
+walking up is the real flow, not a defect worth a reach change.
+
+## ADR-361: Dedicated art for wagons, carts, carriages, chariot and harness (SurVivaZ)
+
+Unique runtime-painted art for the nine drawn defs and the harness — no recolors, no reused sprites, no
+binaries (the snapshot push route carries text only). Painted with the `Px` rasterizer in
+`apps/client/src/task361-art.ts`, in the game's warm palette with the 1px dark-plum outline `[40,30,50]`
+(Task 34 / ADR-356 house style); the fragment `packages/assets/pack/task361/manifest.task361.json` carries
+layout only, and `view.ts` overrides the registry sources with blob URLs from the painter (same shape as
+task34/355). Sixteen atlas keys (`veh_art_<def>` × 9, `veh_art_harness_<art>` × 7) registered in
+`packages/assets/pack/ids.lock.json` (+16 keys, 5463–5478) and in `MANIFEST_INDEX` (optional fragment). The
+fragment must ALSO be added to the `pack/` mount filter in `apps/client/vite.config.ts` — it hardcodes the
+served fragment dirs, and without `task361` the dev server never serves the manifest, so the client never
+requests it (caught by the ADR-248 server/client parity test; see the gate note below).
+
+**World sprites.** One atlas per def, 8 directions in Art order (E,SE,S,SW,W,NW,N,NE), one frame per direction
+(`idle` frames `[0]`, dirStride 1); medium/large wagons use 4 cols × 2 rows so the atlas stays under the 2048px
+mobile cap (262×8 = 2096 and 307×8 = 2456 would exceed it). `resolveVehicleArt` binds by def id at native
+scale 1 with facing offset +PI/4; the frame anchor (`py/h`) comes from `drawnVehicleFrame`, which mirrors the
+renderer's own `vehicleFrame` projection (45.25 px/tile on diagonals, drawbar tip included). Frames: wagon_small
+217×161, wagon_medium 262×184, wagon_large 307×207, cart 180×143, carriage 244×214, chariot 171×124; covered
+twins are taller by the canvas arch (e.g. wagon_small_covered 217×194). The bench top sits at `seatZPx`
+(32px on wagons/cart/chariot, 37px on the carriage) = `modelZScale × seatZ × 16`, so the ADR-360 driver rests
+on the painted bench. Geometry asserted against `vehicles.json` in the tests (footprint, seatX, hitchX, covered).
+
+**Per-vehicle look (eyes on the live build are the final check — this art was verified numerically, not
+visually).** Wagon_small: barn-red `[176,64,46]` open bed, wooden cargo rails, crates/barrel/sacks, front bench,
+two axles. Wagon_medium: same shape in green `[63,138,74]`, longer bed, more cargo. Wagon_large: blue
+`[47,111,176]`, the biggest bed by a clear margin. Covered twins: the same bed in the same paint with a cream
+canvas arch `[232,222,196]` over dark hoop arcs behind the bench — no cargo visible. Cart: natural-wood
+single-axle bed, twin shafts, small bench. Carriage: near-black `[44,44,52]` enclosed cab with glass windows
+`[58,84,104]`, a door seam, gold beltline trim, a roof slab, a driver's box at the front and two brass lamps.
+Chariot: crimson `[178,60,44]`, slim two-wheel with the biggest spoked wheels (r 0.8 vs the cart's 0.62), low
+rails, a small rear bench — it reads light and fast. Every vehicle has a ground shadow and a drawbar/tongue
+running forward from the front hitch 0.38 tiles, bridging the gap toward the mount's rear pin from the vehicle
+side (the harness traces end at the mount's rear edge).
+
+**Harness.** `mount_harness_<art>` overlays for all seven mount arts, one 128px cell per direction sized to each
+species' body averages (max body 79×95 horse, 76×102 moose). Leather chest + girth bands, a back strap along
+the spine, brass buckles, two rope traces running back toward the vehicle. `LAYER_KEY.harness = 0.005`, below
+the saddle (0.01) — a harnessed + saddled mount shows both. `view.ts` `syncMounts` adds the layer via `layerOn`
+exactly when `isHarnessed(net, m)` (MountHarness present) and destroys it on unequip/mount loss; the layer
+copies the mount's VAnim state, so it stays frame-locked to the gait. One cell per direction is shared by every
+gait frame (tack has no gait of its own), so the mount bobs ~1–2px under the straps while walking/galloping.
+
+**Build-menu / kit icons (ADR-357 pattern).** Thirteen keys — the nine `item_vehicle_kit_<def>`, `item_wooden_wheel`,
+`item_canvas_cover`, `item_wagon_frame`, `harness` — painted at runtime from the world art (each kit icon IS its
+def's SE world cell at icon scale, pivot (64,100); the three parts and the harness are dedicated small drawings:
+spoked wheel, folded canvas, bare frame, coiled harness) and injected as the `#task361-menu-icons` CSS override
+after the stylesheet (`installVehicleMenuIcons`, same call site as `installStoreMenuIcons`). Drawn vehicles have
+no build-menu pieces (pieces.json has none — kits craft at the workbench), so the icons surface on crafting
+recipe tiles and inventory/hotbar slots, all reading the same `data-icon` keys; `panelIcon` routes a kit tile to
+the painted icon once the override is installed and to the fiber category fallback before it (asserted both ways).
+
+**Cuts, stated not faked.** Wheels do not animate: the vehicle body sprite is created with `frameId: 0` and no
+VAnim, so the renderer shows one frame per direction and always plays `idle` — spokes are painted 15° off
+vertical, a mid-roll pose, instead of faking an animation the game can't show; there are no moving/idle
+variants. Damage/wear stages are a cut: Art car sprites carry `intact`/`damaged`/`wrecked` anims and
+`atlasManager` builds a `damage[]` table, but it is only consumed by `resolvePiece` (build pieces) — vehicle
+bodies never go through it, so no worn/damaged variants were bolted on as a parallel system.
+
+**Tests.** New `apps/client/test/adr361_drawn_vehicle_art.test.ts` (12 tests, node env) + `adr361_vehicle_menu_icons.test.ts`
+(2 tests, jsdom) + `adr361_vehicle_menu_icons_fallback.test.ts` (1 test, jsdom): every def's world sprite resolves
+and is non-blank in all 8 directions (SE cell opaque/outline: wagon_small 10701/2176, wagon_medium 15135/2676,
+wagon_large 20228/3255, cart 7445/1745, carriage 18268/2483, chariot 5165/1146; covered twins add canvas pixels
+2128/2999/4562 where open beds have 0); sizes order wagon_small < wagon_medium < wagon_large by frame and by
+painted opaque width; carriage glass 1308 px vs 0 on the wagon; chariot tyre 639 px vs the cart's 383; harness cells
+466–1225 opaque / 109–316 outline per direction with leather + rope present; every icon non-blank, outlined and
+distinct (kits 2531–4457 opaque, wheel 5353, canvas 4313, frame 2566, harness 3597); fragment layout matches the
+painter, atlas image/ktx2 twins exist on disk, no key collides with vehicles/nature/items/task34/task355; the
+harness overlay key is per-species and `isHarnessed` tracks MountHarness exactly. The node/jsdom split is
+deliberate: `@engine/assets/node` needs file: URLs, which the jsdom environment breaks (same reason task355's
+registry test is node-env). Neighbours (192 passed, 1 failed): render `vehicles`, `dirframes`, `adr360_drawn_riders`, client
+`task355_art`, `adr357_store_menu_icons`, `adr229_build_icons`, `adr319_mount_render`, `adr322_mount_acts`,
+`adr360_drawn_driver_render`, gameplay `adr358_drawn_vehicles`, `adr359_harness`, `adr360_driver_seat`,
+`vehicle_craft`, `vehicle_keys`, `vehicle_net`, `vehicle_state`, `vehicles`, `pack.test.ts` (193 tests) — the 1
+failure is the known pre-existing pack.test.ts missing `assets/building/KEYS.md`. Full gate (`pnpm vitest run`
+from the repo root, 2026-11-11 ~19:51 CST): **4,099 passed / 3 failed / 3 skipped** (623 files: 618 passed, 3
+failed, 2 skipped). New suites 15/15 in the gate. The 3 failures: the known pre-existing pack.test.ts KEYS.md
+miss; the known persist autosave bench timing flake; `spawn_world` "one in-game day lasts one real hour"
+timing out at 180 s under gate load — it passes standalone in ~75 s, and no slice file touches the server sim.
+The first gate run (4,098 passed / 4 failed) also failed `adr248_server_manifest_parity` — a real regression
+from this slice (the vite `pack/` mount filter above did not serve the new fragment); fixed by adding `task361`
+to the filter, and this re-run gate confirms parity green. Typecheck with pinned TypeScript 5.9.3: `pnpm -r
+typecheck` clean across all 11 workspace projects (root `node_modules/@engine/gameplay` symlink moved aside
+for the run, then restored). The first typecheck run caught 5 real errors in the new painter/tests
+(`noUncheckedIndexedAccess` on tuple destructures + a literal-union `.includes`); all fixed, re-run clean. No
+package-name self-imports in new test files (grep confirms).

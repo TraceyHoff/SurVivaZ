@@ -26,8 +26,12 @@ export const mountForeKey = (species: number): string => { const a = mountArtKey
 export const saddleOverlayKey = (tier: number, species: number): string => {
   const a = mountArtKey(species); const t = SADDLE_ART_TIERS[tier - 1]; return a && t ? `mount_saddle_${a}_${t}` : "";
 };
+/** Harness overlay key (`mount_harness_<art>`, ADR-361 runtime-painted); "" when the species has no mount sheet. */
+export const harnessOverlayKey = (species: number): string => {
+  const a = mountArtKey(species); return a ? `mount_harness_${a}` : "";
+};
 /** Sort-key steps above the mount for the layers drawn on it. */
-export const LAYER_KEY = { saddle: 0.01, rider: 0.02, fore: 0.03 } as const;
+export const LAYER_KEY = { harness: 0.005, saddle: 0.01, rider: 0.02, fore: 0.03 } as const;
 const ZSTEP = MOUNT_SCALE.zStepPx, TILE_W = 64;
 /**
  * World offset (x, y, z) that leaves a sprite at the same screen spot but raises its depth key by `key`

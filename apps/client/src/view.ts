@@ -26,14 +26,14 @@ import { DoorView, doorArt } from "./door-view.js";
 import { loadManifest, buildPieceVisual, type AssetRegistry } from "@engine/assets";
 import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard } from "@engine/render";
 import { countFraction } from "./load-progress.js";
-import { VehicleView, type VehicleSnapshot, type VehicleRenderDef } from "@engine/render";
+import { VehicleView, type RiderPlacement, type VehicleSnapshot, type VehicleRenderDef } from "@engine/render";
 import { Vehicle as GVehicle, VehicleSeats, VehicleState, Hitch, vehicleDefOf, localPlayerVehicle } from "@engine/gameplay";
 import { netIdOf } from "@engine/net";
 import { roadSpriteKeys, ROAD_FLAGS, signFrameId } from "./road-sign-view.js";
 import { Road, Sign, surfaceDef, signDef, walkAnimRate, petSits, facingAfterTravel } from "@engine/gameplay";
 import { HitReact, NodeRegrow, hitDirRad, Equipment, Worn, SlotDye, INVENTORY_SLOTS, wornCosmetics } from "@engine/gameplay";
-import { Mount, Riding } from "@engine/gameplay";
-import { idleGrazing, LAYER_KEY, MOUNT_GAIT_ANIM, MOUNT_SHEET_WILD, mountActOf, mountForeKey, mountGait, mountSpriteKeyOf, riderPose, riderStartTick, saddleOverlayKey, screenNeutralShift, swimClipPx, type MountAct } from "./mount-render.js";
+import { Mount, Riding, isHarnessed } from "@engine/gameplay";
+import { harnessOverlayKey, idleGrazing, LAYER_KEY, MOUNT_GAIT_ANIM, MOUNT_SHEET_WILD, mountActOf, mountForeKey, mountGait, mountSpriteKeyOf, riderPose, riderStartTick, saddleOverlayKey, screenNeutralShift, swimClipPx, type MountAct } from "./mount-render.js";
 import { AssetRegistry as AssetRegistryClass } from "@engine/assets";
 import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, StoreFill, isStorePieceKey, type ResolvedSprite } from "@engine/gameplay";
 
@@ -80,6 +80,7 @@ import { MANIFEST_INDEX, withCharArtFragment, loadMergedManifestWith, type Manif
 import { task34AtlasSources, TASK34_ATLAS_KEYS } from "./task34-art.js";
 import { task256AtlasSources, TASK256_ATLAS_KEYS } from "./task256-art.js";
 import { task355AtlasSources, installStoreMenuIcons, TASK355_ATLAS_KEYS } from "./task355-art.js";
+import { task361AtlasSources, installVehicleMenuIcons, TASK361_ATLAS_KEYS } from "./task361-art.js";
 import { stumpKeys } from "./stumps.js";
 /** `?cam=animal`: debug camera that follows the first ambient animal instead of the player. */
 const CAM_ANIMAL = typeof location !== "undefined" && new URLSearchParams(location.search).get("cam") === "animal";
@@ -194,6 +195,18 @@ export function blackFrameStep(st: BlackCheckState, r: { gl?: WebGL2RenderingCon
   if (st.blackCheck?.gl !== r.gl) st.blackCheck = new BlackFrameCheck(r.gl); const bc = st.blackCheck;
   if (bc.pending) { const black = bc.poll(); if (black === true) { if (++st.blackFrames >= 2) showRenderError("World rendered black", glInfo(r.gl)); } else if (black === false) st.blackFrames = 0; }
   else if (r.heldFrames === held0 && st.checks < 90 && ++st.checks % 30 === 0 && daylight() > 0.5) bc.start(); // held (settling) frames draw nothing: not a black frame
+}
+/** ADR-360: apply VehicleView rider placements to the rider's view entity — the seat anchor of whatever vehicle
+ * (motor or drawn) the rider sits in, in every view rotation. The sim snaps a rider to the vehicle centre; the
+ * placement is the seat (the doll's `vehicle` seat socket lands on it, sprites.ts). PrevTransform matches so the
+ * rider does not interpolate from the centre. Riders with no view entity yet are skipped. */
+export function applyVehicleRiderPlacements(net: World, view: World, map: Map<Entity, Entity>, placements: readonly RiderPlacement[]): void {
+  for (const p of placements) {
+    const ne = netIdEntity(net, p.rider); if (ne === undefined) continue;
+    const ve = map.get(ne); if (ve === undefined || !view.has(ve, Transform)) continue;
+    view.set(ve, Transform, { x: p.x, y: p.y, z: p.z, facing: p.facing });
+    if (view.has(ve, PrevTransform)) view.set(ve, PrevTransform, { x: p.x, y: p.y, z: p.z, facing: p.facing });
+  }
 }
 export class IsoView {
   readonly view = new World({ seed: 1 });
@@ -345,10 +358,16 @@ export class IsoView {
     for (const [k, src] of await task256AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-356: dedicated ore / log / stick / crop / stone store atlases (fill states live in the fragment).
     for (const [k, src] of await task355AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-361: dedicated drawn-vehicle + harness atlases (world sprites keyed by def id, harness overlays).
+    for (const [k, src] of await task361AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-357: the five store build-menu icons point at items_build frames 297–301, which are transparent
     // in the shipped atlas (no binary could ship through the snapshot route) — paint them at runtime from
     // the stores' own world art so the build menu shows them. Safe no-op without a canvas.
     installStoreMenuIcons();
+    // ADR-361: the nine drawn-vehicle kits, three wooden parts and harness have no atlas cell or CSS rule
+    // (they fall back to the fiber category icon) — paint them at runtime from the world art. Safe no-op
+    // without a canvas.
+    installVehicleMenuIcons();
     // Art's customization pack (~220 paper-doll atlases, 1008x960): the renderer packs every atlas into one 2048² texture
     // array, so these alone need ~1.7 GiB of VRAM ("Texture total allocation size is too large" -> every sprite black).
     // Until Render loads outfit layers on demand, keep them out unless the array fits (?cz=1 forces them in).
@@ -365,7 +384,7 @@ export class IsoView {
     // ADR-118: count atlas/KTX2 image responses as they land (Resource Timing works for fetch and <img>); expected =
     // the eager atlases (paper-doll/streamed ones load on demand later), so the fraction stays honest and capped < 1.
     // Task 34 blob URLs carry no file extension, so the png-regex watcher never counts them; exclude them so the fraction stays honest.
-    const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[]), ...(TASK355_ATLAS_KEYS as readonly string[])]);
+    const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[]), ...(TASK355_ATLAS_KEYS as readonly string[]), ...(TASK361_ATLAS_KEYS as readonly string[])]);
     const expected = [...registry.atlases.keys()].filter((k) => !custom.includes(k) && !paintedAtlas.has(k)).length;
     const stopWatch = watchResources(/\.(png|webp|ktx2|avif|jpe?g)(\?|$)/i, (n, bytes) => onStage("atlases", countFraction(n, expected), `Loading sprite atlases (${n}/${expected}${bytes ? `, ${(bytes / 1048576).toFixed(1)} MB` : ""})`));
     try { await renderer.atlas.setRegistry(registry, sources); } finally { stopWatch(); }
@@ -882,8 +901,8 @@ export class IsoView {
   private rideOf = new Map<number, 0 | 1 | 2>();
   /** ADR-322: rider ve -> swim clip (px above the seat pivot); mount -> {act, tick it began} (rider own clock). */
   private riderClipOf = new Map<number, number>(); private mountAct = new Map<Entity, { act: MountAct; at: number }>();
-  /** ADR-319 / ADR-320 view-only layers of a mount: saddle overlay and (while ridden) the fore layer drawn over the rider. */
-  private mountLayers = new Map<Entity, { saddle?: Entity; fore?: Entity }>();
+  /** ADR-319 / ADR-320 view-only layers of a mount: saddle overlay and (while ridden) the fore layer drawn over the rider. ADR-361: the harness overlay, one step below the saddle. */
+  private mountLayers = new Map<Entity, { harness?: Entity; saddle?: Entity; fore?: Entity }>();
   /**
    * ADR-319 / ADR-320 mounts on every peer, from replicated Mount / Riding:
    * - a tamed mount switches to its true-scale `mount_<art>` sheet (taming happens after the view entity exists);
@@ -923,8 +942,10 @@ export class IsoView {
           const fore = this.layerOn(mve, L.fore, mountForeKey(sp), LAYER_KEY.fore, q); if (fore !== undefined) L.fore = fore; else delete L.fore;
         } else if (L.fore !== undefined) { v.destroy(L.fore); delete L.fore; }
         const sad = this.layerOn(mve, L.saddle, mm.saddle ? saddleOverlayKey(mm.saddle, sp) : "", LAYER_KEY.saddle, q); if (sad !== undefined) L.saddle = sad; else delete L.saddle;
+        // ADR-361: the harness overlay, exactly while MountHarness is present (drops with the mount's death loot).
+        const har = this.layerOn(mve, L.harness, isHarnessed(net, m) ? harnessOverlayKey(sp) : "", LAYER_KEY.harness, q); if (har !== undefined) L.harness = har; else delete L.harness;
       }
-      for (const [m, L] of this.mountLayers) if (!live.has(m)) { if (L.saddle !== undefined) v.destroy(L.saddle); if (L.fore !== undefined) v.destroy(L.fore); this.mountLayers.delete(m); }
+      for (const [m, L] of this.mountLayers) if (!live.has(m)) { if (L.harness !== undefined) v.destroy(L.harness); if (L.saddle !== undefined) v.destroy(L.saddle); if (L.fore !== undefined) v.destroy(L.fore); this.mountLayers.delete(m); }
     }
     for (const ve of this.rideOf.keys()) if (!riders.has(ve)) this.rideOf.delete(ve);
     for (const ve of this.riderClipOf.keys()) if (!riders.has(ve)) this.riderClipOf.delete(ve);
@@ -976,7 +997,9 @@ export class IsoView {
     this.vehicleView ??= new VehicleView(this.view, this.registry, { art: true, pages: this.renderer.atlas as never });
     const now = performance.now(), dt = this.vehAt ? Math.min(0.25, (now - this.vehAt) / 1000) : 0; this.vehAt = now;
     const f = frac ?? 0.5, darkness = Math.max(0, Math.min(1, Math.cos(f * 2 * Math.PI) * 1.6 + 0.2));
-    this.vehicleView.sync(list, dt, { darkness, lowEnd: this.renderer.capabilities.lowEnd, ...(player !== undefined ? { localVehicle: localPlayerVehicle(net, player) } : {}), riderShadows: false });
+    // ADR-360: the placements are the riders' seats — the sim snaps a rider to the vehicle centre, so without
+    // this a driver renders in the middle of the wagon instead of on its bench. Same path for motor and drawn.
+    applyVehicleRiderPlacements(net, this.view, this.map, this.vehicleView.sync(list, dt, { darkness, lowEnd: this.renderer.capabilities.lowEnd, ...(player !== undefined ? { localVehicle: localPlayerVehicle(net, player) } : {}), riderShadows: false }));
   }
   private classify(net: World, e: Entity, defs: ReturnType<typeof gameplayDefs> | undefined, own: boolean): Spec | undefined {
     const h = (entityIndex(e) * 2654435761) >>> 0;

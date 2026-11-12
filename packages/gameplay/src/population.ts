@@ -21,7 +21,7 @@ import { applyDamage, lastAttacker, setAnim } from "./combat/combat.js";
 import { addItem } from "./inventory.js";
 import { structures } from "./building/structure.js";
 import { TerrainRes } from "./world.js";
-import { swimSpeedMulAt } from "./systems/movement.js";
+import { swimSpeedMulAt, isDrawnDriven } from "./systems/movement.js";
 import { creatureStep, type TileBlocked } from "./systems/creature_nav.js";
 import { nearestClaimHostile, tamedOwnerTribe, TERRITORY_BITE, TERRITORY_DEFEND_RANGE } from "./territory.js";
 import { installSpatialIndex } from "@engine/world";
@@ -147,6 +147,7 @@ export function animalAISystem(world: World, dt: number): void {
     const aKind = aD.kind[aSlot]!; const def = defs[aKind]; if (!def) continue;
     const owned = mountReg && world.has(e, Mount); // ADR-319: a tamed mount behaves like a domesticated animal
     if (owned && (world.getField(e, Mount, "riderNetId") ?? 0) !== 0) continue; // ridden: mountSystem moves it with its rider
+    if (owned && isDrawnDriven(world, e)) continue; // ADR-360: driven from a wagon — the driver steers, the AI must not wander it off
     if (world.isRegistered(RopeLead) && world.has(e, RopeLead)) continue; // ADR-351: led — ropeSystem owns its movement
     const lureable = !owned && mountSpeciesOfAnimal(def.key) > 0; // ADR-319: food in hand calms a wild mount species
     const aState = aD.state[aSlot]!; const aHomeX = aD.homeX[aSlot]!; const aHomeY = aD.homeY[aSlot]!; const aGoalX = aD.goalX[aSlot]!; const aGoalY = aD.goalY[aSlot]!; const aThinkAt = aD.thinkAt[aSlot]!;

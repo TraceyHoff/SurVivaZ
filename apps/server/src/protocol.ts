@@ -157,10 +157,12 @@ export function applyMoveInput(world: World, e: Entity, cmd: InputCmd | null, dt
 /**
  * Demo input shared by server and client prediction: a rider's move bits become drive input for its vehicle
  * (gameplay.vehicles reads only the seat-0 rider's, so passengers cannot steer); on foot it is applyMoveInput.
+ * ADR-360: the driver's full input (bits + analog) also goes through applyMovementInput, so a wagon driver steers
+ * the pulling mount through the same DrawnDrive hook the tests and bots use — motor drivers ignore it there.
  */
 export function applyDemoInput(world: World, e: Entity, cmd: InputCmd | null, dt = 1 / DEFAULT_TICK_HZ): void {
   if (!world.has(e, Driver)) { applyMoveInput(world, e, cmd, dt); return; }
-  applyMovementInput(world, e, 0, dt); // ADR-289: riding clears the on-foot run-up, never auto-boosts
+  applyMovementInput(world, e, cmd?.buttons ?? 0, dt, cmd ? { x: cmd.moveX, y: cmd.moveY } : undefined); // ADR-289: riding clears the on-foot run-up, never auto-boosts
   const d = driveFromBits(cmd?.buttons ?? 0); setDriveInput(world, e, d.x, d.y, d.boost);
 }
 

@@ -18,7 +18,7 @@ import { StockStallCmd } from "../economy/stall.js";
 import { requestEmote } from "../expression.js";
 import { VehicleEnterCmd, VehicleExitCmd, VehicleHitchCmd, VehicleStationCmd, VehicleUnhitchCmd } from "../vehicles.js";
 import { VehicleDeployCmd, VehicleRefuelCmd, VehicleRepairCmd } from "../vehicle_craft.js";
-import { MountDismountCmd, MountFeedCmd, MountRepairCmd, MountRideCmd, MountSaddleCmd } from "../mount_commands.js";
+import { MountDismountCmd, MountFeedCmd, MountHarnessCmd, MountRepairCmd, MountRideCmd, MountSaddleCmd, MountUnharnessCmd } from "../mount_commands.js";
 import { RopeLeadCmd } from "../rope_commands.js";
 
 export function actionIntent(action: string): BotIntent | undefined {
@@ -158,7 +158,8 @@ function vehicleActionCommand(action: string): AgentCommand | undefined | null {
 }
 /**
  * ADR-321 mount action strings: "mfeed:<animal>:<item>" (tame a wild one / heal the own mount) | "mride:<mount>" | "mdismount"
- * | "msaddle:<mount>:<slot>" | "mrepair:<mount>". The server re-validates (checkFeed / checkRide / checkSaddle / checkRepair).
+ * | "msaddle:<mount>:<slot>" | "mrepair:<mount>" | "mharness:<mount>:<slot>" | "munharness:<mount>" (ADR-359).
+ * The server re-validates (checkFeed / checkRide / checkSaddle / checkRepair / checkHarness / checkUnharness).
  */
 function mountActionCommand(action: string): AgentCommand | undefined | null {
   const [k, ...rest] = action.split(":"); const n = rest.map(Number); const ok = (c: number) => n.length >= c && n.every((v) => Number.isInteger(v) && v >= 0);
@@ -168,6 +169,8 @@ function mountActionCommand(action: string): AgentCommand | undefined | null {
     case "mdismount": return { type: MountDismountCmd.name, payload: {} };
     case "msaddle": return ok(2) ? { type: MountSaddleCmd.name, payload: { target: n[0]!, slot: n[1]! } } : undefined;
     case "mrepair": return ok(1) ? { type: MountRepairCmd.name, payload: { target: n[0]! } } : undefined;
+    case "mharness": return ok(2) ? { type: MountHarnessCmd.name, payload: { target: n[0]!, slot: n[1]! } } : undefined;
+    case "munharness": return ok(1) ? { type: MountUnharnessCmd.name, payload: { target: n[0]! } } : undefined;
     default: return null;
   }
 }
@@ -182,7 +185,7 @@ function ropeActionCommand(action: string): AgentCommand | undefined | null {
     default: return null;
   }
 }
-const COMMAND_ACTIONS = new Set(["mfeed", "mride", "mdismount", "msaddle", "mrepair", "rope", "terrain", "venter", "vexit", "vhitch", "vunhitch", "vstation", "vrefuel", "vrepair", "vdeploy", "ccreate", "cinvite", "caccept", "cleave", "cpromote", "cdemote", "ckick", "cperms", "cgoal", "cstock", "eat", "drink", "craft", "build", "open", "buy", "pinvite", "paccept", "pdecline", "pleave", "pkick", "skill", "equip", "repair", "upgrade", "copen", "cclose", "cdeposit", "fire", "cwithdraw", "wear", "door", "drop", "dye"]);
+const COMMAND_ACTIONS = new Set(["mfeed", "mride", "mdismount", "msaddle", "mrepair", "mharness", "munharness", "rope", "terrain", "venter", "vexit", "vhitch", "vunhitch", "vstation", "vrefuel", "vrepair", "vdeploy", "ccreate", "cinvite", "caccept", "cleave", "cpromote", "cdemote", "ckick", "cperms", "cgoal", "cstock", "eat", "drink", "craft", "build", "open", "buy", "pinvite", "paccept", "pdecline", "pleave", "pkick", "skill", "equip", "repair", "upgrade", "copen", "cclose", "cdeposit", "fire", "cwithdraw", "wear", "door", "drop", "dye"]);
 /**
  * Moves the command-type actions (eat, drink, craft, build, open, buy) out of out.actions and into out.commands, in order.
   Movement and gather/attack/sleep stay

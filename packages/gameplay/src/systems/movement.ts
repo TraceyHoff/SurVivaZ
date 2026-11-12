@@ -11,9 +11,9 @@ import { shaftAwareHeight, updateShaftOccupancy } from "../building/terrain-hatc
  * by edge walls/closed doors, solid cell pieces at the player's level and unwalkable terrain (per-axis slide).
  */
 import { roadSpeedMul } from "../roads.js";
-import { entityIndex, evaluate, Transform, type Entity, type World } from "@engine/core";
+import { entityIndex, evaluate, defineResource, Transform, type Entity, type World } from "@engine/core";
 import { contractDisease, diseaseMoveMul } from "../diseases.js";
-import { Anim, AnimState, DamageCause, Health, LootBag, Buffs, Dead, Driver, EdgeSide, Inventory, PlayerIntent, Riding, Stat, Survival, Wetness } from "../components.js";
+import { Anim, AnimState, DamageCause, Health, LootBag, Buffs, Dead, Driver, EdgeSide, Inventory, Mount, PlayerIntent, Riding, Stat, Survival, Wetness } from "../components.js";
 import { fitsDoorway, fitsUnderCeiling, mountBodyRadius, mountOfRider, mountSpecies, MOUNT_TUNING } from "../mount_defs.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { skillMul } from "../skills/tree.js";
@@ -229,6 +229,7 @@ export function applyMovementInput(world: World, e: Entity, actions: number, dt:
   if (world.has(e, Driver)) {
     autoSprintReady(world, e, 0, 0, dt);
     if (world.has(e, PlayerIntent)) world.set(e, PlayerIntent, { moving: 0, sprint: 0 });
+    world.getResource(DrawnDriveRes)?.(world, e, actions, dt, analog); // ADR-360: a wagon driver steers the pulling mount
     return;
   } // riders move with their vehicle (gameplay.vehicles)
   if (world.isRegistered(Riding) && world.has(e, Riding)) { applyRidingInput(world, e, actions, dt, analog); return; } // ADR-319
@@ -380,6 +381,24 @@ export function floatLootAshore(world: World): void {
   }
 }
 
+/** ADR-358: optional cap on a mount's target speed from a towed drawn vehicle — vehicles.ts registers
+ * drawnTowCap as the resource (installVehicleCraft); movement stays free of the vehicle module (no import cycle).
+ * ADR-360: the cap is keyed by the MOUNT, not the rider — a wagon driver steers the same mount a rider would. */
+export type RideTowCap = (world: World, mount: Entity, galloping: boolean) => number | undefined;
+export const RideTowCapRes = defineResource<RideTowCap>("gameplay.RideTowCap");
+
+/** ADR-360: seat-0 driver of a hitched drawn vehicle steering its mount (vehicles.ts registers the hook in
+ * installVehicleCraft, like RideTowCap). True when the input drove the mount; movement stays free of the vehicle
+ * module. Called from applyMovementInput's Driver branch — the same funnel players, bots and tests share. */
+export type DrawnDrive = (world: World, driver: Entity, actions: number, dt: number, analog?: { x?: number | undefined; y?: number | undefined }) => boolean;
+export const DrawnDriveRes = defineResource<DrawnDrive>("gameplay.DrawnDrive");
+/** ADR-360: true when `mount` is currently driven from a drawn vehicle's driver seat (seat 0 occupied) — the
+ * animal AI must not wander it while a driver steers. Registered by vehicles.ts alongside DrawnDrive. */
+export type DrawnDriven = (world: World, mount: Entity) => boolean;
+export const DrawnDrivenRes = defineResource<DrawnDriven>("gameplay.DrawnDriven");
+/** The DrawnDriven check, or false when no vehicle module registered one (no drawn vehicles in this world). */
+export const isDrawnDriven = (world: World, mount: Entity): boolean => world.getResource(DrawnDrivenRes)?.(world, mount) ?? false;
+
 // ---- ADR-319 riding ----------------------------------------------------------------------------------------
 const angleDiff = (a: number, b: number): number => { let d = (b - a) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2; return d; };
 /**
@@ -391,41 +410,60 @@ const angleDiff = (a: number, b: number): number => { let d = (b - a) % (Math.PI
  * refused (terrain-ladder.ts) and falls hurt rider and mount (applyTerrainFall).
  */
 export function applyRidingInput(world: World, e: Entity, actions: number, dt: number, analog?: { x?: number | undefined; y?: number | undefined }): void {
-  const t = world.get(e, Transform); if (!t) return;
-  const r = world.get(e, Riding)!; const sp = mountSpecies(r.species); const tune = MOUNT_TUNING;
-  const { dx, dy } = world.has(e, Dead) || !sp ? { dx: 0, dy: 0 } : moveVector(actions, analog);
-  const mag = Math.min(1, Math.hypot(dx, dy)); const ready = autoSprintReady(world, e, dx, dy, dt) || (mag > 0 && (actions & A.Sprint) !== 0); // hold Sprint to gallop at once
-  if (!world.has(e, PlayerIntent) && world.predicted.has(e)) world.add(e, PlayerIntent);
-  if (world.has(e, PlayerIntent)) world.set(e, PlayerIntent, { moving: mag > 0 ? 1 : 0, sprint: mag > 0 && ready ? 1 : 0 });
-  if (!sp) return;
+  const r = world.get(e, Riding); if (!r) return;
+  const speed = applyRidingMotion(world, e, r.species, r.speed, r.hurt !== 0, actions, dt, analog);
+  if (Math.abs(speed - r.speed) > 1e-6) world.set(e, Riding, { speed });
+}
+/**
+ * Shared mount-motion core (ADR-319 riding + ADR-360 wagon driving): steers `mover` — a rider's own Transform, or
+ * the mount itself when a wagon driver steers it — at the species' walk/gallop with the tow cap applied. `owner`
+ * is the entity the input belongs to (the rider, or the wagon driver); only when owner === mover do AutoSprint /
+ * PlayerIntent apply — a wagon driver never builds an on-foot run-up and never drains stamina (ADR-289: driving
+ * never auto-boosts; Sprint is the gallop, like a motor vehicle's boost). Returns the new ground speed; the caller
+ * stores it (Riding.speed for a rider, the DrawnDriveSpeeds map for a driven mount).
+ */
+export function applyRidingMotion(world: World, mover: Entity, species: number, speed: number, hurt: boolean, actions: number, dt: number, analog?: { x?: number | undefined; y?: number | undefined }, owner: Entity = mover): number {
+  const t = world.get(mover, Transform); if (!t) return speed;
+  const sp = mountSpecies(species); const tune = MOUNT_TUNING;
+  const { dx, dy } = world.has(owner, Dead) || !sp ? { dx: 0, dy: 0 } : moveVector(actions, analog);
+  const mag = Math.min(1, Math.hypot(dx, dy));
+  const autoReady = owner === mover ? autoSprintReady(world, owner, dx, dy, dt) : false;
+  const ready = autoReady || (mag > 0 && (actions & A.Sprint) !== 0); // hold Sprint to gallop at once
+  if (owner === mover) {
+    if (!world.has(owner, PlayerIntent) && world.predicted.has(owner)) world.add(owner, PlayerIntent);
+    if (world.has(owner, PlayerIntent)) world.set(owner, PlayerIntent, { moving: mag > 0 ? 1 : 0, sprint: mag > 0 && ready ? 1 : 0 });
+  }
+  if (!sp) return speed;
   const level = Math.max(0, Math.round(t.z / gameplayDefs(world).building.levelHeight));
   const swim = level === 0 && sp.swims;
   let facing = t.facing ?? 0; let target = 0;
   if (mag > 0) {
     const want = Math.atan2(dy, dx); const diff = angleDiff(facing, want);
-    target = (ready ? sp.gallop : sp.walk) * mag * (r.hurt ? tune.lowHpSpeedMul : 1) * roadSpeedMul(world, t.x, t.y) * (swim ? swimSpeedMulAt(world, t.x, t.y) : 1);
+    target = (ready ? sp.gallop : sp.walk) * mag * (hurt ? tune.lowHpSpeedMul : 1) * roadSpeedMul(world, t.x, t.y) * (swim ? swimSpeedMulAt(world, t.x, t.y) : 1);
     if (Math.abs(diff) > (tune.reverseAngleDeg * Math.PI) / 180) target = Math.min(target, sp.walk * tune.pivotSpeedMul);
     const step = sp.turn * dt; facing = normalizeFacing(facing + Math.max(-step, Math.min(step, diff)));
   }
-  let speed = r.speed;
+  const towMount = world.has(mover, Mount) ? mover : mountOfRider(world, mover);
+  const towCap = towMount === undefined ? undefined : world.getResource(RideTowCapRes)?.(world, towMount, ready); // ADR-358: a laden wagon slows its mount
+  if (towCap !== undefined) target = Math.min(target, towCap);
   if (speed < target) speed = Math.min(target, Math.max(speed, sp.walk * tune.startSpeedMul * mag) + sp.accel * dt);
   else speed = Math.max(target, speed - sp.accel * tune.decelMul * dt);
   if (speed < 1e-3) speed = 0;
-  const v = speed * dt; const mx = Math.cos(facing) * v, my = Math.sin(facing) * v; const rad = mountBodyRadius(r.species);
+  const v = speed * dt; const mx = Math.cos(facing) * v, my = Math.sin(facing) * v; const rad = mountBodyRadius(species);
   let x = t.x, y = t.y;
   if (v > 0) {
-    let nx = bodyAxisMove(world, x, y, x + mx, 0, level, swim, rad, e);
-    if (rideClearanceBlocked(world, r.species, x, y, nx, y, level)) nx = x;
-    if (level === 0) applyTerrainFall(world, e, x, y, nx, y, dt); x = nx;
-    let ny = bodyAxisMove(world, x, y, y + my, 1, level, swim, rad, e);
-    if (rideClearanceBlocked(world, r.species, x, y, x, ny, level)) ny = y;
-    if (level === 0) applyTerrainFall(world, e, x, y, x, ny, dt); y = ny;
+    let nx = bodyAxisMove(world, x, y, x + mx, 0, level, swim, rad, mover);
+    if (rideClearanceBlocked(world, species, x, y, nx, y, level)) nx = x;
+    if (level === 0) applyTerrainFall(world, mover, x, y, nx, y, dt); x = nx;
+    let ny = bodyAxisMove(world, x, y, y + my, 1, level, swim, rad, mover);
+    if (rideClearanceBlocked(world, species, x, y, x, ny, level)) ny = y;
+    if (level === 0) applyTerrainFall(world, mover, x, y, x, ny, dt); y = ny;
     const moved = Math.hypot(x - t.x, y - t.y); if (moved < v * 0.25) speed = Math.min(speed, moved / Math.max(dt, 1e-6)); // blocked: lose momentum
   }
-  if (x !== t.x || y !== t.y) { world.set(e, Transform, { x, y, facing }); updateShaftOccupancy(world, e, t.x, t.y, x, y); }
-  else if (facing !== t.facing) world.set(e, Transform, { facing });
-  if (Math.abs(speed - r.speed) > 1e-6) world.set(e, Riding, { speed });
-  settleStandZ(world, e, dt);
+  if (x !== t.x || y !== t.y) { world.set(mover, Transform, { x, y, facing }); updateShaftOccupancy(world, mover, t.x, t.y, x, y); }
+  else if (facing !== t.facing) world.set(mover, Transform, { facing });
+  settleStandZ(world, mover, dt);
+  return speed;
 }
 /** ADR-319 clearance: a seated rider taller than a doorway cannot ride through an edge piece's opening, nor under a deck one level up. */
 export function rideClearanceBlocked(world: World, species: number, x0: number, y0: number, x1: number, y1: number, level: number): boolean {

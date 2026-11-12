@@ -496,7 +496,20 @@
     "saddle_reinforced": 494,
     "saddle_steel": 495,
     "dung": 496,
-    "dung_fertilizer": 497
+    "dung_fertilizer": 497,
+    "canvas_cover": 498,
+    "vehicle_kit_carriage": 499,
+    "vehicle_kit_cart": 500,
+    "vehicle_kit_chariot": 501,
+    "vehicle_kit_wagon_large": 502,
+    "vehicle_kit_wagon_large_covered": 503,
+    "vehicle_kit_wagon_medium": 504,
+    "vehicle_kit_wagon_medium_covered": 505,
+    "vehicle_kit_wagon_small": 506,
+    "vehicle_kit_wagon_small_covered": 507,
+    "wagon_frame": 508,
+    "wooden_wheel": 509,
+    "harness": 510
   },
   "resources": {
     "fallen_branches": 1,
@@ -977,7 +990,20 @@
     "saddle_leather": 380,
     "saddle_reinforced": 381,
     "saddle_steel": 382,
-    "dung_fertilizer": 383
+    "dung_fertilizer": 383,
+    "canvas_cover": 384,
+    "vehicle_kit_carriage": 385,
+    "vehicle_kit_cart": 386,
+    "vehicle_kit_chariot": 387,
+    "vehicle_kit_wagon_large": 388,
+    "vehicle_kit_wagon_large_covered": 389,
+    "vehicle_kit_wagon_medium": 390,
+    "vehicle_kit_wagon_medium_covered": 391,
+    "vehicle_kit_wagon_small": 392,
+    "vehicle_kit_wagon_small_covered": 393,
+    "wagon_frame": 394,
+    "wooden_wheel": 395,
+    "harness": 396
   },
   "pieces": {
     "anvil": 1,

@@ -9,7 +9,7 @@
  */
 import { NetId, PlayerId, type Entity, type World } from "@engine/core";
 import raw from "../data/mounts.json";
-import { Equipment, Mount, Riding, Tribe, Worker } from "./components.js";
+import { Equipment, Mount, MountHarness, Riding, Tribe, Worker } from "./components.js";
 import { gameplayDefs } from "./config.js";
 
 export type FoodPref = "love" | "like" | "ok";
@@ -71,6 +71,18 @@ export const saddleOfItemKey = (key: string | undefined): SaddleDef | undefined 
 export const saddleSlots = (tier: number): number => saddleOfTier(tier)?.slots ?? 0;
 /** Armor points (same units as Worn.armor: damage x 100 / (100 + armor)) a saddle gives rider and mount; 0 when broken. */
 export const saddleDefense = (tier: number, dur: number): number => (dur > 0 ? saddleOfTier(tier)?.defense ?? 0 : 0);
+
+// ---- harness (ADR-359) -----------------------------------------------------------------------------------
+/** Item key of the harness (data/items.json, family "harness"). One harness, no tiers: tack, not a seat. */
+export const HARNESS_ITEM_KEY = "harness";
+/** True when `item` is a harness (data-driven: the item's family, so a future harness variant just works). */
+export const isHarnessItem = (world: World, item: number): boolean => gameplayDefs(world).items.get(item)?.family === "harness";
+/** The harness item id (0 when the data has none — a world without the ADR-359 item). */
+export const harnessItemId = (world: World): number => [...gameplayDefs(world).items.values()].find((d) => d.family === "harness")?.id ?? 0;
+/** True when mount `m` wears a harness (MountHarness present). */
+export const isHarnessed = (world: World, m: Entity): boolean => world.isRegistered(MountHarness) && world.has(m, MountHarness);
+/** Equipped harness item id, or 0 when bare. */
+export const harnessItemOf = (world: World, m: Entity): number => (isHarnessed(world, m) ? world.getField(m, MountHarness, "item") ?? 0 : 0);
 
 /** The Mount entity a rider sits on (scan of the few Mount entities by NetId), or undefined. */
 export function mountOfRider(world: World, rider: Entity): Entity | undefined {

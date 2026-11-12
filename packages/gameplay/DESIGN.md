@@ -529,11 +529,13 @@ Lives on the bot's AgentIdentity record in `game.agents` under `social` (`ai/soc
 
 Builds on the Engine Architect vehicle core (docs/VEHICLES.md, ADR-096), which is unchanged. Rules: data/vehicle_crafting.json
 (salted as `gameplay.vehicleCraft`); items/recipes: data/vehicle_items.json + data/vehicle_recipes.json (merged in data.ts; ids append-only).
-- **Spawn = placeable kits.** Each of the 30 vehicles has `vehicle_kit_<id>`; bikes and s/m trailers craft at the workbench, the
-  rest at the new **garage** station (StationKind 5, piece `garage`). Costs (parts -> kit) scale with size and power; every recipe
+- **Spawn = placeable kits.** Each of the 39 vehicles has `vehicle_kit_<id>`; bikes and s/m trailers craft at the workbench, the
+  rest at the new **garage** station (StationKind 5, piece `garage`) — except the 9 animal-drawn vehicles (ADR-358: wagons,
+  cart, carriage, chariot), which are wooden and craft at the workbench from `wooden_wheel` / `wagon_frame` /
+  `canvas_cover`. Costs (parts -> kit) scale with size and power; every recipe
   has `seconds`; the crafter is recorded on the kit slot (crafterId) and copied to the vehicle's `VehicleCondition.crafterId`
   on `gameplay.vehicleDeploy {slot,x,y,heading}` (reach 4, starts with 10% fuel).
-- **Storage** = `storageCapacity`: vehicles.json slots x class scale, clamped per class (`data/vehicle_storage.json`, bike <= 6 ... semi trailer 96; ADR-098). Weight limits unchanged.
+- **Storage** = `storageCapacity`: vehicles.json slots x class scale, clamped per class (`data/vehicle_storage.json`, bike <= 6 ... semi trailer 96; ADR-098). Weight limits unchanged. Animal-drawn (ADR-358): wagon 3/72, cart 2/12, carriage 2/24, chariot 1/4.
 - **Fuel:** crude_oil (items.json, oil_seep node; also furnace-from-coal) -> gasoline / diesel; plant_oil -> biofuel (workbench). 1 item = 1 L. Gasoline vehicles take
   gasoline/biofuel, diesel ones (flatbed, box truck, semi) take diesel/biofuel. `gameplay.vehicleRefuel {target,slot,count}`
   needs a parked vehicle in reach 3, pours whole items up to 20 and never overfills. Consumption is the core's; bikes use stamina.
@@ -543,9 +545,23 @@ Builds on the Engine Architect vehicle core (docs/VEHICLES.md, ADR-096), which i
 - **Camper stations:** `addStationProvider` (crafting.ts) lets parked camper interiors satisfy station checks
   (campfire/workbench/furnace) for existing crafting and cooking; `addVehicleStationHook("survival.stations")` emits
   `VehicleStationOpened` for the UI.
-- **Bots:** `fillVehicleSensors` (replica only) + behaviors `drive`, `vehicle_service`, `hitch`, `deploy_vehicle`. Actions
+- **Bots:** `fillVehicleSensors` (replica only) + behaviors `drive`, `vehicle_service`, `hitch`, `deploy_vehicle`,
+  `drive_drawn` (ADR-360). Actions
   `venter/vexit/vhitch/vunhitch/vstation/vrefuel/vrepair/vdeploy` become AgentOutput.commands. Gates: bravery >= 0.25 to drive,
   industriousness >= 0.5 to hitch. Goal = clan goal, else home; drive when farther than 25, stop within 6. No rng/clock.
+  `drive_drawn` enters the towed wagon's driver seat (`venter:<id>:0`) and steers the mount toward the goal through
+  `AgentOutput` (Sprint gallops when farther than 18 from the goal); `pickRide` never picks a drawn vehicle, and a
+  riding bot gets off its mount for `drive_drawn` (`DISMOUNT_NOW`).
+- **Harness (ADR-359):** the `harness` item (workbench, leather 2 + rope 2 + iron_ingot 1, 6 s — cheaper than a saddle,
+  it is tack, not a seat) equips to a mount via `gameplay.mountHarness` / `gameplay.mountUnharness`, mirroring the saddle
+  commands; state lives in the appended `MountHarness {item: u16}` component (networked + persistent), not on `Mount`.
+  A mount tows a drawn vehicle only while harnessed (`validateHitch` drawn branch rejects an unharnessed mount tow
+  `no_harness`); detach is `vehicleUnhitch` (vehicle stays parked, mount keeps its harness) and unequipping while
+  hitched is rejected `hitched`. Bots: `harness_up` equips a harness from the bag or crafts one at the workbench, but
+  only when a drawn vehicle is nearby (never speculative); `hitch_drawn` rides the mount to a staging point ahead of
+  the vehicle's front hitch via an approach leg along its heading, dismounts when the rear pin sits on the front hitch,
+  and hooks up — `unhitch_drawn` detaches when the haul is done (towing + inventory room or at the drive goal). A bot
+  without a harness never hitches a drawn vehicle.
 - **Persistence/replication:** VehicleCondition {crafterId, wear} is networked + persistent (appended after the arms components Worn/WeaponState/LiveExplosive/ExplosiveOwner);
   everything else uses the core's flags.
 
@@ -596,7 +612,7 @@ Known gaps: `PaintCmd` is not net-bridged; clan roster/perms only cover replicat
 
 ## 32. Container capacity up to 96 slots (ADR-098)
 - `Container` arrays are `CONTAINER_MAX_SLOTS` = 96 wide; capacity is per-instance `slotCount` from the def (piece `container` <= 96, bag sizes, vehicle `storageCapacity`). Slots >= slotCount stay empty; every inventory helper already iterates to slotCount.
-- Vehicle slots by class (`data/vehicle_storage.json`, Gameplay-owned; vehicles.json untouched): slots = clamp(round(base x scale), 1, max). Scale/max: bicycle 1/6, car 1.5/18, van 2/40, truck 2.5/48, camper 2/48, semi 2/16, trailer 4/96. maxWeight unchanged.
+- Vehicle slots by class (`data/vehicle_storage.json`, Gameplay-owned; vehicles.json untouched): slots = clamp(round(base x scale), 1, max). Scale/max: bicycle 1/6, car 1.5/18, van 2/40, truck 2.5/48, camper 2/48, semi 2/16, trailer 4/96, wagon 3/72, cart 2/12, carriage 2/24, chariot 1/4 (drawn classes, ADR-358). maxWeight unchanged.
 - Replication: unchanged net element deltas; one changed slot = 19 B (test `apps/server/test/container_bandwidth.test.ts`). Spawn (open) ~1.4 KB: Netcode ask.
 - Persist: `CONTAINER_96_MIGRATIONS` (grown 24 -> 96, with/without crafterId) for chunk rows and player records (`packages/persist/test/container96.test.ts`).
 - UI: `openContainer` / `containerView(c, e, page)` / `withdrawIntent` / `depositIntent` (`src/ui/menus.ts`); the client inventory panel pages 24 slots at a time (◀ ▶, PgUp/PgDn, LB/RB). Tapping a pack slot while a box is open deposits the stack; tapping a box slot takes it.

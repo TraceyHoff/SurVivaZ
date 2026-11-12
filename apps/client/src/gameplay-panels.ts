@@ -23,7 +23,7 @@ import { hasDisease, iconForItem, ROADS, clanTintIndex,
   type BuildSelection, type MenuCtx, type MenuIntent, camperStationView, vehicleRefuelIntent, type CamperRecipeView,
   progressionView, unlockSkillIntent, respecSkillsIntent, SKILL_REJECT_TEXT, useIntent, drinkWaterIntent, nearWater,
   SKILLS, equipIntent, wearIntent, equipmentView, boilIntent, nearLitCampfire, holdingTorch,
-  mountView, mountRideIntent, mountDismountIntent, mountFeedIntent, mountSaddleIntent, mountUnsaddleIntent, mountRepairIntent, MOUNT_SPECIES,
+  mountView, mountRideIntent, mountDismountIntent, mountFeedIntent, mountSaddleIntent, mountUnsaddleIntent, mountRepairIntent, mountHarnessIntent, mountUnharnessIntent, mountHitchIntent, mountUnhitchIntent, MOUNT_SPECIES,
   petView, petsOf, petOfferIntent, petCommandIntent, petGuardIntent, animalSkillIntent, animalSkillView, petStatusLabel, dropItemIntent, splitStackIntent, moveSlotIntent, containerToSlotIntent, slotToContainerIntent, defaultSplit, HOTBAR_SIZE, PACK_SLOTS, HOTBAR_OFFSET, PET_HELP, petName, petSpecies, Pet, Animal, BuildPiece, Tamed,
   ropeLeadIntent, ropeEquipped,
   workerView, WORKER_JOBS, WORKER_JOB_LABELS, WORKER_JOB_HELP, WORKER_HELP, hireWorkerIntent, dismissWorkerIntent,
@@ -1146,6 +1146,7 @@ function mountBody(c: MenuCtx, src: GameplaySource, kit: PanelKit, btn: Btn, sen
   head.append(bar("HP", v.hp, v.maxHp, "mount-hp"));
   if (v.wild) head.append(bar("Tame", v.tame, 100, "mount-tame"));
   if (v.saddle) head.append(bar(`${v.saddle.name} · +${v.saddle.defense} armor · ${v.saddle.used}/${v.saddle.slots} slots`, v.saddle.dur, v.saddle.max, "mount-saddle"));
+  if (v.harness) head.append(el("p", { "data-role": "mount-harness" }, `Harness on${v.towing ? ` · towing ${v.towing.name}` : " · ready to pull"}`));
   out.push(head);
   if (!v.wild && !v.mayUse) { out.push(kit.para("Someone else's mount.")); return out; }
   if (v.wild) {
@@ -1181,6 +1182,16 @@ function mountBody(c: MenuCtx, src: GameplaySource, kit: PanelKit, btn: Btn, sen
     if (v.repair.length) { const ok = v.repair.every((r) => r.have >= r.count); sg.append(btn(`Repair (${v.repair.map((r) => `${r.count} ${r.name}`).join(", ")})`, "mount-repair", () => send(mountRepairIntent(v.entity), "Repaired."), { disabled: !ok, title: ok ? "Restore durability" : "Missing materials" })); }
   }
   if (sg.childElementCount) out.push(sg); else out.push(kit.para("Bareback: no armor, no saddlebag. Craft a saddle at a workbench (Saddlery, Husbandry tree)."));
+  // ADR-359: harness + hook up / detach. The panel is the same shell-button list on keyboard, gamepad and touch
+  // (Mount menu: U / LB+X / "Mount"), so hook/detach needs no separate input path.
+  out.push(heading("Harness"));
+  const hg = grid(); hg.dataset["role"] = "mount-harness";
+  for (const h of v.harnesses) hg.append(btn(`Put on ${h.name}`, `mount-harness-${h.slot}`, () => send(mountHarnessIntent(v.entity, h.slot), `${h.name} on.`), { data: { item: String(h.item) } }));
+  if (v.harness) hg.append(btn("Remove harness", "mount-unharness", () => send(mountUnharnessIntent(v.entity), "Harness off."), { alt: true, disabled: !!v.towing, title: v.towing ? "Detach the wagon first" : "Take the harness off" }));
+  if (v.towing) hg.append(btn(`Detach ${v.towing.name}`, "mount-unhitch", () => send(mountUnhitchIntent(v.towing!.id), `${v.towing!.name} detached.`), { alt: true, title: "The wagon stays parked where it is" }));
+  else for (const d of v.drawn) hg.append(btn(`Hook up ${d.name}`, `mount-hitch-${d.id}`, () => send(mountHitchIntent(v.entity, d.id), `Hooked up the ${d.name}.`), { disabled: !v.harness, title: v.harness ? "Hitch it behind the mount" : "Put a harness on first" }));
+  if (hg.childElementCount) out.push(hg);
+  else out.push(kit.para(v.harness ? "No wagon, cart, carriage or chariot parked nearby to hook up." : "No harness in your pack. Craft one at a workbench (leather, rope, iron) to pull a wagon, cart, carriage or chariot."));
   if (v.foods.length && v.hp < v.maxHp - 0.5) {
     out.push(heading("Feed (heals)")); const fg = grid(); fg.dataset["role"] = "mount-feed";
     for (const f of v.foods) fg.append(btn(`Feed ${f.name} ×${f.count}`, `mount-feed-${f.item}`, () => send(mountFeedIntent(v.entity, f.item), `Fed ${f.name}.`), { role: "offer", data: { item: String(f.item), icon: f.key } }));

@@ -14,6 +14,10 @@
  *   (gather, combat, crafting, building, sleep, vehicles).
  * - saddle_up: equip the best saddle in the bag, else craft the best unlocked affordable one (at the base station),
  *   else repair a worn saddle when the Saddlery unlock allows it.
+ * - harness_up (ADR-359): equip a harness from the bag, else craft the workbench harness, when a drawn vehicle is
+ *   near enough to tow — a harnessed mount is the only mount that may hitch a wagon / cart / carriage / chariot
+ *   (validateHitch "no_harness"). The hitch / detach itself is the vehicle_behaviors `hitch_drawn` / `unhitch_drawn`
+ *   pair; the mount panel (mount_view.ts) is the player's equivalent.
  * - tend_mount: feed a hurt mount, fetch a mount that strayed from home, use the saddlebag as overflow storage.
  *   A dead mount is simply gone from the sensors, so tame_mount picks a replacement.
  *
@@ -25,11 +29,13 @@
 import { entityIndex, Transform, type Agent, type AgentContext, type AgentOutput, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
-import { Animal, Dead, Equipment, Health, Mount, MountTaming, Pet, Survival, Tamed, Worker } from "../components.js";
+import { Animal, Dead, Equipment, Health, Hitch, Mount, MountTaming, Pet, Survival, Tamed, Worker } from "../components.js";
 import { gameplayDefs } from "../config.js";
 import { countItem, readSlots } from "../inventory.js";
 import { animalDefs } from "../population.js";
-import { MOUNT_BOTS as B, mayUseMount, mountOfRider, mountOwnerIdFor, mountSpecies, mountSpeciesOfAnimal, playerIdOf, saddleOfItemKey, SADDLES } from "../mount_defs.js";
+import { MOUNT_BOTS as B, harnessItemId, isHarnessed, mayUseMount, mountOfRider, mountOwnerIdFor, mountSpecies, mountSpeciesOfAnimal, playerIdOf, saddleOfItemKey, SADDLES } from "../mount_defs.js";
+import { netIdEntity } from "../vehicle_net.js";
+import { isDrawnClass } from "../vehicles.js";
 import { preferredMount } from "./mount_preference.js"; // ADR-339: tame a mount of the bot's own choice
 import { bestMountFood, checkRepair, isRiding, liveRider, MOUNT_TAME_TOKEN, saddleInfo } from "../mounts.js";
 import { hasSkillUnlock } from "../skills/tree.js";
@@ -44,9 +50,13 @@ import { aiMemoryOf, baseHome, insideBase, makePlan, plannerIndex } from "./plan
 export interface SeenMount {
   id: number; x: number; y: number; species: number; hp: number; riding: boolean; busy: boolean;
   saddle: number; saddleDur: number; saddleMax: number; bagFree: number; feedItem?: number;
+  /** ADR-359: wears a harness (may tow a drawn vehicle); towing = the drawn vehicle entity it pulls, if any. */
+  harness: boolean; towing?: number;
 }
 export interface TameTarget { id: number; x: number; y: number; species: number; item: number; slot: number; holding: boolean; progress: number; kicker: boolean }
 export type SaddlePlan = { kind: "equip"; slot: number } | { kind: "craft"; recipe: number; here: boolean; x: number; y: number } | { kind: "repair" };
+/** ADR-359: next harness step for the own mount — one harness, no tiers, no repair (tack, not armor). */
+export type HarnessPlan = { kind: "equip"; slot: number } | { kind: "craft"; recipe: number; here: boolean; x: number; y: number };
 export interface MountSensors {
   /** ADR-321: the bot's own (or its employer's) mount; riding = the bot sits on it. */
   mount?: SeenMount;
@@ -56,6 +66,8 @@ export interface MountSensors {
   tameMount?: TameTarget;
   /** Next saddle step for the own mount. */
   saddleUp?: SaddlePlan;
+  /** ADR-359: next harness step for the own mount (only when a drawn vehicle is near enough to tow). */
+  harnessUp?: HarnessPlan;
   /** Free inventory slots (saddlebag overflow). */
   invFree?: number;
   /** ADR-323: liked food to fetch from an allowed storage box (own / employer's / clan's) for taming or feeding. */
@@ -67,7 +79,7 @@ export interface MountSensors {
 }
 export interface MountFoodFetch { piece: number; x: number; y: number; item: number; count: number; why: "tame" | "feed" }
 export interface SaddleGoal { key: string; tier: number; since: number }
-export const MOUNT_SENSOR_KEYS = ["mount", "mountSkill", "tameMount", "saddleUp", "invFree", "mountFood", "mountForage", "saddleGoal"] as const;
+export const MOUNT_SENSOR_KEYS = ["mount", "mountSkill", "tameMount", "saddleUp", "harnessUp", "invFree", "mountFood", "mountForage", "saddleGoal"] as const;
 type Ctx = AgentContext<AgentWorldView>;
 type Out = AgentOutput;
 
@@ -106,7 +118,9 @@ function seenMount(world: World, self: Entity, m: Entity): SeenMount {
   const si = saddleInfo(world, m); const rider = liveRider(world, m);
   let bagFree = 0; if (si) { const v = readSlots(world, m); for (let i = 0; i < si.slots; i++) if (!v.item(i) || !v.count(i)) bagFree++; }
   const out: SeenMount = { id: m, x: t.x, y: t.y, species: mm.species, hp: h ? h.hp / Math.max(1, h.max) : 1, riding: rider === self, busy: rider !== undefined && rider !== self,
-    saddle: mm.saddle, saddleDur: si?.dur ?? 0, saddleMax: si?.max ?? 0, bagFree };
+    saddle: mm.saddle, saddleDur: si?.dur ?? 0, saddleMax: si?.max ?? 0, bagFree, harness: isHarnessed(world, m) };
+  const towId = world.getField(m, Hitch, "towNetId") ?? 0;
+  if (towId) { const tv = netIdEntity(world, towId); if (tv !== undefined) out.towing = tv; }
   if (out.hp < B.feedBelowHp) { const f = bestMountFood(world, self, mm.species); if (f) out.feedItem = f; }
   return out;
 }
@@ -166,6 +180,23 @@ function saddlePlan(world: World, self: Entity, view: AgentWorldView, m: SeenMou
   if (m.saddle && m.saddleMax > 0 && m.saddleDur / m.saddleMax < B.repairBelow) {
     const why = checkRepair(world, self, m.id as Entity); if (!why || why === "too_far") return { kind: "repair" };
   }
+  return undefined;
+}
+/** ADR-359: next harness step for the own mount (undefined when harnessed, or when no drawn vehicle is near enough
+ *  to tow — a harness with nothing to pull is dead weight, so the bot never crafts one speculatively). One harness,
+ *  no tiers and no repair: equip from the bag, else craft the workbench harness when unlocked and affordable. */
+function harnessPlan(world: World, self: Entity, view: AgentWorldView, m: SeenMount): HarnessPlan | undefined {
+  if (m.harness) return undefined;
+  if (!view.vehicles?.some((v) => isDrawnClass(v.cls))) return undefined;
+  const defs = gameplayDefs(world); const v = readSlots(world, self);
+  const itemId = harnessItemId(world); if (!itemId) return undefined;
+  for (let i = 0; i < v.slotCount; i++) if (v.item(i) === itemId && v.count(i)) return { kind: "equip", slot: i };
+  const r = [...defs.recipes.values()].find((x) => x.output.item === itemId) as RecipeRow | undefined; if (!r) return undefined;
+  if (!recipeOutputUnlocked(world, self, r as never) || !stationUnlocked(world, self, r.station)) return undefined;
+  if (!r.ingredients.every((g) => countItem(world, self, g.item) >= g.count)) return undefined;
+  const t = world.get(self, Transform)!;
+  if (stationInRange(world, self, r.station)) return { kind: "craft", recipe: r.id, here: true, x: t.x, y: t.y };
+  const st = view.bs?.stations.get(r.station); if (st) return { kind: "craft", recipe: r.id, here: false, x: st.x, y: st.y };
   return undefined;
 }
 // ---- ADR-323: liked food from allowed storage, else forage ----------------------------------------------------
@@ -282,6 +313,8 @@ export function fillMountSensors(world: World, self: Entity, view: AgentWorldVie
     const tick = world.tick;
     if (tick - a.bb.num("saddleScanAt", -1e9) >= B.saddleScanEveryTicks) { a.bb.set("saddleScanAt", tick); a.bb.set("saddlePlan", saddlePlan(world, self, view, view.mount) ?? null); }
     const sp = a.bb.get<SaddlePlan | null>("saddlePlan"); if (sp) view.saddleUp = sp;
+    if (tick - a.bb.num("harnessScanAt", -1e9) >= B.harnessScanEveryTicks) { a.bb.set("harnessScanAt", tick); a.bb.set("harnessPlan", harnessPlan(world, self, view, view.mount) ?? null); }
+    const hp2 = a.bb.get<HarnessPlan | null>("harnessPlan"); if (hp2) view.harnessUp = hp2;
     saddleGoalPass(world, self, view, a, view.mount, hp);
   } else if (skill && !isRiding(world, self)) { const tt = tameTarget(world, self, a, hp); if (tt) view.tameMount = tt; }
   foodSensors(world, self, view, a, hp);
@@ -312,6 +345,12 @@ export function mountBehaviors(): GameBehavior[] {
         { name: "calm", curve: { type: "step", at: 0.5 }, input: (c) => on(calm(c)) },
       ],
       run: (c, o) => saddleRun(c, o) },
+    { name: "harness_up", inertia: 0.3, traits: { industriousness: 0.6 },
+      considerations: [
+        { name: "plan", weight: B.harnessUtility, curve: { type: "step", at: 0.5 }, input: (c) => on(!!c.world.harnessUp && !!c.world.mount && !c.world.mount.harness && c.self.tick - c.bb.num("harnessAt", -1e9) >= B.harnessCooldownTicks) },
+        { name: "calm", curve: { type: "step", at: 0.5 }, input: (c) => on(calm(c)) },
+      ],
+      run: (c, o) => harnessRun(c, o) },
     { name: "tend_mount", inertia: 0.25, traits: { industriousness: 0.3 },
       considerations: [
         { name: "need", curve: { type: "linear", m: 1, b: 0 }, input: (c) => tendNeed(c) },
@@ -354,6 +393,17 @@ function saddleRun(c: Ctx, o: Out): boolean | void {
   if (!m.riding && goTo(c, o, m.x, m.y, 0.8) > B.mountReach) return;
   stop(o); o.actions.push(p.kind === "equip" ? `msaddle:${m.id}:${p.slot}` : `mrepair:${m.id}`); return done();
 }
+/** ADR-359: harness the own mount (craft the harness at the base workbench, or put the carried one on). */
+function harnessRun(c: Ctx, o: Out): boolean | void {
+  const p = c.world.harnessUp, m = c.world.mount; if (!p || !m) return false;
+  const tick = c.self.tick; const done = (): false => { c.bb.set("harnessAt", tick); c.bb.set("harnessScanAt", -1e9); return false; };
+  if (p.kind === "craft") {
+    if (!p.here && goTo(c, o, p.x, p.y) > 1.5) return;
+    stop(o); o.actions.push(`craft:${p.recipe}`); return done();
+  }
+  if (!m.riding && goTo(c, o, m.x, m.y, 0.8) > B.mountReach) return;
+  stop(o); o.actions.push(`mharness:${m.id}:${p.slot}`); return done();
+}
 function tendNeed(c: Ctx): number {
   const m = c.world.mount; if (!m || m.busy) return 0;
   if (m.feedItem) return B.feedUtility;
@@ -384,7 +434,7 @@ function tendRun(c: Ctx, o: Out): boolean | void {
 
 // ---- ride / dismount policy -----------------------------------------------------------------------------------
 /** Behaviours that end the ride at once (rest, vehicles, leaving / warming inside a building). */
-const DISMOUNT_NOW = new Set(["sleep", "rest", "drive", "vehicle_service", "hitch", "deploy_vehicle", "leave_base", "warm_up", "cool_down", "work_hold"]);
+const DISMOUNT_NOW = new Set(["sleep", "rest", "drive", "drive_drawn", "vehicle_service", "hitch", "deploy_vehicle", "leave_base", "warm_up", "cool_down", "work_hold"]);
 /** Task behaviours: ride there, dismount within taskDismountTiles of the work spot (gather, combat, craft, build, chores). */
 const DISMOUNT_TASK = new Set(["gather", "hunt", "skin", "defend", "work_defend", "craft", "build", "base_work", "stash", "refuel", "tend_fire", "repair", "reclaim",
   "equip", "stall_trade", "fetch_mount_food", "tame_pet", "tame_livestock", "feed_trough", "work_farm", "work_maintain", "work_craft", "work_forage", "clan_stock", "trip"]);
