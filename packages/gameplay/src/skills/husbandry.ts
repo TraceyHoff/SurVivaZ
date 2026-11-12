@@ -16,6 +16,7 @@ import { awardXp } from "./progression.js";
 import { animalSkillMods, awardAnimalXp, ensureAnimalSkills } from "../animal_skills.js";
 import { hasPerk, SKILLS, skillLevelOf, skillMod } from "./tree.js";
 import { pieceOf, resolveAttachment } from "../building/links.js";
+import { StructureIndexRes } from "../building/structure.js";
 import { tamedOwnerTribe } from "../territory.js";
 import { indexEntity } from "../spawn.js";
 import { TerrainRes } from "../world.js";
@@ -83,6 +84,17 @@ export function feedingTroughs(world: World): Entity[] {
 }
 /** Task 34: the Apiary piece key (packages/gameplay/data/pieces.json). Bees deposit honey here instead of a trough. */
 export const APIARY_PIECE = "apiary";
+/** ADR-368: trough / apiary station lists, cached per StructureIndex version (pieces only change
+ * when the index version bumps — the same convention as autonomy's pieceAt memo; worlds without an
+ * index scan fresh, as before). Entries are re-validated with isAlive on read. */
+const stationCache = new WeakMap<World, { version: number; troughs: Entity[]; apiaries: Entity[] }>();
+function stationLists(world: World): { troughs: Entity[]; apiaries: Entity[] } {
+  const si = world.getResource(StructureIndexRes);
+  if (!si) return { troughs: feedingTroughs(world), apiaries: apiaries(world) };
+  let c = stationCache.get(world);
+  if (!c || c.version !== si.version) { c = { version: si.version, troughs: feedingTroughs(world), apiaries: apiaries(world) }; stationCache.set(world, c); }
+  return c;
+}
 /** Task 34: Apiary storage attachments, same shape as troughs() (Container on the storage attachment, Task 28 lesson). */
 function apiaries(world: World): Entity[] {
   let id: number; try { id = gameplayDefs(world).pieceId(APIARY_PIECE); } catch { return []; }
@@ -94,8 +106,6 @@ function apiaries(world: World): Entity[] {
   }
   return out.sort((x, y) => x - y);
 }
-/** Task 34: true for a tamed bee (the only animal whose produce goes to an Apiary). */
-const isBeeAnimal = (world: World, a: Entity): boolean => animalDefs()[world.get(a, Tamed)?.kind ?? -1]?.key === "animal_bee";
 /** Task 28: hay (the trough-feed item); 1 hay feeds one farm animal for the usual fedSeconds (600s). */
 export const HAY_ITEM = "hay";
 // ---- ADR-353: wider trough diets + trough ownership -------------------------------------------------------
@@ -152,23 +162,35 @@ export const HUSBANDRY_EVERY = DEFAULT_TICK_HZ; // once per second
 /** Restore Animal after load; production + breeding at troughs. */
 export function husbandrySystem(world: World): void {
   if (!isAuthority(world) || world.isReplaying) return;
-  const defs = gameplayDefs(world); const now = world.tick; const tr = feedingTroughs(world); const ap = apiaries(world);
+  const defs = gameplayDefs(world); const now = world.tick;
+  const lists = stationLists(world); const tr = lists.troughs.filter((e) => world.isAlive(e)); const ap = lists.apiaries.filter((e) => world.isAlive(e));
   const animals = [...world.query([Tamed, Transform], [Dead])].sort((a, b) => a - b);
   for (const a of animals) if (!world.has(a, Animal)) {
     const t = world.get(a, Transform)!; world.add(a, Animal, { kind: world.get(a, Tamed)!.kind, homeX: t.x, homeY: t.y, goalX: t.x, goalY: t.y, thinkAt: now });
     if (!world.has(a, AnimState)) world.add(a, AnimState, { anim: 0, startTick: now });
   }
   for (const a of animals) if (!world.has(a, AnimalSkills)) ensureAnimalSkills(world, a); // Task 15: legacy/loaded farm animals
-  const atTrough = (a: Entity): Entity | undefined => { const t = world.get(a, Transform)!; return tr.find((b) => { const bt = world.get(b, Transform)!; return (bt.x - t.x) ** 2 + (bt.y - t.y) ** 2 <= H.troughRange ** 2; }); };
-  // Task 34: nearest Apiary in the same range as a trough (H.troughRange).
-  const atApiary = (a: Entity): Entity | undefined => { const t = world.get(a, Transform)!; return ap.find((b) => { const bt = world.get(b, Transform)!; return (bt.x - t.x) ** 2 + (bt.y - t.y) ** 2 <= H.troughRange ** 2; }); };
+  // ADR-368: each animal's station + owner lookups, computed once per pass. atTrough / atApiary used to
+  // re-scan every trough / apiary (with a Transform copy per station) up to 5x per animal per pass
+  // (grouping, eating, production, grazing), plus tamedOwnerId / tamedOwnerTribe / canUsePens each time.
+  interface AnimalStation { trough: Entity | undefined; apiary: Entity | undefined; ownerId: number; tribeId: number; kindKey: string | undefined; pens: boolean }
+  const stations = new Map<Entity, AnimalStation>();
+  const stationOf = (a: Entity): AnimalStation => {
+    let s = stations.get(a); if (s) return s;
+    const t = world.get(a, Transform)!;
+    const near = (list: readonly Entity[]): Entity | undefined => list.find((b) => { const bt = world.get(b, Transform)!; return (bt.x - t.x) ** 2 + (bt.y - t.y) ** 2 <= H.troughRange ** 2; });
+    const owner = world.get(a, Tamed)!.owner;
+    s = { trough: near(tr), apiary: near(ap), ownerId: tamedOwnerId(world, a), tribeId: tamedOwnerTribe(world, a), kindKey: animalDefs()[world.get(a, Tamed)!.kind]?.key, pens: canUsePens(world, owner) };
+    stations.set(a, s); return s;
+  };
   const perTrough = new Map<Entity, Entity[]>();
-  for (const a of animals) { const b = canUsePens(world, world.get(a, Tamed)!.owner) ? atTrough(a) : undefined; if (b !== undefined) { const l = perTrough.get(b) ?? []; l.push(a); perTrough.set(b, l); } }
+  for (const a of animals) { const b = stationOf(a).pens ? stationOf(a).trough : undefined; if (b !== undefined) { const l = perTrough.get(b) ?? []; l.push(a); perTrough.set(b, l); } }
   // Task 34: bees at an Apiary but no trough still produce (into the Apiary). Bees at a trough are already in perTrough.
   const perApiary = new Map<Entity, Entity[]>();
   for (const a of animals) {
-    if (!isBeeAnimal(world, a) || atTrough(a) !== undefined) continue;
-    const b = canUsePens(world, world.get(a, Tamed)!.owner) ? atApiary(a) : undefined; if (b !== undefined) { const l = perApiary.get(b) ?? []; l.push(a); perApiary.set(b, l); }
+    const stn = stationOf(a);
+    if (stn.kindKey !== "animal_bee" || stn.trough !== undefined) continue;
+    const b = stn.pens ? stn.apiary : undefined; if (b !== undefined) { const l = perApiary.get(b) ?? []; l.push(a); perApiary.set(b, l); }
   }
   // Task 34: one animal's production at its station (trough or Apiary). Bees deposit honey into the nearest Apiary
   // in range INSTEAD of the trough; if there is no Apiary, or it cannot fit the whole harvest, the trough is tried;
@@ -181,7 +203,7 @@ export function husbandrySystem(world: World): void {
     const mods = animalSkillMods(world, a); // Task 15: production + produce-speed nodes
     const mul = (1 + (owner ? skillMod(world, owner, "produce") : 0)) * (1 + mods.produceSpeed);
     const nextAt = now + sec(p.seconds / mul);
-    if (!isBeeAnimal(world, a)) {
+    if (stationOf(a).kindKey !== "animal_bee") {
       world.set(a, Tamed, { produceAt: nextAt });
       try { addItem(world, station, defs.itemId(p.produce), 1 + mods.produce); awardAnimalXp(world, a, defs.animalSkillsTuning.xp.produceXp); } catch { /* unknown produce item */ }
       return;
@@ -189,7 +211,7 @@ export function husbandrySystem(world: World): void {
     let honeyId = 0; try { honeyId = defs.itemId(p.produce); } catch { /* unknown produce item: same as today */ }
     if (!honeyId) { world.set(a, Tamed, { produceAt: nextAt }); return; }
     const count = 1 + mods.produce;
-    const apiary = atApiary(a); const trough = atTrough(a);
+    const stn = stationOf(a); const apiary = stn.apiary; const trough = stn.trough;
     for (const tgt of [apiary, trough]) {
       if (tgt === undefined) continue;
       if (canAddItem(world, tgt, honeyId, count) >= count) { addItem(world, tgt, honeyId, count); world.set(a, Tamed, { produceAt: nextAt }); awardAnimalXp(world, a, defs.animalSkillsTuning.xp.produceXp); return; }
@@ -203,9 +225,9 @@ export function husbandrySystem(world: World): void {
   // animal never eats again until the window lapses, so there is no double-dip with grazing below.
   for (const a of animals) {
     const t = world.get(a, Tamed)!; if (t.fedUntil > now) continue;
-    const b = atTrough(a); if (b === undefined) continue;
-    if (!mayEatFromTrough(world, b, tamedOwnerId(world, a), tamedOwnerTribe(world, a))) continue;
-    const item = troughDietItem(world, b, farmAnimalDiet(animalDefs()[t.kind]?.key));
+    const stn = stationOf(a); const b = stn.trough; if (b === undefined) continue;
+    if (!mayEatFromTrough(world, b, stn.ownerId, stn.tribeId)) continue;
+    const item = troughDietItem(world, b, farmAnimalDiet(stn.kindKey));
     if (!item || !removeItem(world, b, item, 1)) continue;
     world.set(a, Tamed, { fedUntil: now + sec(H.fedSeconds) });
   }
@@ -253,8 +275,8 @@ export function husbandrySystem(world: World): void {
     // ADR-353: food in the animal's own trough wins over grazing — the same ownership + diet check as the trough
     // meal above, so a hungry animal never starts a 20 s graze while its own trough holds something it eats.
     // A stranger's trough does not block grazing: the animal just cannot eat from it.
-    const b = atTrough(a);
-    if (b !== undefined && mayEatFromTrough(world, b, tamedOwnerId(world, a), tamedOwnerTribe(world, a)) && troughDietItem(world, b, farmAnimalDiet(animalDefs()[t.kind]?.key))) continue;
+    const stn = stationOf(a); const b = stn.trough;
+    if (b !== undefined && mayEatFromTrough(world, b, stn.ownerId, stn.tribeId) && troughDietItem(world, b, farmAnimalDiet(stn.kindKey))) continue;
     world.add(a, Grazing, { tx, ty, doneTick: now + sec(GRAZE_SECONDS) });
   }
 }

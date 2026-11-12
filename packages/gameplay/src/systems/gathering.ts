@@ -71,12 +71,26 @@ function setAnimOf(world: World, e: Entity, anim: Anim): void {
 export function respawnSystem(world: World, dt = 1 / 20): void {
   if (!isAuthority(world) || world.isReplaying) return;
   const defs = gameplayDefs(world); const cfg = defs.depletion; const rn = world.store(ResourceNode);
-  for (const node of [...world.query([ResourceNode])]) { // legacy amount-0 nodes (pre-ADR-134 saves)
+  // ADR-368: scratch for the per-tick scans (the old code spread every ResourceNode and every
+  // NodeRegrow marker into fresh arrays each tick just to find the few due ones). Collection and
+  // processing are separate passes, so destroying / creating during processing cannot disturb the
+  // query iteration; order is the query order, as before. Single-threaded sim; never re-entrant.
+  LEGACY_NODES.length = 0;
+  for (const node of world.query([ResourceNode])) { // legacy amount-0 nodes (pre-ADR-134 saves)
     const s = rn.slot(entityIndex(node)); if (rn.data.amount[s] !== 0) continue;
-    const def = defs.resources.get(rn.data.kind[s]!); if (!def || def.oneShot) continue;
+    LEGACY_NODES.push(node);
+  }
+  for (const node of LEGACY_NODES) {
+    const s = rn.slot(entityIndex(node)); const def = defs.resources.get(rn.data.kind[s]!); if (!def || def.oneShot) continue;
     depleteNode(world, node, def.id, Math.max(world.tick, rn.data.respawnAtTick[s]!), 0);
   }
-  for (const g of [...world.query([NodeRegrow, Transform])]) {
+  DUE_REGROW.length = 0;
+  const rg = world.store(NodeRegrow);
+  for (const g of world.query([NodeRegrow, Transform])) {
+    if (world.tick < rg.data.respawnAtTick[rg.slot(entityIndex(g))]!) continue;
+    DUE_REGROW.push(g);
+  }
+  for (const g of DUE_REGROW) {
     const r = world.get(g, NodeRegrow)!; if (world.tick < r.respawnAtTick) continue;
     const def = defs.resources.get(r.kind); if (!def) { world.destroy(g); continue; }
     const t = world.get(g, Transform)!;
@@ -90,6 +104,10 @@ export function respawnSystem(world: World, dt = 1 / 20): void {
     emit(world, NodeRespawned, { node: n, kind: def.id });
   }
 }
+
+/** ADR-368: respawnSystem scratch (see there). */
+const LEGACY_NODES: Entity[] = [];
+const DUE_REGROW: Entity[] = [];
 
 /** Remove a depleted node, leaving a NodeRegrow (trees: a stump for depletion.stumpSeconds). Returns the marker. */
 export function depleteNode(world: World, node: Entity, kind: number, respawnAtTick: number, stumpTicks: number): Entity {

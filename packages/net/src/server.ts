@@ -20,6 +20,8 @@ export const NO_ENTITY = 0xffffffff;
 
 /** Server-side netId <-> local entity mapping. NetIds are monotonic u32, never reused; ids below `first` are reserved. */
 export class NetIdRegistry {
+  /** ADR-369: bumped whenever a netId mapping is created or released; NetServer's per-client relevant-netId cache keys off it, so an entity that gains a netId while sitting still inside a client's AOI is never missed by a stale cache. */
+  generation = 0;
   private next: number;
   private toEntity = new Map<number, Entity>();
   private toNet = new Map<number, number>(); // entity index -> netId
@@ -35,7 +37,7 @@ export class NetIdRegistry {
     if (this.world.has(e, NetId)) return this.adopt(e);
     const id = this.next++;
     this.world.add(e, NetId, { id });
-    this.toEntity.set(id, e); this.toNet.set(entityIndex(e), id);
+    this.toEntity.set(id, e); this.toNet.set(entityIndex(e), id); this.generation++;
     return id;
   }
   /** Registers a NetId that was added directly (not via assign); reassigns if it collides. */
@@ -44,7 +46,7 @@ export class NetIdRegistry {
     const owner = this.toEntity.get(id);
     if (owner === e) return id;
     if ((owner !== undefined && this.world.isAlive(owner)) || id === 0) { this.world.remove(e, NetId); return this.assign(e); }
-    this.toEntity.set(id, e); this.toNet.set(entityIndex(e), id);
+    this.toEntity.set(id, e); this.toNet.set(entityIndex(e), id); this.generation++;
     if (id >= this.next) this.next = id + 1;
     return id;
   }
@@ -53,7 +55,7 @@ export class NetIdRegistry {
   get size(): number { return this.toEntity.size; }
   private release(e: Entity): void {
     const id = this.toNet.get(entityIndex(e));
-    if (id !== undefined && this.toEntity.get(id) === e) { this.toEntity.delete(id); this.toNet.delete(entityIndex(e)); }
+    if (id !== undefined && this.toEntity.get(id) === e) { this.toEntity.delete(id); this.toNet.delete(entityIndex(e)); this.generation++; }
   }
 }
 
@@ -215,6 +217,8 @@ export class NetServer {
   private tickHooks: ((tick: number) => void)[] = [];
   private anomalyHandlers: ((s: ClientSession, kind: AnomalyKind, detail: string) => void)[] = [];
   private ownedCache = new Map<number, Entity[]>();
+  /** ADR-369: per-client cached relevant netIds, in the same order the chunk walk produces them. Rebuilt only when that client's AOI set changes (see replicate); keyed by netIds.generation so a netId gained while still inside the AOI forces a rebuild. */
+  private relevantNetIds = new Map<number, { ids: number[]; gen: number }>();
   private extraViews = new Map<number, readonly Viewpoint[]>();
   private staticCis = new Set<number>();
   private statics: StaticServer | undefined;
@@ -227,7 +231,7 @@ export class NetServer {
   private stamp = new Int32Array(0);
   private stampSeq = 0;
   private posY = new Float64Array(0);
-  readonly perf = { captureMs: 0, sendMs: 0, encoded: 0, shared: 0 };
+  readonly perf = { captureMs: 0, sendMs: 0, encoded: 0, shared: 0, relevantHits: 0, relevantBuilds: 0 };
   private readonly opts: NetServerOptions;
 
   constructor(opts: NetServerOptions) {
@@ -373,7 +377,7 @@ export class NetServer {
    */
   setDirect(clientId: number, direct = true): boolean {
     const s = this.sessions.get(clientId) as SessionState | undefined; if (!s) return false;
-    if (direct) s.direct = true; else delete s.direct; if (direct) { s.views.clear(); s.events.length = 0; } return true;
+    if (direct) s.direct = true; else delete s.direct; if (direct) { s.views.clear(); s.events.length = 0; } this.relevantNetIds.delete(clientId); return true;
   }
   /** Only network players occupy join slots. Direct clients are trusted in-process AI, never a wire flag. */
   private playerSlotCount(): number {
@@ -545,14 +549,14 @@ export class NetServer {
 
   private onDisconnect(conn: ConnId): void {
     const s = this.byConn.get(conn); if (!s) return;
-    this.byConn.delete(conn); s.conn = undefined; s.views.clear(); s.events.length = 0;
+    this.byConn.delete(conn); s.conn = undefined; s.views.clear(); s.events.length = 0; this.relevantNetIds.delete(s.clientId);
     this.interest?.removeViewer(s.clientId);
     this.opts.onClientLeave?.(s, this.world);
   }
 
   removeSession(clientId: number): void {
     const s = this.sessions.get(clientId) as SessionState | undefined; if (!s) return;
-    this.sessions.delete(clientId); this.byToken.delete(tokenKey(s.token)); this.interest?.removeViewer(clientId); this.extraViews.delete(clientId); this.viewBonus.delete(clientId);
+    this.sessions.delete(clientId); this.byToken.delete(tokenKey(s.token)); this.interest?.removeViewer(clientId); this.extraViews.delete(clientId); this.viewBonus.delete(clientId); this.relevantNetIds.delete(clientId);
     if (s.conn !== undefined) { this.byConn.delete(s.conn); this.opts.transport.disconnect(s.conn); }
   }
 
@@ -630,8 +634,10 @@ export class NetServer {
     for (const f of this.tickHooks) f(w.tick); // before capture: hook writes must not be lost to the end-of-step bit clear
     const t0 = now();
     const ns = w.store(NetId);
+    // Spread is deliberate here: adopt() can write the NetId store being iterated, so a snapshot preserves the old behaviour.
     for (const index of [...ns.changedIndices()]) { const e = ns.dense[ns.slot(index)]!; if (this.netIds.netIdOf(e) === undefined) this.netIds.adopt(e); }
-    for (const st of this.schema.stores) for (const index of [...st.changedIndices()]) {
+    // ADR-369: iterate the generator directly (no per-store snapshot array); assign() only writes the NetId store, never `st`.
+    for (const st of this.schema.stores) for (const index of st.changedIndices()) {
       const e = st.dense[st.slot(index)]!;
       if (!w.has(e, NetId)) this.netIds.assign(e);
     }
@@ -662,15 +668,13 @@ export class NetServer {
     const t1 = now(); this.perf.captureMs = t1 - t0;
     const tick = w.tick;
     const globalSet = new Set(globals);
-    { // per-tick netId-indexed positions for prioritization
-      let max = 0; for (const id of cur.keys()) if (id > max) max = id;
-      if (this.posX.length <= max) { this.posX = new Float64Array(max * 2 + 1); this.posY = new Float64Array(max * 2 + 1); }
-      this.posX.fill(NaN); const tf = w.store(Transform);
-      for (const id of cur.keys()) {
-        const e = this.netIds.entityOf(id); if (e === undefined) continue; const i = entityIndex(e);
-        if (tf.has(i)) { const sl = tf.slot(i); this.posX[id] = tf.data.x[sl]!; this.posY[id] = tf.data.y[sl]!; } else this.posX[id] = NaN;
-      }
-    }
+    // ADR-369: one pass over cur (below) fills curArr and the per-tick positions; the old code walked cur.keys()
+    // three times plus a full posX.fill(NaN). Every id in cur gets a posX/posY write in that pass, and every reader
+    // of posX/posY only touches ids in cur (prioritize / distantThrottle) or ids guarded by curArr (linger),
+    // so no fill is needed.
+    let maxId = 0; for (const id of cur.keys()) if (id > maxId) maxId = id;
+    if (this.posX.length <= maxId) { this.posX = new Float64Array(maxId * 2 + 1); this.posY = new Float64Array(maxId * 2 + 1); }
+    if (this.curArr.length <= maxId) { this.curArr = new Array(maxId * 2 + 1); this.stamp = new Int32Array(maxId * 2 + 1); }
     const scoped = this.ownerScoped.size > 0 || this.viewerScoped.size > 0;
     const chunkIds = new Map<string, number[]>(); // per-tick netIds per chunk, shared by every client that sees it
     // Per-tick cache of encoded entity records keyed by (current state object, baseline state object): clients with
@@ -687,12 +691,17 @@ export class NetServer {
       } else this.perf.shared++;
       return r && r.id === id ? r : null;
     };
-    this.perf.encoded = 0; this.perf.shared = 0;
+    this.perf.encoded = 0; this.perf.shared = 0; this.perf.relevantHits = 0; this.perf.relevantBuilds = 0;
     // netId-indexed current states + a per-client stamp for O(1) dedupe without Map lookups
-    let maxId = 0; for (const id of cur.keys()) if (id > maxId) maxId = id;
-    if (this.curArr.length <= maxId) { this.curArr = new Array(maxId * 2 + 1); this.stamp = new Int32Array(maxId * 2 + 1); }
     const curArr = this.curArr; curArr.fill(undefined);
-    cur.forEach((es, id) => { curArr[id] = es; }); // ADR-212: forEach, no [k, v] entry array per entity per tick
+    cur.forEach((es, id) => { // ADR-212: forEach, no [k, v] entry array per entity per tick
+      curArr[id] = es;
+      const e = this.netIds.entityOf(id);
+      if (e === undefined) { this.posX[id] = NaN; this.posY[id] = NaN; return; }
+      const i = entityIndex(e);
+      if (tf.has(i)) { const sl = tf.slot(i); this.posX[id] = tf.data.x[sl]!; this.posY[id] = tf.data.y[sl]!; }
+      else { this.posX[id] = NaN; this.posY[id] = NaN; }
+    });
     if (this.statics) for (const id of this.statics.ids) curArr[id] = undefined; // static channel, not snapshots
     const stamp = this.stamp;
     for (const s of this.byConn.values()) {
@@ -714,14 +723,33 @@ export class NetServer {
       for (const e of owned.get(s.clientId) ?? []) { const id = this.netIds.netIdOf(e); if (id !== undefined) { ownedIds.add(id); consider(id, true); } }
       for (const id of globals) consider(id, true);
       if (grid) {
-        for (const key of grid.grid.get(s.clientId)?.chunks ?? []) {
-          let ids = chunkIds.get(key);
-          if (!ids) {
-            ids = [];
-            for (const e of grid.membership.entitiesIn(key)) { const id = this.netIds.netIdOf(e); if (id !== undefined) ids.push(id); }
-            chunkIds.set(key, ids);
+        // ADR-369: cache this client's relevant netIds across ticks. InterestGrid already maintains the client's
+        // relevant entity set incrementally; it is unchanged exactly when this tick's entered/left (entities and
+        // chunks) are all empty, so a hit skips the per-chunk walk, the entitiesIn() scans and the netId lookups.
+        // A netId gained while still inside the AOI (netIds.generation moved) forces a rebuild, as does any AOI
+        // change. Order on a hit is the order the list was built in; an entity moving between two chunks that are
+        // both still relevant keeps its old position in that order (the set is identical, only the walk order
+        // differs) — prioritize() reorders `rest` by distance/staleness anyway, so only ties among equal
+        // distance/staleness can come out in a different order, and every entity is still sent.
+        const g = grid.grid.get(s.clientId);
+        const cached = this.relevantNetIds.get(s.clientId);
+        if (g !== undefined && cached !== undefined && cached.gen === this.netIds.generation
+          && g.entered.length === 0 && g.left.length === 0 && g.enteredChunks.length === 0 && g.leftChunks.length === 0) {
+          this.perf.relevantHits++;
+          for (let i = 0; i < cached.ids.length; i++) consider(cached.ids[i]!, false);
+        } else {
+          this.perf.relevantBuilds++;
+          const ids: number[] = [];
+          for (const key of g?.chunks ?? []) {
+            let chunk = chunkIds.get(key);
+            if (!chunk) {
+              chunk = [];
+              for (const e of grid.membership.entitiesIn(key)) { const id = this.netIds.netIdOf(e); if (id !== undefined) chunk.push(id); }
+              chunkIds.set(key, chunk);
+            }
+            for (let i = 0; i < chunk.length; i++) { ids.push(chunk[i]!); consider(chunk[i]!, false); }
           }
-          for (let i = 0; i < ids.length; i++) consider(ids[i]!, false);
+          this.relevantNetIds.set(s.clientId, { ids, gen: this.netIds.generation });
         }
         // entity-level leave hysteresis: held entities just outside the AOI chunks linger instead of despawning
         if (base && this.opts.interestLinger !== false) {

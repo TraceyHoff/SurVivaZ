@@ -58,15 +58,18 @@ export function captureState(world: World, schema: NetSchema, prev: WorldState |
   const ns = world.store(NetId);
   const touched = new Set<number>();
   for (const st of schema.stores) for (const e of world.removed(st.def)) touched.add(entityIndex(e));
+  // ADR-369: dirty entity indices from the stores' own change iterators (O(changed), not O(entities x stores)).
+  // changedIndices() yields an index only while the component is still present; removals are covered by `touched`
+  // and NetId adds by the NetId store below, so an index in neither set provably has no replicated change.
+  const dirty = new Set<number>();
+  for (const st of schema.stores) for (const i of st.changedIndices()) dirty.add(i);
+  for (const i of ns.changedIndices()) dirty.add(i);
   const out = new Map<number, EntityState>();
   for (let k = 0; k < ns.size; k++) {
     const index = entityIndex(ns.dense[k]!); const netId = ns.data.id[k]!;
     const old = prev?.get(netId);
     const stores = schema.stores; const isTouched = touched.has(index);
-    if (old && !isTouched && !ns.isChanged(index)) {
-      let any = false; for (let ci = 0; ci < stores.length; ci++) if (stores[ci]!.isChanged(index)) { any = true; break; }
-      if (!any) { out.set(netId, old); continue; }
-    }
+    if (old && !isTouched && !dirty.has(index)) { out.set(netId, old); continue; }
     const es = new Map<number, CompValues>(); let same = !!old;
     for (let ci = 0; ci < stores.length; ci++) {
       const st = stores[ci]!;
@@ -123,8 +126,10 @@ export function writeEntityRecord(w: BitWriter, schema: NetSchema, netId: number
   }
   if (!changed.length && !removed.length) return false;
   w.writeBits(RecordKind.Change, 2); w.writeVarUint(netId);
-  for (let ci = 0; ci < n; ci++) w.writeBool(changed.includes(ci));
-  for (let ci = 0; ci < n; ci++) w.writeBool(removed.includes(ci));
+  // ADR-369: changed/removed are built in ascending ci order, so one linear merge writes both masks
+  // (was changed.includes(ci) per component: O(n^2) per record). Same bits on the wire.
+  let cp = 0; for (let ci = 0; ci < n; ci++) { if (cp < changed.length && changed[cp] === ci) { w.writeBool(true); cp++; } else w.writeBool(false); }
+  let rp = 0; for (let ci = 0; ci < n; ci++) { if (rp < removed.length && removed[rp] === ci) { w.writeBool(true); rp++; } else w.writeBool(false); }
   for (const ci of changed) {
     const v = es.get(ci)!; const a = old.get(ci); const specs = schema.specs[ci]!;
     w.writeBool(!a);

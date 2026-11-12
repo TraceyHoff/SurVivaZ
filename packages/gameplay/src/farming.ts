@@ -182,11 +182,13 @@ export function plantNeed(world: World, e: Entity): PlantNeed | undefined {
   return "growing";
 }
 /** Growth multiplier right now. ADR-286: a surface plant needs water (can, container, rain or water beside it) AND light
- * (the sun between sunrise and sunset, or an artificial light reaching it at night); otherwise 0 (paused). */
-export function growthMul(world: World, c: { waterUntilTick: number; fertilized: number }, x?: number, y?: number): number {
-  const wet = c.waterUntilTick > world.tick || isRaining(world.env(Weather).kind) || (x !== undefined && y !== undefined && nearWater(world, x, y));
+ * (the sun between sunrise and sunset, or an artificial light reaching it at night); otherwise 0 (paused).
+ * ADR-368: `pre` carries the per-pass globals (raining, sunUp) so the crop loop does not re-derive the time
+ * of day and the weather per plant; without it the live reads are used, exactly as before. */
+export function growthMul(world: World, c: { waterUntilTick: number; fertilized: number }, x?: number, y?: number, pre?: { raining: boolean; sunUp: boolean }): number {
+  const wet = c.waterUntilTick > world.tick || (pre?.raining ?? isRaining(world.env(Weather).kind)) || (x !== undefined && y !== undefined && nearWater(world, x, y));
   if (!wet) return 0;
-  if (!isSunUp(world) && (x === undefined || y === undefined || lightAt(world, x, y, 0) === undefined)) return 0;
+  if (!(pre?.sunUp ?? isSunUp(world)) && (x === undefined || y === undefined || lightAt(world, x, y, 0) === undefined)) return 0;
   return FARMING.wateredMul * (c.fertilized ? FARMING.fertilizerMul : 1);
 }
 /**
@@ -229,50 +231,58 @@ export function frostKillsNode(key: string): boolean {
 export function cropGrowthSystem(world: World): void {
   if (!isAuthority(world) || world.isReplaying) return;
   const dt = CROP_EVERY / DEFAULT_TICK_HZ;
+  // ADR-368: per-pass globals, computed once instead of per plant (growthMul used to re-derive the time
+  // of day and the weather for every crop, and droughtTicks re-read the clock per crop too).
+  const raining = isRaining(world.env(Weather).kind);
+  const sunUp = isSunUp(world);
+  const dormant = isCropDormant(world);
+  const drought = droughtTicks(world);
   // Task 28: below 40°F ambient, outdoor crops/plants die (fruit trees die; ordinary trees and berry bushes survive).
   // The kill pass runs even while dormant — a frost kills a field that stopped growing. A killed crop reverts to
   // empty tilled soil (kind 0) so the player can replant; a killed wild node is depleted (amount 0, regrows later).
-  if (surfaceTemperature(world) < FROST_KILL_C) { // ADR-263: the open-air reading (a pit at 0,0 must not stop frost)
+  // ADR-368: the crop half of the frost pass is merged into the growth loop below (same query, same order,
+  // same per-plant outcome — a frost-killed crop is skipped by the growth pass either way); only the
+  // ResourceNode half still needs its own pass, and only while freezing.
+  const frost = surfaceTemperature(world) < FROST_KILL_C; // ADR-263: the open-air reading (a pit at 0,0 must not stop frost)
+  if (frost) {
     const defs = gameplayDefs(world);
-    for (const e of [...world.query([Crop, Transform])].sort((a, b) => a - b)) {
-      const c = world.get(e, Crop)!; const p = plantableOf(c.kind); const t = world.get(e, Transform)!;
-      if (p && p.type === "crop" && !isUnderground(world, t.x, t.y)) world.set(e, Crop, { kind: 0, stage: 0, growth: 0 }); // ADR-263: 60°F underground
-    }
     for (const e of [...world.query([ResourceNode])].sort((a, b) => a - b)) {
       const n = world.get(e, ResourceNode)!; const key = defs.resources.get(n.kind)?.key ?? "";
       if (frostKillsNode(key)) world.set(e, ResourceNode, { amount: 0 });
     }
   }
-  const dormant = isCropDormant(world);
   for (const e of [...world.query([Crop, Transform])].sort((a, b) => a - b)) {
     const c = world.get(e, Crop)!; const p = plantableOf(c.kind); if (!p) continue;
+    const tf = world.get(e, Transform)!; const under = isUnderground(world, tf.x, tf.y); // ADR-263: no seasons underground
+    if (frost && p.type === "crop" && !under) { world.set(e, Crop, { kind: 0, stage: 0, growth: 0 }); continue; } // ADR-263: 60°F underground
     // Migrate legacy permanent fertilizer once; expired doses can be reapplied.
     let fertilizerUntilTick = c.fertilizerUntilTick;
     if (c.fertilized && !fertilizerUntilTick) fertilizerUntilTick = world.tick + fertilizerTicks();
     const fertilized = c.fertilized && fertilizerUntilTick > world.tick ? 1 : 0;
     if (fertilized !== c.fertilized || fertilizerUntilTick !== c.fertilizerUntilTick) world.set(e, Crop, { fertilized, fertilizerUntilTick });
-    const tf = world.get(e, Transform)!; const under = isUnderground(world, tf.x, tf.y); // ADR-263: no seasons underground
     // ADR-286 water / drought clock: rain (open sky only) or water beside the plant keeps it watered; a legacy 0 starts now.
     let wut = c.waterUntilTick;
-    if ((!under && isRaining(world.env(Weather).kind)) || nearWater(world, tf.x, tf.y)) wut = Math.max(wut, world.tick + Math.round(FARMING.wateredSeconds * DEFAULT_TICK_HZ));
+    if ((!under && raining) || nearWater(world, tf.x, tf.y)) wut = Math.max(wut, world.tick + Math.round(FARMING.wateredSeconds * DEFAULT_TICK_HZ));
     else if (wut === 0) wut = dryClock(world);
     if (dormant && !under && wut < world.tick) wut = world.tick; // ADR-286: no drought clock while dormant (winter)
     if (wut !== c.waterUntilTick) world.set(e, Crop, { waterUntilTick: wut });
-    if (world.tick > wut + droughtTicks(world)) { // ADR-286: died of prolonged drought (crop -> bare tilled soil; sapling / bush gone)
+    if (world.tick > wut + drought) { // ADR-286: died of prolonged drought (crop -> bare tilled soil; sapling / bush gone)
       if (p.type === "crop") world.set(e, Crop, { kind: 0, stage: 0, growth: 0, waterUntilTick: 0, fertilized: 0 }); else world.destroy(e);
       emit(world, PlantDied, { x: tf.x, y: tf.y, kind: c.kind }); continue;
     }
     if (dormant && !under) continue;
     const cw = { waterUntilTick: wut, fertilized };
-    const mul = under ? undergroundGrowthMul(world, cw, tf.x, tf.y) : growthMul(world, cw, tf.x, tf.y); if (!(mul > 0)) continue;
+    const mul = under ? undergroundGrowthMul(world, cw, tf.x, tf.y) : growthMul(world, cw, tf.x, tf.y, { raining, sunUp }); if (!(mul > 0)) continue;
     const growth = Math.min(1, c.growth + (dt / p.growSeconds) * mul);
-    if (growth >= 1) { const t = world.get(e, Transform)!; const targetId = world.getField(e, WorkerTarget, "id");
-      world.destroy(e); const node = spawnResourceNode(world, p.becomes, t.x, t.y);
+    if (growth >= 1) { const targetId = world.getField(e, WorkerTarget, "id");
+      world.destroy(e); const node = spawnResourceNode(world, p.becomes, tf.x, tf.y);
       world.add(node, GrownPlant, { kind: c.kind, waterUntilTick: wut, fertilizerUntilTick: fertilized ? fertilizerUntilTick : 0 });
       if (targetId) world.add(node, WorkerTarget, { id: targetId }); // a selected plot stays selected through maturity
       continue; }
     const stage = Math.min(p.stages - 1, Math.floor(growth * p.stages));
-    world.set(e, Crop, stage !== c.stage ? { growth, stage } : { growth });
+    // ADR-368: field writes instead of a whole-component set (same values, same change mark, no object alloc).
+    world.setField(e, Crop, "growth", growth);
+    if (stage !== c.stage) world.setField(e, Crop, "stage", stage);
   }
 }
 

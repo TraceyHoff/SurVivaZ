@@ -7,6 +7,8 @@ import { mountUi } from "./ui-root.js";
 import type { IsoRenderer } from "@engine/render";
 
 export interface DiagSources { renderer(): IsoRenderer | undefined; entities(): number; tick(): number; snapshot(): { received: boolean; latestTick: number; snapshots: number } | undefined; player(): unknown;
+  /** ADR-370: client load-cost breakdown (boot / world-ready / warm-up timings). */
+  loadCost?(): string | undefined;
   /** World spawn points (ADR-106) and the seed they were computed for. */
   spawnPoints?(): { seed: number; points: { x: number; y: number }[] } | undefined }
 let lastError = "";
@@ -34,6 +36,7 @@ export function startDiag(src: DiagSources): { afterRender(): void } | undefined
       const vs = Object.entries(v ?? {}).filter(([, x]) => typeof x !== "object").map(([n, x]) => `${n}=${typeof x === "number" && x > 1e5 ? `${Math.round(x / 1048576)}M` : x}`);
       if (vs.length) L.push(`vram ${vs.join(" ")}`);
       L.push(`frame draws ${f.drawCalls ?? "?"} sprites ${f.sprites ?? "?"} cpu ${(f.cpuMs ?? 0).toFixed(1)}ms`);
+      const lc = src.loadCost?.(); if (lc) L.push(lc);
       L.push(`glError ${glErr ? "0x" + glErr.toString(16) : "none"} centre ${pixel} cam ${r.camera.x.toFixed(1)},${r.camera.y.toFixed(1)} z${r.camera.zoom}`);
       if (c.fallbacks.length) L.push(`fallbacks: ${c.fallbacks.join("; ")}`);
       if (c.problems.length) L.push(`PROBLEMS: ${c.problems.join("; ")}`);

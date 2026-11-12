@@ -26,6 +26,7 @@ import { DoorView, doorArt } from "./door-view.js";
 import { loadManifest, buildPieceVisual, type AssetRegistry } from "@engine/assets";
 import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard } from "@engine/render";
 import { countFraction } from "./load-progress.js";
+import { isWarmupCandidate, type WarmupResult } from "@engine/render";
 import { VehicleView, type RiderPlacement, type VehicleSnapshot, type VehicleRenderDef } from "@engine/render";
 import { Vehicle as GVehicle, VehicleSeats, VehicleState, Hitch, vehicleDefOf, localPlayerVehicle } from "@engine/gameplay";
 import { netIdOf } from "@engine/net";
@@ -244,6 +245,8 @@ export class IsoView {
       equipment: VEquip, heldSprite: (item) => this.heldSpriteOf(item), heldDye: (e, slot) => { const a = this.view.getArray(e as Entity, VSlotDye, "colors"); const c = a?.[slot] ?? 0; return c !== 0 ? c : undefined; }, offHand: VOffHand, offHandSprite: (item) => this.offHandSpriteOf(item),
       ...(cat?.size ? { appearance: { ...coreAppearanceBinding(cat), override: (_w: unknown, ve: number) => { const g = this.gearOf.get(ve) ?? null; return this.charArtOn(ve) ? { salt: (g?.salt ?? 0) + 7919, parts: g?.parts ?? [] } : g; }, mapLayers: <L extends { sprite: number; slot: string; layerName?: string }>(ve: number, ls: readonly L[]): L[] => this.charArtLayers(ve, ls) } } : {}) });
   }
+  /** ADR-370: boot warm-up result (first-view page-ins), read by main.ts for the load-cost breakdown. */
+  warmupResult: WarmupResult | undefined;
   /** ADR-240: `charArt` setting (?charArt= / localStorage): v1 (default), v2s = local player only, v2s-all = every character. */
   charArt: CharArt = parseCharArt(new URLSearchParams(globalThis.location?.search ?? "").get("charArt"), (() => { try { return globalThis.localStorage?.getItem("charArt"); } catch { return null; } })());
   private charArtMapper?: CharArtMapper;
@@ -393,6 +396,12 @@ export class IsoView {
     const expected = [...registry.atlases.keys()].filter((k) => !custom.includes(k) && !paintedAtlas.has(k)).length;
     const stopWatch = watchResources(/\.(png|webp|ktx2|avif|jpe?g)(\?|$)/i, (n, bytes) => onStage("atlases", countFraction(n, expected), `Loading sprite atlases (${n}/${expected}${bytes ? `, ${(bytes / 1048576).toFixed(1)} MB` : ""})`));
     try { await renderer.atlas.setRegistry(registry, sources); } finally { stopWatch(); }
+    // ADR-370: warm-up window — page the visible-pin lazy sheets (furniture / buildings / openings /
+    // defenses stream pages, in view at almost any spawn) in before the first paint, at near-player
+    // priority, bounded so a slow device just gets a soft start instead of a stalled boot.
+    // Resident atlases are already on the GPU; the window only covers lazy pages.
+    const warmupKeys = [...registry.atlases.keys()].filter((k) => isWarmupCandidate(k));
+    const warmupResult = await renderer.atlas.warmupFirstView?.(warmupKeys);
     onStage("atlases", 1); onStage("variants", 0);
     const pv = await assetFetch(packBase + "piece_variants.json").then((r) => (r.ok ? r.json() : null)).catch(() => null) as { pieces?: Record<string, string[]> } | null;
     if (pv?.pieces) renderer.atlas.setPieceVariants(pv.pieces);
@@ -407,7 +416,7 @@ export class IsoView {
     if (look.warnings.length) console.info("render tuning:", look.warnings);
     renderer.camera.zoom = DESKTOP_ZOOM; // main.ts attachZoom then sizes it per viewport (ADR-100)
     onStage("ready", 0);
-    const view = new IsoView(renderer, registry, ov, lights); view.base = base; return view;
+    const view = new IsoView(renderer, registry, ov, lights); view.base = base; view.warmupResult = warmupResult ?? undefined; return view;
   }
 
   private ghost: BuildGhost | undefined;

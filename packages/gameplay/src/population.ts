@@ -136,6 +136,11 @@ export function animalAISystem(world: World, dt: number): void {
   if (animals.length === 0) return;
   const hStore = world.store(Health); const anStore = world.store(AnimState);
   const mountReg = world.isRegistered(Mount);
+  // ADR-368: the living-zombie list, built once per run (lazily, on the first tame defender that needs
+  // it) for nearestClaimHostile — it used to run a spatial radius query per tame animal per tick. The
+  // list path scans with the same exact-distance nearest rule (petSystem's Task 29 precedent); ties
+  // resolve in query order rather than spatial-index order.
+  let zombies: readonly Entity[] | undefined;
   // ADR-215: threat candidates (living survivors) gathered once; a short list beats a radius query over every piece
   // and animal in a village. Same set as the radius query (exact distance on the current Transform).
   THREATS.length = 0; let few = true;
@@ -205,7 +210,11 @@ export function animalAISystem(world: World, dt: number): void {
     let territory: { e: Entity; x: number; y: number; d: number } | undefined;
     if (tame) {
       const tribe = tamedOwnerTribe(world, e);
-      if (tribe) { const z = nearestClaimHostile(world, tx, ty, TERRITORY_DEFEND_RANGE, tribe); if (z !== undefined) { const zt = world.get(z, Transform)!; territory = { e: z, x: zt.x, y: zt.y, d: Math.hypot(zt.x - tx, zt.y - ty) }; } }
+      if (tribe) {
+        if (zombies === undefined) zombies = [...world.query([Zombie, Transform], [Dead])];
+        const z = nearestClaimHostile(world, tx, ty, TERRITORY_DEFEND_RANGE, tribe, zombies);
+        if (z !== undefined) { const zt = world.get(z, Transform)!; territory = { e: z, x: zt.x, y: zt.y, d: Math.hypot(zt.x - tx, zt.y - ty) }; }
+      }
     }
     if (territory) {
       state = AnimalState.Attack; gx = territory.x; gy = territory.y;

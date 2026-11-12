@@ -40,12 +40,13 @@ export function stepBlocker(idx: StructureIndex | undefined, x: number, y: numbe
 let P_SEEN = new Uint32Array(0);
 let P_G = new Float64Array(0);
 let P_FROM = new Int32Array(0);
+let P_BLOCKER = new Int32Array(0);
 let pStamp = 0;
 const P_HF: number[] = []; const P_HH: number[] = []; const P_HK: number[] = [];
 let pTopF = 0;
 function pEnsure(n: number): void {
   if (P_G.length >= n) return;
-  P_SEEN = new Uint32Array(n); P_G = new Float64Array(n); P_FROM = new Int32Array(n); pStamp = 0;
+  P_SEEN = new Uint32Array(n); P_G = new Float64Array(n); P_FROM = new Int32Array(n); P_BLOCKER = new Int32Array(n); pStamp = 0;
 }
 function pLess(f0: number, h0: number, k0: number, f1: number, h1: number, k1: number): boolean {
   return f0 < f1 || (f0 === f1 && (h0 < h1 || (h0 === h1 && k0 < k1)));
@@ -88,7 +89,7 @@ export function findPath(world: World, sx: number, sy: number, gx: number, gy: n
   const key = (x: number, y: number): number => (y - sy + R) * W + (x - sx + R);
   const h = (x: number, y: number): number => Math.abs(x - gx) + Math.abs(y - gy);
   P_HF.length = 0; P_HH.length = 0; P_HK.length = 0;
-  const k0 = key(sx, sy); P_SEEN[k0] = pStamp; P_G[k0] = 0; P_FROM[k0] = -1;
+  const k0 = key(sx, sy); P_SEEN[k0] = pStamp; P_G[k0] = 0; P_FROM[k0] = -1; P_BLOCKER[k0] = 0;
   pPush(h(sx, sy), 0, k0);
   let expanded = 0; let best = k0, bestH = h(sx, sy);
   while (expanded < ai.maxExpandedNodes) {
@@ -108,14 +109,18 @@ export function findPath(world: World, sx: number, sy: number, gx: number, gy: n
       const b = stepBlocker(idx, x, y, nx, ny);
       const step = 1 + (b ? breakTicks(b) * ai.breakCostMul : 0);
       const nk = key(nx, ny); const ng = gc + step;
-      if (P_SEEN[nk] !== pStamp || ng < P_G[nk]!) { P_SEEN[nk] = pStamp; P_G[nk] = ng; P_FROM[nk] = k; const nh = h(nx, ny); pPush(ng + nh, nh, nk); }
+      if (P_SEEN[nk] !== pStamp || ng < P_G[nk]!) { P_SEEN[nk] = pStamp; P_G[nk] = ng; P_FROM[nk] = k; P_BLOCKER[nk] = b; const nh = h(nx, ny); pPush(ng + nh, nh, nk); }
     }
   }
   const tiles: [number, number][] = [];
   for (let k = best; k !== -1; k = P_FROM[k]!) tiles.push([(k % W) + sx - R, Math.floor(k / W) + sy - R]);
   tiles.reverse();
+  // ADR-368: the blocker of the step into each tile was recorded during relaxation (P_BLOCKER is set
+  // exactly when P_FROM is, so it always describes the chosen path's edge) — no second stepBlocker
+  // scan over the path (each call did a chunk-layer cellsIn per tile). stepBlocker is deterministic
+  // on the geometry, so the reported blocker and index are unchanged.
   let blocker: Entity | 0 = 0, blockerIndex = -1;
-  for (let i = 1; i < tiles.length; i++) { const b = stepBlocker(idx, tiles[i - 1]![0], tiles[i - 1]![1], tiles[i]![0], tiles[i]![1]); if (b) { blocker = b; blockerIndex = i; break; } }
+  for (let i = 1; i < tiles.length; i++) { const b = P_BLOCKER[key(tiles[i]![0], tiles[i]![1])]!; if (b) { blocker = b; blockerIndex = i; break; } }
   return { tiles, blocker, blockerIndex, cost: P_SEEN[best] === pStamp ? P_G[best]! : 0 };
 }
 export const pieceHp = (world: World, e: Entity): number => world.getField(e, BuildPiece, "hp") ?? 0;

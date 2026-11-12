@@ -10,7 +10,7 @@ import { mountSnapOverlay } from "./snap-overlay.js";
 import { lastPlayedKey } from "./delete-progress.js";
 import { CHAT_TAG, chatLine, chatSender } from "./chat-line.js";
 import { intentPayload } from "./send-intent.js";
-import { LoadProgress } from "./load-progress.js";
+import { LoadCostBreakdown, LoadProgress } from "./load-progress.js";
 import { attachZoom, type ZoomControl } from "./camera-zoom.js";
 import { attachCameraRotate, screenDirToWorld, type CameraRotateControl } from "./camera-rotate.js";
 let camZoom: ZoomControl | undefined; let padZoomT = 0; // ADR-177
@@ -119,6 +119,10 @@ installGlobalErrorCapture(window);
 setRenderErrorSink((r) => { if (r.visible) showRenderError(`Renderer: ${r.where}`, r.error instanceof Error ? r.error.stack ?? r.error.message : String(r.error)); else logRecoverable(r.where, r.error); });
 errorLog().ctx = { renderer: () => (iso ? (iso.renderer.gl ? "webgl2" : "canvas2d") : ctx ? "debug" : "booting"), gpu: () => (iso ? glInfo(iso.renderer.gl).split(" | ")[0] ?? "" : "n/a") };
 const loadProgress = new LoadProgress();
+/** ADR-370: client cost breakdown (boot / world-ready / warm-up timings) for ?diag=1 + window.__survivazLoadCost. */
+const loadCost = new LoadCostBreakdown();
+const bootT0 = performance.now();
+{ const w = globalThis as { __survivazLoadCost?: () => string }; w.__survivazLoadCost = () => loadCost.format(); }
 const onStage = (id: string, f: number, label?: string): void => { const v = loadProgress.update(id, f, label); boot?.progress(v, loadProgress.label); };
 onStage("renderer", 0);
 const glLevel = effectiveLevel(location.search);
@@ -297,7 +301,7 @@ const session = new ClientSession({ storage: localStorage, slot: SLOT, sampleInp
   hashes: async () => { await isoReady.catch(() => undefined); const c = iso?.registry.cosmetics; return c?.size ? cosmeticsHashes(c) : undefined; } });
 let world = new World({ seed: 1234 }); installDemoWorld(world, "client");
 installFullscreenRestore();
-const diag = startDiag({ renderer: () => iso?.renderer, entities: () => world.entityCount, tick: () => world.tick, player: () => session.player,
+const diag = startDiag({ renderer: () => iso?.renderer, entities: () => world.entityCount, tick: () => world.tick, player: () => session.player, loadCost: () => loadCost.format(),
   snapshot: () => session.client ? { received: session.client.latestTick >= 0, latestTick: session.client.latestTick, snapshots: session.client.stats.snapshots } : undefined,
   // ADR-254: ?seed= pins the preview (and a remote join); otherwise 1234 until the local server reports its seed.
   spawnPoints: (() => { let c: { seed: number; points: { x: number; y: number }[] } | undefined; return () => (c ??= (() => { const seed = Number(params.get("seed") ?? 1234); return { seed, points: computeSpawnPoints(new ProceduralGenerator({ seed })) }; })()); })() });
@@ -613,9 +617,18 @@ const defaultUrl = serverParam ?? `${location.protocol === "https:" ? "wss" : "w
  * server with gameplay.ready — until then the server freezes this player's vitals, diseases, pet hunger
  * and pack spoilage, so nothing drains while the player is still loading in.
  */
+/** ADR-370: bounded warm-up drain after the world is ready — the first frames already draw under the loading overlay, so their stream page-ins are queued; wait for the queue to drain (or the window to expire) before the overlay lifts. */
+const drainFirstView = async (): Promise<void> => {
+  const drain = iso ? await iso.renderer.atlas.warmupDrain?.() : undefined;
+  if (!drain) return;
+  loadCost.record("warmup-drain", drain.ms);
+  loadCost.note(drain.drained ? `first-view pages drained in ${drain.ms}ms` : `${drain.pending} first-view page(s) still pending after ${drain.ms}ms`);
+};
 const signalReady = async (): Promise<void> => {
+  const t0 = performance.now();
   const ok = await waitForWorldReady(session);
-  if (ok) sendIntent(readyIntent());
+  loadCost.record("world-ready", performance.now() - t0);
+  if (ok) { await drainFirstView(); sendIntent(readyIntent()); }
 };
 /** Task 14: the second loading screen — same style as the first — over a world start, until it is loaded. */
 const enterWorld = async (start: () => Promise<unknown>): Promise<void> => {
@@ -624,8 +637,10 @@ const enterWorld = async (start: () => Promise<unknown>): Promise<void> => {
   let started = false;
   try { await start(); started = true; } catch (e) { console.error("start failed", e); }
   if (started) {
+    const t0 = performance.now();
     const ok = await waitForWorldReady(session, { onProgress: (f) => boot.progress(f, f >= 1 ? "Ready" : "Loading world…") });
-    if (ok) sendIntent(readyIntent());
+    loadCost.record("world-ready", performance.now() - t0);
+    if (ok) { await drainFirstView(); sendIntent(readyIntent()); }
   }
   boot.hide();
 };
@@ -633,7 +648,9 @@ if (creatorShot) {
   runCreatorShot(creatorShot).catch((e: unknown) => { (window as { __creatorReady?: unknown }).__creatorReady = { ok: false, seed: creatorShot.seed, error: String(e) }; });
 } else if (boot) {
   void (async () => {
-    await isoReady; loadProgress.complete(); await boot.finish("Ready");
+    await isoReady; loadCost.record("boot", performance.now() - bootT0);
+    if (iso?.warmupResult) { const w = iso.warmupResult; loadCost.note(`boot warm-up: ${w.resident}/${w.requested + w.alreadyResident} first-view pages resident in ${w.ms}ms${w.timedOut ? ` (timed out, ${w.stillPending} pending)` : ""}`); }
+    loadProgress.complete(); await boot.finish("Ready");
     let notice: string | undefined, page: string | null = null;
     try { notice = sessionStorage.getItem(P2P_NOTICE_KEY) ?? undefined; sessionStorage.removeItem(P2P_NOTICE_KEY); page = sessionStorage.getItem(MENU_PAGE_KEY); sessionStorage.removeItem(MENU_PAGE_KEY); } catch { /* ignore */ }
     const { hostPlayerCap, detectDevice } = await import("./p2p.js"); const hc = hostPlayerCap(detectDevice(), settings.hostCap);

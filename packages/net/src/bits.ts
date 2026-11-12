@@ -56,7 +56,11 @@ export class BitWriter implements FieldWriter {
   }
   writeF32(v: number): void { f32[0] = v; this.writeBits(f32u[0]!, 32); }
   writeF64(v: number): void { f64[0] = v; this.writeBits(f64u[0]!, 32); this.writeBits(f64u[1]!, 32); }
-  writeBytes(b: Uint8Array): void { for (const x of b) this.writeBits(x, 8); }
+  /** ADR-369: byte-aligned bulk copy (tile deltas, blobs); bit-identical to one writeBits(x, 8) per byte. */
+  writeBytes(b: Uint8Array): void {
+    if ((this.pos & 7) === 0) { this.ensure(b.length * 8); this.buf.set(b, this.pos >>> 3); this.pos += b.length * 8; return; }
+    for (const x of b) this.writeBits(x, 8);
+  }
   write(t: FieldType, v: number): void {
     switch (t) {
       case "f32": this.writeF32(v); break;
@@ -100,7 +104,14 @@ export class BitReader implements FieldReader {
   }
   readF32(): number { f32u[0] = this.readBits(32); return f32[0]!; }
   readF64(): number { f64u[0] = this.readBits(32); f64u[1] = this.readBits(32); return f64[0]!; }
-  readBytes(n: number): Uint8Array { const o = new Uint8Array(n); for (let i = 0; i < n; i++) o[i] = this.readBits(8); return o; }
+  /** ADR-369: byte-aligned bulk copy; same bytes (and the same overrun RangeError) as one readBits(8) per byte. */
+  readBytes(n: number): Uint8Array {
+    if ((this.pos & 7) === 0) {
+      if (this.pos + n * 8 > this.totalBits) throw new RangeError("BitReader: out of data");
+      const o = this.buf.slice(this.pos >>> 3, (this.pos >>> 3) + n); this.pos += n * 8; return o;
+    }
+    const o = new Uint8Array(n); for (let i = 0; i < n; i++) o[i] = this.readBits(8); return o;
+  }
   read(t: FieldType): number {
     switch (t) {
       case "f32": return this.readF32();

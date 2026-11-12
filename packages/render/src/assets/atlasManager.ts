@@ -36,6 +36,7 @@ import type { RectTable } from "./texturePacker.js";
 import { PageLRU, PRIO_NEAR, VramAccountant, rgbaBytes, type VramStats } from "../gl/vram.js";
 import { blockBytes, GL_FORMAT, ktx2Target, loadKtx2, loadKtx2Rgba, type Ktx2Target } from "./ktx2.js";
 import { assetFetch, isRidePageKey, withAssetSlot } from "./asset-fetch.js";
+import { WARMUP_MAX_PAGES, WARMUP_POLL_MS, WARMUP_PRIO, WARMUP_WINDOW_MS, isWarmupCandidate, sortWarmupKeys, type WarmupResult } from "./warmup.js";
 import type { CompressedTextureSupport } from "../gl/capabilities.js";
 import { isEnclosurePieceKey, lCornerArmPiece, streamingFallbackKeys } from "../building/modular.js";
 
@@ -1463,6 +1464,58 @@ export class AtlasManager {
     for (const a of want) this.request(a);
     const g = this.gen;
     for (let i = 0; i < 600 && g === this.gen && want.some((a) => a.lazy!.state === 1 || this.queue.includes(a)); i++) await new Promise((r) => setTimeout(r, 16));
+  }
+  /**
+   * ADR-370: warm-up window — request the first-view / visible-pin lazy pages first, at
+   * near-player priority, and wait (bounded) for them to land before the first paint.
+   * Reuses request()/pump()/pageIn: prio WARMUP_PRIO (1) is <= PRIO_NEAR, so the pages are
+   * budget-exempt like near art, but != 0, so they still go through the per-frame upload turn
+   * (PAGE_UPLOADS_PER_FRAME) and never jump the local player's own pages. A timeout never
+   * blocks boot: the caller continues with a soft start, and the world-ready warm-up
+   * (main.ts drainFirstView) retries the drain once the player has spawned.
+   */
+  async warmupFirstView(keys: Iterable<string>, opts: { firstView?: Iterable<string>; maxPages?: number; timeoutMs?: number } = {}): Promise<WarmupResult> {
+    const t0 = Date.now();
+    const firstView = new Set(opts.firstView ?? []);
+    const ordered = sortWarmupKeys([...new Set(keys)], firstView).filter((k) => isWarmupCandidate(k, firstView));
+    const maxPages = Math.max(0, opts.maxPages ?? WARMUP_MAX_PAGES);
+    const timeoutMs = Math.max(0, opts.timeoutMs ?? WARMUP_WINDOW_MS);
+    const want: AtlasRT[] = [];
+    let alreadyResident = 0, skipped = 0;
+    for (const k of ordered) {
+      const a = this.atlases.find((x) => x.key === k);
+      if (!a) { skipped++; continue; }
+      if (!a.lazy) { alreadyResident++; continue; } // resident atlases are already on the GPU
+      if (a.lazy.state === 2) { alreadyResident++; continue; }
+      if (want.length >= maxPages) { skipped++; continue; }
+      want.push(a);
+    }
+    for (const a of want) this.request(a, WARMUP_PRIO);
+    const g = this.gen;
+    const deadline = t0 + timeoutMs;
+    while (g === this.gen && want.some((a) => a.lazy!.state !== 2) && Date.now() < deadline) await new Promise((r) => setTimeout(r, WARMUP_POLL_MS));
+    const landed = want.filter((a) => a.lazy!.state === 2).length;
+    return { requested: want.length, alreadyResident, resident: alreadyResident + landed, stillPending: want.length - landed, skipped, ms: Date.now() - t0, timedOut: want.some((a) => a.lazy!.state !== 2) };
+  }
+  /** ADR-370: lazy page keys for sprites (deduped, first-seen order) — the caller passes the sprites in the first view so they sort tier 0 in warmupFirstView. */
+  warmupKeysForSprites(spriteIds: Iterable<number>): string[] {
+    const out: string[] = []; const seen = new Set<string>();
+    for (const id of spriteIds) { const k = this.pageKey(id); if (k && !seen.has(k)) { seen.add(k); out.push(k); } }
+    return out;
+  }
+  /**
+   * ADR-370: wait (bounded) for the page-in queue to drain — used after the world is ready, while the
+   * second loading screen still covers the first frames, so the overlay lifts onto a sharp frame.
+   * Returns immediately when nothing is queued (no draws have requested pages yet).
+   */
+  async warmupDrain(timeoutMs: number = WARMUP_WINDOW_MS): Promise<{ pending: number; ms: number; drained: boolean }> {
+    const t0 = Date.now(); const deadline = t0 + Math.max(0, timeoutMs);
+    while (Date.now() < deadline) {
+      if (this.queue.length + this.inflight === 0) return { pending: 0, ms: Date.now() - t0, drained: true };
+      await new Promise((r) => setTimeout(r, WARMUP_POLL_MS));
+    }
+    const pending = this.queue.length + this.inflight;
+    return { pending, ms: Date.now() - t0, drained: pending === 0 };
   }
   /** Atlas key of a sprite's streamed page (null when resident / not streamed). */
   pageKey(spriteId: number): string | null { return this.lazyOf(spriteId)?.key ?? null; }

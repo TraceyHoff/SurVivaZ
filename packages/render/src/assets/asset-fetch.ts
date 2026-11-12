@@ -2,6 +2,8 @@
  * ADR-307: shared fetch for art and audio. Dedupes in-flight requests, serves a versioned Cache Storage
  * bucket (so a new deploy does not show stale sprites), and limits how many transfers run at once.
  */
+import { isWarmupCandidate } from "./warmup.js";
+
 export const ASSET_CACHE_PREFIX = "survivaz-art-";
 export const ASSET_FETCH_CONCURRENCY = 8;
 
@@ -87,6 +89,31 @@ export function collectPrefetchUrls(manifest: unknown, base: string): string[] {
     urls.push(resolve(a.image));
     if (typeof a.emissiveImage === "string") urls.push(resolve(a.emissiveImage));
     for (const v of Object.values(a.masks ?? {})) if (typeof v === "string") urls.push(resolve(v));
+  }
+  return urls;
+}
+
+/**
+ * ADR-370: Cache-warm the first-view stream sheets (visible-pin pages the boot warm-up will page
+ * in: furniture / buildings / openings / defenses, including building tiers) so their first page-in
+ * is a Cache Storage hit, not a network fetch + decode. Disjoint from collectPrefetchUrls: resident
+ * atlases are already warmed there, ride pages and cold sheets stay on demand.
+ */
+export function collectWarmupPrefetchUrls(manifest: unknown, base: string): string[] {
+  const atlases = (manifest as { atlases?: unknown }).atlases;
+  if (!Array.isArray(atlases)) return [];
+  const root = base.endsWith("/") ? base : base.replace(/[^/]*$/, "");
+  const resolve = (p: string): string => (/^(\/|[a-z]+:)/i.test(p) ? p : root + p.replace(/^\.\//, ""));
+  const urls: string[] = [];
+  for (const raw of atlases) {
+    const a = raw as { key?: string; image?: string; residency?: string; emissiveImage?: string };
+    const key = a.key ?? "";
+    if (typeof a.image !== "string" || !isWarmupCandidate(key)) continue;
+    if (isRidePageKey(key)) continue;
+    if (a.residency !== "stream") continue;
+    if (shouldPrefetchAtlas(key, a.image, a.residency)) continue; // already warmed by collectPrefetchUrls
+    urls.push(resolve(a.image));
+    if (typeof a.emissiveImage === "string") urls.push(resolve(a.emissiveImage));
   }
   return urls;
 }

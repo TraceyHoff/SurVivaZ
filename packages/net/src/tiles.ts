@@ -116,9 +116,11 @@ export class TileSync {
           if (!views.length) return 0; const { cx, cy } = parseChunkKey(key); const x = (cx + 0.5) * CHUNK_SIZE, y = (cy + 0.5) * CHUNK_SIZE;
           let d = Infinity; for (const v of views) d = Math.min(d, (v.x - x) ** 2 + (v.y - y) ** 2); return d;
         };
-        want.sort((a, b) => dist(a) - dist(b));
+        // ADR-369: score each chunk once (the comparator used to re-parse the key and re-scan viewpoints
+        // on every comparison: O(w log w) dist calls). Same order, same bytes.
+        const scored = want.map((key) => [key, dist(key)] as const); scored.sort((a, b) => a[1] - b[1]);
         let sent = 0;
-        for (const key of want) {
+        for (const [key] of scored) {
           const c = tiles.getChunkByKey(key)!; const b = this.full(c);
           if (sent && w.bitLength + b.bits > budget) break;
           section(TileSection.Full, key); w.appendBits(b.bytes, b.bits); s.cache.delete(key); s.subs.set(key, c.version); s.fulls++; sent++;

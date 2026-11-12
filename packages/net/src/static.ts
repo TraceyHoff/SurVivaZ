@@ -48,6 +48,8 @@ export class StaticServer {
   private where = new Map<number, ChunkKey>(); // netId -> chunk
   private changes = new Map<ChunkKey, { from: number; old: Map<number, EntityState | undefined> }>();
   private deltaBlobs = new Map<ChunkKey, Blob>();
+  /** ADR-369: reused across ticks instead of allocating a fresh Set per update. */
+  private seenIds = new Set<number>();
   private spawnBlobs = new WeakMap<EntityState, Blob & { id: number }>();
   /** netIds replicated via the static channel this tick (excluded from snapshots). */
   readonly ids = new Set<number>();
@@ -66,7 +68,7 @@ export class StaticServer {
   /** Fold this tick's captured state into the chunk store. O(static entities) id scan + O(changes) work. */
   update(cur: WorldState): void {
     this.changes.clear(); this.deltaBlobs.clear();
-    const seen = new Set<number>();
+    const seen = this.seenIds; seen.clear();
     const tci = this.transformCi;
     const note = (key: ChunkKey, id: number, old: EntityState | undefined): Chunk => {
       let c = this.chunks.get(key); if (!c) { c = { version: 0, ents: new Map() }; this.chunks.set(key, c); }
@@ -181,7 +183,8 @@ export class StaticServer {
         for (const v of views) d = Math.min(d, (v.x - x) ** 2 + (v.y - y) ** 2);
         return views.length ? d : 0;
       };
-      const order = [...s.streams.keys()].sort((a, b) => dist(a) - dist(b));
+      // ADR-369: score each chunk once (was O(s log s) dist calls through the comparator). Same order.
+      const order = [...s.streams.keys()].map((key) => [key, dist(key)] as const).sort((a, b) => a[1] - b[1]).map(([key]) => key);
       const budget = budgetBytes * 8;
       for (const key of order) {
         if (w.bitLength >= budget - 64) break;

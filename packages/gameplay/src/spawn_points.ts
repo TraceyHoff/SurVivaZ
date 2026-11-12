@@ -38,13 +38,17 @@ const ExtraSafePointsRes = defineResource<{
   dynTick?: number | undefined; dynCache?: SpawnPointXY[] | undefined;
   /** ADR-348: one-shot centres (friend-code guest arrivals) with a tick expiry, pruned on read. */
   temp?: (SpawnPointXY & { untilTick: number })[] | undefined;
+  /** ADR-368: per-tick cache of the merged point list (below). `ver` is bumped by every registration
+   * change so a provider / point added mid-tick is visible to the next read in the same tick. */
+  mergedTick?: number | undefined; mergedVer?: number | undefined; merged?: SpawnPointXY[] | undefined; ver?: number | undefined;
 }>("gameplay.ExtraSafeSpawnPoints");
 /** Install extra safe-radius centres (ADR-326), eagerly or as a lazy builder run on first read.
  * Re-installing keeps any ADR-348 live providers and temporary centres already registered. */
 export function setExtraSafeSpawnPoints(world: World, points: readonly SpawnPointXY[] | (() => SpawnPointXY[])): void {
   const prev = world.getResource(ExtraSafePointsRes);
-  if (typeof points === "function") world.setResource(ExtraSafePointsRes, { points: [], lazy: points, dynamic: prev?.dynamic, dynTick: prev?.dynTick, dynCache: prev?.dynCache, temp: prev?.temp });
-  else world.setResource(ExtraSafePointsRes, { points: points.map((p) => ({ x: p.x, y: p.y })), dynamic: prev?.dynamic, dynTick: prev?.dynTick, dynCache: prev?.dynCache, temp: prev?.temp });
+  // ADR-368: bump ver so the merged cache (extraSafeSpawnPoints) rebuilds on the next read.
+  if (typeof points === "function") world.setResource(ExtraSafePointsRes, { points: [], lazy: points, dynamic: prev?.dynamic, dynTick: prev?.dynTick, dynCache: prev?.dynCache, temp: prev?.temp, ver: (prev?.ver ?? 0) + 1 });
+  else world.setResource(ExtraSafePointsRes, { points: points.map((p) => ({ x: p.x, y: p.y })), dynamic: prev?.dynamic, dynTick: prev?.dynTick, dynCache: prev?.dynCache, temp: prev?.temp, ver: (prev?.ver ?? 0) + 1 });
 }
 /** ADR-348: register a live safe-centre provider (beds, AI homes). The provider is re-evaluated at most
  * once per tick and its points are merged into `extraSafeSpawnPoints`; registering the same key again
@@ -55,6 +59,7 @@ export function addSafeSpawnCentreProvider(world: World, key: string, fn: () => 
   if (!s.dynamic) s.dynamic = [];
   const i = s.dynamic.findIndex((p) => p.key === key);
   if (i >= 0) s.dynamic[i] = { key, fn }; else s.dynamic.push({ key, fn });
+  s.ver = (s.ver ?? 0) + 1; // ADR-368: the merged cache rebuilds on the next read
 }
 /** ADR-348: a one-shot safe centre (a friend-code guest's arrival point) that expires after
  * `durationSeconds` (PVP.guestSafeSeconds). Expired centres are pruned on the next read. */
@@ -63,20 +68,28 @@ export function addTemporarySafeSpawnPoint(world: World, point: SpawnPointXY, du
   if (!s) { s = { points: [] }; world.setResource(ExtraSafePointsRes, s); }
   if (!s.temp) s.temp = [];
   s.temp.push({ x: point.x, y: point.y, untilTick: world.tick + Math.max(1, Math.round(durationSeconds * DEFAULT_TICK_HZ)) });
+  s.ver = (s.ver ?? 0) + 1; // ADR-368: the merged cache rebuilds on the next read
 }
 /** The extra safe-radius centres, materialising a lazy provider on first read — so a lazily installed set
  * is protected from the first spawn check, not only after the first bot spawns. ADR-348: also merges the
- * live providers (re-evaluated at most once per tick) and the unexpired temporary centres. */
+ * live providers (re-evaluated at most once per tick) and the unexpired temporary centres.
+ * ADR-368: the merged list itself is cached per (tick, ver) — the old code re-spread and re-copied every
+ * point on every call, and inSpawnSafeRadius runs in hot paths (zombie acquire per survivor, animal
+ * engage per threat). The returned array is read-only: callers must not mutate it (its point objects
+ * are fresh copies, rebuilt at most once per tick, so a stray write corrupts at most one tick). */
 export function extraSafeSpawnPoints(world: World): SpawnPointXY[] | undefined {
   const s = world.getResource(ExtraSafePointsRes); if (!s) return undefined;
-  if (s.lazy) { s.points = s.lazy().map((p) => ({ x: p.x, y: p.y })); delete s.lazy; }
+  if (s.lazy) { s.points = s.lazy().map((p) => ({ x: p.x, y: p.y })); delete s.lazy; s.ver = (s.ver ?? 0) + 1; }
   let dyn: SpawnPointXY[] | undefined;
   if (s.dynamic?.length) {
     if (s.dynTick !== world.tick) { s.dynCache = s.dynamic.flatMap((p) => p.fn()); s.dynTick = world.tick; }
     dyn = s.dynCache;
   }
-  if (s.temp?.length) { const now = world.tick; const live = s.temp.filter((t) => t.untilTick > now); if (live.length !== s.temp.length) s.temp = live; }
-  const out = [...s.points.map((p) => ({ ...p })), ...(dyn ?? []).map((p) => ({ ...p })), ...(s.temp ?? []).map((p) => ({ x: p.x, y: p.y }))];
+  if (s.temp?.length) { const now = world.tick; const live = s.temp.filter((t) => t.untilTick > now); if (live.length !== s.temp.length) { s.temp = live; s.ver = (s.ver ?? 0) + 1; } }
+  const ver = s.ver ?? 0;
+  if (s.merged !== undefined && s.mergedTick === world.tick && s.mergedVer === ver) return s.merged.length ? s.merged : undefined;
+  const out = [...s.points, ...(dyn ?? []), ...(s.temp ?? [])].map((p) => ({ x: p.x, y: p.y }));
+  s.merged = out; s.mergedTick = world.tick; s.mergedVer = ver;
   return out.length ? out : undefined;
 }
 /** The authority-installed spawn points, if any (else undefined). The pvp.json fallback is NOT a configured
@@ -92,7 +105,10 @@ export function installedSpawnPoints(world: World): SpawnPointXY[] | undefined {
 export function inSpawnSafeRadius(world: World, x: number, y: number): boolean {
   const r2 = SAFE_SPAWN_RADIUS * SAFE_SPAWN_RADIUS;
   const within = (pts: readonly SpawnPointXY[]): boolean => { for (const p of pts) { const dx = x - p.x, dy = y - p.y; if (dx * dx + dy * dy <= r2) return true; } return false; };
-  const pts = installedSpawnPoints(world); if (pts && within(pts)) return true;
+  // ADR-368: read the installed points in place — installedSpawnPoints() copies the array and every
+  // point, and this predicate runs per survivor per zombie think and per animal with a threat.
+  const sp = world.getResource(SpawnPointsRes);
+  if (sp && sp.points.length && within(sp.points)) return true;
   const extra = extraSafeSpawnPoints(world); return !!extra && within(extra);
 }
 /** Default jitter radius around the chosen point (tiles; spawn patches are clear for >= 2 tiles). */

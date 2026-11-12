@@ -6255,3 +6255,212 @@ icons (`game-icons-data.ts`) and the disease/temperature HUD chips were reviewed
 section icon or action image needed one — the atlas sprites depict the actual game objects more
 directly — so they stay unused by the guide for now. The guide has no hotkey and is not on the menu
 bar: it opens from the main menu or from pause only (unchanged from ADR-363).
+
+## ADR-368: Sim hot paths — cache the repeated work, keep the outcomes (SurVivaZ)
+
+**Context.** The busy-world sim runs ~1.5 ms/tick (Task 29 profile harness, `PERF=1`), and Task 29
+already took the biggest wins (allocation-free `findPath` A*, creature-nav scratch, store-direct animal
+AI, hoisted exposure ambient, bot sensor caching). What was left was the same shape of waste one level
+down: per-call rebuilds of lists the hot paths read many times a tick, per-entity re-derivations of
+values that are constant across a pass, and full scans for holders / animals / nodes that have nothing
+to do. Nothing here changes a spawn rate, a balance number, a tuning value, or a gameplay outcome —
+every change is a cache, a hoist, or a skipped no-op, with the old computation kept as the fallback.
+
+**Decision — `inSpawnSafeRadius` merges its point lists at most once per tick.** `extraSafeSpawnPoints`
+re-spread and re-copied every point (installed, dynamic, temporary) on every call, and the predicate
+runs per survivor per zombie think (`acquire`), per animal with a threat (animal AI engage), and per
+spawn-gate attempt. The merged list is now cached per (tick, version) in the resource; every
+registration change (set / provider / temporary centre, plus lazy materialisation and temp pruning)
+bumps the version so a mid-tick registration is visible to the next read in the same tick, and the
+returned array is documented read-only. `inSpawnSafeRadius` also reads the installed points in place
+instead of copying them. Providers are still re-evaluated at most once per tick, as ADR-348 promised.
+
+**Decision — `findPath` records the first blocking piece while it searches.** The post-pass re-ran
+`stepBlocker` over every tile of the returned path (a chunk-layer `cellsIn` per tile). The relaxation
+now records the blocker of the edge into each node in a `P_BLOCKER` scratch array, set exactly when
+`P_FROM` is, so it always describes the chosen path's edge; the post-pass reads it back. `stepBlocker`
+is deterministic on the geometry, so blocker, blockerIndex and cost are unchanged.
+
+**Decision — zombie `acquire` takes the tuning it already has.** It called `gameplayDefs(world).ai`
+and `secondsToTicks(retaliateSeconds)` per survivor per zombie per think; the caller already holds
+`ai`, and the retaliate window is computed once per call. The per-tick `paths` / `snuffs` cleanup
+loops also stop spreading every key into a fresh array and delete during Map iteration instead.
+
+**Decision — `expressionSystem` stops allocating per pass.** Emote names and expression ids are
+computed once at module load (a `Map` instead of `indexOf` per entity); the four queries collect
+into one reused array that is sorted and deduped in place (same deterministic order, each entity
+once); `mood()` and the current-expression reads use `getField` instead of `world.get()` copies.
+`emoteNames()` itself still returns a fresh array for its external callers.
+
+**Decision — `spoilageSystem` skips the per-item work for holders with no spoilable food.** Most holders carry none, but
+every pass ran `mapSlots` (which copies every slot array) for all of them. An allocation-free scan over the live slot
+arrays gates the per-item decay/conversion loop; the `frozenLast` update still runs for every holder, so food added
+later never inherits a stale freeze credit, and `burnSalt` keeps its salt-fuel and salt-count guards (its own
+`holdsSpoilable` scan was redundant under the gate) and still only burns while food is present. The holder's
+`spoilMul` still re-bases every pass even with no spoilable food — it is a property of the container, read by
+`spoilMulOf` / `slotFreshness` and by transfers, and Task 28 pins it (a salt barrel holding only salt reads 0.5x);
+the first draft of this slice skipped the re-base too and broke `task28_salt_storage` (gate fix, 2026-11-12).
+The ambient temperature is hoisted once per pass when there is no `ClimateRes`
+(the same hoist exposure got in Task 29); underground holders still read the constant 60°F, and
+with a `ClimateRes` the per-holder reading stays.
+
+**Decision — `cropGrowthSystem` hoists the pass globals and merges the frost pass.** `growthMul`
+re-derived the time of day and the weather per plant, and `droughtTicks` re-read the clock per plant;
+raining / sun-up / dormant / drought / frost are now computed once per pass and passed in (the live
+reads remain the fallback when the caller does not pass them). The crop half of the frost kill runs
+inside the growth loop instead of a second sorted query over the same crops (same order, same
+per-plant outcome); only the `ResourceNode` half keeps its own pass, and only while freezing. The
+growth-only write is `setField` instead of a whole-component `set` (same values, same change mark).
+
+**Decision — `husbandrySystem` looks each animal's station up once.** `feedingTroughs` /
+`apiaries` did a full `BuildPiece` query plus sort every pass, and `atTrough` / `atApiary` re-scanned
+them (with a `Transform` copy per station) up to five times per animal per pass, along with
+`tamedOwnerId` / `tamedOwnerTribe` / `canUsePens`. Station lists are now cached per
+`StructureIndex` version (the `pieceAt` memo convention; worlds without an index scan fresh), and
+each animal's trough, apiary, owner id, tribe id, kind key and pens gate are computed once per pass
+and reused by grouping, eating, production and grazing.
+
+**Decision — animal AI reuses one zombie list; `respawnSystem` stops spreading.** Tame defenders
+called `nearestClaimHostile` without a list, which ran a spatial radius query per tame animal per
+tick; the living-zombie list is now built once per run (lazily, on the first tame defender that
+needs it) and passed in — the same exact-distance nearest rule as petSystem's Task 29 list (ties
+resolve in query order rather than spatial-index order). `respawnSystem` ran every tick spreading
+every `ResourceNode` and every `NodeRegrow` marker into fresh arrays to find the few due ones; it
+now collects due entities into reused scratch arrays and then processes them (collection and
+processing are separate passes, so destroying / creating during processing cannot disturb the
+query iteration; order is the query order, as before).
+
+**Verification.** New `packages/gameplay/test/adr368_sim_hotpaths.test.ts` (13 tests): the safe-centre
+provider is evaluated at most once per tick and a mid-tick registration applies at once; temporary
+centres expire; `findPath` returns the exact straight tiles with no blocker on open ground, is
+deterministic across calls, and reports the wall piece `stepBlocker` reports for the crossed step
+in a walled room; expression ids / emote ids resolve from the cached tables and a held mood
+expression is not rewritten by repeated runs; a pack with only non-spoilable items keeps `spoilMul`
+1 while spoilable fish still decays; a watered wheat crop grows at the watered rate, an unwatered
+one does not, and a full-growth crop still matures into its node; a fed cow at a real placed trough
+still produces milk; an amount-0 node becomes a regrow marker and then regrows, and 30 live nodes
+are untouched by the per-tick scan. Neighbours (existing suites for animals, zombies, nav215,
+spoilage / salt storage, crops, trough diets, spawn points, expression) are unchanged in behaviour
+and must stay green. **Not run here: the sparse checkout had not landed and no `node_modules` were
+available, so no vitest suite and no typecheck ran in this slice — run `pnpm --filter
+@engine/gameplay test` and `pnpm bench` / `PERF=1 pnpm vitest run
+packages/gameplay/test/bench215.test.ts` on a full checkout before pushing, and confirm the
+busy-world sim still runs ~1.5 ms/tick or better.**
+
+**Honest cuts.** No measured before/after numbers in this slice (checkout blocked — see above); the
+wins are structural (fewer allocations and repeated scans per tick), not a re-tuned sim. Vitals was
+reviewed and left alone: it is already store-direct and `evaluate` scans at most 8 modifier slots.
+`findPath` still returns an allocated tile list per call, and `animalAISystem` still sorts its animal
+list per tick — both are load-bearing for determinism, so they stay. The `extraSafeSpawnPoints`
+merged array is shared within a tick and must be treated as read-only by callers.
+
+## ADR-369: Net replication — cheaper ticks, same wire (SurVivaZ)
+
+**Context.** The 2026-11-12 performance batch asked for less lag with no graphics-quality cut. The
+replication path was already heavily optimised (ADR-212: structural sharing in `captureState`, the
+per-(state, baseline) encoded-record cache, distance/staleness prioritisation, shared tile deltas),
+so this slice takes the remaining per-tick work that scales with world/client size rather than with
+churn: `captureState` re-scanned every entity against every replicated store every tick
+(O(entities × stores)) even when nothing had changed; `replicate` walked the captured state three
+times plus a full `posX.fill(NaN)`; every client re-walked every AOI chunk and re-resolved every
+netId every tick even when its AOI set had not moved; tile/static streaming re-scored each chunk's
+distance on every sort comparison; and `BitWriter.writeBytes` / `BitReader.readBytes` went through
+`writeBits`/`readBits` one byte at a time.
+
+**Decision — dirty-driven capture.** `captureState` (packages/net/src/state.ts) now builds one
+`dirty` set per tick from the stores' own `changedIndices()` iterators plus the NetId store's
+(O(changed)), and reuses the previous `EntityState` whenever an entity is in neither `dirty` nor
+the removal (`touched`) set. That is exactly the old fast path — `changedIndices()` yields a
+changed index only while the component is still present, removals are covered by `touched`, and
+NetId adds by the NetId store — with the per-entity × per-store `isChanged` scan gone. The
+per-component structural sharing inside a rebuilt entity is unchanged. `writeEntityRecord` also
+writes the changed/removed masks with one linear merge instead of `changed.includes(ci)` per
+component (the masks are built in ascending ci order, so the bits on the wire are identical).
+
+**Decision — cached relevant netIds.** `NetServer.replicate` keeps a per-client list of the
+netIds in that client's AOI, in the same order the chunk walk produces it, and reuses it while
+`InterestGrid` reports no entered/left entities or chunks for that client — the grid already
+maintains the relevant set incrementally, so empty deltas mean the set is unchanged. A rebuild
+happens on any AOI change, on disconnect/remove, on `setDirect` either way (the grid keeps
+updating while a client is direct, so a cache built before going direct is stale on return), and
+whenever `NetIdRegistry.generation` moves: the registry now bumps a generation counter on every
+netId assignment, adoption and release, so an entity that gains a netId while sitting still inside
+a client's AOI is never missed by a stale cache. `server.perf` gains `relevantHits` /
+`relevantBuilds` (reset per tick like `encoded` / `shared`) so the hit rate is observable in the
+benches. One documented nuance, not a wire change: on a cache hit the list keeps the order it was
+built in, so an entity moving between two chunks that are both still relevant keeps its old
+position in that order. The set is identical and `prioritize()` reorders `rest` by
+distance/staleness anyway, so only ties among equal distance/staleness can come out in a
+different order, and no entity is dropped or delayed past the budget logic.
+
+**Decision — one pass over the captured state.** `replicate` used to walk `cur.keys()` three
+times (max id, positions, max id again) plus `posX.fill(NaN)` and a `forEach` to fill `curArr`.
+It now takes one max scan and one `forEach` that fills `curArr` and `posX`/`posY` together, and
+the fill is gone: every id in `cur` gets a `posX`/`posY` write in that pass, and every reader
+only touches ids in `cur` (`prioritize`, distant throttle) or ids guarded by `curArr` (linger),
+so no stale position can be read. The `[...st.changedIndices()]` snapshot in the NetId-assign
+loop is now a direct generator iteration (assign only writes the NetId store, never the store
+being iterated); the NetId store's own loop keeps its spread deliberately, because `adopt()` can
+write the store being iterated.
+
+**Decision — bulk bit copies and once-per-chunk scoring.** `BitWriter.writeBytes` and
+`BitReader.readBytes` (packages/net/src/bits.ts) take a direct buffer copy when byte-aligned
+(tile deltas and blobs are the hot callers), bit-identical to one `writeBits`/`readBits` per byte,
+with the same overrun `RangeError`. `TileSync` (`tiles.ts`) and `StaticServer.build`
+(`static.ts`) score each chunk's distance once before sorting instead of re-parsing the chunk
+key and re-scanning viewpoints on every comparison — same order, same bytes. `StaticServer.update`
+reuses one `seen` set instead of allocating a fresh `Set` per tick.
+
+**Verification.** New `packages/net/test/adr369_net_replication.test.ts` (7 tests): bulk
+write/read bytes are byte-identical to the per-byte path aligned and unaligned, and overruns
+throw the same error; a 200-entity idle tick reuses every `EntityState`, a write to the
+non-networked `Control` component changes nothing, a single `Buff` write rebuilds only that
+entity while its `Transform` array is structurally shared, and a component removal is still
+detected; a multi-component change + removal round-trips exactly through `encodeDelta` /
+`decodeDelta`; over loopback, idle ticks report `perf.relevantHits = 1, relevantBuilds = 0`, a
+move between two still-relevant chunks keeps the cache hit and the client still sees the entity,
+leaving the AOI rebuilds on the next tick (`relevantBuilds = 1`) and the entity despawns past
+the linger and re-spawns on re-entry, and `netIds.generation` moves on assign and on release;
+tile streaming with radius 2 loads 16 chunks nearest-first (distances non-decreasing, own
+chunk first). Not run here: the sparse checkout had not landed when this slice was written
+(working tree held only root files), so no vitest or typecheck run was possible — see Honest
+cuts for the exact commands. No wire change: protocol version stays 8, no field renamed, no
+message dropped; the new tests assert byte-identical encodings and unchanged client-visible
+sets, and the existing `bench` / `tiles.bench` / `stalls.bench` / `war.bench` suites are the
+regression net (run them with `PERF=1`).
+
+**Honest cuts.** Unmeasured — checkout blocked. The mechanisms above remove work that scales
+with entities × stores × clients on idle/low-churn ticks and with chunks × log(chunks) ×
+comparisons on streaming ticks, but no before/after number was measured in this slice; the
+baselines to beat are the ones the benches already print (`bench.test.ts`: ~13 ms/tick for
+100 clients × 10k entities spread, ~25 ms/tick clustered, both on the dev box). Run before
+merging, from a full checkout: `pnpm --filter @engine/net test`
+(or `pnpm test:net`), `pnpm -r typecheck` with the lockfile-pinned TypeScript 5.9.3, and
+`pnpm bench` (`PERF=1 vitest run --no-file-parallelism packages/net/test/bench.test.ts
+packages/persist/test/bench.test.ts`), plus the tile/static suites. Deliberately not changed:
+the twice-per-tick `ownedBy` rebuild (the owned set is O(players), and reusing the input-phase
+cache would miss entities whose `Owner` was added during simulation); the `decodeDelta`
+per-Change `copyMap` on the client (needed for the immutable-state contract); the per-tick
+`TileSync` leave scan over subscribed chunks (no cheap invalidation signal exists for chunk
+unloads); `encodeDelta` (no hot-path caller); and anything in the wire format, snapshot
+format, scopes, budgets, throttle or linger behaviour.
+
+## ADR-370: Render warm-up — first-view atlas page-in, a bounded warm-up window (SurVivaZ)
+
+**Context.** The first gameplay frames page stream sheets in at 2 uploads/frame, in whatever order the draw happens to request them (`AtlasManager.pump` / `PAGE_UPLOADS_PER_FRAME`, `STREAM_UPLOADS_PER_FRAME`), while the boot screen only waits for the *resident* atlases (`IsoView.create` → `setRegistry`, which pages body sheets in eagerly at prio 0). A first view with ~20 stream pages therefore spends its first ~10 frames drawing placeholders / body-only fallbacks — the blurry start — even though the art is already on disk / in the ADR-307 cache. Separately, `ChunkManager.update()` drains its load queue in row-major order, so the chunk under the player can load up to 24 chunks after the corner chunk, and there is no prewarm knob: `loadRadius` (default 2, 5×5 chunks) *is* the radius. The ready gate (`ready.ts`) already waits for the 3×3 chunk block around the player before the second loading screen lifts, and the first frames already draw under that overlay.
+
+**Decision — atlas page-in priority for the first view.** New pure module `packages/render/src/assets/warmup.ts` (no GL/DOM/imports) orders atlas keys into tiers: 0 = an explicit first-view set, 1 = visible-pin art (`gt_` / furniture / buildings / openings / defenses — in view at almost any spawn, since spawns sit beside abandoned structures, ADR-300/325), 2 = hot art, 3 = everything else, 4 = cold / ride pages (never warmed). `AtlasManager.warmupFirstView(keys, { firstView, maxPages, timeoutMs })` requests the tier 0–1 lazy pages at `WARMUP_PRIO` 1 — ≤ `PRIO_NEAR` (16), so budget-exempt like near art, but ≠ 0, so the pages still go through the per-frame upload turn and never jump the local player's own pages — and waits, bounded (default 1500 ms, 24 pages), for them to land. It reuses `request()` / `pump()` / `pageIn`; there is no new upload path.
+
+**Decision — warm-up window on load, in two places.** (1) Boot: `IsoView.create` runs `warmupFirstView` over the visible-pin keys right after `setRegistry`, before the "ready" stage; the result is stored on the view (`view.warmupResult`). (2) World entry: `main.ts` adds `drainFirstView()` after `waitForWorldReady` (both the menu `enterWorld` path and `signalReady`), which awaits `atlas.warmupDrain()` — the first-view pages the draws under the loading overlay already queued, draining before the overlay lifts. Both windows are bounded by `WARMUP_WINDOW_MS` (1500 ms); expiry never blocks boot or entry, it just means a soft start on a slow device.
+
+**Decision — asset cache / prefetch (ADR-307 extension).** `collectWarmupPrefetchUrls` (asset-fetch.ts) warms the first-view *stream* sheets (visible-pin pages, including building tiers and their emissive images) in Cache Storage; `prefetch-art.ts` warms them after the resident set, so the boot warm-up's first page-in is a cache hit. The set is disjoint from `collectPrefetchUrls` (resident atlases stay there; ride pages and cold sheets stay on demand).
+
+**Gate fix (2026-11-12): chunk prewarm dropped.** The nearest-first drain was reverted during gating: under the game's `maxLoadsPerUpdate: 4` / `maxLoadTimeMs: 2` budget it turned the fair FIFO load queue into a priority queue, and far-but-wanted chunks could starve while nearer chunks kept arriving (bots move; sources shift). The ADR-252 live bot test proved it: with the sort, one bot never placed its bed within the 3600-tick build window (night fell at the 3600-tick timeout, 0 night-sleep ticks); with the sort reverted, both bots build the bed and sleep (night at tick 3079, 502 sleep ticks). `ChunkManager` is back to pristine FIFO order and `packages/world/test/adr370_chunk_prewarm.test.ts` is removed. The atlas warm-up — the part that fixes the blurry start — is unchanged.
+
+**Decision — client cost breakdown.** `LoadCostBreakdown` (load-progress.ts, pure) records sequential phases (`boot`, `world-ready`, `warmup-drain`) with shares of the total, plus notes for sub-timings (the boot warm-up runs inside `boot`, so it is a note, never double-counted). `main.ts` records the phases, exposes `window.__survivazLoadCost()`, and `?diag=1` prints the breakdown (`diag.ts` `loadCost` source).
+
+**Not changed.** Full stays the default preset and full-resolution rendering (`quality.ts` untouched); no resolution, mip-level, texture-quality, bloom or lighting change; compass untouched; no new art, recolors, or binary art; `BOOT_STAGES` weights and the loading bar are untouched; `ChunkManager` load radius, cache size, unload margin and load order are untouched; `chunkFadeIn` (0.35 s) is untouched.
+
+**Validation.** New `packages/render/test/adr370_warmup.test.ts` (pure ordering + tier agreement with the AtlasManager's own regexes + warm-up prefetch disjointness + stubbed-manager warm-up/drain/key tests) and `apps/client/test/adr370_load_cost.test.ts` (breakdown totals, shares, notes, invalid-input handling). The chunk-prewarm test (`packages/world/test/adr370_chunk_prewarm.test.ts`) was removed with the reverted sort — see the gate fix above. Not run in this slice: the sparse checkout was still downloading (working tree held root files only), so no vitest / typecheck run was possible here — the coordinator must run `pnpm --filter @engine/render test -- adr370_warmup`, `pnpm --filter @engine/world test -- adr370_chunk_prewarm`, the client suite, and `pnpm -r typecheck` after applying, and measure the first-view page-in drain in `perfMobile.mjs` (warm-up resident count + `vram.misses` over the first seconds) before claiming a speedup.
+
+**Honest cuts.** The boot warm-up set is spawn-independent (visible-pin keys); the spawn-*specific* pages (crops, animals, furniture actually at the spawn) are covered only by the world-entry drain, because the spawn tile is not known until the player spawns. Tier 0 (explicit first-view set) is plumbed through `warmupFirstView({ firstView })` and `warmupKeysForSprites()` for a future spawn-aware caller, but no caller passes one yet. No live visual verification was possible in this slice: the blurry start still needs user eyes on a real phone and desktop.

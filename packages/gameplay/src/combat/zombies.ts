@@ -16,7 +16,7 @@ import { entityIndex, NetId, Transform, timeOfDay, sunFractionOf, type Entity, t
 import { installSpatialIndex } from "@engine/world";
 import { Anim, AnimState, Attacker, BodyTemp, Dead, Exposure, Health, NoiseLevel, Survival, Zombie, ZombieBrain, ZState } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
-import { secondsToTicks, type ZombieDef } from "../defs.js";
+import { secondsToTicks, type AiTuning, type ZombieDef } from "../defs.js";
 import { DayPhase, emit, ZombieSpawned, ZombieStateChanged } from "../events.js";
 import { indexEntity } from "../spawn.js";
 import { defineResource } from "@engine/core";
@@ -102,9 +102,9 @@ const dist = (ax: number, ay: number, bx: number, by: number): number => Math.hy
  * seen/heard ranges (sight <= 18, heard <= ~16), and the Dead check is kept so a player who
  * dies mid-run is still excluded for later zombies in the same tick.
  */
-function acquire(world: World, z: Entity, x: number, y: number, def: ZombieDef, survivors: readonly Entity[], dt: number): { e: Entity; seen: boolean } | undefined {
-  const ai = gameplayDefs(world).ai;
+function acquire(world: World, z: Entity, x: number, y: number, def: ZombieDef, survivors: readonly Entity[], dt: number, ai: AiTuning): { e: Entity; seen: boolean } | undefined {
   const la = lastAttacker(world, z);
+  const retaliateTicks = secondsToTicks(ai.retaliateSeconds, dt);
   let best: { e: Entity; seen: boolean; d: number } | undefined;
   for (const p of survivors) {
     if (world.has(p, Dead)) continue;
@@ -113,7 +113,7 @@ function acquire(world: World, z: Entity, x: number, y: number, def: ZombieDef, 
     // (retaliation still re-engages, so the zone is not a free shooting gallery) and except horde
     // members: a player-triggered raid is a deliberate attack, not ambient danger, so it is out of
     // scope for the safe radius and must still reach its target.
-    const recentAttacker = la !== undefined && la.e === p && world.tick - la.tick <= secondsToTicks(ai.retaliateSeconds, dt);
+    const recentAttacker = la !== undefined && la.e === p && world.tick - la.tick <= retaliateTicks;
     if (!recentAttacker && !world.has(z, HordeMember) && inSpawnSafeRadius(world, t.x, t.y)) continue;
     const seen = d <= def.sightRange * (isCrouched(world, p) ? STANCE.crouchSightMul : 1); const heard = d <= (world.getField(p, NoiseLevel, "value") ?? 0) * def.hearingMul;
     if (!seen && !heard) continue;
@@ -179,7 +179,7 @@ export function zombieAISystem(world: World, dt: number): void {
       if (!anyNear && !horde && !world.isReplaying) { ps.delete(z); world.destroy(z); continue; }
       const state = br.data.state[s]! as ZState; const target = br.data.target[s]!;
       const aggr = horde || zombieAggressive(world, z, todT);
-      let tgt = aggr ? acquire(world, z, x, y, def, survivors, dt) : provoker(world, z, x, y, def, dt);
+      let tgt = aggr ? acquire(world, z, x, y, def, survivors, dt, ai) : provoker(world, z, x, y, def, dt);
       // Task 15: a zombie that just gave up a chase does not instantly re-acquire the same player next think
       // (they are usually still in sight). Retaliation still breaks the cooldown: hitting the zombie re-engages it.
       const gu = giveUpsOf(world).get(z);
@@ -296,8 +296,9 @@ export function zombieAISystem(world: World, dt: number): void {
       if (shy) { moveToward(world, z, shy[0], shy[1], def.speed * dt, ts); setAnim(world, z, Anim.Walk); } else setAnim(world, z, Anim.Idle);
     }
   }
-  for (const z of [...ps.keys()]) if (!world.isAlive(z) || world.has(z, Dead)) ps.delete(z);
-  for (const z of [...sn.keys()]) if (!world.isAlive(z) || world.has(z, Dead)) sn.delete(z);
+  // ADR-368: delete during Map iteration (safe in JS) instead of spreading every key into a fresh array per tick.
+  for (const z of ps.keys()) if (!world.isAlive(z) || world.has(z, Dead)) ps.delete(z);
+  for (const z of sn.keys()) if (!world.isAlive(z) || world.has(z, Dead)) sn.delete(z);
 }
 
 /**

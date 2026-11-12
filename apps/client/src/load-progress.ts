@@ -74,3 +74,32 @@ export function zombiePose(timeSec: number, moving: boolean, reducedMotion: bool
   const frame = Math.floor((timeSec / 0.857) * 6) % 6;
   return { frame, bob: -Math.abs(Math.sin(timeSec * Math.PI * 2 / 0.4286)) * 3 };
 }
+
+/**
+ * ADR-370: client cost breakdown — sequential load phases plus free-form notes (warm-up
+ * sub-timings), so the blurry-start cost is visible in ?diag=1 and on window.__survivazLoadCost.
+ * Pure (no DOM): the phases are recorded by main.ts around the real waits (boot, world-ready,
+ * warmup-drain); the warm-up itself is a note, because it runs *inside* the boot phase and
+ * must not be double-counted in the total.
+ */
+export interface CostStage { name: string; ms: number }
+export class LoadCostBreakdown {
+  private stages: CostStage[] = [];
+  private notes: string[] = [];
+  /** Record one sequential phase (ms rounded; invalid records are ignored). */
+  record(name: string, ms: number): void {
+    if (typeof name !== "string" || !name || !Number.isFinite(ms) || ms < 0) return;
+    this.stages.push({ name, ms: Math.round(ms) });
+  }
+  /** Attach a free-form note (e.g. a warm-up sub-timing with its page counts). */
+  note(text: string): void { if (typeof text === "string" && text) this.notes.push(text); }
+  get totalMs(): number { return this.stages.reduce((s, x) => s + x.ms, 0); }
+  get stageList(): readonly CostStage[] { return this.stages; }
+  format(): string {
+    if (!this.stages.length && !this.notes.length) return "load cost: not measured yet";
+    const total = this.totalMs;
+    const parts = this.stages.map((s) => `${s.name} ${s.ms}ms${total > 0 ? ` (${Math.round((s.ms / total) * 100)}%)` : ""}`);
+    const head = parts.length ? `load cost: ${parts.join(" · ")} · total ${total}ms` : "load cost:";
+    return this.notes.length ? `${head}; ${this.notes.join("; ")}` : head;
+  }
+}
