@@ -11,6 +11,7 @@ import { BUILD_HASH } from "./error-log.js";
 import { mountUi } from "./ui-root.js";
 import { bindTypingFullscreenExit, enterFullscreen } from "./fullscreen.js";
 import { BackHistory, focusVisible, markNavFocus } from "./back-history.js";
+import { buildGuidePanel } from "./guide-panel.js";
 import { navPad, PadEdges, padKeyEdge, traceAction, type PadControl } from "./pad-input.js";
 const isTyping = (t: EventTarget | null): boolean => t instanceof HTMLInputElement && t.type !== "checkbox" && t.type !== "range";
 import { EasedBar, zombiePose } from "./load-progress.js";
@@ -325,9 +326,17 @@ export class BootUI {
         this.screen([
           ["Singleplayer", () => { void localWorld("singleplayer", main); }],
           ["Multiplayer", multi],
+          ["Guide", guide, "alt"],
           ["Delete progress", saves, "alt"],
           ["Settings", settings, "alt"],
         ], undefined, `<div class="hint">Mouse / touch · arrows + Enter · gamepad D-pad + A</div>`, ...extra);
+      };
+      /** ADR-363: the guide as a main-menu screen — Back returns to the main menu, same as Settings.
+       *  Focus starts on the first section (data-autofocus), not the Back button. */
+      const guide = (): void => {
+        const el = buildGuidePanel();
+        el.querySelector("[data-guide-section]")?.setAttribute("data-autofocus", "1");
+        this.screen([["Back", main, "alt"]], main, `<h2>Guide</h2>`, el);
       };
       // ADR-236: one Multiplayer page holds everything the old in-game connect / P2P boxes did: host, join a room code,
       // dedicated server address + live reachability/ping, and why the last session ended. In-game only Pause → Session

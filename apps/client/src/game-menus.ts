@@ -1,6 +1,6 @@
 /**
  * In-game menus on the shared focus layer (./ui-nav.ts): pause (general menus + "Quit to main menu"), inventory,
- * crafting, build, character (details), wardrobe, party, clan, trade stalls, chat, settings and session (P2P). Each is a modal
+ * crafting, build, character (details), wardrobe, party, clan, trade stalls, chat, settings, guide (ADR-363) and session (P2P). Each is a modal
  * shell with stable hooks for Gameplay/Art to fill: `.gm-modal[data-modal=<id>]`, `[data-role=body]`, `[data-role=close]`.
  * Touch: general menus live in the top-right bar; health opens character, world Interact opens furniture/stalls.
  * Keyboard hotkeys (no text field focused): Esc pause, I/Tab inventory, C crafting, B build, K character, P party,
@@ -15,6 +15,7 @@ import { morph } from "./ui-diff.js";
 import { audioSettingsRows, type AudioControls } from "./audio/settings-ui.js";
 import { fxSettingsRows, type FxControls } from "./fx/settings-ui.js";
 import { GAMEPLAY_PANELS, gameplayBody, pageContainer, pageSkillCategory, type GameplayPanel, type GameplaySource } from "./gameplay-panels.js";
+import { buildGuidePanel } from "./guide-panel.js";
 import { iconImg, isIconFile } from "./game-icons.js";
 import { closeContainerIntent, onlineTargets, openContainerIntent, openStallIntent, isPetOwner, Pet, Viewing } from "@engine/gameplay";
 import { DEFAULT_QUALITY_PRESET, loadPreset, parsePreset, savePreset, QUALITY_PRESETS, type QualityPreset } from "@engine/render";
@@ -42,6 +43,7 @@ export const GAME_MENUS: readonly MenuDef[] = [
   { id: "map", title: "World Map", icon: "ic_map.png", hotkeys: ["KeyM"], bar: true, text: "Your location, facing and markers. Tap a spot to place a marker." },
   { id: "chat", title: "Chat", icon: "ic_chat.png", hotkeys: ["Enter", "Slash"], bar: true, text: "" },
   { id: "settings", title: "Settings", icon: "⚙", hotkeys: ["KeyO"], text: "" },
+  { id: "guide", title: "Guide", icon: "📖", hotkeys: [], text: "How everything in SurVivaZ works — controls, diseases, temperature, building, AI humans, animals and more." },
 ];
 const CSS = `.gm-modal{position:absolute;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;background:rgba(10,8,6,.55);
 padding:calc(8px + var(--sat,0px)) calc(8px + var(--sar,0px)) calc(8px + var(--sab,0px)) calc(8px + var(--sal,0px));box-sizing:border-box;pointer-events:auto;touch-action:pan-y}
@@ -165,6 +167,7 @@ export class GameMenus {
   build(id: string): HTMLElement {
     if (id === "chat" && this.badges.has("chat")) this.setBadge("chat", 0);
     if (id === "pause") return this.pausePanel();
+    if (id === "guide") return this.guidePanel();
     if (id === "settings") return this.settingsPanel();
     if (id === "chat") return this.chatPanel();
     if (id === "delete-progress") return this.deletePanel();
@@ -247,6 +250,9 @@ export class GameMenus {
   toggle(id: string): void { if (id === "trade") this.stallTarget = undefined; this.nav.toggle(id, () => this.build(id), id === "pet" ? () => this.closePetBag() : undefined); }
   open(id: string): void { this.nav.open(id, this.build(id)); }
   pause(): void { if (this.nav.top === "pause") return; this.nav.open("pause", this.build("pause")); }
+  /** ADR-363: the guide opens stacked over the pause menu (Esc / ✕ / B closes back to pause; the pause
+   *  menu stays in the stack, so singleplayer pause — main.ts keys it on isOpenId("pause") — is preserved). */
+  private guidePanel(): HTMLElement { return this.panel("guide", "Guide", [buildGuidePanel()]); }
 
   private pausePanel(): HTMLElement {
     const items: [string, () => void, string?][] = [["Resume", () => this.nav.close()]];

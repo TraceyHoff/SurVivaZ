@@ -81,6 +81,7 @@ import { task34AtlasSources, TASK34_ATLAS_KEYS } from "./task34-art.js";
 import { task256AtlasSources, TASK256_ATLAS_KEYS } from "./task256-art.js";
 import { task355AtlasSources, installStoreMenuIcons, TASK355_ATLAS_KEYS } from "./task355-art.js";
 import { task361AtlasSources, installVehicleMenuIcons, TASK361_ATLAS_KEYS } from "./task361-art.js";
+import { installGuideArt } from "./task364-art.js";
 import { stumpKeys } from "./stumps.js";
 /** `?cam=animal`: debug camera that follows the first ambient animal instead of the player. */
 const CAM_ANIMAL = typeof location !== "undefined" && new URLSearchParams(location.search).get("cam") === "animal";
@@ -368,6 +369,10 @@ export class IsoView {
     // (they fall back to the fiber category icon) — paint them at runtime from the world art. Safe no-op
     // without a canvas.
     installVehicleMenuIcons();
+    // ADR-364: the guide's placement-hologram image needs the ghost ore store, which has no menu-icon art
+    // (it is a rendering of the store's own world art in the game's ghost treatment) — paint it at
+    // runtime from the store art. Safe no-op without a canvas.
+    installGuideArt();
     // Art's customization pack (~220 paper-doll atlases, 1008x960): the renderer packs every atlas into one 2048² texture
     // array, so these alone need ~1.7 GiB of VRAM ("Texture total allocation size is too large" -> every sprite black).
     // Until Render loads outfit layers on demand, keep them out unless the array fits (?cz=1 forces them in).

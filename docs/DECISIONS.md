@@ -6068,3 +6068,190 @@ typecheck` clean across all 11 workspace projects (root `node_modules/@engine/ga
 for the run, then restored). The first typecheck run caught 5 real errors in the new painter/tests
 (`noUncheckedIndexedAccess` on tuple destructures + a literal-union `.includes`); all fixed, re-run clean. No
 package-name self-imports in new test files (grep confirms).
+
+## ADR-362: In-game guide — content + data (SurVivaZ)
+
+**Context.** The guide batch (ADR-362 content/data, ADR-363 UI, ADR-364 art) needs a content model the UI
+slice can render without changes to its shape, and the guide's numbers must not drift from the game: a guide
+that quotes a stale number is worse than no guide. The content must also stay honest about what changed since
+earlier tasks — ADR-277 removed direct air-temperature HP damage, so the guide must not repeat the Task 24
+"outdoor cold damage 0–10 °F at 2.0 hp/s, blocked by insulation ≥ 10" rule; insulation now only moves felt
+temperature, and only the freezing/overheating body-temperature tiers harm.
+
+**Decision — content model.** `packages/gameplay/data/guide.json` holds 15 sections (getting-started,
+controls, icons, diseases, temperature, cooking, building, ai-humans, animals, mounts-vehicles, crops-farming,
+storage, seasons-weather, combat-defence, multiplayer-clans). Each section has an id, title, an icon reference
+(a key only — `item:`, `piece:`, `vehicle:`, `mount:` or `pet:`, resolved to art by ADR-364), an intro, and
+body items of three kinds: `{ text }` prose, `{ fact, label, format }` numbers, and `{ keys, label, action? }`
+controls rows.
+
+**Decision — no numbers in prose.** Prose (`text`, `intro`, `label`) must contain no digits at all;
+`validateGuide` enforces it. Every duration, temperature, damage, cost or stat a player reads is a fact entry
+resolved by `packages/gameplay/src/guide.ts` from the same data files and named constants the game reads:
+diseases from `data/diseases.json` + `CARE_CURE_SECONDS` / `FLU_AFTER_SECONDS`; season ranges and weather from
+`data/environment.json` (shown in °F, converted from the °C ranges the game stores); crop rules from
+`data/farming.json` + `FROST_KILL_F` / `LATE_FALL_DAYS`; treats from `data/pets.json`; storage from
+`data/pieces.json`; vehicles from `data/vehicles.json` via `drawnSpeedCap` (chariot 11.5, large wagon 5.0
+behind a galloping horse); mounts from `data/mounts.json`; the hire pool size from `WANTED_ITEM_KEYS` (35);
+the safe radius from `SAFE_SPAWN_RADIUS` (20); fire heat from `FIRE_HEAT_MAX_C` / `FIRE_HEAT_TAU_S`
+(+15 °C over 120 s); body-temperature tier boundaries probed from `temperatureTier` (freezing 35 °C,
+overheating 39 °C) rather than copied; salt burn from `SALT_CONSUME_TICKS` (3 min). Where a value cannot be
+sourced it is left out, not guessed.
+
+**Decision — accessor for ADR-363.** `getGuideSections()` / `guideSection(id)` return the validated sections;
+`resolvedGuideSection(id)` returns the same shape with every fact already resolved to a display string
+("70–88 °F", "15 min", "10 Pine Log, 10 Stone, 2 Dye"); `resolveGuideFact(path, format)` resolves one fact
+and throws on an unknown path, format or value. `validateGuide()` returns every problem (dangling fact path,
+unresolvable icon key, digits in prose); `getGuideSections()` throws when the shipped guide is malformed.
+Exported from the `@engine/gameplay` index. No UI is built here and no art is resolved (ADR-363/364 own
+those); `apps/client/src/game-menus.ts`, `gameplay-panels.ts` and the pause menu are untouched.
+
+**Decision — controls rows.** Each row names the input action(s) it documents and is pinned by the tests to
+`packages/input/profiles/keyboardMouse.json` (gameplay cannot import the input package, so the check lives in
+the test, not the loader). The one exception is the character-sheet row (K), a client menu hotkey, pinned to
+`apps/client/src/game-menus.ts` instead.
+
+**Verification.** New `packages/gameplay/test/adr362_guide.test.ts` (10 tests, relative imports only): the
+loader validates clean with 15 sections in order; prose carries no digits (232 prose strings checked); every
+fact path has an independently recomputed expectation from the raw source JSONs and resolves to it — 130
+distinct paths (133 fact entries), so a drift in any source file fails the test; headline numbers pinned
+(summer 70–88 °F, heat wave 89–100 °F, winter 0–35 °F, flu 15 min / Honey Tea, care cure 4 min, dung
+fertiliser 15 min, chariot 11.5 tiles/s, large wagon 5 tiles/s, claim cost 10 Pine Log + 10 Stone + 2 Dye,
+safe radius 20 tiles, 24 inventory slots, 394 recipes, fire +15 °C); every disease in diseases.json has a
+duration (when it expires) and a cure fact; every icon key resolves in its own table; every item key a fact
+names exists; all 28 controls rows match the default keyboard profile (plus the K menu hotkey); accessors work
+and throw on unknown paths/formats. Neighbours: adr355/adr356 storage suites green (28 tests across the 3
+files); full gameplay package suite green (191 files passed, 2 skipped; 2005 tests passed, 3 skipped).
+Typecheck with pinned TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11 workspace projects (root
+`node_modules/@engine/gameplay` symlink moved aside for the run, then restored) — the first run caught 1 real
+error in the new test (`bindings` possibly undefined), fixed, re-run clean. No package-name self-imports in new
+files (grep confirms).
+
+**Honest cuts.** Not this slice (ADR-363/364 own them): no guide window UI, no menu/pause wiring, no art
+resolution — the icon keys are references only. The guide does not surface numbers with no data source to pin
+them to (e.g. per-kind zombie HP is in zombies.json but not shown — the combat section sticks to spawn rates,
+safe radius and fire). Job names (Gather, Farm, Defend, Craft, Maintain) are prose: they come from the
+`WorkerJob` const enum, which is erased at runtime, so no runtime derivation exists and the test does not pin
+them. The `diseases.count` fact path exists in the registry for the completeness check but is not referenced
+by any section.
+
+## ADR-363: In-game guide — UI, main menu + pause menu (SurVivaZ)
+
+**Context.** ADR-362 shipped the guide content model (15 sections, facts resolved from the game's own
+data, icon keys only). This slice builds the window players actually open: a Guide entry in the main menu
+and in the in-game pause menu, rendering the ADR-362 sections with no new UI language and no new art.
+
+**Decision — one body, two shells.** `apps/client/src/guide-panel.ts` builds the guide body once
+(`buildGuidePanel(initialId?)`): a section list above the selected section's detail. The in-game modal
+(`GameMenus.guidePanel()`, gm-modal shell) and the main-menu screen (`BootUI`, boot panel) share that body;
+only the shell differs. The body renders through `getGuideSections()` / `resolvedGuideSection(id)` — title,
+intro, prose items, fact label + resolved value rows, and controls rows with `<kbd>` key chips. Guide text
+lives in the ADR-362 data, never hardcoded in the UI.
+
+**Decision — pause flow preserved, not reimplemented.** The pause menu gains a Guide entry (a `GAME_MENUS`
+row, so it appears in Pause automatically; no hotkey, not a menu-bar button). Opening it stacks the guide
+over the pause menu in the UINav stack; Esc / ✕ / B closes back to pause, and the pause menu stays in the
+stack while the guide is open — so the singleplayer pause in `main.ts` (keyed on `nav.isOpenId("pause")`,
+audio off, UI live) holds exactly as before. Closing from the main menu returns to the main menu. No other
+menu entry's behaviour changes.
+
+**Decision — section navigation, no search.** The 15 sections are a button grid (the quick-jump) with
+`[data-tabs=tab]`, so gamepad LB/RB cycles them through the existing `cycleTabs` tab pattern, and the
+selected tab follows the chat-channels convention (selected = plain green button, the rest `alt` — that
+class is what `cycleTabs` reads to find the current tab). Keyboard arrows / Tab / Enter, touch taps and
+D-pad + A all work through the existing modal and boot-screen navigation; focus starts on the first section
+(`data-autofocus`) on the main menu. No search box: a text search would invent a new modal pattern for a
+list short enough to scan.
+
+**Decision — icons via the existing `[data-icon]` hook, text-only fallback.** `guideIconKey(icon, has)`
+resolves a section's icon ref to a `[data-icon]` key only when the shipped stylesheet has art for it:
+`item:` via the item's sprite key (`iconForItem`, same fallback the panels use), `piece:` via the
+build-menu icon (`buildIconKey`, tiered candidates first), `vehicle:` via the ADR-361 kit key
+(`item_vehicle_kit_<key>`). `mount:` / `pet:` have no menu-icon art and resolve to nothing. A section
+without a resolvable icon renders its title text-only — no `<img>`, never a broken image. 13 of the 15
+sections resolve today (all 8 `item:` keys and all 5 `piece:` keys have shipped CSS rules); the two that
+do not are `pet:dog_lab` (animals) and `mount:horse` (mounts-vehicles).
+
+**Verification.** New `apps/client/test/adr363_guide_ui.test.ts` (11 tests): the resolver with permissive,
+shipped-CSS and empty `has` sets; all 15 sections render (title, intro, every text / fact / keys item via
+the ADR-362 accessors); icons render only where art exists (torch yes, dog_lab / horse no, no `<img>`
+anywhere); guide opens from the pause menu and stacks over it (`isOpenId("pause")` still true), ✕ and Esc
+close back to pause, LB/RB cycles sections; the main menu gains a Guide button, the guide opens, keyboard
+arrows move between sections, Esc / Back returns to the main menu without resolving a choice. Neighbours:
+menus/modals, tutorials, pad navigation, store/vehicle menu icons, seed picker, world preview, compass
+tutorial, version marker (12 files, 74 tests) green. Full client suite green: 184 files, 872 tests
+passed. Typecheck with pinned TypeScript 5.9.3: `pnpm -r typecheck` clean across all 11 workspace projects
+(root `node_modules/@engine/gameplay` symlink moved aside for the run, then restored). No package-name
+self-imports in new files (grep confirms).
+
+**Honest cuts.** No search or quick-jump beyond the section grid (see above). No art resolution for
+`mount:` / `pet:` icons — that is ADR-364's job; the animals and mounts-vehicles sections show a text-only
+title until then. The guide has no hotkey and is not on the menu bar: it opens from the main menu or from
+pause only.
+
+## ADR-364: In-game guide — art: section icons + action images (SurVivaZ)
+
+**Context.** ADR-362 shipped the guide content model (15 sections, icon keys only) and ADR-363 the
+window, but two section icons had no art (`pet:dog_lab`, `mount:horse`) and the guide showed no pictures
+of the actions it describes. This slice wires every section icon through the existing art and adds images
+for the six key actions (building placement/hologram, cooking at a fire, taming/feeding, harnessing a
+mount, using the trough, claiming a base) — all from the game's own sprites and runtime-painted art, no
+new sprites, no recolors, no binary art (the snapshot push route carries text only).
+
+**Decision — the two gaps close with atlas-crop CSS rules, not new painting.** `pet_dog_lab` and
+`mount_horse` get hand-written `[data-icon]` rules appended to `apps/client/src/gameplay-panels.css`
+(after the generated ICONS block, the ADR-264/265 pattern — the generator only rewrites between the
+ICONS markers, so the tail is safe). Each rule crops the SW idle frame (direction 3, the widest profile
+view for both animals: dog 51×32, horse 75×82) out of the shipped atlas with `--cz-isize` / `--cz-ipos`
+computed from the nature manifest's `dirFrames` (frame-major indexing: `dirFrames[frame * dirs + dir]`).
+`guideIconKey` maps `pet:` → `pet_<key>` and `mount:` → `mount_<key>` like the other kinds, gated on
+`has()`. All 15 sections now resolve an icon.
+
+**Decision — action images are composed scenes of `[data-icon]` tiles.** guide.json gains a fourth body
+item kind, `{ image, caption }` (validated in `guide.ts`: kebab-case registry id, non-empty digit-free
+caption, passed through `resolvedGuideSection` unchanged). The composition lives in the client
+(`apps/client/src/task364-art.ts`, `GUIDE_ACTION_IMAGES`): each image is a row of tiles, each tile a
+`[data-icon]` key, with a join (`+` for things used together, `→` for the hologram becoming a piece).
+The six images: place-hologram (ghost ore store → solid ore store), claim-base (claim totem + clan
+flag), cook-fire (campfire + stew bowl), tame-feed (Labrador sprite + dog biscuit, its favourite treat),
+use-trough (feeding trough + animal feed), harness-mount (horse sprite + harness + cart kit). The panel
+renders them as a `<figure>` of icon spans plus a `<figcaption>` — tiles are spans, never `<img>`, the
+same rule as the section icons, inside ADR-363's modal styling (only `.guide-image` / tile / join /
+caption rules were added to the guide's own stylesheet).
+
+**Decision — the hologram tile is painted at runtime in the game's own ghost treatment.** It is the one
+guide tile with no menu-icon art, so `paintGuideGhostPixels` re-runs the ore store's half-full front cell
+(the ADR-357 painter) through the ghost shader's math (`packages/render/src/sprites.ts`: mix toward
+green (0.3, 1.0, 0.4) by 0.68, alpha `smoothstep(0.35, 0.75, a) * 0.62` — the soft ground shadow drops
+out, as in-game). `installGuideArt()` installs it as `[data-icon="guide_ghost_ore_store"]` (style
+`#task364-guide-art`, ADR-357 pattern: idempotent, safe no-op without a canvas), called once in
+`view.ts` next to the store/vehicle installs. The solid tile reuses the build menu's own ADR-357 icon
+(`build_ore_store`): the shipped items_build frame 297 is blank (0 opaque pixels, re-asserted here), so
+the painted icon is the real art. The ghost is a rendering of an existing sprite in the treatment the
+game draws every placement preview in — not a new sprite.
+
+**Verification.** New `apps/client/test/adr364_guide_art.test.ts` (8 tests): all 15 sections resolve an
+icon against the shipped + runtime key sets; the pet/mount CSS values are re-derived from the manifest
+(4-significant-figure match) and both atlas rects are decoded from the shipped PNGs (node:zlib pattern
+from `packages/assets/test/clan_palettes.test.ts`) and non-blank at 1x and 2x; every guide image id exists
+in the registry and every registry entry is used; every tile is non-blank by pixel check — atlas tiles
+decoded at exactly the cell the CSS shows, runtime tiles from the painters that produce them, with
+distinct signatures per tile inside each image; the ghost is pixel-identical to the solid icon except for
+the ghost treatment (RGB mix within ±1, alpha from the shader ramp, green-shifted); install is
+idempotent and a safe no-op without a canvas; the panel renders each image with its tiles in order, the
+right join and the caption, and no `<img>` anywhere. `packages/gameplay/test/adr362_guide.test.ts`
+gains the image-item validation tests (kebab-case id, digit-free caption, rejection of malformed items,
+resolved passthrough) and the captions join the no-digits check; `adr363_guide_ui.test.ts` now expects
+the pet/mount icons and renders image items in the all-sections sweep. Neighbours: full client suite
+green (185 files, 880 tests passed); full gameplay suite green (191 files, 2006 tests passed, 3
+skipped). Typecheck with pinned TypeScript 5.9.3:
+`pnpm -r typecheck` clean across all 11 workspace projects (root `node_modules/@engine/gameplay`
+symlink moved aside for the run, then restored). No package-name self-imports in new files (grep
+confirms).
+
+**Honest cuts.** The six action images are tile rows, not staged screenshots: they show the exact
+sprites involved in each action, composed, but not a live scene of the action happening. The 39 custom
+icons (`game-icons-data.ts`) and the disease/temperature HUD chips were reviewed as art sources; no
+section icon or action image needed one — the atlas sprites depict the actual game objects more
+directly — so they stay unused by the guide for now. The guide has no hotkey and is not on the menu
+bar: it opens from the main menu or from pause only (unchanged from ADR-363).

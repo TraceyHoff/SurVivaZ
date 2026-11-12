@@ -1357,3 +1357,12 @@ html[data-slot-dragging] .gm-modal .gm-panel [data-role=inv-layout] button[data-
    shrinks to inv-t - 20px on phones), so the bar runs over the bottom frame edge, full tile width minus the ADR-128 use badge on the left. */
 .gm-modal .gm-panel :is([data-role=inv-layout],[data-role=container-grid]) button .lfill{left:-6px;right:-6px;bottom:-6px;height:5px}
 .gm-modal .gm-panel [data-role=inv-layout] button[data-role=slot][data-use] .lfill{left:8px}
+
+/* ADR-364: guide section icons for the two refs ADR-363 could not resolve — the pet and mount rendered
+   sprites. Each rule crops the SW (direction 3) idle frame out of the shipped atlas: the widest profile
+   view for both animals, so it reads at 28px. --cz-isize/--cz-ipos are the rect math from the nature
+   manifest's dirFrames (dog_lab (331,253,51,32) in 704x400; horse (457,367,75,82) in 1024x768); the
+   ADR-364 test re-derives them from the manifest and pixel-checks both rects, so a manifest move fails
+   loudly instead of showing a blank tile. Hand-written after the generated ICONS block, like ADR-264/265. */
+[data-icon="pet_dog_lab"]{--cz-icon:image-set(url("../../../packages/assets/pack/nature/atlases/pets_dog_lab.png") 1x, url("../../../packages/assets/pack/nature/atlases/pets_dog_lab@2x.png") 2x);--cz-isize:1380% 1250%;--cz-ipos:50.69% 68.75%}
+[data-icon="mount_horse"]{--cz-icon:image-set(url("../../../packages/assets/pack/nature/atlases/nature_mounts_horse_0.png") 1x, url("../../../packages/assets/pack/nature/atlases/nature_mounts_horse_0@2x.png") 2x);--cz-isize:1365% 936.6%;--cz-ipos:48.16% 53.5%}
