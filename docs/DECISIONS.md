@@ -6464,3 +6464,250 @@ format, scopes, budgets, throttle or linger behaviour.
 **Validation.** New `packages/render/test/adr370_warmup.test.ts` (pure ordering + tier agreement with the AtlasManager's own regexes + warm-up prefetch disjointness + stubbed-manager warm-up/drain/key tests) and `apps/client/test/adr370_load_cost.test.ts` (breakdown totals, shares, notes, invalid-input handling). The chunk-prewarm test (`packages/world/test/adr370_chunk_prewarm.test.ts`) was removed with the reverted sort — see the gate fix above. Not run in this slice: the sparse checkout was still downloading (working tree held root files only), so no vitest / typecheck run was possible here — the coordinator must run `pnpm --filter @engine/render test -- adr370_warmup`, `pnpm --filter @engine/world test -- adr370_chunk_prewarm`, the client suite, and `pnpm -r typecheck` after applying, and measure the first-view page-in drain in `perfMobile.mjs` (warm-up resident count + `vram.misses` over the first seconds) before claiming a speedup.
 
 **Honest cuts.** The boot warm-up set is spawn-independent (visible-pin keys); the spawn-*specific* pages (crops, animals, furniture actually at the spawn) are covered only by the world-entry drain, because the spawn tile is not known until the player spawns. Tier 0 (explicit first-view set) is plumbed through `warmupFirstView({ firstView })` and `warmupKeysForSprites()` for a future spawn-aware caller, but no caller passes one yet. No live visual verification was possible in this slice: the blurry start still needs user eyes on a real phone and desktop.
+
+## ADR-371: Vehicle passengers — ride and destination dismount (SurVivaZ)
+
+**Context.** Tracey asked (2026-11-12) for players and AI humans to ride in the passenger seats of wagons,
+carriages and carts while another player or AI human drives, and to dismount when their destination is reached —
+with no performance drop. Most of it already existed and was verified, not assumed: drawn defs already carry
+passenger seats (wagon_small/medium/large + covered: 2, cart: 2, carriage: 4, chariot: 2); `VehicleSeats` /
+`Driver` / `enterVehicle` / `validateEnter` already seat passengers (seat 255 = first free, passengers need no
+key, seat 0 needs the key); `vehicleSystem` already snaps *every* rider — driver or passenger — to the vehicle
+Transform each tick, so drawn-vehicle passenger follow needed no new code; a passenger's input already moves
+nothing (ADR-360 test); and ADR-360 driver-seat steering of the pulling mount already works. The real gaps were
+four: no way to board *as a passenger* when you hold the key (seat 255 takes the driver seat first); the
+dismount dropped the rider on a fixed left-side point with no safety check (inside a solid, a wall, or deep
+water); no AI passenger behaviour at all; and a rider whose vehicle entity vanished was left frozen with a
+dangling `Driver` (the old `vehicleSystem` early-returned when no vehicles remained, so the follow loop never
+ran to notice).
+
+**Decision — seat 254, the passenger seat.** `PASSENGER_SEAT = 254` in `packages/gameplay/src/vehicles.ts`
+means first free *passenger* seat (1..n-1), never seat 0. `validateEnter` / `enterVehicle` handle it alongside
+255 (new reasons: `full` when no passenger seat is free, `no_passenger_seats` on a single-seat vehicle), and
+`enterVehicleAsPassenger` / `firstFreePassengerSeat` / `vehicleHasDriver` expose it. The command is the same
+`gameplay.vehicleEnter` (no new command, no wire change — the seat is a `u8` payload), so bots already speak it:
+`venter:<vehicle>:254` passes through `agent_output.ts` untouched. Chariot is included: it shares the seats /
+hitch / drive code path exactly, so excluding it would have been an artificial carve-out.
+
+**Decision — safe dismount, never strand a passenger.** `exitVehicle` now places the rider through
+`findSafeDismountTile` (same file): first the legacy left-side point (width/2 + 0.6 — the ADR-360 spot, so the
+existing exit tests pass unchanged on open ground), then tile centres on expanding Chebyshev rings around the
+vehicle tile, nearest the legacy point first, outside the vehicle footprint, checked with `movementBlocked`
+(terrain, walls/doors, solid cells at the rider's level). Land and shallow water are tried first; deep water
+only on a second pass — a ground-level rider can swim out, but wading out beats swimming out. Radii live in
+data, not code: `packages/gameplay/data/vehicle_passengers.json`
+(`dismountSearchRadiusTiles: 3`, `dismountFallbackRadiusTiles: 6`). The fallback, in order: another adjacent
+tile; the fallback radius (forced exits only); and, when even that finds nothing, the rider stays exactly where
+they already stand — never moved onto an unchecked tile. A normal exit with no safe tile inside the search
+radius returns `no_safe_spot` and the rider *stays seated* (seat and `Driver` kept) to retry later, when the
+vehicle has moved on or a tile frees up. Exiting a moving vehicle still works (the ADR-360 exit-while-driving
+case): the spot is found at the current pose. A driver leaving, or a mount being unhitched, leaves passengers
+seated in the parked vehicle — that *is* the safe place; they exit on demand, and the AI behaviour below exits
+when its driver has left. No in-sim path destroys a vehicle entity today (wrecked vehicles persist and are
+repairable, and the ADR-360 wreck test — the driver stays seated in a wreck — is preserved), so destruction is
+covered two ways: `forceExitVehicle` / `ejectVehicleOccupants` (O(seats), the API a future destroy path must
+call) and a safety net in `vehicleSystem`, which now ejects dangling riders — including when no vehicles remain
+at all, the early-return case the old code missed.
+
+**Decision — AI passenger.** New behaviour `ride_passenger` (`packages/gameplay/src/ai/vehicle_behaviors.ts`,
+appended last so the `vehicle_craft.test.ts` positional destructuring of `[drive, vehicle_service]` is
+untouched): it boards a driven drawn vehicle (`pickPassengerRide`: parked, driver seated, a free passenger
+seat, within the existing `seekRadius`) when far from its own goal, claims the tick and does nothing while
+riding (a passenger's input moves nothing), and gets out when parked and (a) the vehicle is within
+`arriveDistance` of its goal, (b) the driver has left, (c) the wagon is wrecked, or (d) the ride has carried it
+10 tiles further from its goal than where it boarded (wrong way). Sensors grew two O(seats) fields
+(`SeenVehicle.driverSeated`, `freePassengerSeats`, read in `fillVehicleSensors`); `mount_behaviors.ts`
+`DISMOUNT_NOW` gained `ride_passenger` so a bot on its own mount gets off it before boarding (enter refuses a
+rider who is already riding). While riding, the "far" consideration stays true: the utility product in
+`scoreBehavior` zeroes a behaviour the moment any consideration is 0, so a threshold that flips at arrival
+would let another behaviour displace the passenger before it can dismount. Motor vehicles are out of scope —
+the existing `drive` behaviour already exits non-driver riders from them, and that was left alone.
+
+**Decision — player UX, no new bindings.** The client (`apps/client/src/vehicle-controls.ts`) sends the
+passenger intent (seat 254) on Interact when the nearest drawn vehicle already has a driver, and the drive
+intent (seat 255) otherwise — a driverless wagon still needs somebody to drive it. While riding as a passenger
+the HUD chip reads "Passenger · Interact to get off"; the driver chip is unchanged (hidden for drawn vehicles,
+ADR-360). Boarding and dismounting both go through Interact (E / pad X / touch "Use"), so keyboard, gamepad
+and touch all work with no new binding, no new button, and no touch-layout change; the compass is untouched.
+The one wart, inherited not introduced: the touch driving layout still shows Engine/Lights buttons to a drawn
+passenger, and they do nothing (the server rejects them — driver only). No new art, no new component (the
+world schema hash is still `0xb629eab2`), no gameplay or balance change beyond the ask.
+
+**Validation.** New `packages/gameplay/test/adr371_vehicle_passengers.test.ts` (26 tests, all passing): seat-254
+boarding, key-holder passenger protection, single-seat `no_passenger_seats`, carriage seat tracking, chariot
+inclusion, passenger follow while moving, passenger input moves nothing, legacy-spot dismount, blocked-legacy
+fallback (lake shore: deep refused, shallow taken), deep water as last resort, `findSafeDismountTile`
+undefined when the only candidate is unsafe, walled-in `no_safe_spot` stays seated, driver-leaves and
+unhitch leave passengers seated, `ejectVehicleOccupants`, destroyed-vehicle ejection on the next tick,
+exiting an already-gone vehicle, the `ride_passenger` registry entry and pick rules, a full two-bot ride
+(passenger boards, rides, dismounts at the shared goal), driver-leaves dismount, wrong-way dismount, staying
+seated while rolling, schema hash, tuning validation, and the `vehicleInteractCommand` passenger form. New
+`apps/client/test/adr371_passenger_controls.test.ts` (6 tests): the 254/255 intents, Interact boarding as
+passenger / driver / motor-vehicle, the passenger chip, and the unchanged driver chip. Neighbours re-run
+green: `vehicles`, `adr358`, `adr360`, `vehicle_keys`, `vehicle_craft`, `vehicle_net`, `vehicle_state`,
+`adr319_mounts`, `adr321_ai_mounts`, and the ADR-360 client render suite. Typecheck passes with the
+lockfile-pinned TypeScript 5.9.3 (`pnpm --filter @engine/gameplay typecheck`).
+
+**Performance.** No per-tick allocations in hot paths, no new per-tick scans: seat-follow is the existing
+O(riders) loop, the dangling-rider check piggybacks on it (one O(1) map lookup per rider), the sensor seat
+read is O(seats) per seen vehicle inside the existing sensor scan, and the dismount search is O(local tiles)
+on exit only. Bench (`PERF=1`, same VM, `packages/gameplay/test/bench215.test.ts`, median of 3): before —
+open 2.582 ms/tick, base 7.741 ms/tick; after — open 1.389 ms/tick, base 4.205 ms/tick. No speedup is
+claimed: the slice adds behaviour, it does not optimise the sim, and this shared VM is noisy — the after-run's
+own base spread was 2.510–5.225 ms/tick across its three rounds, overlapping the before-run's 5.834–7.990, and
+the bench scenario contains no vehicles at all, so it cannot measure this slice's cost either way; the numbers
+are reported so a regression would show. `pnpm bench` (net + persist) was run after-only: net spread 18.6 /
+clustered 42.37 ms/tick, persist autosave p95 1.61–1.77 ms — it failed once on the first run (persist p95
+10.45 ms vs the 2.5 ms ceiling) and passed on a clean re-run with no code change, i.e. VM noise, not this
+slice (it touches neither net nor persist).
+
+**Honest cuts.** Not verified live: a real two-player ride (one drives, one rides) on a phone and desktop, the
+passenger chip on touch, and a passenger dismounting onto a crowded / built-up tile in a real base — Tracey's
+eyes on the live build are the check. A bot only boards a wagon whose driver is already seated; it never
+waits beside a driverless wagon for a driver to show up, and it cannot tell where the driver is headed, so a
+ride can overshoot the passenger's goal (the wrong-way rule only fires once parked, 10+ tiles worse than
+boarding). A passenger whose wagon parks 7–25 tiles short of their goal with the driver still seated stays
+seated — the ride has not ended, it is just paused. `vehicleInteractCommand` gained an `asPassenger` option
+but no other caller uses it yet. Deliberately not changed: motor-vehicle passengers (`drive` already exits
+non-drivers there), exit-while-moving (kept — ADR-360 depends on it), eject-on-wreck (kept — the wrecked
+wagon's driver stays seated by the motor rule), and anything in the wire format, the seat anchors, or the
+render placement of riders.
+
+## ADR-372: Stairs and second-floor access (SurVivaZ)
+
+> Apply order: this entry follows ADR-371 (passengers) in the batch — the gate agent applies 371, then 372, then 373. All three append after ADR-370; this hunk overlaps ADR-371's append.
+
+**Context.** The abandoned generator already placed internal `stairs` pieces (role `stair`) and level-1 floors with a `floor_stairwell` hole in its five two-story+ kinds (TwoStoryCottage, TwoStoryFarmhouse, TwoStoryHomestead, Townhouse, Manor), but no code ever moved an entity between levels on them: `standHeightAt` knew decks and foundations, `findPath` was a level-0-only A*, and `walkerWaypoint` hardcoded level 0. There were no outside stairs at all, and no way for a missing stair to be rebuilt into a climbable route. The player building system already supports upper levels (wall-supported decks validate; pillar-only decks do not, by the existing `deckWallConnected` rule) and the claim-build planner (ADR-337) already rebuilds missing structural pieces — both are reused, not replaced.
+
+**Decision — a stair tile is a ramp in `standHeightAt`.** New pure module `packages/gameplay/src/building/stairs.ts` (`stairRampHeight`, `stairUpDir`, `stairPieceAt`, `stairLinkUp/Down`, `stairLandingAt`, data in `packages/gameplay/data/stairs.json`): when an entity stands on a stair tile, stand height is `level * levelHeight + frac * levelHeight`, where `frac` is progress 0..1 across the tile toward the top edge (`0.5 + dot(pos - centre, upDir)`, clamped). Walking up raises z at the existing `stepRate` (6/s); walking back down lowers it; `settleStandZ` eases both ways, so stopping mid-flight, turning back, or stepping off sideways settles onto the nearest level instead of sticking. The ramp lives in `standHeightAt`, so every mover that settles climbs the same way — players and AI humans via `applyMovementInput`, creatures via `creatureStep`, zombies via their step — by walking, with no button and no UI, on keyboard, gamepad and touch alike. The up direction is a data knob (`upDir: [0,-1]`, rot 0 → north, rotated by the same basis that rotates site layouts). The up-ramp applies only if a landing exists one level up: a non-roof deck on the stair tile itself (the `floor_stairwell` hole) or on the tile past the top edge (outside balcony). No landing → no ramp. A stair tile is a ramp across its whole tile — stepping onto it from any side puts you on the ramp, and crossing it sideways still carries you up; there are no stuck states, and that trade-off was accepted over a z/direction gate, which would oscillate (the ramp rises 8.7/s at walk speed vs the 6/s ease). Two flights stacked on one tile are NOT supported: the upper flight shadows the way back down (up-ramp wins; climb to L2 works, descent on that tile does not — demolish the upper flight, or put the next flight on an adjacent tile, as the Townhouse does).
+
+**Decision — outside stairs.** `exteriorStairsFor` (`stairs.json`: `exteriorKinds` = two_story_cottage, two_story_farmhouse, townhouse) adds, on the south side in local coords, a balcony tile B (foundation + pillar + level-1 floor) and a stair tile A one row further south (foundation + stairs, rot 0, up = north, marked `exterior: true`), plus a level-1 south-wall doorway at the balcony column (`walls()` gains a `doorI?` param); the site grows 2 rows. Homestead and Manor are excluded (south pen-yard conflict) and keep interior stairs only. The Townhouse's second flight moves to its own tile (`sx+1, sy` at level 1, with the level-2 `floor_stairwell` above it) because of the stacked-flight limitation above. `rotateBuilt` now preserves rot for role `stair` (it used to zero it), so a rotated site's stair run still climbs toward its landing. Furniture is moved off stair tiles (Cottage/Homestead/Manor wardrobe one tile east; Townhouse L2 storage one tile east) and random extras never land on a stair tile (a `cook_range` used to spawn on the Townhouse flight).
+
+**Decision — broken / missing stairs are ruin-scaled and deterministic.** `planAbandonedSite` rolls on its own seeded stream `rng(hashU32(seed, ox, oy, 0x5A172))`, so the main plan stream (layouts, loot, furnishing) is untouched: the interior ground flight is omitted iff `roll < brokenChance (0.25) * ruin`; the exterior flight iff `roll < brokenExteriorChance (0.2) * ruin`. A ruin-0 site never loses its stairs (preserves the ADR-300 tests). Only the ground flight goes missing; omission is `omit=true` on the planned stair piece, so the stamp skips it, `ruinLayout` reports it missing (structural), and `planClaimRuin` rebuilds it — no new AI build behaviour. Damaged-but-present stairs remain climbable (damaged ≠ broken). If both flights on one site spawn missing (probability ≈ `brokenChance × brokenExteriorChance × ruin²`), the upper floor is unreachable until a stair is built.
+
+**Decision — level-aware pathfinding, same pathfinders.** `findPath` (`combat/path.ts`) state is now `(x, y, level)` with optional `opts { startLevel, goalLevel, allowStairs }`; stair vertical links cost `pathStairCost` (2, from data); the heuristic adds `|level - goalLevel| * stairCost`; `PathResult` gains parallel `levels: number[]`; `stepBlocker` gains a `level = 0` param. The default (no opts) is bit-identical to the old level-0 search — `zombies.ts` is unchanged, so zombies do not route upstairs (deliberate, no balance change) — and the ADR-368 blocker-recording optimisation is preserved (the blocker scan now keys by `(x, y, level)`). `creature_nav.route()` is level-aware the same way (scratch arrays × 3 levels, `maxPathLevel` 2); `NavState` gains `lvl`/`glvl` and re-plans when the entity's level flips; the straight-sight shortcut only applies when `goalLevel === level`; `walkerWaypoint` derives the start level from `Transform.z` (was hardcoded 0) and takes an optional `goalLevel` (default = start level; existing callers unchanged). `movementBlocked` needed no change — stairs and `floor_stairwell` are not solid.
+
+**Performance.** Stair checks are O(local tiles) only: `stairRampHeight` reuses the layer-1 cell lookup the foundation ramp already does in `standHeightAt`, the below-stairs lookup runs only above ground level, and landing `deck()` lookups run only when a stairs piece is present. No per-tick allocations in hot paths, no new per-tick scans over all entities. Benches (PERF=1, same VM, single runs): `bench215` ms/tick median of 3 — open 1.384 → 1.509, base 2.923 → 3.185 (run ranges overlap almost completely: open 0.677–1.661 vs 0.738–1.750, base 2.107–3.510 vs 2.144–4.067); `bodyAxisMove x2 + settleStandZ` 2.44 → 2.38 µs/call, `stepBlocker` 0.52 → 0.47 µs/call, `idx.cell` 0.23 → 0.24 µs/call — the hot-path micros that touch this slice are flat. No speedup is claimed. See the slice REPORT.md ("Real-play performance note (2026-11-12)"): Tracey reports the game is slow and laggy in real play since 9ecf1388, which these benches did not capture — bench numbers here must not be read as proof of real-play smoothness, and that note lists this slice's touch-points with ADR-368/369/370 for the follow-up investigation (after this batch is pushed and CI is green).
+
+**Validation.** New `packages/gameplay/test/adr372_stairs.test.ts`, 15/15 passing (run 3×, no flakes): ramp stand heights across the tile and back down; idle on a stair settles mid-ramp; stair tiles do not block movement at either level; player walks up interior stairs to L1 and back down; outside stairs carry the player to the balcony; every two-story kind plans a usable interior flight; Townhouse second flight on its own tile with L2 stairwell; a ruined site can spawn with the ground flight missing (never at ruin 0); a missing stair blocks access until the player builds it back; player-built stairs + upper floor in a 3×3 walled room; `findPath` routes across levels via the interior stair tile when allowed and stays level 0 otherwise; an AI human walks across levels via `walkerWaypoint`; an AI human cannot route upstairs when the stairs are missing; a claiming AI human rebuilds a missing stair through the existing claim-build plan; ground-level movement unchanged. Regression: 11 targeted suites, 120/120 (adr125, adr127, adr273, adr300, adr301, adr310, adr311, adr337 ×2, adr368, nav215). Typecheck clean with lockfile-pinned TypeScript 5.9.3. Two pre-existing behaviours found while testing and left alone: the stamp never places 5 L1 corner pieces (2 floors, 3 walls) on a TwoStoryCottage — verified identical on pristine base — and the claim-build plan skips a rebuild candidate whose grid cell is still Occupied until `structureIndexSystem` runs on a world step after the destroy (the test steps the world, as real play does).
+
+**Not changed.** No new art (stairs/floor/pillar sprites already exist; the `stairs` prefix is already in the render warm-up allowlist, so no new atlas page-in); no UI changes; compass untouched; no graphics-quality change; no new systems; `GameDefs`/`loadDefs` untouched (data is imported directly, as elsewhere); no gameplay/balance change beyond stairs; ground-level movement for entities not using stairs is unchanged; mounted riders cannot use stairs (pre-existing `rideClearanceBlocked` under a level-1 deck); ad-hoc "build stairs to chase someone upstairs" AI behaviour does not exist — bots rebuild missing stairs only as part of claiming/rebuilding a ruin, as with any piece.
+
+**Honest cuts.** Stairs art orientation (`upDir`, rot 0 → north) is a data guess — the sprite files are not in the sparse checkout, so the climb direction still needs Tracey's eyes on the live build; if the sprite ascends the other way, flip `upDir` in `stairs.json`, not code. The ramp-across-the-whole-tile quirk and the stacked-flight limitation (above) are accepted trade-offs of the stateless ramp. No live visual verification was possible in this slice.
+
+## ADR-373: Abandoned structures — more variety, a few more sites (SurVivaZ)
+
+**Apply order note.** This entry is appended after the ADR-370 tail in the patch, but in
+apply order it follows ADR-371 (passengers) and ADR-372 (stairs): the gate agent applies
+371, then 372, then 373, and this entry lands after ADR-372's entry. Expected tail text
+after all three apply: `... ADR-372 ...` followed by this `## ADR-373: Abandoned structures
+— more variety, a few more sites (SurVivaZ)` entry, ending with the "Honest cuts" paragraph
+below. This patch's `docs/DECISIONS.md` hunk and its `packages/gameplay/src/building/abandoned.ts`
+hunk both overlap ADR-372's (both append after ADR-370; both touch `abandoned.ts`) — that is
+expected; resolve by applying in order.
+
+**Context.** The abandoned generator (ADR-300/301/311) had 14 kinds and stamped one site per
+chunk with probability `SITE_CHANCE = 0.12`. The world felt samey: the same sheds, cottages
+and homesteads everywhere. Tracey asked for greatly expanded variety and a few more sites,
+with no performance drop. All new kinds are composed from the existing `house()` / `yard()` /
+`furnished()` helpers and piece keys already in `packages/gameplay/data/pieces.json` — no new
+art, no new helpers, no new systems.
+
+**Decision — fourteen new kinds (14 → 28).** New `AbandonedKind` ids 14–27, in this order:
+Mill, Schoolhouse, Chapel, TradingPost, Smithy, Bakery, Stable, Watchtower, Bathhouse, Inn,
+Apiary, Granary, FisherHut, Barracks. Each has a footprint, stories, roof style, room plan,
+furniture/loot placement and a `KIND_WEIGHTS` entry, following the existing patterns exactly
+(same helpers, same determinism from seed — plans are a pure function of seed + origin).
+The largest new kind is the Stable at 6×9, the same shape as the Barn, so every kind still
+fits the `planAbandonedChunk` margin (`w+4 <= 32`, `h+4 <= 32`). The Inn is the only new
+two-story kind (6×5, beds upstairs); the Watchtower's tower piece is ground-placed beside a
+3×3 hut (like the HunterShack's outside campfire); the Apiary's apiaries stand inside its
+fenced garden; the Stable and Bathhouse reuse the Barn/Homestead yard pattern (pen / garden).
+
+| Kind | Footprint | Stories | Garden / Pen | Signature pieces | Weight |
+| --- | --- | --- | --- | --- | --- |
+| Shed | 3×3 | 1 | – | storage | 12 |
+| Cottage | 5×5 | 1 | – | bed, table, fireplace | 12 |
+| Homestead | 13×9 | 1 | garden + pen | garden beds, trough | 11 |
+| Farmhouse | 7×5 | 1 | – | dining table, large chest | 8 |
+| Workshop | 5×4 | 1 | – | workbench, anvil extra | 8 |
+| Cabin | 4×4 | 1 | – | bed, table, lamp | 8 |
+| Barn | 6×9 | 1 | pen | trough, barrels | 7 |
+| HunterShack | 4×5 | 1 | – | bed, campfire outside | 6 |
+| LargeHomestead | 13×10 | 1 | garden + pen | – | 6 |
+| TwoStoryCottage | 5×5 | 2 | – | upstairs bed | 7 |
+| TwoStoryFarmhouse | 7×5 | 2 | – | upstairs double bed | 5 |
+| TwoStoryHomestead | 13×9 | 2 | garden + pen | upstairs bed | 5 |
+| Townhouse | 4×5 | 3 | – | beds on levels 1–2 | 3 |
+| Manor | 13×10 | 2 | garden + pen | – | 2 |
+| **Mill** | 6×5 | 1 | – | workbench, crop_store, stone_store | 4 |
+| **Schoolhouse** | 6×4 | 1 | – | desk_rustic, bookcase_rustic | 3 |
+| **Chapel** | 5×6 | 1 | – | bench pews, statue | 3 |
+| **TradingPost** | 6×5 | 1 | – | counter_rustic, stall_booth | 4 |
+| **Smithy** | 5×4 | 1 | – | anvil, furnace, tool_bench | 4 |
+| **Bakery** | 5×4 | 1 | – | clay_oven, cook_range, pantry | 4 |
+| **Stable** | 6×9 | 1 | pen | feeding troughs | 4 |
+| **Watchtower** | 6×3 | 1 | – | watchtower piece | 2 |
+| **Bathhouse** | 9×5 | 1 | garden | fountain | 2 |
+| **Inn** | 6×5 | 2 | – | dining table, upstairs beds | 3 |
+| **Apiary** | 9×3 | 1 | garden | apiary ×2 | 3 |
+| **Granary** | 5×4 | 1 | – | crop/ore/log/stick stores | 4 |
+| **FisherHut** | 4×5 | 1 | – | basket, campfire outside | 3 |
+| **Barracks** | 6×4 | 1 | – | bunk_bed ×2 | 3 |
+
+**Decision — density up a little, not doubled.** `SITE_CHANCE` 0.12 → **0.15** (same exported
+const in `abandoned.ts`, where the knob already lived). A chunk is 32×32 = 1024 tiles, so the
+expected count goes 12 → 15 sites per 100 chunks (+25%), 12 → 15 per 10×10-chunk region
+(320×320 tiles), ~117 → ~146 per 1M tiles (~977 chunks) — before terrain / near-spawn / busy
+skips, which only lower the realised count. The fourteen old weights are unchanged (they
+summed to 100); the new kinds add 46, so the catalogue total is 146 and each old kind's share
+of sites is scaled by 100/146 while keeping its relative order — the new kinds together take
+46/146 (~31%) of sites. `KIND_WEIGHTS` is now exported so tests can pin the table.
+
+**Decision — small extensions in the existing shape.** `extrasFor` gains one or two chance
+extras per new kind (existing keys, inside the footprint); `roofWeights` leans Chapel /
+Schoolhouse to gable and Mill / Stable to barn roofs, and the Inn joins the two-story roof
+case; `STONE_KINDS` gains Chapel, Inn and TradingPost (tier-2 stone read, same 35% roll).
+Loot tables, reclaim values, claim code and the `AbandonedSite` marker are untouched; no
+existing kind id, key, weight or footprint changed, so saves, reclaim and the ADR-337 / ADR-340
+bot logic keep working — new kinds flow through `planAbandonedChunk` / `stampAbandonedChunk` /
+`catalogHas` generically, including the AI spawn points beside abandoned sites.
+
+**Not used, and why.** `market_counter` is not in any new kind: it carries `stall.clanOnly`,
+and `validatePlacement` rejects clan-only stall pieces for the worldgen builder
+(`NoPrivilege`), so it could never stamp — the TradingPost uses `counter_rustic` (same
+counter shape, no stall land rules) plus `stall_booth` (no `clanOnly`, stamps fine). No
+edge-placement pieces (`weapon_rack`, `map_board`, `shield_mount`) are used in any new kind:
+they need a wall socket the planner does not guarantee. No windmill/sawmill kind: there is no
+millstone or saw piece in `pieces.json`, and a mill made of crates would read as a warehouse,
+so the Mill is a grain store instead.
+
+**Performance.** Stamping is chunk-load-time only — no per-tick code was added, no new scans.
+Measured on this VM (shared 1.5-CPU box, noisy): planning 1600 chunks 14.4 ms before
+(189 sites at 0.12) vs 2.8–26.7 ms after (226 sites at 0.15); stamping 40 sites 494 ms
+before vs 283 / 478 / 678 ms after (39 stamped, ~3600 pieces) — the same noisy band, no
+measurable cost; per-site stamp cost is ~7–17 ms of chunk-load time, unchanged in shape.
+`pnpm bench` (`PERF=1`, net + persist) fails the same thresholds before and after on this VM
+(net spread 31.9 → 47.6 ms/tick, clustered 90.1 → 74.2, both over the 30 ms/tick bar;
+persist autosave p95 ~5–10 ms vs the 2.5 bar; the 3000-piece chunk encode reads 1.01 ms in
+one pristine run and 1.19 / 7.80 ms in two identical after-runs), so the bench numbers are
+VM noise, not a regression — and the net bench does not import gameplay at all. No speedup
+is claimed.
+
+**Validation.** New `packages/gameplay/test/adr373_abandoned_variety.test.ts` (8 tests): 28
+kinds with unique keys and ids 0–27, old ids/keys unchanged; weights sum to 146 with old
+weights untouched and every kind reached in 5000 seeded draws; every new kind plans
+deterministically with valid footprints, resolvable piece keys inside the footprint, walls /
+door / top-story roof, and its signature furniture, and stamps it from real pieces; old kinds
+still plan as before (Shed: 9 foundations); `SITE_CHANCE` is 0.15 and a 1600-chunk sweep
+plans 226 sites (range 190–290); no two sites overlap in a 16×16-chunk plan sweep or a
+6×6-chunk stamp sweep. Neighbouring suites pass: adr300 / adr301 / adr311 / adr337 /
+adr340 / adr348 / modular_building, 97 tests. `pnpm --filter @engine/gameplay typecheck`
+passes with the lockfile-pinned TypeScript 5.9.3.
+
+**Honest cuts.** No live visual check: the new kinds have not been seen in the running game,
+so Tracey's eyes on the live build are still the real check — especially the Watchtower
+(2×2 tower beside a 3×3 hut), the Bathhouse fountain, and the Chapel pews. The stamp-timing
+and bench numbers above are single-VM, noisy, and not a benchmark claim. Deliberately not
+changed: loot tables, reclaim values, `SITE_CHANCE` beyond 0.15, the per-chunk one-site rule,
+`ABANDONED_SCAN_RADIUS`, and anything in the stairs (ADR-372) or passenger (ADR-371) slices.

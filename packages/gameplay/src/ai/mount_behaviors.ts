@@ -434,7 +434,7 @@ function tendRun(c: Ctx, o: Out): boolean | void {
 
 // ---- ride / dismount policy -----------------------------------------------------------------------------------
 /** Behaviours that end the ride at once (rest, vehicles, leaving / warming inside a building). */
-const DISMOUNT_NOW = new Set(["sleep", "rest", "drive", "drive_drawn", "vehicle_service", "hitch", "deploy_vehicle", "leave_base", "warm_up", "cool_down", "work_hold"]);
+const DISMOUNT_NOW = new Set(["sleep", "rest", "drive", "drive_drawn", "ride_passenger", "vehicle_service", "hitch", "deploy_vehicle", "leave_base", "warm_up", "cool_down", "work_hold"]);
 /** Task behaviours: ride there, dismount within taskDismountTiles of the work spot (gather, combat, craft, build, chores). */
 const DISMOUNT_TASK = new Set(["gather", "hunt", "skin", "defend", "work_defend", "craft", "build", "base_work", "stash", "refuel", "tend_fire", "repair", "reclaim",
   "equip", "stall_trade", "fetch_mount_food", "tame_pet", "tame_livestock", "feed_trough", "work_farm", "work_maintain", "work_craft", "work_forage", "clan_stock", "trip"]);

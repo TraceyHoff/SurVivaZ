@@ -10,18 +10,23 @@
  * done (arrived at its goal, or pack space recovered). The hook-up itself is the same `vhitch` / `vunhitch` action
  * strings — the server's validateHitch enforces the harness ("no_harness") — but the bot first rides its mount into
  * position, because the pin joint needs the mount's rear pin on the vehicle's front hitch.
+ *
+ * ADR-371: `ride_passenger` rides along in a drawn vehicle someone else drives — board a free passenger seat
+ * (seat 254) when far from its goal, sit tight while the wagon rolls, and get out at its destination (or when
+ * the driver leaves, the wagon is wrecked, or the ride has carried it 10 tiles further from its goal than where
+ * it boarded). A passenger's input moves nothing, so while riding it claims the tick and does nothing.
  */
 import { Transform, type Entity, type World } from "@engine/core";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
-import { Driver, Hitch, Vehicle } from "../components.js";
+import { Driver, Hitch, Vehicle, VehicleSeats } from "../components.js";
 import { readSlots } from "../inventory.js";
-import { DRAWN_HITCH_GAP, hitchPoint, isDrawnClass, isParked, mountRearPin, ridingVehicle, vehicleDefOf, VEHICLE_TUNING, type VehicleClass } from "../vehicles.js";
+import { DRAWN_HITCH_GAP, hitchPoint, isDrawnClass, isParked, mountRearPin, PASSENGER_SEAT, ridingVehicle, vehicleDefOf, VEHICLE_TUNING, type VehicleClass } from "../vehicles.js";
 import { mountSpecies } from "../mount_defs.js";
 import { fuelFits, kitVehicle, vehicleMaxHealth, VEHICLE_CRAFT } from "../vehicle_craft.js";
 import { gameplayDefs } from "../config.js";
 import { agentWorld, goTo } from "./base_behaviors.js";
 
-export interface SeenVehicle { id: number; x: number; y: number; cls: VehicleClass; fuel: number; hp: number; parked: boolean; hitched: boolean; canTow: boolean; fuelSlot?: number; repairSlot?: number }
+export interface SeenVehicle { id: number; x: number; y: number; cls: VehicleClass; fuel: number; hp: number; parked: boolean; hitched: boolean; canTow: boolean; fuelSlot?: number; repairSlot?: number; /** ADR-371: seat 0 occupied — someone is driving, so a passenger may board. */ driverSeated: boolean; /** ADR-371: free seats 1..n-1. */ freePassengerSeats: number }
 export interface VehicleSensors {
   vehicles?: SeenVehicle[];
   /** Vehicle the bot sits in (driver seat or not). */
@@ -34,8 +39,11 @@ export interface VehicleSensors {
 
 function seen(world: World, v: Entity, slots: ReturnType<typeof readSlots> | undefined): SeenVehicle | undefined {
   const d = vehicleDefOf(world, v); const t = world.get(v, Transform); const s = world.get(v, Vehicle); if (!d || !t || !s) return undefined;
+  const occ = world.has(v, VehicleSeats) ? (world.get(v, VehicleSeats)!.occupant as ArrayLike<number>) : undefined;
+  let freePassengerSeats = 0; for (let i = 1; i < d.seats; i++) if (!occ?.[i]) freePassengerSeats++;
   const out: SeenVehicle = { id: v, x: t.x, y: t.y, cls: d.class, fuel: d.fuel ? s.fuel / d.fuel.capacity : 1, hp: d.health ? s.health / d.health : 0, parked: isParked(world, v),
-    hitched: (world.getField(v, Hitch, "parentNetId") ?? 0) !== 0, canTow: d.hitches.some((h) => h.at === "rear") && (world.getField(v, Hitch, "towNetId") ?? 0) === 0 };
+    hitched: (world.getField(v, Hitch, "parentNetId") ?? 0) !== 0, canTow: d.hitches.some((h) => h.at === "rear") && (world.getField(v, Hitch, "towNetId") ?? 0) === 0,
+    driverSeated: (occ?.[0] ?? 0) !== 0, freePassengerSeats };
   if (slots) {
     const defs = gameplayDefs(world);
     for (let i = 0; i < slots.slotCount; i++) {
@@ -131,8 +139,47 @@ export function vehicleBehaviors(): GameBehavior[] {
         const s = c.world.kitSlot; if (s === undefined) return false; o.moveX = 0; o.moveY = 0;
         o.actions.push(`vdeploy:${s}:${Math.round(c.self.x) + 2}:${Math.round(c.self.y)}:0`); c.bb.set("deployedAt", c.self.tick); return false;
       } },
+    { name: "ride_passenger", inertia: 0.4, traits: { bravery: 0.4, industriousness: 0.3 }, considerations: [
+        { name: "far", curve: { type: "step", at: 0.5 }, input: (c) => (passengerRiding(c.world) || goalDist(c.world, c.self.x, c.self.y) > B().driveMinDistance ? 1 : 0) },
+        { name: "ride", curve: { type: "step", at: 0.5 }, input: (c) => (passengerRiding(c.world) || pickPassengerRide(c.world) ? 1 : 0) }],
+      run: (c, o) => ridePassengerRun(c, o) },
   ];
 }
+/** ADR-371: a drawn vehicle the bot can ride in as a passenger — parked, driver seated, a free passenger seat.
+ * Chariot shares the path (same seats/hitch/drive code as wagon/cart/carriage), so it is included. */
+export function pickPassengerRide(w: AgentWorldView): SeenVehicle | undefined {
+  return w.vehicles?.find((v) => isDrawnClass(v.cls) && v.parked && v.hp > 0 && v.driverSeated && v.freePassengerSeats > 0);
+}
+/** True when the bot sits in a passenger seat of a drawn vehicle. */
+const passengerRiding = (w: AgentWorldView): boolean => !!w.riding && isDrawnClass(w.riding.cls) && !w.riding.driver;
+/**
+ * Walk to a driven drawn vehicle, board a passenger seat (seat 254 — never the driver seat), and ride along.
+ * While riding the bot claims the tick and does nothing: a passenger's input moves nothing. It gets out when
+ * parked and (a) the vehicle is within arriveDistance of its goal, (b) the driver has left, (c) the wagon is
+ * wrecked, or (d) the ride has carried it 10 tiles further from its goal than where it boarded (wrong way).
+ * Boarding is re-validated by the server (seat 254 returns "full" if the seat filled meanwhile), so a failed
+ * board just re-picks on the next pass. A bot on its own mount is got off it first by mountPolicy
+ * (DISMOUNT_NOW), because enter refuses a rider who is already riding.
+ */
+function ridePassengerRun(c: Ctx, o: Parameters<GameBehavior["run"]>[1]): boolean | void {
+  const w = c.world; const g = w.driveGoal; if (!g) return false; const r = w.riding;
+  if (r) {
+    if (!isDrawnClass(r.cls) || r.driver) return false; // a motor vehicle is drive's; the driver seat is drive_drawn's
+    const d = goalDist(w, r.x, r.y);
+    const from = c.bb.get<{ x: number; y: number }>("rideFrom");
+    const wrongWay = from !== undefined && d > Math.hypot(g.x - from.x, g.y - from.y) + 10;
+    if (r.parked && (d <= B().arriveDistance || !r.driverSeated || r.hp <= 0 || wrongWay)) {
+      o.moveX = 0; o.moveY = 0; o.actions.push("vexit"); return false;
+    }
+    return; // stay seated — claim the tick so no foot behaviour fires while riding
+  }
+  const v = pickPassengerRide(w); if (!v) return false;
+  if (toward(o, c.self.x, c.self.y, v.x, v.y, 0.9) < 2.5 && cooled(c.self.tick, c.bb.num("enteredPassengerAt", -1e9), 20)) {
+    o.moveX = 0; o.moveY = 0; o.actions.push(`venter:${v.id}:${PASSENGER_SEAT}`); c.bb.set("enteredPassengerAt", c.self.tick);
+    c.bb.set("rideFrom", { x: c.self.x, y: c.self.y });
+  }
+}
+
 function serviceTarget(w: AgentWorldView): { v: SeenVehicle; kind: "fuel" | "repair"; slot: number } | undefined {
   for (const v of w.vehicles ?? []) {
     if (!v.parked || v.cls === "trailer" && v.repairSlot === undefined) continue;

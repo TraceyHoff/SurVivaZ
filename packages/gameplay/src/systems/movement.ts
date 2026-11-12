@@ -19,6 +19,7 @@ import { gameplayDefs, isAuthority } from "../config.js";
 import { skillMul } from "../skills/tree.js";
 import { GameplayHoldBits as A, INPUT } from "../input_hooks.js";
 import { isLCorner, rotParts, StructureIndexRes, type StructureIndex } from "../building/structure.js";
+import { stairRampHeight } from "../building/stairs.js";
 import type { PieceDef } from "../defs.js";
 import { TerrainRes } from "../world.js";
 import { WaterDepth, waterDepthAt, installSpatialIndex } from "@engine/world";
@@ -169,11 +170,15 @@ export function standHeightAt(world: World, x: number, y: number, level: number)
   const idx = world.getResource(StructureIndexRes); const mv = gameplayDefs(world).movement;
   const base = level * gameplayDefs(world).building.levelHeight; if (!idx || idx.count === 0) return base;
   const tx = Math.floor(x), ty = Math.floor(y);
+  // ADR-372: the layer-1 cell is fetched once here (the foundation ramp below reuses it); a stairs piece
+  // underfoot is a ramp between levels (walk to climb, walk back to descend) — no extra lookup when absent.
+  const struct = idx.cell(tx, ty, level, 1); const sd = struct ? idx.def(struct) : undefined;
+  const stairH = stairRampHeight(world, idx, x, y, tx, ty, level, struct, sd?.key);
+  if (stairH !== undefined) return stairH;
   const d = idx.deck(tx, ty, level); const dd = d ? idx.def(d) : undefined;
   if (dd && !dd.roof) return base + (dd.family === "foundation" ? mv.deckStandHeight : mv.floorStandHeight);
   for (const t of idx.trisInTile(tx, ty, level)) { const td = idx.def(t); if (td?.roof) continue; const tt = world.get(t, Transform); if (tt && Math.hypot(tt.x - x, tt.y - y) < 0.5) return base + (td?.family === "foundation" ? mv.deckStandHeight : mv.floorStandHeight); }
-  const ramp = idx.cell(tx, ty, level, 1); const rd = ramp ? idx.def(ramp) : undefined;
-  if (rd && rd.family === "foundation") return base + mv.deckStandHeight * 0.5;
+  if (sd && sd.family === "foundation") return base + mv.deckStandHeight * 0.5;
   return base;
 }
 /** ADR-212: ease Transform.z toward the stand height (smooth step-up / step-down, stepRate z units per second). */

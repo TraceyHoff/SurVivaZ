@@ -20,12 +20,18 @@ import { terrainMoveBlocked } from "../building/terrain-ladder.js";
 import { defineResource, Transform, type Entity, type World } from "@engine/core";
 import { EdgeSide } from "../components.js";
 import { gameplayDefs } from "../config.js";
+// ADR-372 gate fix: STAIRS_DATA comes from the leaf stairs_data.js, not stairs.ts —
+// creature_nav reads STAIRS_DATA.maxPathLevel at module top level to size its A* scratch
+// arrays, and stairs.ts's import graph reaches back here, so importing stairs.ts from
+// stairs.js threw a TDZ "Cannot access 'STAIRS_DATA' before initialization".
+import { STAIRS_DATA } from "../building/stairs_data.js";
+import { stairLinkDown, stairLinkUp } from "../building/stairs.js";
 import { isLCorner, structures, StructureIndexRes, type StructureIndex } from "../building/structure.js";
 import { bodyAxisMove, cornerPostBoxes, settleStandZ, solidCell, terrainBlocksWalker } from "./movement.js";
 
 /** Per-tile terrain veto of the caller (animals / pets: unwalkable population tiles). */
 export type TileBlocked = (tx: number, ty: number) => boolean;
-interface NavState { gtx: number; gty: number; ver: number; until: number; clear: boolean; path: number[]; i: number; reached: boolean; stall: number; strict: number; pj: number; pi: number; pexp: number }
+interface NavState { gtx: number; gty: number; ver: number; until: number; clear: boolean; path: number[]; i: number; reached: boolean; stall: number; strict: number; pj: number; pi: number; pexp: number; /** ADR-372: entity level + goal level the cached route was planned for (a climb re-plans). */ lvl: number; glvl: number }
 const NavRes = defineResource<Map<Entity, NavState>>("gameplay.CreatureNav");
 const nav = (w: World): Map<Entity, NavState> => { let m = w.getResource(NavRes); if (!m) w.setResource(NavRes, (m = new Map())); return m; };
 
@@ -81,22 +87,30 @@ export function reachableSpotNear(world: World, ox: number, oy: number, z: numbe
   return { x: ox, y: oy };
 }
 
-/** AI humans emit movement input rather than teleporting: use the same cached ladder-aware route. */
-export function walkerWaypoint(world: World, e: Entity, x: number, y: number, gx: number, gy: number): { x: number; y: number } | undefined {
+/**
+ * AI humans emit movement input rather than teleporting: use the same cached ladder-aware route.
+ * ADR-372: the walker's level comes from its own Transform.z (it used to be hardcoded 0, so a bot that
+ * had climbed could never route on its own floor), and `goalLevel` routes across floors via stairs when
+ * given — the bot walks onto the stair tile and the movement ramp carries its z up / down. Callers that
+ * pass no goal level keep the old same-floor behaviour.
+ */
+export function walkerWaypoint(world: World, e: Entity, x: number, y: number, gx: number, gy: number, goalLevel?: number): { x: number; y: number } | undefined {
   if (!navNeeded(world, x, y, gx, gy)) return { x: gx, y: gy };
   const r = gameplayDefs(world).movement.bodyRadius;
+  const t = world.get(e, Transform);
+  const level = Math.max(0, Math.round((t?.z ?? 0) / gameplayDefs(world).building.levelHeight));
   // Digital human input moves a full ~0.13 tiles per tick: a 0.04 creature lane
   // oscillates forever across the centre. Keep a body-clear lane with half-step tolerance.
   const lane = Math.max(LANE, Math.min(.15, .5 - r - .02));
-  return waypoint(world, structures(world), e, x, y, gx, gy, 0, r,
-    (tx, ty) => terrainBlocksWalker(world, tx, ty), lane);
+  return waypoint(world, structures(world), e, x, y, gx, gy, level, r,
+    (tx, ty) => terrainBlocksWalker(world, tx, ty), lane, goalLevel ?? level);
 }
 
 // ---- internals -------------------------------------------------------------------------------------------------
-function waypoint(world: World, idx: StructureIndex, e: Entity, x: number, y: number, gx: number, gy: number, level: number, r: number, blocked: TileBlocked, lane = LANE): { x: number; y: number; final: boolean } | undefined {
+function waypoint(world: World, idx: StructureIndex, e: Entity, x: number, y: number, gx: number, gy: number, level: number, r: number, blocked: TileBlocked, lane = LANE, goalLevel = level): { x: number; y: number; final: boolean } | undefined {
   const m = nav(world); const gtx = Math.floor(gx), gty = Math.floor(gy); const now = world.tick;
   let st = m.get(e);
-  if (st && !st.clear && st.reached && st.ver === idx.version && now < st.until && now >= st.strict && Math.abs(gtx - st.gtx) + Math.abs(gty - st.gty) === 1 && enterable(idx, gtx, gty, level, blocked)
+  if (st && !st.clear && st.reached && st.ver === idx.version && now < st.until && now >= st.strict && st.lvl === level && st.glvl === goalLevel && Math.abs(gtx - st.gtx) + Math.abs(gty - st.gty) === 1 && enterable(idx, gtx, gty, level, blocked)
     && (level !== 0 || !terrainMoveBlocked(world, st.gtx, st.gty, gtx, gty, true))
     && !(gtx !== st.gtx ? idx.edgeBlocker(Math.max(gtx, st.gtx), gty, level, EdgeSide.West) : idx.edgeBlocker(gtx, Math.max(gty, st.gty), level, EdgeSide.North))) {
     // goal stepped one open edge on (a pet's walking owner): extend the route instead of searching again
@@ -105,10 +119,12 @@ function waypoint(world: World, idx: StructureIndex, e: Entity, x: number, y: nu
     if (st.i > p.length >> 1) st.i = p.length >> 1;
     st.gtx = gtx; st.gty = gty; st.pexp = 0;
   }
-  if (!st || st.gtx !== gtx || st.gty !== gty || st.ver !== idx.version || now >= st.until) {
-    const strict = st && now < st.strict ? st.strict : 0; const clear = !strict && sight(idx, x, y, gx, gy, level, r, blocked);
-    st = { gtx, gty, ver: idx.version, until: now + (clear ? NAV.clearTicks : NAV.repathTicks), clear, path: [], i: 0, reached: true, stall: st?.stall ?? 0, strict, pj: -2, pi: -1, pexp: 0 };
-    if (!clear) { const p = route(idx, Math.floor(x), Math.floor(y), gtx, gty, level, blocked); st.path = p.path; st.reached = p.reached; if (p.reached) st.until = now + NAV.keepTicks; } // a found route holds (a door shut on it shows up as a stall)
+  if (!st || st.gtx !== gtx || st.gty !== gty || st.ver !== idx.version || st.lvl !== level || st.glvl !== goalLevel || now >= st.until) {
+    const strict = st && now < st.strict ? st.strict : 0;
+    // ADR-372: straight sight is a same-floor shortcut only — an upstairs goal is never "in sight" from below.
+    const clear = !strict && goalLevel === level && sight(idx, x, y, gx, gy, level, r, blocked);
+    st = { gtx, gty, ver: idx.version, until: now + (clear ? NAV.clearTicks : NAV.repathTicks), clear, path: [], i: 0, reached: true, stall: st?.stall ?? 0, strict, pj: -2, pi: -1, pexp: 0, lvl: level, glvl: goalLevel };
+    if (!clear) { const p = route(idx, Math.floor(x), Math.floor(y), gtx, gty, level, blocked, goalLevel); st.path = p.path; st.reached = p.reached; if (p.reached) st.until = now + NAV.keepTicks; } // a found route holds (a door shut on it shows up as a stall)
     m.set(e, st);
     if (m.size > 64 && (now & 63) === 0) for (const k of [...m.keys()]) if (!world.isAlive(k)) m.delete(k);
   }
@@ -210,40 +226,61 @@ function segBox(x0: number, y0: number, x1: number, y1: number, cx: number, cy: 
   return true;
 }
 
-// A* scratch (single-threaded sim): a (2R+1)^2 window around the start
-const W = NAV.radius * 2 + 1; const G = new Float64Array(W * W); const PARENT = new Int32Array(W * W); const SEEN = new Uint32Array(W * W); const CLOSED = new Uint32Array(W * W); const ENTER = new Uint32Array(W * W); const ENTER_OK = new Uint8Array(W * W); let stamp = 0;
+// A* scratch (single-threaded sim): a (2R+1)^2 window around the start, x ADR-372 levels (townhouse = 0..2)
+const W = NAV.radius * 2 + 1; const NL = STAIRS_DATA.maxPathLevel + 1; const NN = W * W * NL;
+const G = new Float64Array(NN); const PARENT = new Int32Array(NN); const SEEN = new Uint32Array(NN); const CLOSED = new Uint32Array(NN); const ENTER = new Uint32Array(NN); const ENTER_OK = new Uint8Array(NN); let stamp = 0;
 const HEAP: number[] = []; const HF: number[] = [];
-/** Bounded A* over passable steps; falls back to the closest reached tile (by heuristic) when the goal is not reachable. */
-function route(idx: StructureIndex, sx: number, sy: number, gx: number, gy: number, level: number, blocked: TileBlocked): { path: number[]; reached: boolean } {
+/**
+ * Bounded A* over passable steps; falls back to the closest reached tile (by heuristic) when the goal is not reachable.
+ * ADR-372: state is (x, y, level) and a stair tile links its level to the one above / below at `pathStairCost`,
+ * so a walker whose goal is on another floor routes through the stairs; the returned `path` stays (x, y) pairs
+ * (the follower re-plans when its level flips) with `levels` alongside for callers that need them. With
+ * goalLevel === level the search is the old single-level one.
+ */
+function route(idx: StructureIndex, sx: number, sy: number, gx: number, gy: number, level: number, blocked: TileBlocked, goalLevel: number = level): { path: number[]; levels: number[]; reached: boolean } {
   stamp = (stamp + 1) >>> 0; if (stamp === 0) { SEEN.fill(0); CLOSED.fill(0); ENTER.fill(0); stamp = 1; }
   const ox = sx - NAV.radius, oy = sy - NAV.radius;
   const inWin = (x: number, y: number): boolean => x >= ox && y >= oy && x < ox + W && y < oy + W;
-  const h = (x: number, y: number): number => Math.abs(x - gx) + Math.abs(y - gy);
-  const id0 = (sy - oy) * W + (sx - ox); SEEN[id0] = stamp; G[id0] = 0; PARENT[id0] = -1;
-  HEAP.length = 0; HF.length = 0; push(id0, h(sx, sy));
-  let best = id0, bestH = h(sx, sy), expanded = 0, goal = -1; const fMax = 2 * bestH + NAV.detour; // bounded detour: a sealed goal cannot flood the window
+  const stairCost = STAIRS_DATA.pathStairCost;
+  const h = (x: number, y: number, l: number): number => Math.abs(x - gx) + Math.abs(y - gy) + Math.abs(l - goalLevel) * stairCost;
+  const id = (x: number, y: number, l: number): number => (l * W + (y - oy)) * W + (x - ox);
+  const id0 = id(sx, sy, level); SEEN[id0] = stamp; G[id0] = 0; PARENT[id0] = -1;
+  HEAP.length = 0; HF.length = 0; push(id0, h(sx, sy, level));
+  let best = id0, bestH = h(sx, sy, level), expanded = 0, goal = -1; const fMax = 2 * bestH + NAV.detour; // bounded detour: a sealed goal cannot flood the window
   while (HEAP.length && expanded < NAV.maxNodes) {
     const cur = pop(); if (CLOSED[cur] === stamp) continue; CLOSED[cur] = stamp; expanded++;
-    const cx = (cur % W) + ox, cy = Math.floor(cur / W) + oy;
-    if (cx === gx && cy === gy) { goal = cur; break; }
-    const hc = h(cx, cy); if (hc < bestH) { bestH = hc; best = cur; }
+    const cl = Math.floor(cur / (W * W)); const rem = cur - cl * W * W;
+    const cx = (rem % W) + ox, cy = Math.floor(rem / W) + oy;
+    if (cx === gx && cy === gy && cl === goalLevel) { goal = cur; break; }
+    const hc = h(cx, cy, cl); if (hc < bestH) { bestH = hc; best = cur; }
+    const relax = (nx: number, ny: number, nl: number, g: number): void => {
+      if (g + h(nx, ny, nl) > fMax) return;
+      const nid = id(nx, ny, nl); if (CLOSED[nid] === stamp) return;
+      if (ENTER[nid] !== stamp) { ENTER[nid] = stamp; ENTER_OK[nid] = enterable(idx, nx, ny, nl, blocked) ? 1 : 0; }
+      if (!ENTER_OK[nid]) return;
+      if (SEEN[nid] === stamp && G[nid]! <= g) return;
+      SEEN[nid] = stamp; G[nid] = g; PARENT[nid] = cur; push(nid, g + h(nx, ny, nl) * 1.001);
+    };
     for (let k = 0; k < 4; k++) {
       const nx = cx + (k === 0 ? 1 : k === 1 ? -1 : 0), ny = cy + (k === 2 ? 1 : k === 3 ? -1 : 0);
-      if (!inWin(nx, ny)) continue; const nid = (ny - oy) * W + (nx - ox); if (CLOSED[nid] === stamp) continue;
-      const g = G[cur]! + 1; if (g + h(nx, ny) > fMax) continue;
-      if (level === 0 && terrainMoveBlocked(idx.world, cx, cy, nx, ny, true)) continue;
-      if (nx !== cx ? idx.edgeBlocker(Math.max(cx, nx), cy, level, EdgeSide.West) : idx.edgeBlocker(cx, Math.max(cy, ny), level, EdgeSide.North)) continue;
-      if (ENTER[nid] !== stamp) { ENTER[nid] = stamp; ENTER_OK[nid] = enterable(idx, nx, ny, level, blocked) ? 1 : 0; }
-      if (!ENTER_OK[nid]) continue;
-      if (SEEN[nid] === stamp && G[nid]! <= g) continue;
-      SEEN[nid] = stamp; G[nid] = g; PARENT[nid] = cur; push(nid, g + h(nx, ny) * 1.001);
+      if (!inWin(nx, ny)) continue;
+      if (cl === 0 && terrainMoveBlocked(idx.world, cx, cy, nx, ny, true)) continue;
+      if (nx !== cx ? idx.edgeBlocker(Math.max(cx, nx), cy, cl, EdgeSide.West) : idx.edgeBlocker(cx, Math.max(cy, ny), cl, EdgeSide.North)) continue;
+      relax(nx, ny, cl, G[cur]! + 1);
     }
+    // ADR-372: vertical stair links on this tile (same tile, level +/- 1).
+    if (cl < STAIRS_DATA.maxPathLevel && stairLinkUp(idx, cx, cy, cl)) relax(cx, cy, cl + 1, G[cur]! + stairCost);
+    if (cl > 0 && stairLinkDown(idx, cx, cy, cl)) relax(cx, cy, cl - 1, G[cur]! + stairCost);
   }
-  const end = goal >= 0 ? goal : best; const out: number[] = [];
-  for (let c = end; c !== -1 && c !== id0; c = PARENT[c]!) out.push((c % W) + ox, Math.floor(c / W) + oy);
+  const end = goal >= 0 ? goal : best; const out: number[] = []; const outLv: number[] = [];
+  for (let c = end; c !== -1 && c !== id0; c = PARENT[c]!) {
+    const l = Math.floor(c / (W * W)); const r2 = c - l * W * W;
+    out.push((r2 % W) + ox, Math.floor(r2 / W) + oy); outLv.push(l);
+  }
   // reverse pairs (start side first)
-  const path: number[] = []; for (let i = out.length - 2; i >= 0; i -= 2) path.push(out[i]!, out[i + 1]!);
-  return { path, reached: goal >= 0 };
+  const path: number[] = []; const levels: number[] = [];
+  for (let i = out.length - 2; i >= 0; i -= 2) { path.push(out[i]!, out[i + 1]!); levels.push(outLv[i / 2]!); }
+  return { path, levels, reached: goal >= 0 };
 }
 function push(id: number, f: number): void {
   HEAP.push(id); HF.push(f); let i = HEAP.length - 1;

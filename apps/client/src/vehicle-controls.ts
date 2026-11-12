@@ -2,6 +2,11 @@
  * ADR-170 vehicle controls on every device. Gameplay had the whole vehicle loop (deploy a kit, enter / exit, drive,
  * engine + headlight toggles) but the client never sent any of it, so a crafted kit was a dead item.
  * - Interact (E / pad X / touch "Use") enters the nearest vehicle in reach, or exits the one you ride.
+ * - ADR-371: Interact on a drawn vehicle (wagon / cart / carriage / chariot) that already has a driver boards
+ *   as a passenger (seat 254, first free passenger seat — never the driver seat, even for a key-holder); on any
+ *   other vehicle it enters as before (seat 255). While riding as a passenger the chip reads
+ *   "Passenger · Interact to get off". Boarding and dismounting both go through Interact, so keyboard, gamepad
+ *   and touch all work with no new binding, and the compass is untouched.
  * - Vehicle.Engine (V / pad RB+Y / touch "Engine") and Vehicle.Lights (F / pad RB+B / touch "Lights") toggle the
  *   driven vehicle's VehicleState bits (server: driver only). Touch buttons exist only in the driving layout.
  * - Deploy: the inventory panel lists carried kits (gameplay-panels.ts, deployKitIntent).
@@ -11,7 +16,7 @@ import { Transform, type Entity, type World } from "@engine/core";
 import { eidOfNetId } from "@engine/net";
 import {
   Driver, Vehicle, VehicleState, VehicleEnterCmd, VehicleExitCmd, VehicleEngineCmd, VehicleHeadlightsCmd, VehicleDeployCmd,
-  VEHICLE_ENGINE_ON, VEHICLE_HEADLIGHTS, VEHICLE_TUNING, vehicleDefOf, isDrawnDef, kitVehicle, type MenuIntent,
+  PASSENGER_SEAT, VEHICLE_ENGINE_ON, VEHICLE_HEADLIGHTS, VEHICLE_TUNING, vehicleDefOf, vehicleHasDriver, isDrawnDef, kitVehicle, type MenuIntent,
 } from "@engine/gameplay";
 
 export interface VehicleControlsDeps {
@@ -40,6 +45,8 @@ export const vehicleFlagsOf = (w: World, v: Entity): number => (w.isRegistered(V
 export const engineIntent = (v: Entity): MenuIntent => ({ cmd: VehicleEngineCmd, args: { target: v, on: 2 }, entities: ["target"] });
 export const lightsIntent = (v: Entity): MenuIntent => ({ cmd: VehicleHeadlightsCmd, args: { target: v, on: 2 }, entities: ["target"] });
 export const enterIntent = (v: Entity): MenuIntent => ({ cmd: VehicleEnterCmd, args: { target: v, seat: 255 }, entities: ["target"] });
+/** ADR-371: board as a passenger (seat 254 = first free passenger seat, never the driver seat). */
+export const passengerIntent = (v: Entity): MenuIntent => ({ cmd: VehicleEnterCmd, args: { target: v, seat: PASSENGER_SEAT }, entities: ["target"] });
 export const exitIntent = (): MenuIntent => ({ cmd: VehicleExitCmd, args: {} });
 /** Deploy the kit in `slot` 2.5 tiles ahead of the player (deploy reach is checked by the server). */
 export function deployKitIntent(w: World, player: Entity, slot: number): MenuIntent | undefined {
@@ -60,19 +67,31 @@ export function mountVehicleControls(root: HTMLElement, d: VehicleControlsDeps):
     if (v !== undefined) {
       // ADR-360: a drawn vehicle has no engine or lights — the chip says nothing true about a wagon, so hide it
       // and ignore the engine/lights buttons there (Interact still exits). `driving` stays true: the driver steers.
+      // ADR-371: a passenger gets a chip instead — the one thing they can do is get off (Interact).
       const drawn = (() => { try { const d = vehicleDefOf(w, v); return !!d && isDrawnDef(d); } catch { return false; } })();
-      hud.style.display = drawn ? "none" : "flex";
       if (!drawn) {
+        hud.style.display = "flex";
         const f = vehicleFlagsOf(w, v), eng = (f & VEHICLE_ENGINE_ON) !== 0, li = (f & VEHICLE_HEADLIGHTS) !== 0;
         hud.dataset["engine"] = eng ? "on" : "off"; hud.dataset["lights"] = li ? "on" : "off";
         const txt = `Engine ${eng ? "on" : "off"} · Lights ${li ? "on" : "off"}`; if (hud.textContent !== txt) hud.textContent = txt;
         if (d.input.pressed("Vehicle.Engine")) { d.send(engineIntent(v)); return true; }
         if (d.input.pressed("Vehicle.Lights")) { d.send(lightsIntent(v)); return true; }
-      }
+      } else if (w.getField(p, Driver, "seat") !== 0) {
+        hud.style.display = "flex";
+        const txt = "Passenger · Interact to get off"; if (hud.textContent !== txt) hud.textContent = txt;
+      } else hud.style.display = "none";
       if (d.input.pressed("Interact")) { d.send(exitIntent()); return true; }
       return false;
     }
-    if (d.input.pressed("Interact")) { const n = nearestEnterable(w, p); if (n !== undefined) { if (!d.send(enterIntent(n))) d.toast?.("Can't get in."); return true; } }
+    if (d.input.pressed("Interact")) {
+      const n = nearestEnterable(w, p);
+      if (n !== undefined) {
+        // ADR-371: a drawn vehicle with a driver already seated takes a passenger, not a second driver.
+        const asPassenger = (() => { try { const def = vehicleDefOf(w, n); return !!def && isDrawnDef(def) && vehicleHasDriver(w, n); } catch { return false; } })();
+        if (!d.send(asPassenger ? passengerIntent(n) : enterIntent(n))) d.toast?.("Can't get in.");
+        return true;
+      }
+    }
     return false;
   };
   return { update, get driving() { return driving; }, destroy: () => hud.remove() };

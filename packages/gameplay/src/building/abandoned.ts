@@ -16,8 +16,15 @@ import { AttachKind } from "../components.js";
 import { resolveAttachment } from "./links.js";
 import { damageStageFor, maxHpOf } from "./integrity.js";
 import { hasOwnClaim, placePiece, snapPlacement, tribeOf, validatePlacement } from "./place.js";
+import { exteriorStairsFor, STAIRS_DATA } from "./stairs.js";
 
-export const SITE_CHANCE = 0.12;
+/**
+ * ADR-373: density raised 0.12 -> 0.15 per chunk (+25%): a chunk is 32x32 = 1024 tiles, so
+ * expected sites go 12 -> 15 per 100 chunks, 12 -> 15 per 10x10-chunk region (320x320 tiles),
+ * ~117 -> ~146 per 1M tiles (~977 chunks) — before terrain / near-spawn / busy skips, which only
+ * lower the realised count. Stamping stays chunk-load-time only, O(site footprint) per site.
+ */
+export const SITE_CHANCE = 0.15;
 export const ABANDONED_SCAN_RADIUS = 24;
 
 export const AbandonedKind = {
@@ -35,15 +42,35 @@ export const AbandonedKind = {
   TwoStoryHomestead: 11,
   Townhouse: 12,
   Manor: 13,
+  // ADR-373: fourteen more kinds, all built from the same pieces / helpers as the old ones.
+  Mill: 14,
+  Schoolhouse: 15,
+  Chapel: 16,
+  TradingPost: 17,
+  Smithy: 18,
+  Bakery: 19,
+  Stable: 20,
+  Watchtower: 21,
+  Bathhouse: 22,
+  Inn: 23,
+  Apiary: 24,
+  Granary: 25,
+  FisherHut: 26,
+  Barracks: 27,
 } as const;
 export type AbandonedKindId = (typeof AbandonedKind)[keyof typeof AbandonedKind];
 
 export const ABANDONED_KIND_KEYS: readonly string[] = [
   "shed", "cottage", "homestead", "farmhouse", "workshop", "cabin", "barn", "hunter_shack",
   "large_homestead", "two_story_cottage", "two_story_farmhouse", "two_story_homestead", "townhouse", "manor",
+  "mill", "schoolhouse", "chapel", "trading_post", "smithy", "bakery", "stable", "watchtower",
+  "bathhouse", "inn", "apiary", "granary", "fisher_hut", "barracks",
 ];
 
-const KIND_WEIGHTS: readonly { kind: AbandonedKindId; w: number }[] = [
+// ADR-373: the fourteen old weights are unchanged (they summed to 100); the new kinds add 46,
+// so the catalogue total is 146 and every old kind keeps its relative order — each old kind's
+// share of sites is scaled by 100/146, the new kinds together take 46/146 (~31%).
+export const KIND_WEIGHTS: readonly { kind: AbandonedKindId; w: number }[] = [
   { kind: AbandonedKind.Shed, w: 12 },
   { kind: AbandonedKind.Cottage, w: 12 },
   { kind: AbandonedKind.Homestead, w: 11 },
@@ -58,10 +85,24 @@ const KIND_WEIGHTS: readonly { kind: AbandonedKindId; w: number }[] = [
   { kind: AbandonedKind.TwoStoryHomestead, w: 5 },
   { kind: AbandonedKind.Townhouse, w: 3 },
   { kind: AbandonedKind.Manor, w: 2 },
+  { kind: AbandonedKind.Mill, w: 4 },
+  { kind: AbandonedKind.Schoolhouse, w: 3 },
+  { kind: AbandonedKind.Chapel, w: 3 },
+  { kind: AbandonedKind.TradingPost, w: 4 },
+  { kind: AbandonedKind.Smithy, w: 4 },
+  { kind: AbandonedKind.Bakery, w: 4 },
+  { kind: AbandonedKind.Stable, w: 4 },
+  { kind: AbandonedKind.Watchtower, w: 2 },
+  { kind: AbandonedKind.Bathhouse, w: 2 },
+  { kind: AbandonedKind.Inn, w: 3 },
+  { kind: AbandonedKind.Apiary, w: 3 },
+  { kind: AbandonedKind.Granary, w: 4 },
+  { kind: AbandonedKind.FisherHut, w: 3 },
+  { kind: AbandonedKind.Barracks, w: 3 },
 ];
 
 type Role = "deck" | "wall" | "opening" | "stair" | "furniture" | "fence" | "garden" | "loot" | "roof";
-interface Spec { key: string; x: number; y: number; level: number; rot: number; role: Role }
+interface Spec { key: string; x: number; y: number; level: number; rot: number; role: Role; /** ADR-372: outside stair run (vs the interior flight). */ exterior?: boolean }
 
 /**
  * ADR-311 roof styles built from the existing roof pieces (all have tier 1-4 art):
@@ -76,6 +117,8 @@ export const ROOF_STYLE_KEYS: readonly string[] = ["flat", "eaves", "gable", "hi
 export interface PlannedPiece {
   key: string; x: number; y: number; level: number; rot: number; role: Role;
   tier: number; omit: boolean; hpFrac: number;
+  /** ADR-372: outside stair run (vs the interior flight). */
+  exterior?: boolean;
 }
 export interface PlannedSite {
   kind: AbandonedKindId; kindKey: string; originX: number; originY: number;
@@ -134,13 +177,13 @@ function edgeAim(side: string, i: number, x0: number, y0: number, w: number, h: 
   if (side === "w") return { x: x0, y: y0 + i + 0.5 };
   return { x: x0 + w, y: y0 + i + 0.5 };
 }
-function walls(out: Spec[], x0: number, y0: number, w: number, h: number, level: number, doorSide: string, windows: readonly { side: string; i: number }[], withDoor: boolean): void {
+function walls(out: Spec[], x0: number, y0: number, w: number, h: number, level: number, doorSide: string, windows: readonly { side: string; i: number }[], withDoor: boolean, doorI?: number): void {
   // ADR-211: outer foundation corners take an L (`wall_corner_outer`), not a straight wall.
   out.push({ key: "wall_corner_outer", x: x0, y: y0, level, rot: 0, role: "wall" });
   out.push({ key: "wall_corner_outer", x: x0 + w, y: y0, level, rot: 1, role: "wall" });
   out.push({ key: "wall_corner_outer", x: x0 + w, y: y0 + h, level, rot: 2, role: "wall" });
   out.push({ key: "wall_corner_outer", x: x0, y: y0 + h, level, rot: 3, role: "wall" });
-  const doorIdx = Math.floor(((doorSide === "n" || doorSide === "s") ? w : h) / 2);
+  const doorIdx = doorI ?? Math.floor(((doorSide === "n" || doorSide === "s") ? w : h) / 2);
   for (const side of ["n", "s", "e", "w"]) {
     const n = (side === "n" || side === "s") ? w : h;
     for (let i = 1; i < n - 1; i++) {
@@ -173,7 +216,7 @@ function fenceRect(out: Spec[], x0: number, y0: number, w: number, h: number, ke
 
 interface Built { w: number; h: number; stories: number; garden: boolean; pen: boolean; pieces: Spec[] }
 
-function house(x0: number, y0: number, w: number, h: number, stories: number, furn: readonly { key: string; x: number; y: number; level?: number; rot?: number; role?: Role }[], extraWindows?: boolean): Spec[] {
+function house(x0: number, y0: number, w: number, h: number, stories: number, furn: readonly { key: string; x: number; y: number; level?: number; rot?: number; role?: Role }[], extraWindows?: boolean, exteriorStairs = false): Spec[] {
   const out: Spec[] = [];
   foundations(out, x0, y0, w, h);
   const win = extraWindows
@@ -181,15 +224,32 @@ function house(x0: number, y0: number, w: number, h: number, stories: number, fu
     : [{ side: "n", i: Math.max(1, w >> 1) }, { side: "e", i: Math.max(1, h >> 1) }];
   walls(out, x0, y0, w, h, 0, "s", win, true);
   const sx = 1, sy = h - 2;
+  // ADR-372: the outside stair run sits one tile west of the ground-floor door (its pillar would block the
+  // doorway if it shared the door's x), climbs north onto a level-1 balcony, and enters through a level-1
+  // doorway in the south wall above a plain ground-floor wall segment.
+  const ex = Math.floor(w / 2) - 1;
   if (stories >= 2) {
     out.push({ key: "stairs", x: x0 + sx + 0.5, y: y0 + sy + 0.5, level: 0, rot: 0, role: "stair" });
     floors(out, x0, y0, w, h, 1, sx, sy);
-    walls(out, x0, y0, w, h, 1, "s", [{ side: "n", i: w >> 1 }, { side: "e", i: h >> 1 }], false);
+    walls(out, x0, y0, w, h, 1, "s", [{ side: "n", i: w >> 1 }, { side: "e", i: h >> 1 }], exteriorStairs, exteriorStairs ? ex : undefined);
   }
   if (stories >= 3) {
-    out.push({ key: "stairs", x: x0 + sx + 0.5, y: y0 + sy + 0.5, level: 1, rot: 0, role: "stair" });
-    floors(out, x0, y0, w, h, 2, sx, sy);
+    // ADR-372: the second flight sits on the tile EAST of the first flight, not on top of it — two flights
+    // on one tile share one ramp line, so the upper one would shadow the way back down (see stairs.ts).
+    // Its stairwell hole is the level-2 floor tile above it.
+    out.push({ key: "stairs", x: x0 + sx + 1 + 0.5, y: y0 + sy + 0.5, level: 1, rot: 0, role: "stair" });
+    floors(out, x0, y0, w, h, 2, sx + 1, sy);
     walls(out, x0, y0, w, h, 2, "s", [{ side: "n", i: w >> 1 }], false);
+  }
+  if (exteriorStairs && stories >= 2) {
+    // Balcony tile B (ex, h) + stair tile A (ex, h+1), south of the house in local coords; the site height
+    // grows by 2 rows for these (see buildKind). The pillar carries the balcony floor; the stairs climb
+    // north (rot 0, upDir [0,-1]) from A onto B.
+    out.push({ key: "foundation", x: x0 + ex + 0.5, y: y0 + h + 0.5, level: 0, rot: 0, role: "deck" });
+    out.push({ key: "foundation", x: x0 + ex + 0.5, y: y0 + h + 1 + 0.5, level: 0, rot: 0, role: "deck" });
+    out.push({ key: "pillar", x: x0 + ex + 0.5, y: y0 + h + 0.5, level: 0, rot: 0, role: "wall" });
+    out.push({ key: "floor", x: x0 + ex + 0.5, y: y0 + h + 0.5, level: 1, rot: 0, role: "deck" });
+    out.push({ key: "stairs", x: x0 + ex + 0.5, y: y0 + h + 1 + 0.5, level: 0, rot: 0, role: "stair", exterior: true });
   }
   roofs(out, x0, y0, w, h, stories);
   furnished(out, furn);
@@ -237,25 +297,27 @@ function buildKind(kind: AbandonedKindId): Built {
   }
   if (kind === AbandonedKind.Cottage || kind === AbandonedKind.TwoStoryCottage) {
     const stories = kind === AbandonedKind.TwoStoryCottage ? 2 : 1;
+    const ext = stories >= 2 && exteriorStairsFor("two_story_cottage");
     const furn = [
       { key: "bed", x: 1.5, y: 1.0 }, { key: "table", x: 3.5, y: 2.5 }, { key: "chair", x: 3.5, y: 1.5 }, { key: "chair", x: 2.5, y: 2.5 },
-      { key: "storage_box", x: 3.5, y: 3.5 }, { key: "wardrobe_rustic", x: 1.5, y: 3.5 }, { key: "floor_lamp", x: 4.5, y: 1.5 },
+      { key: "storage_box", x: 3.5, y: 3.5 }, { key: "wardrobe_rustic", x: 2.5, y: 3.5 }, { key: "floor_lamp", x: 4.5, y: 1.5 },
       { key: "fireplace", x: 2.5, y: 0.5 },
       ...(stories >= 2 ? [{ key: "bed", x: 3.5, y: 1.5, level: 1 }, { key: "chair", x: 1.5, y: 1.5, level: 1 }, { key: "basic_storage_box", x: 3.5, y: 3.5, level: 1 }] : []),
     ];
-    p.push(...house(0, 0, 5, 5, stories, furn, true));
-    return { w: 5, h: 5, stories, garden: false, pen: false, pieces: p };
+    p.push(...house(0, 0, 5, 5, stories, furn, true, ext));
+    return { w: 5, h: ext ? 7 : 5, stories, garden: false, pen: false, pieces: p };
   }
   if (kind === AbandonedKind.Farmhouse || kind === AbandonedKind.TwoStoryFarmhouse) {
     const stories = kind === AbandonedKind.TwoStoryFarmhouse ? 2 : 1;
+    const ext = stories >= 2 && exteriorStairsFor("two_story_farmhouse");
     const furn = [
       { key: "bed", x: 1.5, y: 1.0 }, { key: "table_dining_rustic", x: 3.5, y: 2.5 }, { key: "chair_rustic", x: 2.5, y: 2.5 },
       { key: "chair_rustic", x: 4.5, y: 2.5 }, { key: "large_chest", x: 5.5, y: 1.5 }, { key: "wardrobe_rustic", x: 1.5, y: 4.5 },
       { key: "fireplace", x: 3.5, y: 0.5 }, { key: "floor_lamp", x: 6.5, y: 1.5 },
       ...(stories >= 2 ? [{ key: "bed_double_rustic", x: 2.5, y: 1.5, level: 1 }, { key: "wardrobe_rustic", x: 5.5, y: 1.5, level: 1 }] : []),
     ];
-    p.push(...house(0, 0, 7, 5, stories, furn, true));
-    return { w: 7, h: 5, stories, garden: false, pen: false, pieces: p };
+    p.push(...house(0, 0, 7, 5, stories, furn, true, ext));
+    return { w: 7, h: ext ? 7 : 5, stories, garden: false, pen: false, pieces: p };
   }
   if (kind === AbandonedKind.Barn) {
     p.push(...house(0, 0, 6, 4, 1, [
@@ -271,7 +333,7 @@ function buildKind(kind: AbandonedKindId): Built {
     const hw = large ? 7 : 5, hh = large ? 6 : 5;
     const furn = [
       { key: "bed", x: 1.5, y: 1.0 }, { key: "table", x: 3.5, y: 2.5 }, { key: "chair", x: 2.5, y: 2.5 }, { key: "chair", x: 3.5, y: 1.5 },
-      { key: "storage_box", x: hw - 1.5, y: hh - 1.5 }, { key: "wardrobe_rustic", x: 1.5, y: hh - 1.5 }, { key: "fireplace", x: 2.5, y: 0.5 },
+      { key: "storage_box", x: hw - 1.5, y: hh - 1.5 }, { key: "wardrobe_rustic", x: 2.5, y: hh - 1.5 }, { key: "fireplace", x: 2.5, y: 0.5 },
       ...(stories >= 2 ? [{ key: "bed", x: 3.5, y: 1.5, level: 1 }, { key: "basic_storage_box", x: hw - 1.5, y: 1.5, level: 1 }] : []),
     ];
     p.push(...house(0, 0, hw, hh, stories, furn, true));
@@ -282,13 +344,139 @@ function buildKind(kind: AbandonedKindId): Built {
     return { w: hw + 1 + gw, h: hh + 1 + ph, stories, garden: true, pen: true, pieces: p };
   }
   if (kind === AbandonedKind.Townhouse) {
+    const ext = exteriorStairsFor("townhouse");
     const furn = [
       { key: "table", x: 2.5, y: 2.5 }, { key: "chair", x: 1.5, y: 2.5 }, { key: "storage_box", x: 3.5, y: 3.5 }, { key: "fireplace", x: 2.5, y: 0.5 },
       { key: "bed", x: 1.5, y: 1.5, level: 1 }, { key: "wardrobe_rustic", x: 3.5, y: 1.5, level: 1 },
-      { key: "bed", x: 2.5, y: 1.5, level: 2 }, { key: "basic_storage_box", x: 1.5, y: 3.5, level: 2 },
+      { key: "bed", x: 2.5, y: 1.5, level: 2 }, { key: "basic_storage_box", x: 3.5, y: 3.5, level: 2 },
     ];
-    p.push(...house(0, 0, 4, 5, 3, furn, true));
-    return { w: 4, h: 5, stories: 3, garden: false, pen: false, pieces: p };
+    p.push(...house(0, 0, 4, 5, 3, furn, true, ext));
+    return { w: 4, h: ext ? 7 : 5, stories: 3, garden: false, pen: false, pieces: p };
+  }
+  // ADR-373: fourteen more kinds, all composed from the existing house()/yard()/furnished()
+  // helpers and piece keys already in pieces.json — no new art, no new helpers. Footprints stay
+  // well inside the chunk (planAbandonedChunk needs w+4 <= 32 and h+4 <= 32); the largest new
+  // kind is the Stable at 6x9, same shape as the Barn.
+  if (kind === AbandonedKind.Mill) {
+    p.push(...house(0, 0, 6, 5, 1, [
+      { key: "workbench", x: 1.5, y: 1.5 }, { key: "crop_store", x: 4.5, y: 1.5 }, { key: "stone_store", x: 4.5, y: 2.5 },
+      { key: "storage_box", x: 1.5, y: 3.5 }, { key: "barrel_storage", x: 3.5, y: 1.5 },
+      { key: "table", x: 2.5, y: 2.5 }, { key: "chair", x: 3.5, y: 2.5 },
+    ]));
+    return { w: 6, h: 5, stories: 1, garden: false, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.Schoolhouse) {
+    p.push(...house(0, 0, 6, 4, 1, [
+      { key: "desk_rustic", x: 1.5, y: 1.5 }, { key: "desk_rustic", x: 3.5, y: 1.5 },
+      { key: "bench_rustic", x: 1.5, y: 2.5 }, { key: "bench_rustic", x: 3.5, y: 2.5 },
+      { key: "bookcase_rustic", x: 5.5, y: 1.5 }, { key: "chair", x: 2.5, y: 3.5 }, { key: "table_lamp", x: 4.5, y: 3.5 },
+    ]));
+    return { w: 6, h: 4, stories: 1, garden: false, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.Chapel) {
+    p.push(...house(0, 0, 5, 6, 1, [
+      { key: "bench_rustic", x: 1.5, y: 1.5 }, { key: "bench_rustic", x: 3.5, y: 1.5 },
+      { key: "bench_rustic", x: 1.5, y: 2.5 }, { key: "bench_rustic", x: 3.5, y: 2.5 },
+      { key: "table", x: 2.5, y: 4.5 }, { key: "statue", x: 4.5, y: 5.5 }, { key: "storage_box", x: 1.5, y: 5.5 },
+    ]));
+    return { w: 5, h: 6, stories: 1, garden: false, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.TradingPost) {
+    // NOTE: market_counter is NOT used here — it carries stall.clanOnly, and validatePlacement
+    // rejects stall pieces with clanOnly for the worldgen builder (NoPrivilege), so it could
+    // never stamp. counter_rustic is the same shop-counter shape without stall land rules.
+    p.push(...house(0, 0, 6, 5, 1, [
+      { key: "counter_rustic", x: 1.5, y: 1.5 }, { key: "shelf_rustic", x: 4.5, y: 1.5 },
+      { key: "stall_booth", x: 4.5, y: 3.5 }, { key: "storage_box", x: 1.5, y: 3.5 },
+      { key: "large_chest", x: 2.5, y: 4.5 }, { key: "barrel_storage", x: 5.5, y: 2.5 },
+      { key: "table", x: 2.5, y: 2.5 }, { key: "chair", x: 3.5, y: 2.5 },
+    ]));
+    return { w: 6, h: 5, stories: 1, garden: false, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.Smithy) {
+    p.push(...house(0, 0, 5, 4, 1, [
+      { key: "anvil", x: 1.5, y: 1.5 }, { key: "furnace", x: 3.5, y: 1.5 },
+      { key: "workbench", x: 1.5, y: 2.5 }, { key: "tool_bench", x: 3.5, y: 2.5 },
+      { key: "barrel_storage", x: 4.5, y: 2.5 }, { key: "storage_box", x: 1.5, y: 3.5 },
+    ]));
+    return { w: 5, h: 4, stories: 1, garden: false, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.Bakery) {
+    p.push(...house(0, 0, 5, 4, 1, [
+      { key: "clay_oven", x: 1.5, y: 1.5 }, { key: "cook_range", x: 3.5, y: 1.5 },
+      { key: "pantry", x: 4.5, y: 2.5 }, { key: "kitchen_cupboard", x: 1.5, y: 2.5 },
+      { key: "table", x: 2.5, y: 2.5 }, { key: "chair", x: 3.5, y: 2.5 }, { key: "storage_box", x: 4.5, y: 1.5 },
+    ]));
+    return { w: 5, h: 4, stories: 1, garden: false, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.Stable) {
+    p.push(...house(0, 0, 6, 4, 1, [
+      { key: "feeding_trough", x: 1.5, y: 1.5 }, { key: "feeding_trough", x: 4.5, y: 1.5 },
+      { key: "barrel_storage", x: 1.5, y: 2.5 }, { key: "log_store", x: 4.5, y: 2.5 }, { key: "storage_box", x: 2.5, y: 3.5 },
+    ]));
+    yard(p, 0, 5, 6, 4, "pen");
+    return { w: 6, h: 9, stories: 1, garden: false, pen: true, pieces: p };
+  }
+  if (kind === AbandonedKind.Watchtower) {
+    p.push(...house(0, 0, 3, 3, 1, [
+      { key: "bed", x: 1.5, y: 1.0 }, { key: "basic_storage_box", x: 0.5, y: 2.5 }, { key: "table", x: 2.5, y: 2.5 },
+    ]));
+    // The watchtower piece is ground-placed (2x2, free/layer 1), so it stands on bare ground
+    // beside the hut like the HunterShack's outside campfire — no foundation pad needed.
+    p.push({ key: "watchtower", x: 4.5, y: 1.5, level: 0, rot: 0, role: "furniture" });
+    return { w: 6, h: 3, stories: 1, garden: false, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.Bathhouse) {
+    p.push(...house(0, 0, 5, 5, 1, [
+      { key: "fountain", x: 2.5, y: 2.5 }, { key: "bench_rustic", x: 1.5, y: 4.5 }, { key: "bench_rustic", x: 4.5, y: 0.5 },
+      { key: "table", x: 3.5, y: 4.5 }, { key: "potted_plant", x: 4.5, y: 3.5 }, { key: "storage_box", x: 4.5, y: 2.5 },
+    ]));
+    yard(p, 6, 0, 3, 3, "garden");
+    return { w: 9, h: 5, stories: 1, garden: true, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.Inn) {
+    const furn = [
+      { key: "table_dining_rustic", x: 3.5, y: 2.5 }, { key: "chair_rustic", x: 2.5, y: 2.5 }, { key: "chair_rustic", x: 4.5, y: 2.5 },
+      { key: "counter_rustic", x: 4.5, y: 1.5 }, { key: "cook_range", x: 1.5, y: 1.5 }, { key: "fireplace", x: 3.5, y: 0.5 },
+      { key: "barrel_storage", x: 5.5, y: 3.5 },
+      { key: "bed", x: 1.5, y: 1.5, level: 1 }, { key: "bed", x: 4.5, y: 1.5, level: 1 },
+      { key: "wardrobe_rustic", x: 1.5, y: 3.5, level: 1 }, { key: "basic_storage_box", x: 4.5, y: 3.5, level: 1 },
+    ];
+    p.push(...house(0, 0, 6, 5, 2, furn, true));
+    return { w: 6, h: 5, stories: 2, garden: false, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.Apiary) {
+    p.push(...house(0, 0, 3, 3, 1, [
+      { key: "bed", x: 1.5, y: 1.0 }, { key: "barrel_storage", x: 0.5, y: 2.5 }, { key: "basic_storage_box", x: 2.5, y: 2.5 },
+    ]));
+    yard(p, 4, 0, 5, 3, "garden");
+    // Apiaries are ground-placed (free/layer 2) inside the fenced garden, clear of the beds.
+    p.push({ key: "apiary", x: 8.5, y: 1.5, level: 0, rot: 0, role: "furniture" });
+    p.push({ key: "apiary", x: 8.5, y: 2.5, level: 0, rot: 0, role: "furniture" });
+    return { w: 9, h: 3, stories: 1, garden: true, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.Granary) {
+    p.push(...house(0, 0, 5, 4, 1, [
+      { key: "crop_store", x: 1.5, y: 1.5 }, { key: "ore_store", x: 3.5, y: 1.5 },
+      { key: "log_store", x: 1.5, y: 2.5 }, { key: "stick_store", x: 3.5, y: 2.5 },
+      { key: "large_chest", x: 4.5, y: 1.5 }, { key: "storage_box", x: 4.5, y: 2.5 }, { key: "barrel_storage", x: 2.5, y: 3.5 },
+    ]));
+    return { w: 5, h: 4, stories: 1, garden: false, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.FisherHut) {
+    p.push(...house(0, 0, 3, 4, 1, [
+      { key: "bed", x: 1.5, y: 1.0 }, { key: "basket", x: 0.5, y: 2.5 }, { key: "barrel_storage", x: 2.5, y: 2.5 },
+      { key: "campfire", x: 3.5, y: 4.5, role: "furniture" },
+    ]));
+    return { w: 4, h: 5, stories: 1, garden: false, pen: false, pieces: p };
+  }
+  if (kind === AbandonedKind.Barracks) {
+    p.push(...house(0, 0, 6, 4, 1, [
+      { key: "bunk_bed", x: 1.5, y: 1.5 }, { key: "bunk_bed", x: 3.5, y: 1.5 }, { key: "bed", x: 5.5, y: 1.5 },
+      { key: "table", x: 2.5, y: 3.5 }, { key: "chair", x: 1.5, y: 3.5 }, { key: "chair", x: 3.5, y: 3.5 },
+      { key: "large_chest", x: 5.5, y: 3.5 }, { key: "storage_box", x: 4.5, y: 3.5 },
+    ]));
+    return { w: 6, h: 4, stories: 1, garden: false, pen: false, pieces: p };
   }
   return buildKind(AbandonedKind.Cottage);
 }
@@ -298,7 +486,9 @@ function rotateBuilt(b: Built, rot: number): Built {
   const bw = b.w, bh = b.h;
   const pieces = b.pieces.map((s) => {
     const [x, y] = rotPoint(s.x, s.y, rot, bw, bh);
-    const keep = s.role === "furniture" || s.role === "loot" || s.role === "fence" || s.role === "garden" || s.role === "roof" || s.key === "wall_corner_outer";
+    // ADR-372: stairs keep their rotation (their up-direction rotates with the site, like furniture) —
+    // a rotated site's stair run must still climb toward its landing.
+    const keep = s.role === "furniture" || s.role === "loot" || s.role === "fence" || s.role === "garden" || s.role === "roof" || s.role === "stair" || s.key === "wall_corner_outer";
     return { ...s, x, y, rot: keep ? (s.rot + rot) & 3 : 0 };
   });
   const w = (rot & 1) ? bh : bw, h = (rot & 1) ? bw : bh;
@@ -308,6 +498,8 @@ function rotateBuilt(b: Built, rot: number): Built {
 const STONE_KINDS = new Set<number>([
   AbandonedKind.Cottage, AbandonedKind.Farmhouse, AbandonedKind.TwoStoryCottage, AbandonedKind.TwoStoryFarmhouse,
   AbandonedKind.Townhouse, AbandonedKind.Manor, AbandonedKind.LargeHomestead,
+  // ADR-373: the solid public buildings read as stone too.
+  AbandonedKind.Chapel, AbandonedKind.Inn, AbandonedKind.TradingPost,
 ]);
 
 function extrasFor(kind: AbandonedKindId): readonly { key: string; x: number; y: number; level?: number; chance: number }[] {
@@ -338,6 +530,21 @@ function extrasFor(kind: AbandonedKindId): readonly { key: string; x: number; y:
     ];
   }
   if (kind === AbandonedKind.Townhouse) return [{ key: "stove_iron", x: 3.5, y: 1.5, chance: 0.45 }, { key: "cook_range", x: 1.5, y: 3.5, chance: 0.28 }, { key: "workbench", x: 0.5, y: 1.5, chance: 0.2 }];
+  // ADR-373: one or two chance extras per new kind, same pattern (existing keys, inside the footprint).
+  if (kind === AbandonedKind.Mill) return [{ key: "log_store", x: 5.5, y: 3.5, chance: 0.35 }, { key: "stone_store", x: 0.5, y: 3.5, chance: 0.3 }];
+  if (kind === AbandonedKind.Schoolhouse) return [{ key: "bookcase_rustic", x: 5.5, y: 2.5, chance: 0.35 }, { key: "table_lamp", x: 0.5, y: 3.5, chance: 0.4 }];
+  if (kind === AbandonedKind.Chapel) return [{ key: "candelabra", x: 2.5, y: 3.5, chance: 0.4 }, { key: "candle", x: 4.5, y: 1.5, chance: 0.35 }];
+  if (kind === AbandonedKind.TradingPost) return [{ key: "salt_barrel", x: 5.5, y: 3.5, chance: 0.35 }, { key: "workbench", x: 0.5, y: 2.5, chance: 0.2 }];
+  if (kind === AbandonedKind.Smithy) return [{ key: "ore_store", x: 4.5, y: 3.5, chance: 0.4 }, { key: "tool_bench", x: 0.5, y: 3.5, chance: 0.3 }];
+  if (kind === AbandonedKind.Bakery) return [{ key: "wood_stove", x: 4.5, y: 3.5, chance: 0.35 }, { key: "salt_barrel", x: 0.5, y: 3.5, chance: 0.4 }];
+  if (kind === AbandonedKind.Stable) return [{ key: "workbench", x: 2.5, y: 2.5, chance: 0.25 }, { key: "salt_barrel", x: 5.5, y: 2.5, chance: 0.3 }];
+  if (kind === AbandonedKind.Watchtower) return [{ key: "basic_storage_box", x: 2.5, y: 1.5, chance: 0.4 }, { key: "table_lamp", x: 0.5, y: 1.5, chance: 0.3 }];
+  if (kind === AbandonedKind.Bathhouse) return [{ key: "potted_plant", x: 1.5, y: 3.5, chance: 0.5 }, { key: "flower_box", x: 4.5, y: 1.5, chance: 0.35 }];
+  if (kind === AbandonedKind.Inn) return [{ key: "table_lamp", x: 5.5, y: 2.5, level: 1, chance: 0.5 }, { key: "chair_rustic", x: 2.5, y: 3.5, level: 1, chance: 0.4 }];
+  if (kind === AbandonedKind.Apiary) return [{ key: "herb_planter", x: 7.5, y: 2.5, chance: 0.5 }];
+  if (kind === AbandonedKind.Granary) return [{ key: "barrel_storage", x: 0.5, y: 3.5, chance: 0.4 }, { key: "salt_barrel", x: 2.5, y: 3.5, chance: 0.3 }];
+  if (kind === AbandonedKind.FisherHut) return [{ key: "log_store", x: 2.5, y: 1.5, chance: 0.4 }, { key: "basket", x: 1.5, y: 2.5, chance: 0.5 }];
+  if (kind === AbandonedKind.Barracks) return [{ key: "storage_box", x: 5.5, y: 2.5, chance: 0.4 }, { key: "table", x: 4.5, y: 3.5, chance: 0.3 }];
   return [];
 }
 function extraRole(key: string): Role {
@@ -351,7 +558,10 @@ function roofWeights(kind: AbandonedKindId): readonly number[] {
     case AbandonedKind.Workshop: case AbandonedKind.Barn: return [0.25, 0.1, 0.45, 0.2];
     case AbandonedKind.Cabin: return [0.15, 0.15, 0.4, 0.3];
     case AbandonedKind.Townhouse: return [0.3, 0.4, 0.05, 0.25];
-    case AbandonedKind.TwoStoryCottage: case AbandonedKind.TwoStoryFarmhouse: case AbandonedKind.TwoStoryHomestead: case AbandonedKind.Manor:
+    // ADR-373: civic buildings lean gable, the mill and stable read as barns.
+    case AbandonedKind.Chapel: case AbandonedKind.Schoolhouse: return [0.05, 0.15, 0.5, 0.3];
+    case AbandonedKind.Mill: case AbandonedKind.Stable: return [0.25, 0.1, 0.45, 0.2];
+    case AbandonedKind.TwoStoryCottage: case AbandonedKind.TwoStoryFarmhouse: case AbandonedKind.TwoStoryHomestead: case AbandonedKind.Manor: case AbandonedKind.Inn:
       return [0.1, 0.4, 0.2, 0.3];
     default: return [0.1, 0.35, 0.25, 0.3];
   }
@@ -405,7 +615,11 @@ export function planAbandonedSite(seed: number, originX: number, originY: number
   const built0 = buildKind(kind);
   const extraRand = rng(hashU32(seed >>> 0, originX, originY, 0x57A70001));
   for (const ex of extrasFor(kind)) {
-    if (extraRand() < ex.chance) built0.pieces.push({ key: ex.key, x: ex.x, y: ex.y, level: ex.level ?? 0, rot: 0, role: extraRole(ex.key) });
+    // ADR-372: a random extra never lands on a stair tile (a cook_range used to spawn on the townhouse
+    // flight) or on the tile its second flight climbs from — the flight must stay walkable.
+    const onStair = built0.pieces.some((s) => s.role === "stair" && (ex.level ?? 0) === s.level
+      && Math.floor(s.x) === Math.floor(ex.x) && Math.floor(s.y) === Math.floor(ex.y));
+    if (!onStair && extraRand() < ex.chance) built0.pieces.push({ key: ex.key, x: ex.x, y: ex.y, level: ex.level ?? 0, rot: 0, role: extraRole(ex.key) });
   }
   const roofRand = rng(hashU32(seed >>> 0, originX, originY, 0x2F0F0311)); // ADR-311: own stream
   const roofStyle = opts.roof ?? pickRoofStyle(kind, roofRand);
@@ -421,6 +635,21 @@ export function planAbandonedSite(seed: number, originX: number, originY: number
       : Math.max(0.22, 1 - ruin * (0.35 + rand() * 0.45));
     return { ...s, x: originX + s.x, y: originY + s.y, tier, omit, hpFrac };
   });
+  // ADR-372: broken / missing stairs. A two-story+ site can spawn with its ground flight missing (interior
+  // and/or exterior), so the upper floor is only reachable by building the stairs back — through the
+  // existing build system for players, and through the claim-build rebuild flow for AI humans (the missing
+  // stair is a structural piece in the plan, so ruinLayout + planClaimRuin already rebuild it). The roll is
+  // ruin-scaled (a ruin-0 site never loses its stairs) on its own seeded stream, so the main plan stream —
+  // layouts, loot, furnishing rolls — is untouched.
+  if (built.stories >= 2) {
+    const sr = rng(hashU32(seed >>> 0, originX, originY, 0x5A172));
+    const interiorMissing = sr() < STAIRS_DATA.brokenChance * ruin;
+    const exteriorMissing = sr() < STAIRS_DATA.brokenExteriorChance * ruin;
+    for (const p of pieces) {
+      if (p.role !== "stair" || p.level !== 0) continue; // only the ground flight goes missing
+      if (p.exterior ? exteriorMissing : interiorMissing) p.omit = true;
+    }
+  }
   return {
     kind, kindKey: ABANDONED_KIND_KEYS[kind] ?? "cottage", originX, originY,
     width: built.w, height: built.h, stories: built.stories, rot, ruin, tier,

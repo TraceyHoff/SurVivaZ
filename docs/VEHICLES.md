@@ -114,14 +114,35 @@ stored with `setDriveInput`, and PlayerIntent.moving is forced to 0 while riding
 mount moves in the input phase and the wagon follows on the pin joint. A passenger's input moves nothing, and a
 mount with its own rider is steered by that rider, never by the wagon driver.
 
+## Passengers (ADR-371)
+Any seat >= 1 is a passenger seat: boarding it needs no key, and the seat system already snapped every rider
+(driver or passenger) to the vehicle's Transform, so drawn-vehicle passenger follow needed no new code. What
+ADR-371 adds: (1) seat 254 = first free *passenger* seat (`PASSENGER_SEAT`, `enterVehicleAsPassenger`), which
+never takes seat 0 — a key-holder can ride along without stealing the drive; seat 255 still takes the driver
+seat first for a key-holder. The client sends seat 254 on Interact when the drawn vehicle already has a driver,
+and shows a "Passenger · Interact to get off" chip while riding as one; boarding and dismounting both go
+through Interact (E / pad X / touch "Use"), so all three devices work with no new binding. (2) Safe dismount:
+`exitVehicle` first tries the legacy left-side spot, then tile centres on expanding rings around the vehicle
+(`findSafeDismountTile`, radii in `data/vehicle_passengers.json`), land/shallow first, deep water only as a
+last tier, never inside a solid or the footprint; with no safe tile it returns `no_safe_spot` and the rider
+stays seated to retry later. (3) Forced exit: a rider whose vehicle entity is gone is ejected to a safe tile
+by `vehicleSystem` (`forceExitVehicle` / `ejectVehicleOccupants`); a driver leaving or a mount being unhitched
+leaves passengers seated in the parked vehicle, which is safe — they exit on demand, and the `ride_passenger`
+bot behaviour exits when its driver has left. (4) AI: `ride_passenger` boards a driven drawn vehicle (wagon /
+cart / carriage / chariot) when far from its goal and gets out at its destination when parked, or when the
+driver leaves, the wagon is wrecked, or the ride carried it 10 tiles further from its goal than where it
+boarded. No new component, no wire change, no new art.
+
 ## Commands (validated, ADR-092 path; registered after ClanDeclineCmd)
-`gameplay.vehicleEnter {target, seat (255 = first free)}`, `gameplay.vehicleExit {}`, `gameplay.vehicleHitch {target = trailer, tow}`,
+`gameplay.vehicleEnter {target, seat (255 = first free, 254 = first free passenger seat)}`, `gameplay.vehicleExit {}`,
+`gameplay.vehicleHitch {target = trailer, tow}`,
 `gameplay.vehicleUnhitch {target}`, `gameplay.vehicleStation {target, station}`. NetId fields are listed in
 `COMMAND_ENTITY_FIELDS`. Server: `installVehicleCommands(world, handlers)` (wired in apps/server game.ts).
 Interact: the client calls `vehicleInteractCommand(world, player, target)`, which returns exit while riding and enter otherwise.
 Rejection reasons: `dead, already_riding, not_vehicle, no_seats, no_net_id, wrecked, too_far, moving, full, bad_seat,
 seat_taken, not_riding, no_hitch, incompatible, already_hitched, tow_busy, cycle, actor_too_far, not_hitched, no_station,
-no_harness, not_harness, hitched` (the last three are the ADR-359 harness reasons, on the mount commands and the drawn hitch path).
+no_harness, not_harness, hitched, no_passenger_seats, no_safe_spot` (`no_harness, not_harness, hitched` are the ADR-359
+harness reasons, on the mount commands and the drawn hitch path; `no_passenger_seats, no_safe_spot` are ADR-371).
 
 ## Camper interior hook API (Survival wires the station logic)
 - `vehicleStations(world, v)` → `{index, key, kind}[]` (kind = StationKind from stations.json).

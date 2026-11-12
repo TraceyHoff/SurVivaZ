@@ -8,16 +8,21 @@
  *  - gameplay.vehicles (simulation, every peer): deterministic arcade kinematic bicycle model with drift, footprint
  *    collision against movementBlocked (or setVehicleBlocker), trailer pin-joint articulation, riders follow seats.
  *  - Camper interior: usableVehicleStations / addVehicleStationHook; stations usable only while parked.
+ *  - Passengers (ADR-371): seat 254 = first free *passenger* seat (never the driver seat); a safe dismount search
+ *    (findSafeDismountTile) so nobody is ever dropped inside a solid or deep water; forced ejection
+ *    (forceExitVehicle / ejectVehicleOccupants) when a ridden vehicle's entity is gone.
  */
 import { roadVehicleMul } from "./roads.js";
 import { AnimState as Anim, defineCommand, defineResource, fnv1a, NetId, Transform, type CommandHandlers, type Entity, type World } from "@engine/core";
+import { WaterDepth } from "@engine/world";
 import raw from "../data/vehicles.json";
+import passengersRaw from "../data/vehicle_passengers.json";
 import stationsRaw from "../data/stations.json";
 import storageRaw from "../data/vehicle_storage.json";
 import { AnimState, Container, CONTAINER_MAX_SLOTS, Dead, Driver, Health, Hitch, Mount, Survival, Vehicle, VehicleSeats, VehicleState, VEHICLE_ENGINE_ON, VEHICLE_HEADLIGHTS, VEHICLE_MAX_SEATS } from "./components.js";
-import { applyRidingMotion, DrawnDriveRes, DrawnDrivenRes, movementBlocked } from "./systems/movement.js";
+import { applyRidingMotion, DrawnDriveRes, DrawnDrivenRes, movementBlocked, waterDepth } from "./systems/movement.js";
 import { isHarnessed, MOUNT_TUNING, mountSpecies } from "./mount_defs.js";
-import { isAuthority } from "./config.js";
+import { gameplayDefs, isAuthority } from "./config.js";
 import { spendStamina } from "./systems/vitals.js";
 import { netIdEntity } from "./vehicle_net.js";
 import { hasKeyFor, keyIssueSystem } from "./vehicle_keys.js";
@@ -118,6 +123,19 @@ export const VEHICLE_TUNING = {
   /** Max trailer angle relative to its tow (rad) before the joint clamps (jackknife limit). */
   maxArticulation: 1.75, impactDamagePerSpeedTon: 4, bounce: 0.2,
 } as const;
+/** ADR-371: seat 254 = first free *passenger* seat (seat 255 = first free seat, which is the driver seat for a
+ * key-holder). 254 never takes seat 0, so a key-holder can ride as a passenger without stealing the drive. */
+export const PASSENGER_SEAT = 254;
+/** ADR-371 passenger tunables (data/vehicle_passengers.json — the numbers live in data, never in code). */
+export interface VehiclePassengerTuning { dismountSearchRadiusTiles: number; dismountFallbackRadiusTiles: number }
+export function loadVehiclePassengerTuning(doc: unknown): VehiclePassengerTuning {
+  const d = doc as Partial<VehiclePassengerTuning>;
+  if (!(d.dismountSearchRadiusTiles! >= 1 && Number.isInteger(d.dismountSearchRadiusTiles)) || !(d.dismountFallbackRadiusTiles! >= d.dismountSearchRadiusTiles! && Number.isInteger(d.dismountFallbackRadiusTiles))) {
+    throw new Error("vehicle_passengers.json: dismountSearchRadiusTiles >= 1 and dismountFallbackRadiusTiles >= it, both integers");
+  }
+  return { dismountSearchRadiusTiles: d.dismountSearchRadiusTiles!, dismountFallbackRadiusTiles: d.dismountFallbackRadiusTiles! };
+}
+export const VEHICLE_PASSENGER_TUNING: VehiclePassengerTuning = loadVehiclePassengerTuning(passengersRaw);
 
 // ---- spawn / lookup -------------------------------------------------------------------------------
 /** Spawns a vehicle (server). NetId is assigned by net; standalone tests add it themselves. */
@@ -378,9 +396,13 @@ function stepTrailer(world: World, tr: Entity, d: VehicleDef, tow: Entity, dt: n
 /** gameplay.vehicles: drive powered vehicles, then trailers in chain order, then seat riders. Deterministic on every peer. */
 export function vehicleSystem(world: World, dt: number): void {
   if (world.tick % 20 === 0 && world.isRegistered(VehicleLock)) keyIssueSystem(world); // ADR-109 legacy migration + owed keys
-  const vs = [...world.query([Vehicle, Transform])]; if (vs.length === 0) return;
   const inputs = world.getResource(DriveInputs); const riders = new Map<number, Entity>();
   for (const r of world.query([Driver, NetId])) riders.set(world.getField(r, NetId, "id")!, r);
+  const vs = [...world.query([Vehicle, Transform])];
+  if (vs.length === 0) { // no vehicles at all: every rider is dangling (ADR-371) — eject them, don't strand them
+    for (const [, r] of riders) if (!world.has(r, Dead)) forceExitVehicle(world, r);
+    return;
+  }
   const byNet = new Map<number, Entity>(); for (const v of vs) { const id = netIdOf(world, v); if (id) byNet.set(id, v); }
   const sorted = [...vs].sort((a, b) => netIdOf(world, a) - netIdOf(world, b) || a - b);
   const trailers: Entity[] = [];
@@ -398,9 +420,12 @@ export function vehicleSystem(world: World, dt: number): void {
   for (const tr of [...trailers].sort((a, b) => depth(a) - depth(b) || netIdOf(world, a) - netIdOf(world, b))) {
     if (done.has(tr)) continue; done.add(tr); stepTrailer(world, tr, vehicleDefOf(world, tr)!, entityByNetId(world, world.getField(tr, Hitch, "parentNetId")!)!, dt);
   }
-  // riders follow
+  // riders follow; a rider whose vehicle entity is gone (destroyed / despawned out from under them — no in-sim
+  // path destroys a vehicle today, wrecked ones persist and are repairable) is ejected to a safe tile instead of
+  // sitting frozen in limbo with a dangling Driver. O(riders), piggybacked on the loop that already runs.
   for (const [, r] of riders) {
-    const v = byNet.get(world.getField(r, Driver, "vehicleNetId")!); if (v === undefined) continue;
+    const v = byNet.get(world.getField(r, Driver, "vehicleNetId")!);
+    if (v === undefined) { if (!world.has(r, Dead)) forceExitVehicle(world, r); continue; }
     const vt = world.get(v, Transform)!; const rt = world.get(r, Transform);
     if (rt && (rt.x !== vt.x || rt.y !== vt.y || rt.facing !== vt.facing)) world.set(r, Transform, { x: vt.x, y: vt.y, facing: vt.facing });
     if (world.has(r, AnimState) && !world.has(r, Dead) && world.getField(r, AnimState, "anim") !== Anim.Sit) world.set(r, AnimState, { anim: Anim.Sit, startTick: world.tick });
@@ -441,6 +466,7 @@ export function validateEnter(world: World, actor: Entity, v: Entity, seat: numb
   const occ = seatsOf(world, v)!;
   const key = hasKeyFor(world, actor, v); // ADR-109: the driver seat needs the matching key; passengers don't
   if (seat === 255) { for (let i = key ? 0 : 1; i < d.seats; i++) if (!occ[i]) return undefined; return key || d.seats > 1 ? "full" : "no_key"; }
+  if (seat === PASSENGER_SEAT) { for (let i = 1; i < d.seats; i++) if (!occ[i]) return undefined; return d.seats > 1 ? "full" : "no_passenger_seats"; }
   if (seat >= d.seats) return "bad_seat";
   if (seat === 0 && !key) return "no_key";
   return occ[seat] ? "seat_taken" : undefined;
@@ -449,24 +475,131 @@ export function enterVehicle(world: World, actor: Entity, v: Entity, seat = 255)
   const r = validateEnter(world, actor, v, seat); if (r) return r;
   const d = vehicleDefOf(world, v)!; const occ = seatsOf(world, v)!;
   if (seat === 255) for (seat = hasKeyFor(world, actor, v) ? 0 : 1; seat < d.seats && occ[seat]; seat++);
+  else if (seat === PASSENGER_SEAT) for (seat = 1; seat < d.seats && occ[seat]; seat++);
   writeSeat(world, v, seat, netIdOf(world, actor));
   world.add(actor, Driver, { vehicleNetId: netIdOf(world, v), seat });
   return undefined;
 }
+/** First free passenger seat (1..n-1), or undefined when the vehicle has none free. Never seat 0. */
+export function firstFreePassengerSeat(world: World, v: Entity): number | undefined {
+  const d = vehicleDefOf(world, v); const occ = seatsOf(world, v); if (!d || !occ) return undefined;
+  for (let i = 1; i < d.seats; i++) if (!occ[i]) return i;
+  return undefined;
+}
+/** True when seat 0 is occupied — the vehicle already has a driver (a passenger may board). */
+export const vehicleHasDriver = (world: World, v: Entity): boolean => (seatsOf(world, v)?.[0] ?? 0) !== 0;
+/** Board as a passenger: first free seat >= 1, never the driver seat. "full" when none is free,
+ * "no_passenger_seats" on a single-seat vehicle. The command form is seat 254 (see PASSENGER_SEAT). */
+export const enterVehicleAsPassenger = (world: World, actor: Entity, v: Entity): string | undefined => enterVehicle(world, actor, v, PASSENGER_SEAT);
+/**
+ * ADR-371 safe dismount search. Candidates, in order:
+ *  1. the legacy exit point beside the vehicle (left side, width/2 + 0.6 — the ADR-360 spot), when it is safe;
+ *  2. tile centres on expanding Chebyshev rings around the vehicle tile, out to `radius`, nearest the legacy
+ *     point first (so the familiar side wins) — land and shallow water first, deep water only on a second pass
+ *     (a rider at ground level can swim, but wading out beats swimming out).
+ * A candidate is safe when it sits outside the vehicle's footprint and `movementBlocked` (terrain, walls/doors,
+ * solid cells at the rider's level) does not block the step from the vehicle to it. Deterministic: fixed ring
+ * order, ties broken by tile coords, no rng. O(local tiles) only — never a scan over entities; called on exit,
+ * never per tick. Returns undefined when no safe tile exists inside `radius`.
+ */
+export function findSafeDismountTile(world: World, actor: Entity, cx: number, cy: number, heading: number, halfLength: number, halfWidth: number, level: number, radius: number): { x: number; y: number } | undefined {
+  const side = halfWidth + 0.6;
+  const lx = cx - Math.sin(heading) * side, ly = cy + Math.cos(heading) * side; // legacy left-side exit point
+  const blocked = (x: number, y: number, swim: boolean): boolean => movementBlocked(world, cx, cy, x, y, level, swim, actor);
+  if (!blocked(lx, ly, false) && waterDepth(world, lx, ly) !== WaterDepth.Deep) return { x: lx, y: ly };
+  const tx0 = Math.floor(cx), ty0 = Math.floor(cy);
+  const ch = Math.cos(heading), sh = Math.sin(heading);
+  const outside = (x: number, y: number): boolean => {
+    const dx = x - cx, dy = y - cy; const ax = ch * dx + sh * dy, ay = -sh * dx + ch * dy;
+    return Math.abs(ax) > halfLength + 0.3 || Math.abs(ay) > halfWidth + 0.3;
+  };
+  // One pass per water tier (0 = land/shallow, 1 = deep): rings ascending, nearest the legacy point first.
+  for (let tier = 0; tier < 2; tier++) {
+    for (let r = 1; r <= radius; r++) {
+      const ring: { x: number; y: number; d: number; tx: number; ty: number }[] = [];
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const x = tx0 + dx + 0.5, y = ty0 + dy + 0.5; if (!outside(x, y)) continue;
+        const deep = waterDepth(world, x, y) === WaterDepth.Deep;
+        if (tier === 0 ? deep : !deep) continue;
+        ring.push({ x, y, d: Math.hypot(x - lx, y - ly), tx: tx0 + dx, ty: ty0 + dy });
+      }
+      ring.sort((a, b) => a.d - b.d || a.tx - b.tx || a.ty - b.ty);
+      for (const c of ring) if (!blocked(c.x, c.y, tier === 1)) return { x: c.x, y: c.y };
+    }
+  }
+  return undefined;
+}
+/** Building level of a rider (same rule movement applies: Transform.z / levelHeight, clamped to ground). */
+const riderLevel = (world: World, actor: Entity): number => {
+  const t = world.get(actor, Transform); if (!t) return 0;
+  return Math.max(0, Math.round((t.z ?? 0) / gameplayDefs(world).building.levelHeight));
+};
+/** Safe spot beside vehicle `v` for `actor`, inside the normal search radius. Undefined when none exists. */
+export function safeDismountTile(world: World, actor: Entity, v: Entity): { x: number; y: number } | undefined {
+  const d = vehicleDefOf(world, v); const t = world.get(v, Transform); if (!d || !t) return undefined;
+  return findSafeDismountTile(world, actor, t.x, t.y, world.getField(v, Vehicle, "heading") ?? 0, d.footprint.length / 2, d.footprint.width / 2, riderLevel(world, actor), VEHICLE_PASSENGER_TUNING.dismountSearchRadiusTiles);
+}
 export function exitVehicle(world: World, actor: Entity): string | undefined {
   if (!world.has(actor, Driver)) return "not_riding";
   const v = ridingVehicle(world, actor); const seat = world.getField(actor, Driver, "seat")!;
+  // No safe tile, no exit: the rider stays seated (seat kept, Driver kept) and retries later — when the vehicle
+  // has moved on, or a tile frees up. Never strand a rider inside a solid, a wall, or deep water. A moving
+  // vehicle may still be left (the ADR-360 exit-while-driving case): the spot is found at the current pose.
+  if (v !== undefined) {
+    const spot = safeDismountTile(world, actor, v);
+    if (!spot) return "no_safe_spot";
+    world.remove(actor, Driver); world.getResource(DriveInputs)?.delete(actor);
+    if (seat === 0) { // ADR-360: the wagon driver left — the mount's driven speed ramps up from 0 next time
+      const m = entityByNetId(world, world.getField(v, Hitch, "parentNetId") ?? 0); if (m !== undefined) clearDrawnDriveSpeed(world, m);
+    }
+    if (world.getField(actor, AnimState, "anim") === Anim.Sit) world.set(actor, AnimState, { anim: Anim.Idle, startTick: world.tick });
+    if (seatsOf(world, v)?.[seat] === netIdOf(world, actor)) writeSeat(world, v, seat, 0);
+    world.set(actor, Transform, { x: spot.x, y: spot.y });
+    return undefined;
+  }
+  // The vehicle entity is already gone: free the seat reference and leave the rider where they stand.
   world.remove(actor, Driver); world.getResource(DriveInputs)?.delete(actor);
-  if (seat === 0 && v !== undefined) { // ADR-360: the wagon driver left — the mount's driven speed ramps up from 0 next time
+  if (world.getField(actor, AnimState, "anim") === Anim.Sit) world.set(actor, AnimState, { anim: Anim.Idle, startTick: world.tick });
+  return undefined;
+}
+/**
+ * ADR-371 forced exit (vehicle destroyed / despawned, or a caller that must get a rider out now): always
+ * succeeds. Tries the fallback radius around the vehicle's pose (or the rider's own position when the vehicle
+ * is gone); when even that finds nothing, the rider stays exactly where they already stand — never moved onto
+ * an unchecked tile. The seat is freed and the Driver component removed either way.
+ */
+export function forceExitVehicle(world: World, actor: Entity): string | undefined {
+  if (!world.has(actor, Driver)) return "not_riding";
+  const v = ridingVehicle(world, actor); const seat = world.getField(actor, Driver, "seat")!;
+  world.remove(actor, Driver); world.getResource(DriveInputs)?.delete(actor);
+  if (seat === 0 && v !== undefined) {
     const m = entityByNetId(world, world.getField(v, Hitch, "parentNetId") ?? 0); if (m !== undefined) clearDrawnDriveSpeed(world, m);
   }
   if (world.getField(actor, AnimState, "anim") === Anim.Sit) world.set(actor, AnimState, { anim: Anim.Idle, startTick: world.tick });
-  if (v === undefined) return undefined;
-  if (seatsOf(world, v)?.[seat] === netIdOf(world, actor)) writeSeat(world, v, seat, 0);
-  const d = vehicleDefOf(world, v)!; const t = world.get(v, Transform)!; const h = world.getField(v, Vehicle, "heading")!;
-  const side = d.footprint.width / 2 + 0.6; // step out on the left side
-  world.set(actor, Transform, { x: t.x - Math.sin(h) * side, y: t.y + Math.cos(h) * side });
+  if (v !== undefined && seatsOf(world, v)?.[seat] === netIdOf(world, actor)) writeSeat(world, v, seat, 0);
+  const t = world.get(actor, Transform); if (!t) return undefined;
+  const R = VEHICLE_PASSENGER_TUNING.dismountFallbackRadiusTiles;
+  let spot: { x: number; y: number } | undefined;
+  if (v !== undefined) spot = safeDismountTile(world, actor, v) ?? undefined;
+  if (spot === undefined && v !== undefined) {
+    const d = vehicleDefOf(world, v); const vt = world.get(v, Transform);
+    if (d && vt) spot = findSafeDismountTile(world, actor, vt.x, vt.y, world.getField(v, Vehicle, "heading") ?? 0, d.footprint.length / 2, d.footprint.width / 2, riderLevel(world, actor), R);
+  }
+  if (spot === undefined) spot = findSafeDismountTile(world, actor, t.x, t.y, t.facing ?? 0, 0.5, 0.5, riderLevel(world, actor), R);
+  if (spot) world.set(actor, Transform, { x: spot.x, y: spot.y });
   return undefined;
+}
+/** Force every occupant of `v` out to a safe tile (O(seats)). The API a vehicle-destruction path must call;
+ * no in-sim path destroys a vehicle entity today — wrecked vehicles persist and are repairable, so the live
+ * safety net for a vanished vehicle is the vehicleSystem dangling-rider ejection above. */
+export function ejectVehicleOccupants(world: World, v: Entity): void {
+  const occ = seatsOf(world, v); if (!occ) return;
+  for (let seat = 0; seat < occ.length; seat++) {
+    const id = occ[seat] ?? 0; if (!id) continue;
+    const rider = entityByNetId(world, id);
+    if (rider !== undefined && world.has(rider, Driver) && world.getField(rider, Driver, "vehicleNetId") === netIdOf(world, v)) forceExitVehicle(world, rider);
+  }
 }
 
 /**
@@ -604,10 +737,13 @@ export function nearbyVehicleStationKinds(world: World, player: Entity): Set<num
   return out;
 }
 
-/** What Interact does for a vehicle target: exit when riding, else enter (seat 255) - caller makes the command. */
-export function vehicleInteractCommand(world: World, player: Entity, target: Entity | undefined): { def: typeof VehicleEnterCmd | typeof VehicleExitCmd; values: Record<string, number> } | undefined {
+/** What Interact does for a vehicle target: exit when riding, else enter (seat 255) - caller makes the command.
+ * ADR-371: `asPassenger` enters with seat 254 (first free passenger seat, never the driver seat) — the client
+ * sends that when the vehicle already has a driver, so a key-holder boards as a passenger instead of taking
+ * the wheel. */
+export function vehicleInteractCommand(world: World, player: Entity, target: Entity | undefined, opts?: { asPassenger?: boolean }): { def: typeof VehicleEnterCmd | typeof VehicleExitCmd; values: Record<string, number> } | undefined {
   if (world.has(player, Driver)) return { def: VehicleExitCmd, values: {} };
-  if (target !== undefined && world.has(target, VehicleSeats)) return { def: VehicleEnterCmd, values: { target, seat: 255 } };
+  if (target !== undefined && world.has(target, VehicleSeats)) return { def: VehicleEnterCmd, values: { target, seat: opts?.asPassenger ? PASSENGER_SEAT : 255 } };
   return undefined;
 }
 
