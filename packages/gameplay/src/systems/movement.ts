@@ -24,6 +24,7 @@ import type { PieceDef } from "../defs.js";
 import { TerrainRes } from "../world.js";
 import { WaterDepth, waterDepthAt, installSpatialIndex } from "@engine/world";
 import { STANCE_ANIM, stanceAllowsSprint, stanceMode, stanceMoveMul } from "../stance.js";
+import { makeNoise } from "./noise.js";
 
 /**
  * World-space (tile) move vector from screen-space input, |v| <= 1 (ADR-127). Screen axes sx (right +) / sy (down +)
@@ -270,6 +271,12 @@ export function applyMovementInput(world: World, e: Entity, actions: number, dt:
     if (x !== t.x || y !== t.y) {
       world.set(e, Transform, { x, y, facing: nextFacing });
       updateShaftOccupancy(world, e, t.x, t.y, x, y);
+      // ADR-388: walking / sprinting / swimming raise NoiseLevel (zombies hear it). Crouch multiplies inside makeNoise.
+      if (world.isRegistered(Survival) && world.has(e, Survival)) {
+        const n = gameplayDefs(world).noise;
+        const wet = (t.z < 0.5) && inDeepWater(world, x, y);
+        makeNoise(world, e, wet ? n.swim : sprint ? n.sprint : n.walk);
+      }
     } else world.set(e, Transform, { facing: nextFacing });
   }
   settleStandZ(world, e, dt); // ADR-212: decks are walked on at deck-top height

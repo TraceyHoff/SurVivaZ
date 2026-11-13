@@ -34,5 +34,5 @@
     "corpseSeconds": 5
   },
   "lightAvoid": { "phases": ["night", "dusk"], "gridCell": 8, "rebuildTicks": 10, "edgeMargin": 0.75, "paceSeconds": 3, "headlightRadius": 9, "minRadius": 2 },
-  "noise": { "gather": 8, "build": 10, "attack": 9, "structureHit": 12, "door": 5, "decayPerSec": 0.2 }
+  "noise": { "gather": 8, "build": 10, "attack": 9, "structureHit": 12, "door": 5, "walk": 12, "sprint": 18, "swim": 7, "decayPerSec": 0.2 }
 }

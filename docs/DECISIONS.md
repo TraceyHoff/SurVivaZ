@@ -8050,3 +8050,30 @@ per row, quick-jump icons, entry buttons and headers, no 📖 anywhere in the Gu
 Updated: ADR-362 (resolved fact items now carry `icon`), ADR-363/ADR-364 (fact-row `<img>`
 icons are allowed, scoped to fact rows / action-image figures respectively).
 
+
+## ADR-388: Quieter crouching, and the render path is ready for dedicated crouch frames (SurVivaZ)
+
+Context: ADR-244 already toggles crouch (walk ×0.6, noise ×0.4, zombie sight ×0.55) and ADR-241 already
+asks the doll for `crouch_idle` → `idle` / `crouch_walk` → `crouch_idle` → `walk` → `idle`. The live v1
+customization pack (and every wear layer) has no dedicated crouch clips; only the excluded v2 sample does.
+Gather / build / attack / door / structureHit already went through `makeNoise` (so the crouch multiplier
+applied), but walking produced no `NoiseLevel` at all, so "quieter when crouched" was almost meaningless
+for sneaking past zombies. AI humans already sneak-crouch in the 4..10 tile band (ADR-252). Art & Assets
+will author the missing clips; this ADR must not paint, reuse, or recolor walk frames as crouch.
+
+Decision: keep the ADR-241 key lookup and v1 fallback (no fake art). Add `walk` (12), `sprint` (18) and
+`swim` (7) to `zombies.json` `noise`. `applyMovementInput` emits that amount through `makeNoise` when a
+`Survival` entity actually changes position (authority only, same as every other source), so crouch still
+multiplies it to 0.4×. Swimming uses the swim amount (water muffles). A crouched body cannot sprint, so
+it stays on walk ×0.4. Client footstep SFX (not zombie hearing) use `Anim.Crouch` at `CROUCH_STEP_GAIN`
+0.45. AI humans share this funnel, so their sneak-crouch is quieter too. Tests cover every noise table
+entry, standing vs crouched walk / swim, no noise when still, determinism, crouched AI walk, and the
+anim chain keys.
+
+Art landed in `5eb3c037` (`docs/ART_KEYS_CROUCH.md`): dedicated `crouch_idle` (2 frames @ 4 fps) and
+`crouch_walk` (4 frames @ 8 fps), 8 facings, on every live v1 doll layer (body, wear, hair, hat, face,
+eyes, hands, accessories). Pages `cz_crouch_<slot>_<n>` stream like the ride pages; the ADR-241 chain
+still falls back while a page is paging in, or if a layer is missing the clip: `crouch_walk` falls back to the resident `walk` (the doll keeps stepping instead of sliding on idle) and `crouch_idle` to `idle`. Crouch pages are never boot-prefetched or cache-warmed (`collectWarmupPrefetchUrls` now skips every lazy doll page, not only ride pages), and page-ins stay inside the existing 2-uploads-per-frame budget, so a first crouch costs a few frames of fallback, not a stalled frame. The
+renderer reads frame counts, rects and anchors from the manifest (it does not hardcode them). AI
+humans share this rig; no separate bot sheets.
+

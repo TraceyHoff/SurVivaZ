@@ -22,7 +22,9 @@ export interface SoundEvent { key: string; pos?: Vec2; indoors?: boolean; gain?:
 export interface LoopSpec { id: string; key: string; pos?: Vec2; indoors?: boolean; gain: number; pitch?: number }
 
 /** Anim ids (core AnimState, wire-stable). */
-export const A = { Idle: 0, Walk: 1, Run: 2, Attack: 3, Hurt: 4, Die: 5, Gather: 6, Build: 7, Eat: 8, Swim: 14, Punch: 15, Harvest: 16, Chop: 17, Mine: 18, Drink: 19 } as const;
+export const A = { Idle: 0, Walk: 1, Run: 2, Attack: 3, Hurt: 4, Die: 5, Gather: 6, Build: 7, Eat: 8, Swim: 14, Punch: 15, Harvest: 16, Chop: 17, Mine: 18, Drink: 19, Crouch: 22 } as const;
+/** ADR-388: crouched footsteps are quieter (client SFX only; zombie hearing is NoiseLevel). */
+export const CROUCH_STEP_GAIN = 0.45;
 const RANGED = new Set(["bow", "crossbow", "sling", "pistol", "rifle", "autorifle", "shotgun", "musket"]);
 const FAMILY_CLASS: Record<string, string> = { sword: "blade", knife: "blade", dagger: "blade", machete: "blade", bayonet: "blade", bat: "blunt", mace: "blunt", maul: "blunt",
   axe: "axe", throwing_axe: "axe", pickaxe: "pickaxe", spear: "spear", shovel: "shovel", bow: "bow", crossbow: "crossbow", sling: "sling", pistol: "pistol", rifle: "rifle", autorifle: "autorifle", shotgun: "shotgun", musket: "musket" };
@@ -79,7 +81,8 @@ export class AudioDirector {
           const stride = swim ? 1.6 : e.kind === "zombie" ? STEP_DIST.zombie : e.kind === "animal" ? STEP_DIST.animal : run ? STEP_DIST.run : STEP_DIST.walk;
           if (mem.stepAcc >= stride) { mem.stepAcc = 0;
             const key = swim ? "footstep.swim" : e.kind === "zombie" ? "footstep.zombie" : e.kind === "animal" ? "footstep.animal" : `footstep.${e.surface ?? "grass"}`;
-            if (e.kind !== "animal" || near(e, 8)) at(e, key, { gain: run ? 1.15 : 1 }); }
+            const crouch = e.anim === A.Crouch;
+            if (e.kind !== "animal" || near(e, 8)) at(e, key, { gain: crouch ? CROUCH_STEP_GAIN : run ? 1.15 : 1 }); }
         } else if (d >= 3) mem.stepAcc = 0;
       }
       // ---- attacks ----

@@ -113,7 +113,7 @@ export function collectWarmupPrefetchUrls(manifest: unknown, base: string): stri
     const a = raw as { key?: string; image?: string; residency?: string; emissiveImage?: string };
     const key = a.key ?? "";
     if (typeof a.image !== "string" || !isWarmupCandidate(key)) continue;
-    if (isRidePageKey(key)) continue;
+    if (isLazyDollPageKey(key)) continue; // ride / crouch: stream on use, never cache-warmed at boot
     if (a.residency !== "stream") continue;
     if (shouldPrefetchAtlas(key, a.image, a.residency)) continue; // already warmed by collectPrefetchUrls
     urls.push(resolve(a.image));

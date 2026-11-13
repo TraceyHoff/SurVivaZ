@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { AudioDirector, A, surfaceOf, weaponClass, tierMaterial, type EntSnap } from "../src/audio/events.js";
+import { AudioDirector, A, CROUCH_STEP_GAIN, surfaceOf, weaponClass, tierMaterial, type EntSnap } from "../src/audio/events.js";
 import { MusicDirector } from "../src/audio/music.js";
 import { AmbienceDirector, daylight, dayBedKey } from "../src/audio/ambience.js";
 import { LoopSet } from "../src/audio/loops.js";
@@ -22,6 +22,19 @@ describe("ADR-117 event mapping", () => {
     expect(keys(z.step([P({ id: 9, kind: "zombie", sub: "walker", x: 1.2 })], { now: 0.1, listener: L, rng: () => 0.99 }))).toContain("footstep.zombie");
   });
   test("teleport (>3 tiles) does not spam steps", () => { const d = settled(); d.step([P()], { now: 0, listener: L }); expect(keys(d.step([P({ x: 10 })], { now: 0.1, listener: L }))).not.toContain("footstep.grass"); });
+  test("ADR-388 crouched footsteps are quieter than a walk", () => {
+    const walk = settled(); walk.step([P()], { now: 0, listener: L });
+    const crouch = settled(); crouch.step([P()], { now: 0, listener: L });
+    const wg: number[] = [], cg: number[] = [];
+    for (let i = 1; i <= 10; i++) {
+      const we = walk.step([P({ x: i * 0.25, anim: A.Walk, surface: "grass" })], { now: i * 0.1, listener: L }).events.filter((e) => e.key === "footstep.grass");
+      const ce = crouch.step([P({ x: i * 0.25, anim: A.Crouch, surface: "grass" })], { now: i * 0.1, listener: L }).events.filter((e) => e.key === "footstep.grass");
+      for (const e of we) wg.push(e.gain ?? 1);
+      for (const e of ce) cg.push(e.gain ?? 1);
+    }
+    expect(wg.length).toBeGreaterThan(0); expect(cg.length).toBe(wg.length);
+    expect(cg[0]).toBe(CROUCH_STEP_GAIN); expect(wg[0]).toBe(1); expect(cg[0]!).toBeLessThan(wg[0]!);
+  });
   test("attack start -> swing / fire by weapon class; target hit uses attacker class", () => {
     const d = settled(); const z = { id: 5, kind: "zombie" as const, x: 1, y: 0, z: 0, sub: "runner", hp: 50, anim: A.Idle, animStart: 0 };
     d.step([P({ sub: "axe" }), z], { now: 0, listener: L, rng: () => 0.99 });

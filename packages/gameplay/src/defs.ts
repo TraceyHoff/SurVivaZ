@@ -247,7 +247,7 @@ export interface AiTuning {
   /** Task 15: max chase distance from a zombie's spawn anchor (homeX/homeY), in tiles. Beyond it a chasing zombie gives up and wanders (horde members and light/structure chasing are exempt). */
   readonly chaseLimitTiles: number;
 }
-export interface NoiseTuning { readonly gather: number; readonly build: number; readonly attack: number; readonly structureHit: number; readonly door: number; readonly decayPerSec: number }
+export interface NoiseTuning { readonly gather: number; readonly build: number; readonly attack: number; readonly structureHit: number; readonly door: number; readonly walk: number; readonly sprint: number; readonly swim: number; readonly decayPerSec: number }
 export interface WorldgenBand { readonly max: number; readonly tile: number; readonly nodes: readonly number[]; readonly nodeChance: number; readonly temp: number; readonly humidity: number }
 export interface WorldgenDef { readonly bands: readonly WorldgenBand[]; readonly unbuildableTiles: ReadonlySet<number>; readonly unwalkableTiles: ReadonlySet<number> }
 

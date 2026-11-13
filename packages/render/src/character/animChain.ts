@@ -40,7 +40,7 @@ const PUNCH = ATTACK.unarmed!;
 const AIM_BOW_DRAW = c("bow_draw", "bow_hold", "idle"), AIM_BOW_HOLD = c("bow_hold", "bow_draw", "idle"), AIM_GUN = c("gun_aim", "idle");
 const BLOCK = c("block", "idle");
 const BLOCK_HIT = c("block_hit", "block", "idle");
-const CROUCH_IDLE = c("crouch_idle", "idle"), CROUCH_WALK = c("crouch_walk", "crouch_idle", "walk", "idle");
+export const CROUCH_IDLE = c("crouch_idle", "idle"), CROUCH_WALK = c("crouch_walk", "crouch_idle", "walk", "idle");
 const CARRY_IDLE = c("carry_idle", "idle"), CARRY_WALK = c("carry_walk", "carry_idle", "walk", "idle");
 const SLEEP = c("sleep", "sit", "idle"), SLEEP_LIE = c("sleep_lie", "sleep", "sit", "idle"), SLEEP_LIE_UNDER = c("sleep_lie_under", "sleep_lie", "sleep", "sit", "idle");
 const VEHICLE = c("vehicle", "sit", "idle");
