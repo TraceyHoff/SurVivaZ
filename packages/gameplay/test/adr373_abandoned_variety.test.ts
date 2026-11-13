@@ -151,14 +151,27 @@ describe("ADR-373 abandoned variety", () => {
     expect(keys(w, r.placed).filter((k) => k === "foundation").length).toBe(9);
   });
 
-  it("raises density a little: SITE_CHANCE 0.15, ~15 sites per 100 chunks", () => {
+  it("raises density a little: SITE_CHANCE 0.15, ~15 planned sites per 100 chunks", () => {
+    // ADR-384 as delivered raised this to 0.25 to compensate for the strict
+    // single-level gate (only ~41% of planned sites are already flat, so
+    // 0.25 x ~41% ~= 10 realised ruins per 100 chunks — the ADR-373 level).
+    // GATE FIX (ADR-384 gate, 2026-11-13): 0.25 reshuffles the site spawn-point
+    // set and deterministically broke adr331 — bot0 respawned at a site point
+    // beside a terrain trap (a resource node on a ridge it cannot climb) and
+    // froze for the whole 120 s window. The strict gate alone (at 0.15) does
+    // NOT break adr331; only the 0.25 compensation does. The gate reverted to
+    // 0.15 so the spawn-point set matches the pre-384 base. TRADE-OFF: realised
+    // density is now ~6 ruins per 100 chunks (0.15 x ~41%) instead of ~10 — a
+    // visible reduction vs the live game. Restoring 0.25 needs the
+    // planner/pathfinder to re-target unreachable resource nodes (a new ADR),
+    // not a gate fix.
     expect(G.SITE_CHANCE).toBe(0.15);
-    // 1600 chunks at 0.15 -> mean 240, sd ~14.3; the old 0.12 gave 189 on this seed.
+    // 1600 chunks at 0.15 -> mean 240, sd ~14.3.
     let planned = 0;
     for (let cy = 0; cy < 40; cy++) for (let cx = 0; cx < 40; cx++) if (G.planAbandonedChunk(42, cx, cy)) planned++;
-    expect(planned).toBeGreaterThanOrEqual(190);
-    expect(planned).toBeLessThanOrEqual(290);
-    // Expected sites per area: 0.15/chunk = 15 per 100 chunks = 15 per 10x10-chunk region.
+    expect(planned).toBeGreaterThanOrEqual(200);
+    expect(planned).toBeLessThanOrEqual(280);
+    // Planned sites per area: 0.15/chunk = 15 per 100 chunks = 15 per 10x10-chunk region.
     expect(G.SITE_CHANCE * 100).toBeCloseTo(15);
   });
 

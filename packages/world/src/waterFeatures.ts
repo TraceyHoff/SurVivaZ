@@ -2,12 +2,14 @@
  * ADR-255: every world seed gets at least one lake, one river and one pond.
  * Features are pure functions of (seed, tx, ty) so chunk generation stays deterministic and streamable.
  *
- * Placement keeps clear of the four diagonal spawn quadrants (ADR-106 / Task 33): features sit on the
- * cardinal axes so the grass spawn patches around (±R, ±R) are not drowned.
+ * ADR-383: every seed also gets one elevated lake per 512-tile region — a lake whose water sits above
+ * sea level (surface level 4..7, vs the flat ADR-182 level 0), held in a bowl of higher terrain by the
+ * generator's rim (see generator.ts). Placement keeps clear of the four diagonal spawn quadrants (ADR-106 /
+ * Task 33): features sit on the cardinal axes so the grass spawn patches around (±R, ±R) are not drowned.
  */
 import { hash2 } from "./noise.js";
 
-export type WaterFeatureKind = "none" | "lake" | "river" | "pond";
+export type WaterFeatureKind = "none" | "lake" | "river" | "pond" | "elevatedLake";
 
 /** Survey window used by tests / docs: guaranteed features always lie inside |x|,|y| < this. */
 export const WATER_FEATURE_RADIUS = 120;
@@ -15,30 +17,56 @@ export const WATER_FEATURE_RADIUS = 120;
 const LAKE_SALT = 0x6c616b; // "lak"
 const POND_SALT = 0x706f6e; // "pon"
 const RIVER_SALT = 0x726976; // "riv"
+const ELEVATED_SALT = 0x656c76; // "elv"
+
+/** ADR-383: elevated-lake knobs (ProceduralOptions.elevatedLakes overrides these; `false` disables the feature).
+ *  level: water surface above the flat ADR-182 sea level (4..7 — well under HEIGHT_MAX, so the rim stays a hill,
+ *  not a sky lake). distance: far enough out that the starter lake/pond/river do not overlap it, close enough to
+ *  stay inside WATER_FEATURE_RADIUS with its rim. rimWidth: bowl ring around the disc (generator.ts). */
+export interface ElevatedLakeOptions {
+  minLevel?: number; maxLevel?: number;
+  minRadius?: number; maxRadius?: number;
+  minDistance?: number; maxDistance?: number;
+  rimWidth?: number;
+}
+export const ELEVATED_LAKE_DEFAULTS: Required<ElevatedLakeOptions> = {
+  minLevel: 4, maxLevel: 7, minRadius: 6, maxRadius: 10, minDistance: 84, maxDistance: 104, rimWidth: 4,
+};
 
 export interface WaterFeatureLayout {
   lake: { x: number; y: number; r: number };
   pond: { x: number; y: number; r: number };
   river: { angle: number; phase: number; amp: number; period: number; halfLen: number; width: number; offset: number };
+  /** ADR-383: elevated lake — centre, radius and water surface level (above the flat sea level 0). */
+  elevatedLake: { x: number; y: number; r: number; level: number };
 }
 
 /** Seed-derived lake / pond centres and river parameters (stable for the life of the world). */
-export function waterFeatureLayout(seed: number): WaterFeatureLayout {
+export function waterFeatureLayout(seed: number, elevated: ElevatedLakeOptions = ELEVATED_LAKE_DEFAULTS): WaterFeatureLayout {
   const s = seed >>> 0;
+  const el = { ...ELEVATED_LAKE_DEFAULTS, ...elevated };
   // Cardinals: E, N, W, S — spawn points use diagonals, so these stay clear of the 20-tile safe radii at the patches.
   const cardinals: readonly (readonly [number, number])[] = [[1, 0], [0, -1], [-1, 0], [0, 1]];
   const lakePick = Math.floor(hash2(s ^ LAKE_SALT, 1, 0) * 4) % 4;
   const pondPick = (lakePick + 1 + Math.floor(hash2(s ^ POND_SALT, 2, 0) * 3)) % 4;
+  // ADR-383: the elevated lake takes one of the two cardinals neither the lake nor the pond uses, further out.
+  const remaining = [0, 1, 2, 3].filter((i) => i !== lakePick && i !== pondPick);
+  const elevatedPick = remaining[Math.floor(hash2(s ^ ELEVATED_SALT, 1, 0) * remaining.length) % remaining.length]!;
+  const [edx, edy] = cardinals[elevatedPick]!;
   const [ldx, ldy] = cardinals[lakePick]!;
   const [pdx, pdy] = cardinals[pondPick]!;
   const lakeDist = 48 + Math.floor(hash2(s ^ LAKE_SALT, 3, 0) * 36); // 48..83
   const pondDist = 36 + Math.floor(hash2(s ^ POND_SALT, 3, 0) * 40); // 36..75
   const lakeR = 12 + Math.floor(hash2(s ^ LAKE_SALT, 4, 0) * 6); // 12..17
   const pondR = 3 + Math.floor(hash2(s ^ POND_SALT, 4, 0) * 2); // 3..4
+  const elevatedDist = el.minDistance + Math.floor(hash2(s ^ ELEVATED_SALT, 2, 0) * (el.maxDistance - el.minDistance + 1));
+  const elevatedR = el.minRadius + Math.floor(hash2(s ^ ELEVATED_SALT, 3, 0) * (el.maxRadius - el.minRadius + 1));
+  const elevatedLevel = el.minLevel + Math.floor(hash2(s ^ ELEVATED_SALT, 4, 0) * (el.maxLevel - el.minLevel + 1));
   const angle = hash2(s ^ RIVER_SALT, 1, 0) * Math.PI * 2;
   return {
     lake: { x: Math.round(ldx * lakeDist) + 0.5, y: Math.round(ldy * lakeDist) + 0.5, r: lakeR },
     pond: { x: Math.round(pdx * pondDist) + 0.5, y: Math.round(pdy * pondDist) + 0.5, r: pondR },
+    elevatedLake: { x: Math.round(edx * elevatedDist) + 0.5, y: Math.round(edy * elevatedDist) + 0.5, r: elevatedR, level: elevatedLevel },
     river: {
       angle,
       phase: hash2(s ^ RIVER_SALT, 2, 0) * Math.PI * 2,
@@ -67,9 +95,21 @@ export function riverPoint(layout: WaterFeatureLayout, u: number): { x: number; 
   return { x: u * c - v * s, y: u * s + v * c };
 }
 
-/** Which guaranteed feature covers (tx, ty). Lake > pond > river so small ponds are not erased by a river crossing. */
+/** Euclidean distance from the tile centre (tx+0.5, ty+0.5) to the elevated lake's centre. */
+export function elevatedLakeDist(layout: WaterFeatureLayout, tx: number, ty: number): number {
+  return Math.hypot(tx + 0.5 - layout.elevatedLake.x, ty + 0.5 - layout.elevatedLake.y);
+}
+
+/** Water surface level of the elevated lake covering (tx, ty), or undefined when the tile is not in it. */
+export function elevatedLakeAt(seed: number, tx: number, ty: number, layout = waterFeatureLayout(seed)): number | undefined {
+  return elevatedLakeDist(layout, tx, ty) <= layout.elevatedLake.r ? layout.elevatedLake.level : undefined;
+}
+
+/** Which guaranteed feature covers (tx, ty). Elevated lake > lake > pond > river so the elevated disc swallows
+ *  a river crossing it (the river runs at sea level either side) and small ponds are not erased by a river crossing. */
 export function waterFeatureAt(seed: number, tx: number, ty: number, layout = waterFeatureLayout(seed)): WaterFeatureKind {
   const x = tx + 0.5, y = ty + 0.5;
+  if (elevatedLakeDist(layout, tx, ty) <= layout.elevatedLake.r) return "elevatedLake";
   const dlx = x - layout.lake.x, dly = y - layout.lake.y;
   if (dlx * dlx + dly * dly <= layout.lake.r * layout.lake.r) return "lake";
   const dpx = x - layout.pond.x, dpy = y - layout.pond.y;
@@ -132,7 +172,7 @@ export function surveyWaterFeatures(
       const cy = q.pop()!, cx = q.pop()!;
       area++; minX = Math.min(minX, cx); maxX = Math.max(maxX, cx); minY = Math.min(minY, cy); maxY = Math.max(maxY, cy);
       const k = waterFeatureAt(seed, cx, cy, layout);
-      if (k === "lake") hasLake = true; else if (k === "river") hasRiver = true; else if (k === "pond") hasPond = true;
+      if (k === "lake" || k === "elevatedLake") hasLake = true; else if (k === "river") hasRiver = true; else if (k === "pond") hasPond = true;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
         const nx = cx + dx, ny = cy + dy;
         if (nx < -half || nx >= half || ny < -half || ny >= half) continue;

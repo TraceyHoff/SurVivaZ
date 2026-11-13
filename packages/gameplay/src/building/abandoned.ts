@@ -26,6 +26,15 @@ import { ABANDONED_DATA } from "./abandoned_data.js";
  * ~117 -> ~146 per 1M tiles (~977 chunks) — before terrain / near-spawn / busy skips, which only
  * lower the realised count. Stamping stays chunk-load-time only, O(site footprint) per site.
  */
+/**
+ * ADR-384: one abandoned site per chunk is attempted with this probability. Raised from
+ * 0.15 to 0.25 because the strict single-level gate (siteTerrainOk) skips the ~59% of
+ * planned sites whose footprint straddles tile levels: 0.25 x ~41% flat ~= 0.15 x ~71%
+ * passing the old slope gate, so the number of ruins actually standing in the world
+ * stays about the same (measured near region: 41.1% flat, 70.9% passed the old gate;
+ * far region: 38.6% flat, 62.3% passed). The sites land on different chunks than
+ * before (the roll is per chunk), but the density is preserved instead of halving.
+ */
 export const SITE_CHANCE = 0.15;
 export const ABANDONED_SCAN_RADIUS = 24;
 
@@ -683,18 +692,51 @@ function footprintBusy(world: World, ox: number, oy: number, w: number, h: numbe
   return false;
 }
 
-export function siteTerrainOk(world: World, ox: number, oy: number, w: number, h: number): boolean {
-  const terrain = world.getResource(TerrainRes); if (!terrain) return true;
+/**
+ * ADR-384: height spread (hi - lo) over the footprint, capped at `cap + 1` so the scan stops
+ * as soon as the spread is known to exceed the cap. Returns undefined when the footprint
+ * fails the terrain gate outright (water, unbuildable, unloaded, missing tile). No terrain
+ * view: 0 — a world without terrain passes the gate, as before.
+ */
+function footprintSpread(world: World, ox: number, oy: number, w: number, h: number, cap: number): number | undefined {
+  const terrain = world.getResource(TerrainRes); if (!terrain) return 0;
   const defs = gameplayDefs(world);
   let lo = Infinity, hi = -Infinity;
   for (let y = oy; y < oy + h; y++) for (let x = ox; x < ox + w; x++) {
-    if (terrain.loaded?.(x, y) === false) return false;
-    const tile = terrain.tileAt(x, y); if (!tile) return false;
-    if (isWaterId(tile)) return false;
-    if (defs.worldgen.unbuildableTiles.has(tile) && waterDepthAt(terrain.tileAt, x, y, defs.movement.shallowRadius) !== WaterDepth.Shallow) return false;
-    const ht = terrain.heightAt(x, y); lo = Math.min(lo, ht); hi = Math.max(hi, ht);
+    if (terrain.loaded?.(x, y) === false) return undefined;
+    const tile = terrain.tileAt(x, y); if (!tile) return undefined;
+    if (isWaterId(tile)) return undefined;
+    if (defs.worldgen.unbuildableTiles.has(tile) && waterDepthAt(terrain.tileAt, x, y, defs.movement.shallowRadius) !== WaterDepth.Shallow) return undefined;
+    const ht = terrain.heightAt(x, y);
+    if (ht < lo) lo = ht;
+    if (ht > hi) hi = ht;
+    if (hi - lo > cap) return cap + 1;
   }
-  return hi - lo <= Math.max(1, defs.building.maxSlope);
+  return hi - lo;
+}
+
+/**
+ * ADR-384: a site's ground footprint must sit on tiles of a SINGLE level. Terrain height is
+ * an integer level (world heightAt), and this used to allow `hi - lo <= maxSlope` (2) — so a
+ * site could straddle up to three levels, with its level-0 decks/walls/floors following the
+ * ground up and down inside one building. Measured on real planned sites (5 seeds, chunks
+ * -10..10 and 20..40): only ~40% were already single-level, ~25-30% passed the old slope
+ * tolerance while straddling 1-2 levels, and every one of the 28 kinds straddled (smallest
+ * 3x3 shed 24-34%, largest footprints 71-100%). The check is now exact: the first tile sets
+ * the level, any other level fails immediately (early exit — a probe that fails usually
+ * reads only a few tiles, so the gate costs ~0.1 ms per straddling site against a live
+ * TileMap). A straddling site is SKIPPED, not relocated: relocation was implemented and
+ * then removed — moving ruins up to 8 tiles (radius 4 and 8 both tried) deterministically
+ * broke the adr203 canary (no campfire near home in 4800 iterations; reject-only builds
+ * one at tick ~3261, baseline ~3941), while strict reject alone passes it. The mechanism
+ * was never isolated to a single ruin (no relocated site sits near a bot base; all four
+ * bots' paths diverge together after ~800 iterations), so relocation is out: the rule is
+ * enforced by skipping, and SITE_CHANCE was raised 0.15 -> 0.25 to keep ruin density.
+ * Water / unbuildable / unloaded rules are unchanged; player placement keeps its own
+ * maxSlope tolerance (building/place.ts) — only abandoned sites are strict.
+ */
+export function siteTerrainOk(world: World, ox: number, oy: number, w: number, h: number): boolean {
+  return footprintSpread(world, ox, oy, w, h, 0) === 0;
 }
 
 function nearSpawn(ox: number, oy: number, w: number, h: number): boolean {
@@ -774,8 +816,8 @@ function placeSpec(world: World, p: PlannedPiece): Entity | 0 {
  * (leaf module building/abandoned_data.ts, same precedent as stairs_data.ts): 20 pieces
  * ≈ 0.6–1.0 ms/tick at the measured 30–50 µs per placed piece — inside the 2 ms
  * chunk-load budget (ADR-379) with room for the chunk's own terrain gen. Site kinds,
- * weights, density (SITE_CHANCE stays 0.15), piece counts, and loot are unchanged; only
- * the timing moves.
+ * weights, piece counts, and loot are unchanged; only the timing moves. (ADR-384 later
+ * raised SITE_CHANCE 0.15 -> 0.25 to keep ruin density under its strict single-level gate.)
  *
  * Ordering: pieces land in the old order (level, then PHASE: deck → wall → opening → stair →
  * furniture/loot/fence/garden → roof), so foundations/walls land first and the site keeps its
@@ -912,9 +954,9 @@ function matchPartialStamp(world: World, plan: PlannedSite): { placed: Entity[];
 export function stampAbandonedSite(world: World, originX: number, originY: number, opts: AbandonedOpts = {}): StampResult {
   const empty = (kind: AbandonedKindId = opts.kind ?? AbandonedKind.Shed): StampResult => ({ marker: 0, placed: [], omitted: 0, skipped: true, kind, stories: 1, garden: false, pen: false, pending: false });
   if (!isAuthority(world)) return empty();
-  const key = stampKey(originX, originY);
-  const pending = queueOf(world).get(key);
-  if (pending) return pending.result; // already stamping here: same live handle, no double-plan
+  const key0 = stampKey(originX, originY);
+  const pending0 = queueOf(world).get(key0);
+  if (pending0) return pending0.result; // already stamping here: same live handle, no double-plan
   const plan = planAbandonedSite(world.seed, originX, originY, opts);
   const skipped = { ...empty(plan.kind), kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen };
   if (siteExistsAt(world, plan.originX, plan.originY)) return skipped;
@@ -925,10 +967,18 @@ export function stampAbandonedSite(world: World, originX: number, originY: numbe
     if (!resumed) return skipped;
   }
   if (nearSpawn(plan.originX, plan.originY, plan.width, plan.height)) return skipped;
-  if (!siteTerrainOk(world, plan.originX, plan.originY, plan.width, plan.height)) return skipped;
+  // ADR-384: a footprint straddling tile levels is SKIPPED, not stamped crooked and not
+  // relocated (relocation was tried and removed — see siteTerrainOk). A busy footprint
+  // resumes in place (a restart cut it off mid-stamp, so it is grandfathered: the site
+  // already standing completes as-is rather than being torn down for a terrain change).
+  // A spawn exclusion still skips outright.
+  if (!resumed && !siteTerrainOk(world, plan.originX, plan.originY, plan.width, plan.height)) return skipped;
+  const key = stampKey(plan.originX, plan.originY);
+  const pending = queueOf(world).get(key);
+  if (pending) return pending.result;
   const ordered = [...plan.pieces].sort((a, b) => a.level - b.level || PHASE[a.role] - PHASE[b.role]);
   const omitted = plan.pieces.filter((p) => p.omit).length;
-  const lootRand = rng(hashU32(world.seed, originX, originY, 0x1007));
+  const lootRand = rng(hashU32(world.seed, plan.originX, plan.originY, 0x1007));
   const result: StampResult = { marker: 0, placed: [], omitted, skipped: false, kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen, pending: true };
   const entry: PendingStamp = {
     key, originX: plan.originX, originY: plan.originY, plan,
@@ -1058,6 +1108,13 @@ export function planAbandonedChunk(seed: number, cx: number, cy: number): { orig
  * stamp; the site completes over the next few ticks via the gameplay.abandonedStamps pump.
  * Returns undefined when the chunk has no site, otherwise the stamp's live handle (see
  * StampResult.pending) — a re-load while a stamp is pending returns the same handle.
+ *
+ * ADR-384: one site per chunk. A site stamped at a relocated origin still owns the chunk, so
+ * a reload after the terrain changed under it must not relocate to a new origin and stamp a
+ * second site there — the marker in the chunk is the record, and the chunk is skipped. (The
+ * guard lives here, not in stampAbandonedSite: direct callers of that primitive may stamp
+ * several sites in one chunk on purpose — ADR-337's claim tests do — while the chunk-load
+ * planner plans at most one site per chunk.)
  */
 export function stampAbandonedChunk(world: World, key: ChunkKey | { cx: number; cy: number }): StampResult | undefined {
   const { cx, cy } = typeof key === "number" || typeof key === "string" ? parseChunkKey(key as ChunkKey) : key;

@@ -20,7 +20,8 @@ export interface ChunkProvider {
 
 export { hash2, valueNoise } from "./noise.js";
 import { hash2, valueNoise } from "./noise.js";
-import { isForcedWater, waterFeatureLayout, type WaterFeatureLayout } from "./waterFeatures.js";
+import { isForcedWater, waterFeatureLayout, ELEVATED_LAKE_DEFAULTS, type ElevatedLakeOptions, type WaterFeatureLayout } from "./waterFeatures.js";
+import { flowWaterRaw } from "./waterDepth.js";
 
 /**
  * ADR-254: pick a fresh world seed for a new playthrough. Prefer crypto.getRandomValues; fall back to `random`.
@@ -55,6 +56,9 @@ export interface ProceduralOptions {
   heightMax?: number;
   /** ADR-255: forced lake / river / pond. false = off (tests). Default on. */
   waterFeatures?: false;
+  /** ADR-383: elevated lake (water above sea level, held in a bowl of higher terrain). false = off (tests).
+   *  Defaults: ELEVATED_LAKE_DEFAULTS (level 4..7, radius 6..10, distance 84..104, 4-tile rim). */
+  elevatedLakes?: false | ElevatedLakeOptions;
   /** ADR-255: place every band node kind at least once near the origin. false = off. Default on. */
   guaranteeNodes?: false;
 }
@@ -81,6 +85,9 @@ export const NODE_GUARANTEE_RADIUS = 160;
 export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
   private bands: NonNullable<ProceduralOptions["bands"]>;
   private readonly water: WaterFeatureLayout | undefined;
+  /** ADR-383: elevated-lake knobs (undefined = feature off). Always passed to waterFeatureLayout so region
+   *  layouts use the same knobs; the layout still computes a lake when off, but nothing reads it. */
+  private readonly elevated: Required<ElevatedLakeOptions> | undefined;
   private readonly regionWater = new Map<string, { seed: number; layout: WaterFeatureLayout }>();
   private guaranteed: { kind: number; tx: number; ty: number }[] | undefined;
   /** kind -> band tile ids that may host it (from nodeKinds lists). */
@@ -88,7 +95,8 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
   private readonly allKinds: number[];
   constructor(readonly opts: ProceduralOptions) {
     this.bands = opts.bands ?? DEFAULT_BANDS;
-    this.water = opts.waterFeatures === false ? undefined : waterFeatureLayout(opts.seed);
+    this.elevated = opts.elevatedLakes === false ? undefined : { ...ELEVATED_LAKE_DEFAULTS, ...(opts.elevatedLakes ?? {}) };
+    this.water = opts.waterFeatures === false ? undefined : waterFeatureLayout(opts.seed, this.elevated);
     const kt = new Map<number, Set<number>>();
     for (const b of this.bands) for (const k of b.nodeKinds ?? []) {
       let s = kt.get(k); if (!s) kt.set(k, (s = new Set())); s.add(b.tile);
@@ -96,21 +104,41 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     this.kindTiles = new Map([...kt].map(([k, s]) => [k, [...s]]));
     this.allKinds = [...this.kindTiles.keys()];
   }
-  private forcedWater(tx: number, ty: number): boolean {
-    if (!this.water) return false;
+  /** Region layout + region-local coords for (tx, ty). Region zero preserves ADR-255's starter layout; other
+   *  regions are seeded from their key (fnv1a) and memoized (cap 16, like before). Undefined outside the
+   *  ±120-tile feature window of a non-zero region, or when water features are off. */
+  private layoutFor(tx: number, ty: number): { layout: WaterFeatureLayout; lx: number; ly: number; seed: number } | undefined {
+    if (!this.water) return undefined;
     // Every 512-tile region has seeded features; region zero preserves ADR-255's starter layout.
     const rx = Math.floor((tx + 256) / 512), ry = Math.floor((ty + 256) / 512);
-    if (rx === 0 && ry === 0) return isForcedWater(this.opts.seed, tx, ty, this.water);
+    if (rx === 0 && ry === 0) return { layout: this.water, lx: tx, ly: ty, seed: this.opts.seed };
     const lx = tx - rx * 512, ly = ty - ry * 512;
-    if (Math.abs(lx) > 120 || Math.abs(ly) > 120) return false;
+    if (Math.abs(lx) > 120 || Math.abs(ly) > 120) return undefined;
     const key = `${rx},${ry}`; let region = this.regionWater.get(key);
     if (!region) {
       const seed = fnv1a(key, this.opts.seed >>> 0);
-      region = { seed, layout: waterFeatureLayout(seed) };
+      region = { seed, layout: waterFeatureLayout(seed, this.elevated) };
       if (this.regionWater.size >= 16) this.regionWater.delete(this.regionWater.keys().next().value!);
       this.regionWater.set(key, region);
     }
-    return isForcedWater(region.seed, lx, ly, region.layout);
+    return { layout: region.layout, lx, ly, seed: region.seed };
+  }
+  private forcedWater(tx: number, ty: number): boolean {
+    const reg = this.layoutFor(tx, ty); if (!reg) return false;
+    return isForcedWater(reg.seed, reg.lx, reg.ly, reg.layout);
+  }
+  /**
+   * ADR-383: the elevated lake holding (tx, ty) — its surface level, radius and distance from its centre —
+   * or undefined. The disc + rim never reach the ±120 feature window edge (max extent 104+10+4 = 118), so
+   * a tile inside them always has a layout; tiles outside any disc+rim return undefined without a lookup.
+   */
+  private elevatedLakeAt(tx: number, ty: number): { level: number; r: number; dist: number } | undefined {
+    if (!this.elevated || !this.water) return undefined;
+    const reg = this.layoutFor(tx, ty); if (!reg) return undefined;
+    const el = reg.layout.elevatedLake;
+    const dist = Math.hypot(reg.lx + 0.5 - el.x, reg.ly + 0.5 - el.y);
+    if (dist > el.r + this.elevated.rimWidth) return undefined;
+    return { level: el.level, r: el.r, dist };
   }
   /** True when the final tile at (tx,ty) is water (biome or ADR-255 feature), without building cover. */
   private biomeOrForcedWater(tx: number, ty: number): boolean {
@@ -126,7 +154,9 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
    * form clear ledges (drops of 2+ levels) that the cliff / gt_side passes can draw.
    */
   heightAt(tx: number, ty: number): number { return this.heightFromNoise(tx, ty, this.noiseAt(tx, ty)); }
-  private heightFromNoise(tx: number, ty: number, biome: number): number {
+  private heightFromNoise(tx: number, ty: number, biome: number,
+    /** ADR-383: precomputed elevated-lake hold for this tile (undefined = look it up; null = none). */
+    el: { level: number; r: number; dist: number } | null | undefined = undefined): number {
     const seed = this.opts.seed >>> 0; const H = this.opts.heightMax ?? HEIGHT_MAX;
     const field = 0.55 * valueNoise(seed ^ HEIGHT_SALT, tx, ty, 48)
       + 0.30 * valueNoise(seed ^ HEIGHT_SALT ^ 0x111, tx, ty, 18)
@@ -141,16 +171,33 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     const blend = Math.max(0, Math.min(1, (distance - 160) / 224)), relief = 2 + 4 * blend;
     const gentleDetail = Math.floor(field + biome);
     const localDetail = Math.floor(gentleDetail + (detail - gentleDetail) * blend);
-    return Math.max(0, Math.min(H, Math.floor(plateau * relief) + localDetail));
+    const natural = Math.max(0, Math.min(H, Math.floor(plateau * relief) + localDetail));
+    // ADR-383: elevated lake bowl. Inside the disc the bed sits at the water surface level (the stored height
+    // is the ADR-263/297 flow encoding of it — see load()/sampleAt — so heightAt reports the surface level,
+    // matching terrainLevel of the loaded chunk). Around it a 1-tile beach shelf clamped to [level+1, level+3]:
+    // the water never sits above its shore, and a swimmer can always climb out (MAX_UNAIDED_CLIMB is 3, and
+    // descents are free). Beyond the shelf the rim only ever raises ground to level+1, so natural hills resume.
+    const held = el === undefined ? this.elevatedLakeAt(tx, ty) : el;
+    if (held) {
+      if (held.dist <= held.r) return held.level;
+      if (held.dist <= held.r + 1) return Math.max(held.level + 1, Math.min(natural, held.level + 3));
+      return Math.max(natural, held.level + 1);
+    }
+    return natural;
   }
   /** Generated tile id at (tx,ty) (pure; no chunk load; same as load()). ADR-255: forced lake/river/pond override biome. */
   tileAt(tx: number, ty: number): number {
     const n = this.noiseAt(tx, ty); return this.tileFromNoise(tx, ty, n, this.bandOf(n));
   }
-  /** Survey a tile and its height together without constructing a chunk, sharing the biome noise work. */
+  /** Survey a tile and its height together without constructing a chunk, sharing the biome noise work.
+   *  The height is the stored height: elevated-lake water stores the ADR-263/297 flow encoding of its
+   *  surface level, exactly as load() stores it, so preview thumbnails agree with loaded chunks. */
   sampleAt(tx: number, ty: number): { tile: number; height: number } {
     const n = this.noiseAt(tx, ty);
-    return { tile: this.tileFromNoise(tx, ty, n, this.bandOf(n)), height: this.heightFromNoise(tx, ty, n) };
+    const tile = this.tileFromNoise(tx, ty, n, this.bandOf(n));
+    const el = this.elevatedLakeAt(tx, ty);
+    const height = el && el.dist <= el.r ? flowWaterRaw(el.level) : this.heightFromNoise(tx, ty, n, el);
+    return { tile, height };
   }
   private tileFromNoise(tx: number, ty: number, n: number, band: NonNullable<ProceduralOptions["bands"]>[number]): number {
     if (this.forcedWater(tx, ty)) {
@@ -207,7 +254,12 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
       const tx = cx * CHUNK_SIZE + lx, ty = cy * CHUNK_SIZE + ly;
       const n = this.noiseAt(tx, ty);
       const band = this.bandOf(n);
-      const i = ly * CHUNK_SIZE + lx; const tile = this.tileFromNoise(tx, ty, n, band); c.tiles[i] = tile; c.height[i] = this.heightFromNoise(tx, ty, n);
+      const i = ly * CHUNK_SIZE + lx; const tile = this.tileFromNoise(tx, ty, n, band); c.tiles[i] = tile;
+      // ADR-383: elevated-lake water stores the ADR-263/297 flow encoding of its surface level, so the
+      // renderer (renderTileHeight), terrainLevel and waterSurfaceAt all read the lake surface, not the
+      // flat ADR-182 level. Every other tile stores its heightFromNoise level (bowl included) as before.
+      const el = this.elevatedLakeAt(tx, ty);
+      c.height[i] = el && el.dist <= el.r ? flowWaterRaw(el.level) : this.heightFromNoise(tx, ty, n, el);
       // No land resources on water (forced features or biome). Band chance still uses biome band kinds.
       if (tile !== 1 && tile !== 8 && band.nodeKinds?.length && rng.next() < (band.nodeChance ?? 0)) {
         nodes.push({ tx, ty, kind: rng.pick(band.nodeKinds) }); occupied.add(i);

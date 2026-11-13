@@ -7502,3 +7502,164 @@ only runs when nav is needed, and the repo bench spread was not measured for thi
 confirm no regression). The `dismountReason` goal-direction probe adds one
 `rideClearanceBlocked` call per mounted tick; it is the same cheap segment check the
 move-direction probe already does.
+
+## ADR-383: Lakes above sea level — elevated (mountain / perched) lakes (SurVivaZ)
+
+**Context.** Tracey asked for lakes that sit above sea level: a water body in a bowl of higher terrain,
+held by surrounding higher ground. There is no `seaLevel` / `SEA_LEVEL` constant anywhere in the code —
+"sea level" is an emergent convention, not a value: the biome water band (noise < 0.3) plus the ADR-182
+rule that every natural water tile renders at one flat surface, `WATER_SURFACE_HEIGHT = 0`
+(`renderTileHeight` in `packages/world/src/waterDepth.ts`). So "above sea level" means a lake whose
+rendered water surface is a level L > 0 while ordinary lakes and seas stay at 0.
+
+**Design — reuse the existing water systems, do not invent a second one.** Every behaviour an elevated
+lake needs already exists for one of the two existing water kinds, and this ADR is the combination:
+
+- *Placement:* the ADR-255 forced-feature layout (`waterFeatureLayout`, pure function of seed) gains one
+  `elevatedLake` per 512-tile region — centre, radius 6..10, surface level 4..7, on one of the two
+  cardinals neither the lake nor the pond uses, at distance 84..104 (inside `WATER_FEATURE_RADIUS`).
+  `waterFeatureAt` reports `"elevatedLake"` for disc tiles (precedence over lake/pond/river, so a river
+  crossing the disc is swallowed by the lake and resumes at sea level either side). Deterministic and
+  streamable exactly like the existing lake: chunk generation stays a pure function of (seed, tx, ty),
+  and the disc + rim never reach the ±120 feature-window edge (max extent 104+10+4 = 118).
+- *Surface height:* the ADR-263/297 flow-water encoding (`flowWaterRaw(level)` in the stored height
+  byte) is the codebase's existing per-tile water-surface mechanism — it is how a shovel-dug channel
+  keeps its own level. Elevated-lake water tiles store `flowWaterRaw(level)`, so with zero renderer
+  changes `renderTileHeight` returns the elevated level, `terrainLevel` returns it, and
+  `waterSurfaceAt` (terrain.ts, the flow system's source check) reads it. Both ground renderers
+  (`render/src/tilemap.ts`, `render/src/terrainTiles.ts`) and the client's swimmer height
+  (`apps/client/src/view.ts`) already draw through `renderTileHeight`; a render test pins
+  `tileHeight` at the elevated level over the disc and 0 over the ordinary lake. The chunk codec
+  stores heights as signed bytes (flow raw 84..87 fits), and a codec round-trip test pins it.
+- *The bowl:* `heightFromNoise` shapes the terrain around the disc — inside the disc the bed sits at the
+  surface level; a 1-tile beach shelf around it is clamped to [level+1, level+3]; beyond the shelf the
+  rim only ever raises ground to level+1, out to 4 tiles, and natural hills resume. The shelf clamp is
+  load-bearing for movement: `terrainStepBlocked` (terrain-ladder.ts) blocks upward steps over
+  `MAX_UNAIDED_CLIMB = 3` unless a ladder spans the face, while descents are free — so a swimmer can
+  always climb out of the lake onto the shelf (rise ≤ 3, and a 1..3 drop into the water costs no fall
+  damage), and the water never sits above its shore. A test asserts every land tile touching the lake
+  is climbable from the water (rise ≤ 3) for 40 seeds.
+- *Behaves like a normal lake:* the lake is tile 1/8 water, so everything that routes through tile ids
+  or depth needs no change and is tested for parity, not assumed: `waterDepthAt` (deep centre, shallow
+  shore where a land shore exists), swimming (`swimTiles [1, 8]`), wetness / thirst / exposure
+  (`inWater`, tile-based), AI water crossing (`water_crossing.ts` — the same ford/swim/around rule
+  governs the elevated profile and the ordinary-lake profile, asserted rule-for-rule), and the flow
+  system (a dug channel below the rim floods from the elevated lake, because `waterSurfaceAt` reads
+  its surface — the dam-breach behaviour falls out of the existing code). Fishing and disease hooks:
+  there are none to wire — no fishing system exists (`fish_shoal` is a sand-band resource node) and
+  `diseases.ts` has no water hooks; anything tile-based includes the lake automatically.
+- *What is NOT true:* `Transform.z` is the building-floor height, not terrain height (ground level is
+  always z ≈ 0), so the swim-anim / no-sprint-while-swimming / loot-float checks (`z < 0.5`) work
+  unchanged at an elevated surface. The lake does not drown spawn points (cardinal vs diagonal
+  quadrants; tested). `heightAt` reports the surface level inside the disc (matching `terrainLevel`
+  of the loaded chunk) while `sampleAt` returns the stored flow raw (matching the chunk byte) — the
+  preview test's `sampleAt == chunk` contract is preserved, and `worldPreviewSvg` now shades by
+  decoded terrain level so the raw 80+ byte does not paint a white halo on the shore pixels.
+- *Knobs:* `ProceduralOptions.elevatedLakes` (`false` = off; otherwise `{minLevel, maxLevel, minRadius,
+  maxRadius, minDistance, maxDistance, rimWidth}`, defaults 4..7 / 6..10 / 84..104 / 4). Production
+  constructs the generator with `{ seed }` only, so the defaults are the live values; threading
+  `worldgen.json` through would mean reordering server boot (the generator is built before defs load)
+  and was left out rather than adding dead config.
+
+**Measurements (headless VM, tsx, medians — no phone ms).** Chunk-load cost, before vs after on the
+identical harness (88 chunks, 7 runs, fresh generator per run): before median-of-medians 4.49 ms/chunk
+(run medians 4.00..4.82), after 4.28 ms/chunk (run medians 4.12..4.85 excluding the warmup run) — ranges
+overlap completely, no regression shown, no speedup claimed. (Absolutes are VM tsx numbers, not the
+~0.75 ms/chunk quoted for built loads.) Bowl survey over 200 seeds: 0 violations — shelf land always in
+[level+1, level+3], outer rim always ≥ level+1, disc surface always exactly the elevated level.
+
+**Tests.** New: `packages/world/test/adr383_elevated_lakes.test.ts` (12 tests: layout, surface, bowl,
+climb-out, depth, spawn safety, survey, off-switch, far regions, preview decode),
+`packages/gameplay/test/adr383_elevated_lakes.test.ts` (3 tests: AI crossing parity, flow surface),
+`packages/render/test/adr383_elevated_lakes.test.ts` (1 test: tileHeight). Full suites, serialized,
+TMPDIR under ~/workspace: world 91 passed, render 506 passed + 2 skipped, gameplay 2,091 passed +
+3 skipped, client 895 passed — 0 failed anywhere. Typecheck EXIT 0 all 11 projects (lockfile-pinned
+TypeScript 5.9.3).
+
+**Honest cuts.** In ~32% of seeds (64/200) biome sea water touches the elevated disc, and in ~5% (23/500)
+the lake has no land shore at all (it merges with a sea). There the raised disc sits in flat sea water
+and the L-vs-0 step renders exactly like existing shovel-dug flow water — flat quads at different
+heights with no side faces (`terrainTiles.ts` draws no drop edges for water) — so it reads as a raised
+water plateau, not a bowl. That is a cosmetic edge, not a trap: water is traversable, and where a land
+shore exists it is always climbable. Fixing it properly would mean noise-aware siting (choosing the
+lake's cardinal by the height field, not by hash), which duplicates the biome formula into the layout
+and was judged out of scope for this slice; it is the natural follow-up if Tracey finds the sea-merged
+lakes ugly. No live visual verification was possible here: Tracey's eyes on the live build are the real
+check — the lake should read as water sitting visibly higher than the surrounding sea, ringed by a
+raised shore. No graphics-quality change; no new art; no input changes; no wire change; no gameplay,
+balance, or tuning values changed beyond the feature itself.
+
+## ADR-384: All abandoned structures built on one tile level (SurVivaZ)
+
+Tracey asked that no abandoned structure be built across two different tile levels: every
+ruin's ground footprint must sit on tiles of a single level. Two-story ruins keep their L1
+(the rule is about the ground footprint's terrain level, not the building's floors).
+
+What the code did before: `siteTerrainOk` (packages/gameplay/src/building/abandoned.ts) let a
+footprint pass when `hi - lo <= maxSlope` (2, from building tuning in tiers.json), so a site
+could straddle up to three distinct integer terrain levels and still stamp, its level-0
+decks/walls/floors following the ground up and down inside one building. Per-piece placement
+(building/place.ts) only checks slope per 1x1 piece, never per site — that was the gap.
+Measured on real planned sites (ProceduralGenerator, 5 seeds): near region (chunks -10..10)
+41.1% of planned sites were already single-level, 15.2% spread 1, 14.6% spread 2, 29.1%
+spread 3+; far region (chunks 20..40) 38.6% single-level. All 28 kinds straddled (smallest
+3x3 shed 24-34%, largest footprints 71-100%: homestead 83-85%, barn 75-86%, manor 71-100%).
+
+Design (strict reject, no relocation, density compensation): `siteTerrainOk` is now exact —
+`footprintSpread(world, ox, oy, w, h, 0) === 0`, early-exiting on the second distinct height
+(~0.1 ms per straddling site against a live TileMap). A straddling site is SKIPPED in
+`stampAbandonedSite` (a busy footprint still resumes in place via ADR-382's
+`matchPartialStamp`, so a pre-384 partial stamp completes as-is — grandfathered, no
+migration; already-stamped sites stay as-is). Player placement keeps its own maxSlope
+tolerance; only abandoned sites are strict. Relocation was implemented first (spiral search,
+radius 8, only for spread 1..2 sites the old gate would have stamped) and then REMOVED:
+moving ruins deterministically broke the adr203 canary (no campfire near home in 4800
+iterations, at both radius 8 and radius 4), while strict reject alone passes it (campfire
+at tick ~3261, vs baseline ~3941). The mechanism was never isolated to a single ruin — no
+relocated site sits near a bot base, and all four bots' paths diverge together after ~800
+iterations (identical through 800, deterministic run-to-run) — so relocation is out and the
+rule is enforced by skipping. Because the strict gate stamps only ~41% of planned sites,
+`SITE_CHANCE` was raised 0.15 -> 0.25 so the realised density stays ~10 ruins per 100
+chunks (0.25 x 0.41 ~= 0.15 x 0.71), the same world richness ADR-373 gave; the ADR-373
+density test was updated to 0.25 / ~25 planned per 100 chunks. No levelling: there is no
+terrain-levelling precedent in the codebase (terrain is only edited by players digging), so
+the terrain is never rewritten to fit a ruin. `ai_spawn.ts` only reads `planAbandonedChunk`
+(pure, unchanged) for AI spawn points beside seeded ruins — left unchanged; `claim_build.ts`
+rebuilds already-stamped claimed ruins from the same plan — unchanged (grandfathered).
+ADR-382 slicing is intact (plan ~0.1 ms, postSim pump <= 20 pieces/tick, marker only at
+completion, rollback on unload, matchPartialStamp resume). No graphics change, no new art,
+no wire change, no gameplay/balance/tuning change beyond the gate and the SITE_CHANCE
+compensation.
+
+Tests: new packages/gameplay/test/adr384_single_level_ruins.test.ts (9 tests): siteTerrainOk
+exactness (flat passes, one tile up fails, water fails, no-terrain passes); a slope site is
+skipped, not stamped straddling (spread 1, which the old gate passed); steep ground stays
+skipped (no resurrection); flat ground stamps exactly where planned; all 28 kinds skip on a
+slope and stamp flat on flat ground, never straddling; two-story kinds (TwoStoryCottage,
+TwoStoryFarmhouse, Inn, Manor = 2 stories; Townhouse = 3) keep their upper floor on flat
+ground and skip on a slope; chunk reload does not add a second site (standing site
+grandfathered); chunk-load stamping skips a straddling site and stamps a flat one (real
+ChunkManager + ProceduralGenerator, seed 1234); SITE_CHANCE compensation keeps realised
+density near the old level (plan rate ~0.25, flat rate ~0.41, realised ~0.10/chunk).
+Results: abandoned suites 17 files / 208 tests pass; canaries adr203 (3) + adr252-live (8)
+= 11/11 pass, twice; typecheck EXIT 0 all 11 projects (pinned TS 5.9.3). No phone ms claimed;
+no live visual verification was possible here — Tracey's eyes on the live build are the real
+check that ruins sit flat. Known edge: a server restart mid-stamp plus a terrain change
+under the site before reload could orphan the partial site (sub-second window, no crash);
+a restart mid-stamp with unchanged terrain resumes it as before.
+
+Gate fix (2026-11-13, gate commit 59aaffa): the 0.25 SITE_CHANCE compensation was REVERTED
+to 0.15. The 0.25 reshuffles the site spawn-point set (planAbandonedChunk rolls sites at
+SITE_CHANCE, and ai_spawn.ts reads the plan for bot respawn points), which deterministically
+broke adr331 on seed 5: bot0 respawned at a site point (50,674) beside a terrain trap — a
+resource node on a ridge it cannot climb (rise +6, max unaided climb 3) — and its goTo target
+(43.5,681.5) stayed constant while its displacement stayed exactly 0.0 for the whole 120 s
+window. The strict single-level gate alone (at 0.15) does NOT break adr331; only the 0.25
+compensation does (verified: 384-only at 0.15 passes adr331 2/2). The freeze mechanism itself
+is a pre-existing planner/pathfinder gap (the bot picks the nearest resource node without
+checking reachability, and goTo falls back to walking directly at an unreachable target when
+walkerWaypoint cannot route) — it is NOT fixed here. Trade-off of the revert: realised ruin
+density is now ~0.06/chunk (~6 per 100 chunks) instead of ~0.10 — a visible reduction vs the
+live game. Restoring 0.25 needs the planner/pathfinder to re-target unreachable resource
+nodes (a new ADR). The ADR-373 density test and the ADR-384 density test were updated to
+0.15 / ~15 planned per 100 chunks. The strict single-level gate itself is unchanged.
