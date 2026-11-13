@@ -18,6 +18,7 @@ import { SEASON_GROUND_GLSL } from "./season.js";
 import { terrainDropEdges, DROP_EDGE_GLSL } from "./dropEdges.js";
 import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/util.js";
 import { WATERFALL_MIN_DROP } from "./tilemap.js";
+import { planWaterfallArt, waterfallArtResident, isWaterfallSheetAt, VIEW_PLUS_X, VIEW_PLUS_Y, WATERFALL_OVERLAY_MODE } from "./waterfallTiles.js";
 import type { AtlasManager } from "./assets/atlasManager.js";
 import type { Rect } from "./camera.js";
 import { TileId, TERRAIN_SPRITES, isWaterTile } from "./ids.js";
@@ -43,14 +44,18 @@ void main() {
   ivec2 tc = ivec2((entry % 1024) * 2, entry / 1024);
   vec4 uvr = texelFetch(uFrames, tc, 0); vec4 dim = texelFetch(uFrames, tc + ivec2(1, 0), 0);
   vec2 c = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
-  vec2 px = c * dim.xy; // frame px
-  vUvRaw = vec3(mix(uvr.xy, uvr.zw, c), dim.z); vLayer = int(dim.z + 0.5); vRect = uvr; vLocal = px; vInfo = vec4(dim.xy, aB.z, aC.z); vCorn = aD; vOrg = aA.xy - 0.5; vArt = aC.xyw;
+  // ADR-389: mask bit 8 = flipX (Art's py/ny are mirrors of px/nx). Flip UVs, local x and the anchor.
+  float flip = float((int(aB.z + 0.5) & 8) != 0);
+  vec2 cu = vec2(mix(c.x, 1.0 - c.x, flip), c.y);
+  vec2 px = cu * dim.xy; // frame px
+  vec2 anchor = vec2(mix(aC.x, dim.x - aC.x, flip), aC.y);
+  vUvRaw = vec3(mix(uvr.xy, uvr.zw, cu), dim.z); vLayer = int(dim.z + 0.5); vRect = uvr; vLocal = px; vInfo = vec4(dim.xy, aB.z, aC.z); vCorn = aD; vOrg = aA.xy - 0.5; vArt = vec3(anchor, aC.w);
   vec2 pivot = vec2((aA.x - aA.y) * uIso.x, (aA.x + aA.y) * uIso.y - aA.z * uIso.z); // tile centre
-  vec2 iso = pivot + px - aC.xy;
+  vec2 iso = pivot + px - anchor;
   // world position (for overlays) of the ground point under this pixel
-  vec2 d = (px - aC.xy) / uIso.xy; vView = vec2(aA.x, aA.y) + vec2(d.x + d.y, d.y - d.x) * 0.5;
+  vec2 d = (px - anchor) / uIso.xy; vView = vec2(aA.x, aA.y) + vec2(d.x + d.y, d.y - d.x) * 0.5;
   vWorld = vec2(uRot.x * vView.x + uRot.y * vView.y, -uRot.y * vView.x + uRot.x * vView.y);
-  float hp = aC.y - px.y; // px above pivot
+  float hp = anchor.y - px.y; // px above pivot
   float key = aA.x + aA.y + aA.z * uZFactor + 0.004 - max(hp, -uIso.y) / uIso.y; // ground plane; skirt clamped to the front corner
   vKey = aA.x + aA.y + aA.z * uZFactor + 0.004;
   gl_Position = vec4(isoToClip(iso), keyToNdc(key), 1.0);
@@ -79,7 +84,8 @@ vec3 crispUv(vec3 uv, vec2 w) {
 void main() {
   vec2 uv = clamp(crispUv(vec3(vUv.xy, vUv.z), fwidth(vUv.xy)).xy, vRect.xy, vRect.zw);
   vec4 t = texture(uAtlas, vec3(uv, vUv.z));
-  if (t.a < 0.5) discard;
+  int artEarly = int(vArt.z + 0.5);
+  if (t.a < (artEarly == 4 ? 0.01 : 0.5)) discard;
   // ADR-249: per-pixel ground-plane depth. The clamp (skirt = front-corner key) is not linear over the frame quad, so the
   // per-vertex key interpolated to ~0.35 tile behind the true ground plane mid-diamond: the vertex-colour mesh won the
   // depth test almost everywhere (hid gt water/land art; only small triangles near the front corners showed).
@@ -90,8 +96,14 @@ void main() {
   vec2 q = vLocal - vArt.xy; // diamond centre = the cell anchor (legacy 32,16; gt 34,18)
   bool inDiamond = abs(q.x) / uIso.x + abs(q.y) / uIso.y <= 1.02;
   int mask = int(vInfo.z + 0.5);
-  if (!inDiamond && q.y > 0.0) { bool right = q.x > 0.0; if (right ? (mask & 1) == 0 : (mask & 2) == 0) discard; }
+  int art = int(vArt.z + 0.5);
+  // ADR-389: waterfall fall sheets are full-frame art (mode 3) — no diamond / skirt discard, no ground overlays.
+  // Mode 4 is a lip / pool impact overlay: keep the diamond, write source alpha, and let the dest/source
+  // water underneath show through (the pool is not a full-diamond refill).
+  if (art != 3) { if (!inDiamond && q.y > 0.0) { bool right = q.x > 0.0; if (right ? (mask & 1) == 0 : (mask & 2) == 0) discard; } }
   vec3 c = t.rgb;
+  if (art == 3) { oColor = vec4(c, 1.0); oEmissive = vec4(0.0); return; }
+  if (art == 4) { oColor = vec4(c, t.a); oEmissive = vec4(0.0); return; }
   if (vInfo.w > 0.5) { // ADR-184: smooth per-pixel shore->deep gradient (bilinear corner tints; continuous across tiles)
     vec2 f = clamp(vView - vOrg, 0.0, 1.0); // view-space cell + view-ordered corner tints
     float k = mix(mix(vCorn.x, vCorn.y, f.x), mix(vCorn.w, vCorn.z, f.x), f.y); k = smoothstep(0.0, 1.0, k);
@@ -110,7 +122,6 @@ void main() {
   if (vInfo.w < -0.5) { // ADR-249: gt_ice decal (water = -1): lift the dark diamond outline so frozen water reads as one sheet
     float rim = smoothstep(0.8, 1.0, abs(q.x) / uIso.x + abs(q.y) / uIso.y); c = mix(c, max(c, vec3(0.72, 0.85, 0.95)), rim * 0.85);
   }
-  int art = int(vArt.z + 0.5);
   if (vInfo.w < 0.5 && art == 0) c = seasonGround(c, vWorld, uSeason); // ADR-239 (skirts too, so cliff faces match); gt art is seasonal already
   if (inDiamond && vInfo.w < 0.5 && art < 2) {
     float m = vnoise(vWorld * 0.9) * 0.65 + vnoise(vWorld * 3.1 + 11.0) * 0.35;
@@ -132,7 +143,9 @@ void main() {
   oColor = vec4(c, 1.0); oEmissive = vec4(0.0);
 }`;
 
-interface TileChunk { vao: WebGLVertexArrayObject; vbo: WebGLBuffer; count: number; stamp: number; cx: number; cy: number; maxZ: number; minZ: number; atlasVersion: number; art: number }
+export { VS as TERRAIN_TILES_VS, FS as TERRAIN_TILES_FS };
+
+interface TileChunk { vao: WebGLVertexArrayObject; vbo: WebGLBuffer; count: number; overlayVao?: WebGLVertexArrayObject; overlayCount?: number; stamp: number; cx: number; cy: number; maxZ: number; minZ: number; atlasVersion: number; art: number }
 
 /** ADR-253: view cell (X, Y) of quarter q -> its world tile (inverse of viewRect on a unit cell). */
 export function viewCellToTile(X: number, Y: number, q: number): { x: number; y: number } {
@@ -218,8 +231,10 @@ export class TileTerrain {
     const hAt = (X: number, Y: number): number => { const x = wx(X, Y), y = wy(X, Y); const ch = map.getChunk(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE)); if (!ch) return -99; const i = (((y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE) * CHUNK_SIZE + (((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE); return ch.tiles[i] === 0 ? -99 : renderTileHeight(ch.tiles[i]!, ch.height[i]!) - (isWaterTile(ch.tiles[i]!) ? 0.25 : 0); };
     const tm = new Map<number, number>(); const tintAt = (x: number, y: number): number => { const k = x * 65536 + y; let v = tm.get(k); if (v === undefined) tm.set(k, (v = waterShoreTint(tileAt, x, y))); return v; };
     const cT = (x: number, y: number): number => waterCornerTint(tileAt, x, y, tintAt);
-    const data: number[] = []; let minZ = 1e9, maxZ = -1e9;
+    const data: number[] = []; const overlays: number[] = []; let minZ = 1e9, maxZ = -1e9;
     const ox = c.cx * CHUNK_SIZE, oy = c.cy * CHUNK_SIZE;
+    const wfArt = !!(art && g && waterfallArtResident((k) => g.id(k) >= 0));
+    const dirX = VIEW_PLUS_X[q]!, dirY = VIEW_PLUS_Y[q]!;
     for (let ly = 0; ly < CHUNK_SIZE; ly++) for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       const i = ly * CHUNK_SIZE + lx; const id = c.tiles[i]!; if (id === 0) continue;
       const tx = ox + lx, ty = oy + ly; const water = isWaterTile(id); // world tile
@@ -232,7 +247,12 @@ export class TileTerrain {
       // drop); a 1-level ledge keeps its skirt (it covers the 1-level mesh face, as before), and a
       // missing neighbour keeps its skirt too (the mesh face there runs to the void, not a falls).
       const dropX = pu > -99 ? z - pu : 0, dropY = pv > -99 ? z - pv : 0;
-      const mask = (pu < z && !(water && dropX >= WATERFALL_MIN_DROP) ? 1 : 0) | (pv < z && !(water && dropY >= WATERFALL_MIN_DROP) ? 2 : 0);
+      // ADR-389: when Art's sheets are resident, also suppress the skirt on 1-level cascade
+      // faces so sheet_1 shows; without art, those ledges keep the ADR-386 skirt. Ordinary
+      // 1-level stream steps are not cascade faces, so their skirts stay.
+      const hideX = water && pu > -99 && (dropX >= WATERFALL_MIN_DROP || (wfArt && isWaterfallSheetAt(map, tx, ty, dirX)));
+      const hideY = water && pv > -99 && (dropY >= WATERFALL_MIN_DROP || (wfArt && isWaterfallSheetAt(map, tx, ty, dirY)));
+      const mask = (pu < z && !hideX ? 1 : 0) | (pv < z && !hideY ? 2 : 0);
       if (art && g) { // ADR-246: gt_ layers (base, edges by priority, shore/bank | water or ice, leaves)
         const grazed = this.grazedAt ? (X: number, Y: number): boolean => this.grazedAt!(wx(X, Y), wy(X, Y)) : undefined;
         groundLayers(tileAt, x, y, art - 1, tintAt, L, groundHash(tx, ty), grazed); let n = 0;
@@ -250,6 +270,17 @@ export class TileTerrain {
           data.push(x + 0.5, y + 0.5, z - sl.level, e.first, e.count, e.fps, sl.mask, 0, e.ax, e.ay, 0, 1, 0, 0, 0, 0); n++;
           minZ = Math.min(minZ, z - sl.level);
         }
+        // ADR-389: waterfall art when the sprite is in the pack. The destination's gt_water instance is
+        // already in `data` — the pool is an impact overlay on top of it, not a refill. Sheets stay in
+        // the opaque pass so their foot foam stacks with the pool; lips/pools go to the blended pass.
+        if (water) {
+          for (const inst of planWaterfallArt(map, tx, ty, (k) => g.id(k) >= 0, q)) {
+            const ev = EI(g.id(inst.key)); if (!ev) continue;
+            const row = [x + 0.5, y + 0.5, inst.z, ev.first, ev.count, ev.fps, inst.mask, 0, ev.ax, ev.ay, 0, inst.mode, 0, 0, 0, 0];
+            if (inst.mode === WATERFALL_OVERLAY_MODE) overlays.push(...row); else { data.push(...row); n++; }
+            minZ = Math.min(minZ, inst.z);
+          }
+        }
         if (n) { minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); continue; }
       }
       // Task 21: legacy path draws plain sand next to water. The old tile_shore_* sprites (like the gt_shore_*
@@ -264,11 +295,21 @@ export class TileTerrain {
       data.push(x + 0.5, y + 0.5, z, e.first, e.count, e.fps, mask, 0, e.ax, e.ay, water ? 1 : 0, 0, ...(water ? [cT(x, y), cT(x + 1, y), cT(x + 1, y + 1), cT(x, y + 1)] : drops));
       minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
     }
+    const opaque = data.length / FLOATS;
+    if (overlays.length) data.push(...overlays);
     const vao = old?.vao ?? gl.createVertexArray()!; const vbo = old?.vbo ?? gl.createBuffer()!;
+    const stride = FLOATS * 4;
     gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, vbo); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
-    for (let a = 0; a < 4; a++) { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 4, gl.FLOAT, false, FLOATS * 4, a * 16); gl.vertexAttribDivisor(a, 1); }
+    for (let a = 0; a < 4; a++) { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 4, gl.FLOAT, false, stride, a * 16); gl.vertexAttribDivisor(a, 1); }
+    const overlayCount = overlays.length / FLOATS;
+    let overlayVao = old?.overlayVao;
+    if (overlayCount) {
+      overlayVao = overlayVao ?? gl.createVertexArray()!;
+      gl.bindVertexArray(overlayVao); gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      for (let a = 0; a < 4; a++) { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 4, gl.FLOAT, false, stride, opaque * stride + a * 16); gl.vertexAttribDivisor(a, 1); }
+    } else if (overlayVao) { gl.deleteVertexArray(overlayVao); overlayVao = undefined; }
     gl.bindVertexArray(null);
-    return { vao, vbo, count: data.length / FLOATS, stamp: this.stamp(map, c), cx: c.cx, cy: c.cy, minZ, maxZ, atlasVersion: atlas.version, art };
+    return { vao, vbo, count: opaque, stamp: this.stamp(map, c), cx: c.cx, cy: c.cy, minZ, maxZ, atlasVersion: atlas.version, art, ...(overlayVao ? { overlayVao, overlayCount } : {}) };
   }
 
   private fresh(map: TileMap, c: Chunk, atlas: AtlasManager, t: TileChunk | undefined, art: number): t is TileChunk {
@@ -308,16 +349,23 @@ export class TileTerrain {
       let t = cur.get(c);
       if (!this.fresh(map, c, atlas, t, art)) { t = this.build(map, c, atlas, t, art, q); cur.set(c, t); }
       if (!warm && this.prewarm && (!this.fresh(map, c, atlas, this.views[(q + 1) & 3]!.get(c), art) || !this.fresh(map, c, atlas, this.views[(q + 3) & 3]!.get(c), art))) warm = c;
-      if (!t.count) continue;
+      if (!t.count && !t.overlayCount) continue;
       const sf = perChunk?.(c.key) ?? surface;
       gl.uniform1f(u.uWet ?? null, sf.wet); gl.uniform1f(u.uSnow ?? null, sf.snow);
       gl.uniform1f(u.uArtSnow ?? null, gtSnow(art, sf.snow, this.season[2]));
-      gl.bindVertexArray(t.vao); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, t.count); stats.drawCalls++;
+      if (t.count) { gl.bindVertexArray(t.vao); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, t.count); stats.drawCalls++; }
+      if (t.overlayCount && t.overlayVao) {
+        // Impact overlays (pool / lip) only: one extra instanced draw on chunks that have a fall, blended
+        // over the dest/source water that was already drawn. Blend stays off for every other ground tile.
+        gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.bindVertexArray(t.overlayVao); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, t.overlayCount); stats.drawCalls++;
+        gl.disable(gl.BLEND);
+      }
     }
     if (warm && this.builds === 0) for (const k of [(q + 1) & 3, (q + 3) & 3]) {
       const m = this.views[k]!, t = m.get(warm); if (!this.fresh(map, warm, atlas, t, art)) { m.set(warm, this.build(map, warm, atlas, t, art, k)); break; }
     }
     gl.bindVertexArray(null);
-    for (const m of this.views) for (const [c, t] of m) if (map.getChunk(c.cx, c.cy) !== c) { gl.deleteBuffer(t.vbo); gl.deleteVertexArray(t.vao); m.delete(c); }
+    for (const m of this.views) for (const [c, t] of m) if (map.getChunk(c.cx, c.cy) !== c) { gl.deleteBuffer(t.vbo); gl.deleteVertexArray(t.vao); if (t.overlayVao) gl.deleteVertexArray(t.overlayVao); m.delete(c); }
   }
 }

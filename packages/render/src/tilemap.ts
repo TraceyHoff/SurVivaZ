@@ -98,7 +98,7 @@ void main() {
 const FS = /* glsl */ `#version 300 es
 precision highp float; precision highp int;
 in vec3 vColor; in vec2 vWorld; flat in int vFlags; in float vZ; // ADR-386: vZ is the tile height (levels) the falls streaks scroll down
-uniform float uTime, uWet, uSnow, uPuddles, uWetDarken, uIce;
+uniform float uTime, uWet, uSnow, uPuddles, uWetDarken, uIce, uWaterfallArt;
 uniform vec3 uSkyRefl, uSeason;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oEmissive;
@@ -109,17 +109,16 @@ ${SEASON_GROUND_GLSL}
 void main() {
   vec3 c = vColor;
   if (vFlags == 6) {
-    // ADR-386: waterfall face — bright streaks scrolling DOWNWARD (the vZ term rises with uTime,
-    // so a fixed streak slides to lower vZ), faster than the flat-water drift, plus foam flecks
-    // riding the fall. "along" is monotonic along either face (+x faces vary in y, +y faces in x).
-    // Smooth value noise, not hashed cells, so the fall flows instead of popping. No speckle,
-    // season tint, ice, puddles or snow: it is moving water, not ground (it does not ice over in
-    // winter — the flat water does).
-    float along = vWorld.x + vWorld.y;
-    float streak = vnoise(vec2(along * 2.0, vZ * 1.5 + uTime * 1.0));
-    float band = 0.5 + 0.5 * sin(vZ * 9.0 + uTime * 6.0 + along * 2.0);
-    c *= 0.85 + 0.3 * streak * band;
-    c += step(0.8, streak) * step(0.5, band) * 0.2;
+    // ADR-386: waterfall face — bright streaks scrolling DOWNWARD unless Art's frames are
+    // resident (ADR-389 uWaterfallArt): then this mesh face is a quiet under-layer and the
+    // gt_waterfall sheets / lip / pool carry the motion.
+    if (uWaterfallArt < 0.5) {
+      float along = vWorld.x + vWorld.y;
+      float streak = vnoise(vec2(along * 2.0, vZ * 1.5 + uTime * 1.0));
+      float band = 0.5 + 0.5 * sin(vZ * 9.0 + uTime * 6.0 + along * 2.0);
+      c *= 0.85 + 0.3 * streak * band;
+      c += step(0.8, streak) * step(0.5, band) * 0.2;
+    }
   } else if (vFlags == 1) {
     // animated water: two travelling wave bands + sparkle
     float w = sin(vWorld.x * 2.3 + uTime * 1.3) * sin(vWorld.y * 1.7 - uTime * 0.9);
@@ -148,6 +147,7 @@ void main() {
   oColor = vec4(c, 1.0);
   oEmissive = vec4(0.0);
 }`;
+export const TILEMAP_FS = FS;
 
 export interface SurfaceState { wet: number; snow: number }
 export type SurfaceProvider = (chunkKey: string) => SurfaceState | undefined;
@@ -158,6 +158,8 @@ export class TilemapRenderer {
   private prog: Program;
   private meshes = new Map<Chunk, ChunkMesh>();
   maxZ = 1;
+  /** ADR-389: Art's gt_waterfall frames are in the pack — skip procedural streaks on mesh faces. */
+  waterfallArt = false;
 
   constructor(private gl: WebGL2RenderingContext, private iso: IsoConfig, private zFactor: number) {
     this.prog = createProgram(gl, VS, FS, "tilemap");
@@ -269,7 +271,7 @@ export class TilemapRenderer {
     gl.useProgram(this.prog.prog);
     gl.uniform4fv(u.uView!, view); gl.uniform2fv(u.uDepth!, depth);
     gl.uniform3f(u.uIso!, this.iso.tileW / 2, this.iso.tileH / 2, this.iso.zStep);
-    gl.uniform1f(u.uZFactor!, this.zFactor); gl.uniform1f(u.uTime!, time);
+    gl.uniform1f(u.uZFactor!, this.zFactor); gl.uniform1f(u.uTime!, time); gl.uniform1f(u.uWaterfallArt ?? null, this.waterfallArt ? 1 : 0);
     const vq = (this.iso.view ?? 0) & 3; gl.uniform2f(u.uRot ?? null, VIEW_COS[vq]!, VIEW_SIN[vq]!);
     gl.uniform1f(u.uPuddles!, this.surfaceStyle.puddles); gl.uniform1f(u.uWetDarken!, this.surfaceStyle.wetDarken);
     gl.uniform3f(u.uSeason ?? null, this.season[0], this.season[1], this.season[2]); gl.uniform1f(u.uIce ?? null, this.season[3]);
@@ -295,3 +297,4 @@ export class TilemapRenderer {
 }
 
 function tileIsWater(map: TileMap, x: number, y: number): boolean { return isWaterTile(map.getTile(x, y)); }
+

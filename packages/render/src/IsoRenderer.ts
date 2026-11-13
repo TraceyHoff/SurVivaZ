@@ -32,6 +32,7 @@ import { AtlasManager } from "./assets/atlasManager.js";
 import { BuildingTierStreamer } from "./assets/buildingTiers.js";
 import { basisTranscoder, setKtx2Transcoder } from "./assets/ktx2.js";
 import { TilemapRenderer } from "./tilemap.js";
+import { waterfallArtResident } from "./waterfallTiles.js";
 import { SpriteBatch, type GameplayBindings } from "./sprites.js";
 import { LightPass } from "./lighting.js";
 import { CompositePass } from "./composite.js";
@@ -619,6 +620,8 @@ export class IsoRenderer implements Renderer {
       // z-fighting it (hid gt water/land on some depth buffers; the fall-grass mosaic / seam lines).
       const textured = this.texturedTerrain && TileTerrain.available(this.atlas);
       if (textured) { gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(2, 8); }
+      const reg = this.atlas.registry;
+      this.terrain.waterfallArt = !!reg && waterfallArtResident((k) => reg.ids.sprites.tryId(k) !== undefined);
       this.terrain.draw(this.viewU, this.depthU, rect, this.time, stats, this.activeKeys);
       if (textured) gl.disable(gl.POLYGON_OFFSET_FILL);
       if (textured) {

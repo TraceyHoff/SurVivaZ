@@ -10,6 +10,7 @@
  * Cell: 68x52 px (64x48 art + 2 px pad), diamond centre at frame px (34, 18) = anchor (0.5, 18/52); @2x pages 136x104.
  */
 import { TileId } from "./ids.js";
+import { allWaterfallArtKeys } from "./waterfallTiles.js";
 
 /** Land materials, lowest -> highest priority: a higher material's edge overlay is drawn onto a lower neighbour. */
 export const GROUND_PRIORITY = ["rock", "sand", "dirt", "mud", "forest", "grass", "snow"] as const;
@@ -104,6 +105,7 @@ export class GroundArt {
       if (s === 2) for (const v of GROUND_VARIANTS) add(`gt_ice${v}`); else { const ws = s === 3 ? "_spring" : ""; add(`gt_water${ws}`); add(`gt_water_shallow${ws}`); }
       if (s === 1) for (const c of "abc") add(`gt_water_leaves_${c}`);
       add(`gt_grass_grazed${GROUND_SEASON_SUFFIX[s]}`); // ADR-256: grazed lawn atlas (gt_grazed)
+      for (const k of allWaterfallArtKeys()) add(k); // ADR-389: stream keep-alive once Art's frames land (no-op until then)
       this.pages[s] = [...by.values()];
     }
   }

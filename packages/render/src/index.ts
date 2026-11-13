@@ -17,6 +17,7 @@ export * from "./env.js";
 export * from "./transformSource.js";
 export * from "./vfx.js";
 export * from "./tilemap.js";
+export * from "./waterfallTiles.js";
 export * from "./sprites.js";
 export * from "./buildPieces.js";
 export * from "./ghost.js";

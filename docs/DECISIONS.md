@@ -8077,3 +8077,44 @@ still falls back while a page is paging in, or if a layer is missing the clip: `
 renderer reads frame counts, rects and anchors from the manifest (it does not hardcode them). AI
 humans share this rig; no separate bot sheets.
 
+## ADR-389: Waterfall tile classification and Art's lip / sheet / pool frames (SurVivaZ)
+
+Context: ADR-386 already detects a water face that drops ≥ 2 levels (`WATERFALL_MIN_DROP`) and draws
+it as a mesh face with downward procedural streaks (flags 6..9), suppressing the gt skirt on that face.
+Art & Assets shipped dedicated waterfall tiles in `e8c03108`, polished in `097c8a71`
+(`docs/ART_KEYS_WATERFALL.md`): page `gt_waterfall` (resident with the other gt_ ground pages, 1x and
+@2x PNG + KTX2; `097c8a71` packs 256×352 / 512×704), unique packed keys
+`gt_waterfall_{lip,sheet_1,sheet_2,pool}_{px,nx}`, 6 frames @ 8 fps looping on `animations.idle`.
+The anchor is the diamond centre, the same world point as `gt_water`. Trim rects (and therefore
+dirFrames fractions) may change as Art polishes the page — the renderer reads them with
+`AssetRegistry.dirFrame()` and does not hardcode them. py and ny are not packed — draw the px or nx
+key with `FrameRef.flipX` (instance mask bit 8). Every key's placeholder is `gt_water`.
+`gt_waterfall_pool_*` is an impact overlay (foam, splash ring, mist), not a full-diamond refill.
+
+Decision: a classifier (`classifyWaterfallFaces` / `classifyWaterfallAt` in
+`packages/render/src/waterfallTiles.ts`) tags, in world space with dirs px/py/nx/ny:
+
+- **lip** on the source of a ≥ 2 drop (the breach / tiles[0] drop edge);
+- **fall** on the source of that drop (sheet_2 for a 2-level face; drop > 2 stacks sheet_2 then
+  sheet_1, never stretched) and on 1-level water-to-water cascade steps after the fall (sheet_1);
+- **pool** on the lower neighbour at each fall's destination, in the same flow direction as the sheet.
+
+An ordinary 1-level stream ledge, a land cliff, and a missing / unloaded neighbour are not falls.
+A 1-level cascade is only a sheet when the source sits downhill of a ≥ 2 waterfall (walk uphill at
+most 8 water steps). `planWaterfallArt` resolves Art's packed keys via `AssetRegistry.dirFrame()`
+and returns instance descriptors. `TileTerrain` still emits the destination's `gt_water` instance;
+the pool (and the lip) is a mode-4 overlay drawn on top of that water in a blended pass on chunks
+that have a fall (one extra instanced draw; blend stays off for every other ground tile). Sheets
+stay in the opaque pass so the foam at the foot of the sheet stacks with the pool. Art mode 3 draws
+a sheet as a full frame with no diamond/skirt discard. Camera-facing faces only (view-quarter mask);
+far faces keep the mesh silhouette. When the page is resident, 1-level cascade skirts are suppressed
+so sheet_1 shows, and `uWaterfallArt` turns off the ADR-386 procedural streaks — the mesh face is a
+quiet under-layer. Canvas2D draws the same planned instances after ground art (pools, then lips,
+then sheets), with `scale(-1,1)` around the pivot when `flipX` is set, and is a no-op when the page
+is missing (residency is cached per registry). Until the sprites are in the registry,
+`planWaterfallArt` returns [] and streaks stay.
+
+Keys (no seasonal twins; falls do not ice): `gt_waterfall_lip_px` / `_nx`, `gt_waterfall_sheet_1_px`
+/ `_nx` (1-level, 16 px), `gt_waterfall_sheet_2_px` / `_nx` (2-level, 32 px), `gt_waterfall_pool_px`
+/ `_nx`. Paint box 64×64 at 1x (32 px diamond + 32 px skirt for a 2-level face).
+

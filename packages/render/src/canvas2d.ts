@@ -14,6 +14,7 @@ import { Transform, PrevTransform, entityIndex, getAppearance, type World, type 
 import { fireAnimTime, hearthParticles, pieceFireFrame, isFireAnim, type HearthParticle } from "./fire-anim.js";
 import { previewLayers2D, tintPixels, type PreviewLayer2D } from "./character/preview2d.js";
 import { worldToScreen, toView, fromView, viewRect, DEFAULT_ISO, CHUNK_SIZE, floorToTerrainZ, terrainZToFloor, isWaterId, waterShoreTint, type TileMap, type Chunk } from "@engine/world";
+import { allWaterfallArtKeys, planWaterfallArt, WATERFALL_ANIM } from "./waterfallTiles.js";
 import type { AssetRegistry } from "@engine/assets";
 import { IsoCamera } from "./camera.js";
 import { Sprite, LightSource, SpriteAlpha } from "./components.js";
@@ -202,15 +203,38 @@ export class Canvas2DRenderer {
     g.drawImage(cv, 0, 0); g.restore();
   }
 
+  /** ADR-389: draw Art's waterfall frames when resident. Pools (then lips) paint over the dest/source
+   *  water already drawn; sheets come last so the curtain sits in front and stacks with the pool foam. */
+  private drawWaterfallArt(tm: TileMap, x0: number, y0: number, n: number, time: number): void {
+    const reg = this.registry; if (!reg) return;
+    if (this.waterfallArtOn === undefined) this.waterfallArtOn = allWaterfallArtKeys().some((k) => reg.ids.sprites.tryId(k) !== undefined);
+    if (!this.waterfallArtOn) return;
+    const has = (k: string): boolean => reg.ids.sprites.tryId(k) !== undefined;
+    const g = this.ctx, iso = this.camera.iso, q = (iso.view ?? 0) & 3;
+    const insts: ReturnType<typeof planWaterfallArt> = [];
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) insts.push(...planWaterfallArt(tm, x0 + i, y0 + j, has, q));
+    insts.sort((a, b) => (a.role === "pool" ? 0 : a.role === "lip" ? 1 : 2) - (b.role === "pool" ? 0 : b.role === "lip" ? 1 : 2));
+    for (const inst of insts) {
+      const id = reg.ids.sprites.tryId(inst.key); if (id === undefined) continue;
+      let f; try { f = reg.dirFrame(id, WATERFALL_ANIM, 0, time); } catch { continue; }
+      const img = this.image(f.atlas.key); if (!img) continue;
+      const p = worldToScreen(inst.x + 0.5, inst.y + 0.5, inst.z, iso);
+      g.save(); g.translate(p.sx, p.sy); if (inst.flipX) g.scale(-1, 1);
+      g.drawImage(img, f.x, f.y, f.w, f.h, -f.anchorX, -f.anchorY, f.w, f.h); g.restore();
+    }
+  }
+
   // ---- ADR-246 gt_ ground art: cached B x B tile blocks (all layers baked once per season / chunk edit) ----
   private gArt: GroundArt | null = null; private gArtReg: AssetRegistry | undefined;
+  /** ADR-389: cached "any waterfall sprite is in the pack"; undefined = not scanned yet. */
+  private waterfallArtOn: boolean | undefined;
   private gBlocks = new Map<string, { cv: HTMLCanvasElement; stamp: string; used: number }>(); private gFrame = 0;
   /** false = flat legacy diamonds (tests / diag). */ groundArtEnabled = true;
   /** ADR-256: world-tile grazed lookup; undefined = ungrazed. */ grazedAt: ((tx: number, ty: number) => boolean) | undefined;
   /** ADR-256: bumped when the grazed set changes so gt blocks rebuild. */ grazedRev = 0;
   /** gt blocks drawn / built this frame (diag). */ groundStats = { blocks: 0, built: 0, cached: 0 };
   private groundArtOf(reg: AssetRegistry): GroundArt | null {
-    if (this.gArtReg !== reg) { this.gArtReg = reg; const g = new GroundArt(reg); this.gArt = g.available ? g : null; this.gBlocks.clear(); }
+    if (this.gArtReg !== reg) { this.gArtReg = reg; const g = new GroundArt(reg); this.gArt = g.available ? g : null; this.gBlocks.clear(); this.waterfallArtOn = undefined; }
     return this.gArt;
   }
   /** One baked block (null = an art page is still loading or no DOM). Back-to-front so skirts sit under front cells. */
@@ -417,6 +441,7 @@ export class Canvas2DRenderer {
       const p = worldToScreen(x, y, 0, iso); g.fillStyle = this.groundColor(t, x, y); // ADR-239 season tint
       g.beginPath(); g.moveTo(p.sx, p.sy - th / 2); g.lineTo(p.sx + tw / 2, p.sy); g.lineTo(p.sx, p.sy + th / 2); g.lineTo(p.sx - tw / 2, p.sy); g.fill(); stats.tiles++;
     }
+    if (tm) this.drawWaterfallArt(tm, Math.floor(c.x) - R, Math.floor(c.y) - R, 2 * R + 1, time); // ADR-389: art hook after ground (no-op without frames)
     // sprites: gather, sort by iso depth (screen y of the foot), draw
     const reg = this.registry; const items: { e: Entity; sx: number; sy: number; depth: number; ord: number; pc?: C2DPiece }[] = [];
     if (reg && world.isRegistered(Sprite)) for (const e of world.query([Transform, Sprite])) {
