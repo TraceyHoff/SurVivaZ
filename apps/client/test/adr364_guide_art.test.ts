@@ -277,6 +277,10 @@ describe("ADR-364 guide panel renders the action images", () => {
         expect(fig.querySelector("figcaption")?.textContent).toBe(item.caption);
       }
     }
-    expect(el.querySelector("img")).toBeNull(); // tiles are [data-icon] spans, never <img>
+    // ADR-387: fact rows may contain <img> icons (condition/file kinds), but action-image tiles
+    // are [data-icon] spans, never <img>s — so scope the no-<img> rule to the figures themselves.
+    for (const fig of Array.from(el.querySelectorAll("[data-role=guide-image]"))) {
+      expect(fig.querySelector("img")).toBeNull();
+    }
   });
 });

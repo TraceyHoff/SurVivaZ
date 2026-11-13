@@ -35,7 +35,7 @@ import piecesRaw from "../data/pieces.json";
 import { INVENTORY_SLOTS, PACK_SLOTS } from "./components.js";
 import { defaultDefs } from "./data.js";
 import { StationKind, WeatherKind } from "./defs.js";
-import { CARE_CURE_SECONDS, FLU_AFTER_SECONDS } from "./diseases.js";
+import { CARE_CURE_SECONDS, FLU_AFTER_SECONDS, diseaseIcon } from "./diseases.js";
 import { temperatureTier, wetnessStage } from "./exposure-stages.js";
 import { FROST_KILL_F, LATE_FALL_DAYS } from "./farming.js";
 import { MOUNT_SPECIES, MOUNT_TUNING, SADDLES, mountSpeciesOfKey } from "./mount_defs.js";
@@ -82,9 +82,107 @@ export interface GuideSection {
 /** A section with every fact resolved to its display string, ready for ADR-363 to render. */
 export type ResolvedGuideItem =
   | { readonly kind: "text"; readonly text: string }
-  | { readonly kind: "fact"; readonly label: string; readonly value: string }
+  | { readonly kind: "fact"; readonly label: string; readonly value: string; readonly icon: GuideRowIcon | undefined }
   | { readonly kind: "keys"; readonly keys: readonly string[]; readonly label: string }
   | { readonly kind: "image"; readonly image: string; readonly caption: string };
+
+/**
+ * ADR-387: the icon a fact row shows before its label — the row's subject, never invented art.
+ * Three shapes, rendered by the client: `guide` is a GuideIconRef (a `[data-icon]` span via
+ * guideIconKey, the same hook section icons use); `condition` is a diseaseIcon() result (the HUD's
+ * own status art, rendered via conditionIconImg — the broken-leg UI-atlas key or an ic_ file);
+ * `file` is one of the game's embedded ic_ icons (rendered via iconImg).
+ *
+ * Derivation, in order — the first rule that matches wins:
+ * 1. `diseases.<key>.durationSeconds|cure` -> the disease's own status icon (diseaseIcon): the
+ *    broken-leg art for broken_leg, the infected art for wound_infection, the snowflake for a cold,
+ *    the thermometer for the flu, the generic health icon for the rest. The same icon the HUD
+ *    disease chips show for that condition — so the guide and the HUD agree about what ails you.
+ * 2. `animals.treats.<species>` -> pet:<species> (the pet the row is about); `mounts.<species>.*`
+ *    -> mount:<species> (the horse's walk/gallop rows).
+ * 3. format "item" (and not a disease row) -> item:<the resolved item key> (the harness, the coin).
+ * 4. the explicit map below, one row at a time: the piece the row is about (claim totem, campfire,
+ *    ore/crop/salt stores, stalls, feeding trough), the item the row is about (fur coat/hat, salt,
+ *    rope), or an ic_ file icon where that icon IS the row's subject (the backpack for the inventory
+ *    rows, the fire for the fire rows, the snowflake/thermometer for the freezing/heat rows, the
+ *    plant for the crops row, the HUD season icons for the season rows).
+ * Anything else has no icon: aggregate counts, durations, zombie rates, seasons lengths and the
+ * like describe a number, not a thing with art — and controls rows describe keybindings, prose
+ * describes nothing picturable. A row with no icon renders text-only, never a placeholder, and the
+ * gaps are listed in the ADR-387 report (pet cat/fox/owl have no CSS rule yet; fox/owl have no
+ * pet atlas at all; spring has no HUD season icon).
+ */
+export type GuideRowIcon =
+  | { readonly kind: "guide"; readonly key: GuideIconRef }
+  | { readonly kind: "condition"; readonly icon: string }
+  | { readonly kind: "file"; readonly file: string };
+
+const guide = (key: GuideIconRef): GuideRowIcon => ({ kind: "guide", key });
+const file = (fileName: string): GuideRowIcon => ({ kind: "file", file: fileName });
+
+/** One-off fact paths whose icon is a single named thing (see guideFactIcon). */
+const FACT_ICONS: Readonly<Record<string, GuideRowIcon>> = {
+  // the item the row is about
+  "temperature.furCoatInsulation": guide("item:fur_coat"),
+  "temperature.furHatInsulation": guide("item:fur_hat"),
+  "food.saltConsumeSeconds": guide("item:salt"),
+  "animals.ropeAttachRangeTiles": guide("item:rope"),
+  "animals.ropeBreakDistanceTiles": guide("item:rope"),
+  // the piece the row is about
+  "cooking.campfireRecipeCount": guide("piece:campfire"),
+  "building.claimCost": guide("piece:claim_totem"),
+  "building.claimRadiusTiles": guide("piece:claim_totem"),
+  "animals.troughRangeTiles": guide("piece:feeding_trough"),
+  "storage.oreAccepts": guide("piece:ore_store"),
+  "storage.cropAcceptsCount": guide("piece:crop_store"),
+  "storage.saltBarrelMul": guide("piece:salt_barrel"),
+  "storage.curingBoxMul": guide("piece:curing_box"),
+  "storage.coldStoreMul": guide("piece:cold_store"),
+  "trade.stallBlanketListings": guide("piece:stall_blanket"),
+  "trade.stallCartListings": guide("piece:stall_cart"),
+  "trade.stallBoothListings": guide("piece:stall_booth"),
+  "trade.stallPavilionListings": guide("piece:clan_pavilion"),
+  "trade.stallCounterListings": guide("piece:market_counter"),
+  // the vehicle the row is about (ADR-361 runtime-painted kit icons)
+  "vehicles.chariotGallopCap": guide("vehicle:chariot"),
+  "vehicles.wagonLargeGallopCap": guide("vehicle:wagon_large"),
+  "vehicles.carriageSeats": guide("vehicle:carriage"),
+  "vehicles.wagonLargeStorageSlots": guide("vehicle:wagon_large"),
+  // an ic_ file icon that IS the row's subject (the game's own embedded icons, Task 25)
+  "inventory.packSlots": file("ic_backpack.png"),
+  "inventory.hotbarSlots": file("ic_backpack.png"),
+  "inventory.totalSlots": file("ic_backpack.png"),
+  "farming.plantableCount": file("ic_plant.png"),
+  "temperature.bodyFreezingC": file("ic_snowflake.png"),
+  "temperature.bodyOverheatingC": file("ic_temp.png"),
+  "temperature.freezingC": file("ic_snowflake.png"),
+  "temperature.fireHeatMaxC": file("ic_fire.png"),
+  "temperature.fireHeatTauSeconds": file("ic_fire.png"),
+  "food.frozenBelowC": file("ic_snowflake.png"),
+  "combat.fireDps": file("ic_fire.png"),
+  "combat.fireSpreadChance": file("ic_fire.png"),
+  "combat.fireSpreadRadiusTiles": file("ic_fire.png"),
+  "seasons.summer.tempRange": file("ic_sun.png"),
+  "seasons.summer.heatWaveRange": file("ic_sun.png"),
+  "seasons.fall.tempRange": file("ic_leaf.png"),
+  "seasons.winter.tempRange": file("ic_snowflake.png"),
+};
+
+/** The icon for one fact row, or undefined when the row describes no thing with art. */
+export function guideFactIcon(fact: string, format: GuideFactFormat): GuideRowIcon | undefined {
+  const disease = /^diseases\.([a-z_]+)\.(durationSeconds|cure)$/.exec(fact);
+  if (disease) return { kind: "condition", icon: diseaseIcon(disease[1]!) };
+  const treats = /^animals\.treats\.([a-z_]+)$/.exec(fact);
+  if (treats) return guide(`pet:${treats[1]}` as GuideIconRef);
+  const mount = /^mounts\.([a-z_]+)\./.exec(fact);
+  if (mount) return guide(`mount:${mount[1]}` as GuideIconRef);
+  if (format === "item") {
+    const raw = GUIDE_FACTS[fact]?.();
+    if (typeof raw === "string" && raw) return guide(`item:${raw}` as GuideIconRef);
+    return undefined;
+  }
+  return FACT_ICONS[fact];
+}
 export interface ResolvedGuideSection {
   readonly id: string;
   readonly title: string;
@@ -492,7 +590,7 @@ export function resolvedGuideSection(id: string): ResolvedGuideSection | undefin
     id: s.id, title: s.title, icon: s.icon, intro: s.intro,
     items: s.items.map((item): ResolvedGuideItem => {
       if ("text" in item) return { kind: "text", text: item.text };
-      if ("fact" in item) return { kind: "fact", label: item.label, value: resolveGuideFact(item.fact, item.format) };
+      if ("fact" in item) return { kind: "fact", label: item.label, value: resolveGuideFact(item.fact, item.format), icon: guideFactIcon(item.fact, item.format) };
       if ("image" in item) return { kind: "image", image: item.image, caption: item.caption };
       return { kind: "keys", keys: item.keys, label: item.label };
     }),

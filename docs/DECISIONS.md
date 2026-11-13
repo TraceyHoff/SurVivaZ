@@ -7965,3 +7965,88 @@ water, 18/490 = 3.7% of sited lakes) is the same one-way-trap shape as the lengt
 spillway and stays queued — see the Behaviour note above; it is not fixed by the length-1
 guard. No particles, no sound. Canvas2D fallback reads the
 falls only as a stepped stream.
+
+## ADR-387: Guide listings show their own icons; no sprint with a broken leg; the Guide's pages show a book, not emoji (SurVivaZ)
+
+Decision: three parts, one ADR. (1) Every Guide listing shows the icon of the thing it
+describes, derived from the fact it already resolves — no new data, no new art. (2) A player
+with a broken leg cannot sprint: the shared movement path ignores sprint while `broken_leg`
+is active. (3) The Guide's pages and entry buttons show a runtime-painted book icon; the
+📖 emoji is gone from the Guide UI.
+
+Guide icons (`packages/gameplay/src/guide.ts`, `guideFactIcon`, wired into
+`resolvedGuideSection` so every resolved fact item carries `icon?: GuideRowIcon`). Three
+shapes, rendered by the client (`apps/client/src/guide-panel.ts`, `factIconNode`): `guide`
+(a `GuideIconRef`, a `[data-icon]` span through the same `guideIconKey` hook section icons
+use); `condition` (a `diseaseIcon()` result, rendered through `conditionIconImg` — the HUD's
+own status-art path); `file` (an embedded ic_ PNG, rendered through `iconImg`). Derivation,
+first match wins: `diseases.<key>.durationSeconds|cure` -> the disease's own status icon
+(`diseaseIcon`: broken_leg -> the dedicated UI-atlas `"broken_leg"` art, wound_infection ->
+`"infected"`, common_cold -> `ic_snowflake.png`, influenza -> `ic_temp.png`, everything else
+-> the generic `ic_health.png`) — the same icon the HUD disease chips show, so the guide and
+the HUD agree about what ails you; `animals.treats.<species>` -> `pet:<species>`;
+`mounts.<species>.*` -> `mount:<species>`; format `"item"` (and not a disease row) ->
+`item:<the resolved item key>` (the harness, the coin); then the explicit `FACT_ICONS` map,
+one row at a time — the piece the row is about (claim totem, campfire, ore/crop/salt stores,
+stalls, feeding trough), the item the row is about (fur coat/hat, salt, rope), or an ic_ file
+icon where that icon IS the row's subject (the backpack for the inventory rows, the fire for
+the fire rows, the snowflake/thermometer for the freezing/heat rows, the plant for the crops
+row, the HUD season icons for the summer/fall/winter rows). Coverage: 133 fact rows, 64 with
+icons (18 file, 15 condition, 31 guide), 69 without — aggregate counts, durations, zombie
+rates and the like describe a number, not a thing with art, and controls rows describe
+keybindings. A row whose icon has no art renders text-only, never a placeholder. Fact icons
+render at 20px before the label (`.guide-fact-label`); quick-jump buttons show their section
+icon (24px, flex row); section headers are unchanged.
+
+Book icon (`apps/client/src/guide-art.ts`): NEW pixels, painted at runtime with the Px
+software canvas (Task 34 / ADR-361 pattern) — a closed red leather book, gilt frame and
+medallion, cream page block on the right edge, dark spine on the left, gold bookmark ribbon,
+128x128, pixel-checked by the ADR-387 client test. No sprite is reused for a different thing
+and no binary art ships. `installGuideMenuIcon` registers the PNG in `ICON_DATA` under
+`guide_book.png` (so `iconImg`/`iconUrl` serve it like the embedded ic_ icons) and installs
+a `[data-icon="guide_book"]` override rule; idempotent, safe no-op without a canvas, with a
+`urls` test seam like the other installers. Installed at startup in `IsoView.create` (next
+to `installVehicleMenuIcons`) and lazily in `buildGuidePanel` — the boot menu can show the
+Guide before the view exists. Used by: the `GAME_MENUS` guide entry (was `"📖"`, now
+`guide_book.png` — the entry has no menu-bar button, so the def was dead text until now);
+the pause menu's Guide button and "Play the guide again" button (the `panel()` button tuple
+gains an optional icon element); the Settings "Play the guide again" button (was `"📖 Play
+the guide again"`); the in-game Guide panel header (`guidePanel()` prepends the icon to the
+h2); the boot-menu Guide screen header (`menu.ts`, `<img src="iconUrl(...)">` in the header
+string). The main-menu Guide BUTTON stays text-only (it never had an emoji; the boot menu's
+branding-icon path covers Singleplayer/Multiplayer/Settings only). The tutorial's "Broken
+leg 🦴" step is untouched — the tutorial is not the Guide.
+
+No sprint with a broken leg (`packages/gameplay/src/systems/movement.ts:244`): the sprint
+computation in the shared `applyMovementInput` (server authority + client prediction alike)
+gains `&& !hasDisease(world, e, "broken_leg")`. While the leg is broken, sprint stays 0 —
+speed is walk x the disease moveMul 0.5 — and `vitalsSystem` never sees a sprint to drain
+stamina for, because it reads `PlayerIntent.sprint`. The `AutoSprint` latch is untouched, so
+sprint resumes the moment the leg heals (cure or expiry) with no new warm-up. Other diseases
+do not block sprint (only `broken_leg`). Riding gallop (`applyRidingMotion`) and driving
+boost are deliberately NOT gated: the mount's speed is not the rider's leg. Client
+reflection: on foot there is no sprint button on any device — sprint is the ADR-289
+auto-sprint after 4 s straight, and the Shift key / touch Boost button do nothing on foot
+today (Boost lives only in the driving layout, where it gallops the mount). So there is
+nothing to disable on foot; the enforcement is the sim, the HUD already shows the broken-leg
+chip, and the tutorial "Run" step cannot complete while the leg is broken (its probe reads
+`PlayerIntent.sprint`). Note for the record: the Guide's Controls row still says Sprint is
+Shift — Shift is the Sprint action bit, used for gallop and by AI; on foot it is a no-op
+today. That wording predates this ADR and is left alone.
+
+Gaps (no icon invented): the treats rows for cat_tabby, fox and owl derive `pet:<species>`
+but only `pet_dog_lab` has a CSS rule — cat_tabby has a shipped atlas
+(`pets_cat_tabby.png`) and needs one crop rule in the ADR-364 pattern; fox and owl have no
+`pets_fox`/`pets_owl` atlas files at all (their in-world sprites live in the nature atlas as
+`animal_fox`/`animal_owl`), so their pet rules need an art decision first. Spring has no HUD
+season icon (`SEASON_ICON` covers summer/fall/winter only), so the spring row stays bare.
+The 69 icon-less rows are listed in the ADR-387 report. Tests: new
+`packages/gameplay/test/adr387_guide_icons.test.ts` (derivation pinned row by row, every
+returned guide key resolves in its defs table, coverage 133/64 pinned) and
+`adr387_broken_leg_sprint.test.ts` (blocked while broken, walk x 0.5, no stamina drain,
+other disease sprints, cure/expiry resume, AI human blocked, tutorial contract), plus
+`apps/client/test/adr387_guide_icons.test.ts` (book pixels, install seam, panel rendering
+per row, quick-jump icons, entry buttons and headers, no 📖 anywhere in the Guide UI).
+Updated: ADR-362 (resolved fact items now carry `icon`), ADR-363/ADR-364 (fact-row `<img>`
+icons are allowed, scoped to fact rows / action-image figures respectively).
+

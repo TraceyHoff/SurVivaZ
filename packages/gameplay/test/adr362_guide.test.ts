@@ -427,9 +427,10 @@ describe("ADR-362 guide content + data", () => {
     expect(guideSection("diseases")?.title).toBe("Diseases");
     expect(guideSection("no-such-section")).toBeUndefined();
     const resolved = resolvedGuideSection("diseases");
-    expect(resolved?.items).toContainEqual({ kind: "fact", label: "Flu — lasts", value: "15 min" });
-    expect(resolved?.items).toContainEqual({ kind: "fact", label: "Flu — cure", value: "Honey Tea" });
-    expect(resolved?.items).toContainEqual({ kind: "fact", label: "Exhaustion — cure", value: "Rest" });
+    // ADR-387: resolved fact items carry their icon (the disease's status icon here).
+    expect(resolved?.items).toContainEqual({ kind: "fact", label: "Flu — lasts", value: "15 min", icon: { kind: "condition", icon: "ic_temp.png" } });
+    expect(resolved?.items).toContainEqual({ kind: "fact", label: "Flu — cure", value: "Honey Tea", icon: { kind: "condition", icon: "ic_temp.png" } });
+    expect(resolved?.items).toContainEqual({ kind: "fact", label: "Exhaustion — cure", value: "Rest", icon: { kind: "condition", icon: "ic_health.png" } });
     expect(resolvedGuideSection("no-such-section")).toBeUndefined();
     expect(getGuideSections().length).toBe(SECTION_IDS.length);
     expect(() => resolveGuideFact("no.such.path", "count")).toThrow(/unknown path/);

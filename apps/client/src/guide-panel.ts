@@ -17,19 +17,24 @@
  * composed by ./task364-art.ts (GUIDE_ACTION_IMAGES) plus the caption. Tiles are spans, never `<img>` —
  * the same rule as the section icons — and every tile key is pinned to real pixels by the ADR-364 tests.
  */
-import { defaultDefs, getGuideSections, iconForItem, resolvedGuideSection, type GuideIconRef, type ResolvedGuideSection } from "@engine/gameplay";
+import { defaultDefs, getGuideSections, iconForItem, resolvedGuideSection, type GuideIconRef, type GuideRowIcon, type ResolvedGuideSection } from "@engine/gameplay";
+import { conditionIconImg, iconImg } from "./game-icons.js";
+import { installGuideMenuIcon } from "./guide-art.js";
 import { buildIconKey, iconKeysFromCss } from "./gameplay-panels.js";
 import { guideActionImage } from "./task364-art.js";
 
 const CSS = `.guide{display:flex;flex-direction:column;gap:10px}
 .guide-sections{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
-.guide-sections button{font:700 15px Fredoka,system-ui,sans-serif;min-height:44px;min-width:44px;border-radius:10px;padding:6px 10px;cursor:pointer;box-sizing:border-box}
+.guide-sections button{font:700 15px Fredoka,system-ui,sans-serif;min-height:44px;min-width:44px;border-radius:10px;padding:6px 10px;cursor:pointer;box-sizing:border-box;display:flex;align-items:center;gap:6px;text-align:left}
+.guide-sections .guide-icon{width:24px;height:24px}
 .guide-sections button:focus-visible{outline:3px solid #FFD45A;outline-offset:2px}
 .guide-detail{display:flex;flex-direction:column;gap:8px}
 .guide-detail h3{margin:0;font-size:19px;color:#74432C;display:flex;align-items:center;gap:8px}
 .guide-detail p{margin:0;font-size:14px;line-height:1.4}
 .guide-icon{display:inline-block;flex:none;width:28px;height:28px;background:var(--cz-icon,none) var(--cz-ipos,center)/var(--cz-isize,contain) no-repeat}
 .guide-fact{display:flex;justify-content:space-between;align-items:baseline;gap:12px;font-size:14px}
+.guide-fact-label{display:flex;align-items:center;gap:6px;min-width:0}
+.guide-fact .guide-icon{width:20px;height:20px}
 .guide-fact b{white-space:nowrap;text-align:right}
 .guide-keys{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:14px}
 .guide-keys kbd{font:700 13px Fredoka,system-ui,sans-serif;background:#FFFAF0;border:2px solid #4A2F3D;border-radius:6px;padding:2px 7px;box-sizing:border-box}
@@ -87,6 +92,25 @@ export function guideIconKey(icon: GuideIconRef, has: (k: string) => boolean): s
   }
 }
 
+/**
+ * The icon node for one fact row (ADR-387), or undefined when the row's icon has no art yet.
+ * `guide` keys render as [data-icon] spans through the same hook as section icons; `condition`
+ * icons (diseaseIcon results) render through conditionIconImg — the HUD's own status-art path, an
+ * <img> that stays hidden until the UI atlas loads; `file` icons are embedded ic_ PNGs via iconImg.
+ * A row whose icon resolves to nothing renders text-only, never a broken image.
+ */
+function factIconNode(icon: GuideRowIcon, has: (k: string) => boolean, label: string): Node | undefined {
+  if (icon.kind === "guide") {
+    const key = guideIconKey(icon.key, has);
+    if (!key) return undefined;
+    const ic = document.createElement("span"); ic.className = "guide-icon"; ic.dataset["role"] = "ic"; ic.dataset["icon"] = key;
+    ic.setAttribute("aria-hidden", "true");
+    return ic;
+  }
+  if (icon.kind === "condition") return conditionIconImg(icon.icon, 20, label);
+  return iconImg(icon.file, 20, label);
+}
+
 function renderGuideSection(s: ResolvedGuideSection, has: (k: string) => boolean): Node[] {
   const out: Node[] = [];
   const h = document.createElement("h3"); h.dataset["role"] = "guide-title";
@@ -103,7 +127,12 @@ function renderGuideSection(s: ResolvedGuideSection, has: (k: string) => boolean
       const p = document.createElement("p"); p.dataset["role"] = "guide-text"; p.textContent = item.text; out.push(p);
     } else if (item.kind === "fact") {
       const row = document.createElement("div"); row.className = "guide-fact"; row.dataset["role"] = "guide-fact";
-      const l = document.createElement("span"); l.textContent = item.label;
+      // ADR-387: the row's icon immediately before its label — the broken-leg status icon before
+      // "Broken Leg", the pet before its treats, the piece before its numbers. No icon, no node.
+      const l = document.createElement("span"); l.className = "guide-fact-label";
+      const ic = item.icon ? factIconNode(item.icon, has, item.label) : undefined;
+      if (ic) l.append(ic);
+      l.append(document.createTextNode(item.label));
       const v = document.createElement("b"); v.textContent = item.value;
       row.append(l, v); out.push(row);
     } else if (item.kind === "image") {
@@ -139,6 +168,9 @@ function renderGuideSection(s: ResolvedGuideSection, has: (k: string) => boolean
  */
 export function buildGuidePanel(initialId?: string): HTMLElement {
   installGuideCss();
+  // ADR-387: opening the Guide ensures its book icon exists — the boot menu can show the Guide
+  // before the view runs its startup installs, and this is idempotent (same pattern as installGuideCss).
+  installGuideMenuIcon();
   const sections = getGuideSections();
   const known = guideIconKeysFromDom();
   const has = (k: string): boolean => hasGuideIcon(k, known);
@@ -162,7 +194,13 @@ export function buildGuidePanel(initialId?: string): HTMLElement {
   for (const s of sections) {
     const b = document.createElement("button"); b.type = "button";
     b.dataset["guideSection"] = s.id; b.dataset["key"] = `guide-${s.id}`;
-    b.textContent = s.title; b.setAttribute("aria-pressed", "false");
+    // ADR-387: the quick-jump buttons show the section's own icon, like the section headers do.
+    const bic = guideIconKey(s.icon, has);
+    if (bic) {
+      const ic = document.createElement("span"); ic.className = "guide-icon"; ic.dataset["role"] = "ic"; ic.dataset["icon"] = bic;
+      ic.setAttribute("aria-hidden", "true"); b.append(ic);
+    }
+    b.append(document.createTextNode(s.title)); b.setAttribute("aria-pressed", "false");
     b.addEventListener("click", () => render(s.id));
     list.append(b);
   }

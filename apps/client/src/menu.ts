@@ -12,6 +12,8 @@ import { mountUi } from "./ui-root.js";
 import { bindTypingFullscreenExit, enterFullscreen } from "./fullscreen.js";
 import { BackHistory, focusVisible, markNavFocus } from "./back-history.js";
 import { buildGuidePanel } from "./guide-panel.js";
+import { iconUrl } from "./game-icons.js";
+import { GUIDE_BOOK_ICON_FILE } from "./guide-art.js";
 import { navPad, PadEdges, padKeyEdge, traceAction, type PadControl } from "./pad-input.js";
 const isTyping = (t: EventTarget | null): boolean => t instanceof HTMLInputElement && t.type !== "checkbox" && t.type !== "range";
 import { EasedBar, zombiePose } from "./load-progress.js";
@@ -336,7 +338,9 @@ export class BootUI {
       const guide = (): void => {
         const el = buildGuidePanel();
         el.querySelector("[data-guide-section]")?.setAttribute("data-autofocus", "1");
-        this.screen([["Back", main, "alt"]], main, `<h2>Guide</h2>`, el);
+        // ADR-387: the boot Guide screen header shows the book icon, like the in-game Guide panel
+        // (buildGuidePanel above lazily installed it, so iconUrl serves the painted PNG here).
+        this.screen([["Back", main, "alt"]], main, `<h2><img src="${iconUrl(GUIDE_BOOK_ICON_FILE)}" alt="Guide" style="width:24px;height:24px;image-rendering:pixelated;vertical-align:middle"> Guide</h2>`, el);
       };
       // ADR-236: one Multiplayer page holds everything the old in-game connect / P2P boxes did: host, join a room code,
       // dedicated server address + live reachability/ping, and why the last session ended. In-game only Pause → Session

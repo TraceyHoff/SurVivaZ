@@ -83,7 +83,12 @@ describe("ADR-363 buildGuidePanel", () => {
       // exactly one section is pressed, and it is this one
       expect(buttons.filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.dataset["guideSection"])).toEqual([s.id]);
     }
-    expect(el.querySelector("img")).toBeNull(); // icons are [data-icon] spans, never <img>
+    // ADR-387: section icons are [data-icon] spans, but fact-row icons may be <img>s — disease
+    // status art via conditionIconImg and embedded ic_ icons via iconImg. Every <img> in the panel
+    // must be a fact-row icon, never a section or quick-jump icon.
+    for (const img of Array.from(el.querySelectorAll("img"))) {
+      expect(img.closest("[data-role=guide-fact]"), img.outerHTML).not.toBeNull();
+    }
   });
   test("icons render where the stylesheet has art — including the ADR-364 pet/mount icons", () => {
     document.body.innerHTML = "";

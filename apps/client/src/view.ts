@@ -83,6 +83,7 @@ import { task256AtlasSources, TASK256_ATLAS_KEYS } from "./task256-art.js";
 import { task355AtlasSources, installStoreMenuIcons, TASK355_ATLAS_KEYS } from "./task355-art.js";
 import { task361AtlasSources, installVehicleMenuIcons, TASK361_ATLAS_KEYS } from "./task361-art.js";
 import { installGuideArt } from "./task364-art.js";
+import { installGuideMenuIcon } from "./guide-art.js";
 import { stumpKeys } from "./stumps.js";
 /** `?cam=animal`: debug camera that follows the first ambient animal instead of the player. */
 const CAM_ANIMAL = typeof location !== "undefined" && new URLSearchParams(location.search).get("cam") === "animal";
@@ -388,6 +389,10 @@ export class IsoView {
     // (it is a rendering of the store's own world art in the game's ghost treatment) — paint it at
     // runtime from the store art. Safe no-op without a canvas.
     installGuideArt();
+    // ADR-387: the Guide's own book icon (its menu entry carried the 📖 emoji) — painted at runtime
+    // from the guide-art painter and registered in ICON_DATA, so the pause/settings Guide buttons and
+    // the Guide panel headers render it. Safe no-op without a canvas.
+    installGuideMenuIcon();
     // Art's customization pack (~220 paper-doll atlases, 1008x960): the renderer packs every atlas into one 2048² texture
     // array, so these alone need ~1.7 GiB of VRAM ("Texture total allocation size is too large" -> every sprite black).
     // Until Render loads outfit layers on demand, keep them out unless the array fits (?cz=1 forces them in).

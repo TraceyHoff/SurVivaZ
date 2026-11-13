@@ -17,6 +17,7 @@ import { fxSettingsRows, type FxControls } from "./fx/settings-ui.js";
 import { GAMEPLAY_PANELS, gameplayBody, pageContainer, pageSkillCategory, type GameplayPanel, type GameplaySource } from "./gameplay-panels.js";
 import { buildGuidePanel } from "./guide-panel.js";
 import { iconImg, isIconFile } from "./game-icons.js";
+import { GUIDE_BOOK_ICON_FILE } from "./guide-art.js";
 import { closeContainerIntent, onlineTargets, openContainerIntent, openStallIntent, isPetOwner, Pet, Viewing } from "@engine/gameplay";
 import { DEFAULT_QUALITY_PRESET, loadPreset, parsePreset, savePreset, QUALITY_PRESETS, type QualityPreset } from "@engine/render";
 
@@ -43,7 +44,7 @@ export const GAME_MENUS: readonly MenuDef[] = [
   { id: "map", title: "World Map", icon: "ic_map.png", hotkeys: ["KeyM"], bar: true, text: "Your location, facing and markers. Tap a spot to place a marker." },
   { id: "chat", title: "Chat", icon: "ic_chat.png", hotkeys: ["Enter", "Slash"], bar: true, text: "" },
   { id: "settings", title: "Settings", icon: "⚙", hotkeys: ["KeyO"], text: "" },
-  { id: "guide", title: "Guide", icon: "📖", hotkeys: [], text: "How everything in SurVivaZ works — controls, diseases, temperature, building, AI humans, animals and more." },
+  { id: "guide", title: "Guide", icon: GUIDE_BOOK_ICON_FILE, hotkeys: [], text: "How everything in SurVivaZ works — controls, diseases, temperature, building, AI humans, animals and more." },
 ];
 const CSS = `.gm-modal{position:absolute;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;background:rgba(10,8,6,.55);
 padding:calc(8px + var(--sat,0px)) calc(8px + var(--sar,0px)) calc(8px + var(--sab,0px)) calc(8px + var(--sal,0px));box-sizing:border-box;pointer-events:auto;touch-action:pan-y}
@@ -127,7 +128,7 @@ export class GameMenus {
   }
   destroy(): void { this.nav.destroy(); this.bar?.remove(); }
 
-  private panel(id: string, title: string, body: Node[], buttons: [string, () => void, string?][] = []): HTMLElement {
+  private panel(id: string, title: string, body: Node[], buttons: [string, () => void, (string | undefined)?, (string | undefined)?][] = []): HTMLElement {
     const m = document.createElement("div"); m.className = "gm-modal";
     m.addEventListener("pointerdown", (e) => { if (e.target === m) this.nav.close(); }); // tap outside closes
     const p = document.createElement("div"); p.className = "gm-panel"; p.setAttribute("aria-label", title);
@@ -137,7 +138,7 @@ export class GameMenus {
     h.append(h2, x);
     const b = document.createElement("div"); b.dataset["role"] = "body"; if (!camper) b.style.cssText = "display:flex;flex-direction:column;gap:8px"; /* camper: grid areas from gameplay-panels.css */ b.append(...body);
     const actions = document.createElement("div"); actions.className = "gm-grid";
-    for (const [t, fn, cls] of buttons) { const bt = document.createElement("button"); bt.type = "button"; bt.textContent = t; if (cls) bt.className = cls; bt.dataset["action"] = t; bt.addEventListener("click", fn); actions.append(bt); }
+    for (const [t, fn, cls, icon] of buttons) { const bt = document.createElement("button"); bt.type = "button"; if (icon) bt.append(iconImg(icon, 20, t)); bt.append(document.createTextNode(t)); if (cls) bt.className = cls; bt.dataset["action"] = t; bt.addEventListener("click", fn); actions.append(bt); }
     p.append(h, b); if (buttons.length) p.append(actions);
     const hint = document.createElement("div"); hint.className = "hint"; hint.textContent = "Tap · Tab/arrows + Enter, Esc back · D-pad + A, B back"; p.append(hint);
     m.append(p); m.dataset["menu"] = id; return m;
@@ -252,15 +253,22 @@ export class GameMenus {
   pause(): void { if (this.nav.top === "pause") return; this.nav.open("pause", this.build("pause")); }
   /** ADR-363: the guide opens stacked over the pause menu (Esc / ✕ / B closes back to pause; the pause
    *  menu stays in the stack, so singleplayer pause — main.ts keys it on isOpenId("pause") — is preserved). */
-  private guidePanel(): HTMLElement { return this.panel("guide", "Guide", [buildGuidePanel()]); }
+  private guidePanel(): HTMLElement {
+    const el = this.panel("guide", "Guide", [buildGuidePanel()]);
+    // ADR-387: the Guide page header shows the book icon (runtime-painted, guide-art.ts) instead of
+    // the bare heading — the same icon as the Guide's entry buttons.
+    const h2 = el.querySelector("h2");
+    if (h2) h2.prepend(iconImg(GUIDE_BOOK_ICON_FILE, 24, "Guide"), document.createTextNode(" "));
+    return el;
+  }
 
   private pausePanel(): HTMLElement {
-    const items: [string, () => void, string?][] = [["Resume", () => this.nav.close()]];
+    const items: [string, () => void, (string | undefined)?, (string | undefined)?][] = [["Resume", () => this.nav.close()]];
     if (this.o.session?.()) items.push(["Session", () => this.open("session")]); // ADR-236: multiplayer status / room code / leave live here, not over the game
-    for (const m of GAME_MENUS) if (!CONTEXT_ONLY_MENUS.has(m.id)) items.push([m.title, () => this.open(m.id)]); // station / camper open by walking up to one
+    for (const m of GAME_MENUS) if (!CONTEXT_ONLY_MENUS.has(m.id)) items.push([m.title, () => this.open(m.id), undefined, m.id === "guide" ? GUIDE_BOOK_ICON_FILE : undefined]); // station / camper open by walking up to one
     const tut = this.o.tutorial;
     if (tut?.active()) items.push(["Dismiss this tip", () => { this.nav.closeAll(); tut.next(); }], ["Turn off tips", () => { this.nav.closeAll(); tut.skip(); }, "alt"]);
-    else if (tut) items.push(["Play the guide again", () => { this.nav.closeAll(); tut.replay(); }]);
+    else if (tut) items.push(["Play the guide again", () => { this.nav.closeAll(); tut.replay(); }, undefined, GUIDE_BOOK_ICON_FILE]);
     items.push(["Quit to main menu", () => { this.nav.closeAll(); this.o.onQuit(); }, "alt"]);
     return this.panel("pause", "Paused", [], items);
   }
@@ -287,7 +295,7 @@ export class GameMenus {
     const del = this.o.deleteProgress?.();
     const wr = this.o.worldRules?.(); const l4 = document.createElement("small"); l4.dataset["role"] = "world-rules"; l4.style.cssText = "display:block;opacity:.8";
     l4.textContent = wr ? `This world: zombie hordes ${wr.hordes ? `ON (after ${wr.hordeGraceDays} in-game days)` : "OFF"} · AI humans ${wr.aiHumans ? "ON" : "OFF"}` : "";
-    return this.panel("settings", "Settings", [l7, l1, l2, l5, l6, l8, l3, ...(wr ? [l4] : []), ...(this.o.fx ? [fxSettingsRows(this.o.fx)] : []), ...(this.o.audio ? [audioSettingsRows(this.o.audio)] : [])], [...(this.o.tutorial ? [["📖 Play the guide again", () => { this.nav.closeAll(); this.o.tutorial!.replay(); }, "alt"] as [string, () => void, string]] : []), ...(del ? [[del.label, () => this.open("delete-progress"), "alt"] as [string, () => void, string]] : []), ["🐞 Error log", () => this.open("error-log"), "alt"],["Save", () => { saveSettings({ ...loadSettings(), showHud: hud.checked, fullscreen: fs.checked, toolHints: th.checked, nameTags: nt.checked, ledgeWarnings: lw.checked, ...tu.patch() }); const qp = parsePreset(q.value) ?? DEFAULT_QUALITY_PRESET; savePreset(qp); this.o.setQuality?.(qp); this.nav.close(); }], ["Back", () => this.nav.close(), "alt"]]);
+    return this.panel("settings", "Settings", [l7, l1, l2, l5, l6, l8, l3, ...(wr ? [l4] : []), ...(this.o.fx ? [fxSettingsRows(this.o.fx)] : []), ...(this.o.audio ? [audioSettingsRows(this.o.audio)] : [])], [...(this.o.tutorial ? [["Play the guide again", () => { this.nav.closeAll(); this.o.tutorial!.replay(); }, "alt", GUIDE_BOOK_ICON_FILE] as [string, () => void, string, string]] : []), ...(del ? [[del.label, () => this.open("delete-progress"), "alt"] as [string, () => void, string]] : []), ["🐞 Error log", () => this.open("error-log"), "alt"],["Save", () => { saveSettings({ ...loadSettings(), showHud: hud.checked, fullscreen: fs.checked, toolHints: th.checked, nameTags: nt.checked, ledgeWarnings: lw.checked, ...tu.patch() }); const qp = parsePreset(q.value) ?? DEFAULT_QUALITY_PRESET; savePreset(qp); this.o.setQuality?.(qp); this.nav.close(); }], ["Back", () => this.nav.close(), "alt"]]);
   }
   private deletePanel(): HTMLElement {
     const d = this.o.deleteProgress?.();

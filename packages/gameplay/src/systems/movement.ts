@@ -12,7 +12,7 @@ import { shaftAwareHeight, updateShaftOccupancy } from "../building/terrain-hatc
  */
 import { roadSpeedMul } from "../roads.js";
 import { entityIndex, evaluate, defineResource, Transform, type Entity, type World } from "@engine/core";
-import { contractDisease, diseaseMoveMul } from "../diseases.js";
+import { contractDisease, diseaseMoveMul, hasDisease } from "../diseases.js";
 import { Anim, AnimState, DamageCause, Health, LootBag, Buffs, Dead, Driver, EdgeSide, Inventory, Mount, PlayerIntent, Riding, Stat, Survival, Wetness } from "../components.js";
 import { fitsDoorway, fitsUnderCeiling, mountBodyRadius, mountOfRider, mountSpecies, MOUNT_TUNING } from "../mount_defs.js";
 import { gameplayDefs, isAuthority } from "../config.js";
@@ -241,7 +241,7 @@ export function applyMovementInput(world: World, e: Entity, actions: number, dt:
   const dead = world.has(e, Dead);
   const { dx, dy } = dead ? { dx: 0, dy: 0 } : moveVector(actions, analog);
   const moving = dx || dy ? 1 : 0; const ready = autoSprintReady(world, e, dx, dy, dt);
-  const sprint = ready && (world.getField(e, Survival, "stamina") ?? 0) > 0 && stanceAllowsSprint(world, e) && !(t.z < 0.5 && inDeepWater(world, t.x, t.y)) ? 1 : 0; // ADR-181: no sprint while swimming
+  const sprint = ready && (world.getField(e, Survival, "stamina") ?? 0) > 0 && stanceAllowsSprint(world, e) && !(t.z < 0.5 && inDeepWater(world, t.x, t.y)) && !hasDisease(world, e, "broken_leg") ? 1 : 0; // ADR-181: no sprint while swimming; ADR-387: no sprint with a broken leg (walk speed only, disease moveMul still applies; the AutoSprint latch is untouched, so sprint resumes the moment the leg heals)
   // ADR-147: PlayerIntent is not networked, so a client replica has none and its predicted vitals never drained sprint
   // stamina (the replica's stamina lagged the server by the snapshot delay, sprint ended a tick apart: a rubber-band).
   // The predicting client keeps a local PlayerIntent on its own entity so movement + vitals replay like the server.
