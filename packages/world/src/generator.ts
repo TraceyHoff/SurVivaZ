@@ -20,8 +20,33 @@ export interface ChunkProvider {
 
 export { hash2, valueNoise } from "./noise.js";
 import { hash2, valueNoise } from "./noise.js";
-import { isForcedWater, waterFeatureLayout, ELEVATED_LAKE_DEFAULTS, type ElevatedLakeOptions, type WaterFeatureLayout } from "./waterFeatures.js";
+import { isForcedWater, waterFeatureAt, waterFeatureLayout, elevatedLakeDist, ELEVATED_LAKE_DEFAULTS, type ElevatedLakeOptions, type Spillway, type WaterFeatureLayout } from "./waterFeatures.js";
 import { flowWaterRaw } from "./waterDepth.js";
+
+/** ADR-386: noise-aware elevated-lake siting + spillway (waterfall) channel.
+ *  SITING_SEA_MARGIN: a sited lake has no biome sea within disc + this many tiles (disc + beach
+ *  shelf + one tile of land margin), so every sited lake has a full land shore.
+ *  SITING_DIST_STEPS: distance offsets tried along each free cardinal, inside [minDistance, maxDistance].
+ *  SITING_HEIGHT_MARGIN: a challenger must beat the hash placement's mean ring height by this much
+ *  (levels) to displace it — the hash placement is kept unless another direction is clearly higher ground.
+ *  SPILLWAY_MAX_LEN: longest channel (tiles) before the lake is treated as closed (no spillway).
+ *  SPILLWAY_TARGET_RANGE: farthest sea (beyond the rim) a spillway will reach for.
+ *  SPILLWAY_WINDOW: the walk stays inside the region's ±120-tile feature window (a channel must not
+ *  cross a region boundary, where the neighbouring region's layout would cut it off). */
+const SITING_SEA_MARGIN = 2;
+const SITING_DIST_STEPS = [0, -5, 5, -10, 10, -15, 15, -20, 20] as const;
+const SITING_HEIGHT_MARGIN = 1;
+const SPILLWAY_MAX_LEN = 64;
+const SPILLWAY_TARGET_RANGE = 64;
+const SPILLWAY_WINDOW = 255; // the walk stays inside the region's own 512-tile span (a channel must not cross into the next region, whose layout would cut it off)
+
+/** ADR-386: spillway channel level at region-local (lx, ly), or undefined (the bbox rejects most tiles). */
+function spillLevelAt(layout: WaterFeatureLayout, lx: number, ly: number): number | undefined {
+  const sp = layout.spillway; if (!sp) return undefined;
+  if (lx < sp.bbox.x0 || lx > sp.bbox.x1 || ly < sp.bbox.y0 || ly > sp.bbox.y1) return undefined;
+  for (const t of sp.tiles) if (t.x === lx && t.y === ly) return t.level;
+  return undefined;
+}
 
 /**
  * ADR-254: pick a fresh world seed for a new playthrough. Prefer crypto.getRandomValues; fall back to `random`.
@@ -97,6 +122,9 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     this.bands = opts.bands ?? DEFAULT_BANDS;
     this.elevated = opts.elevatedLakes === false ? undefined : { ...ELEVATED_LAKE_DEFAULTS, ...(opts.elevatedLakes ?? {}) };
     this.water = opts.waterFeatures === false ? undefined : waterFeatureLayout(opts.seed, this.elevated);
+    // ADR-386: noise-aware siting for region zero's elevated lake (uses the height field, so it runs
+    // here, not in waterFeatureLayout — the hash layout is only the baseline).
+    if (this.water) this.siteElevatedLake(0, 0, this.opts.seed, this.water);
     const kt = new Map<number, Set<number>>();
     for (const b of this.bands) for (const k of b.nodeKinds ?? []) {
       let s = kt.get(k); if (!s) kt.set(k, (s = new Set())); s.add(b.tile);
@@ -105,27 +133,251 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     this.allKinds = [...this.kindTiles.keys()];
   }
   /** Region layout + region-local coords for (tx, ty). Region zero preserves ADR-255's starter layout; other
-   *  regions are seeded from their key (fnv1a) and memoized (cap 16, like before). Undefined outside the
-   *  ±120-tile feature window of a non-zero region, or when water features are off. */
+   *  regions are seeded from their key (fnv1a) and memoized (cap 16, like before). The layout covers the
+   *  whole 512-tile region (features sit within ±120 of its centre, but an ADR-386 spillway may run to
+   *  the region edge); undefined only when water features are off. */
   private layoutFor(tx: number, ty: number): { layout: WaterFeatureLayout; lx: number; ly: number; seed: number } | undefined {
     if (!this.water) return undefined;
     // Every 512-tile region has seeded features; region zero preserves ADR-255's starter layout.
     const rx = Math.floor((tx + 256) / 512), ry = Math.floor((ty + 256) / 512);
     if (rx === 0 && ry === 0) return { layout: this.water, lx: tx, ly: ty, seed: this.opts.seed };
     const lx = tx - rx * 512, ly = ty - ry * 512;
-    if (Math.abs(lx) > 120 || Math.abs(ly) > 120) return undefined;
     const key = `${rx},${ry}`; let region = this.regionWater.get(key);
     if (!region) {
       const seed = fnv1a(key, this.opts.seed >>> 0);
       region = { seed, layout: waterFeatureLayout(seed, this.elevated) };
       if (this.regionWater.size >= 16) this.regionWater.delete(this.regionWater.keys().next().value!);
       this.regionWater.set(key, region);
+      // ADR-386: noise-aware siting + spillway for this region's elevated lake (stored in the map
+      // first, so a re-entrant lookup during siting sees the in-progress region).
+      this.siteElevatedLake(rx * 512, ry * 512, seed, region.layout);
     }
     return { layout: region.layout, lx, ly, seed: region.seed };
   }
+  /** ADR-386: the sited water-feature layout covering (tx, ty) — the elevated lake as noise-aware
+   *  siting placed it (undefined when the region has no elevated lake), or undefined outside any
+   *  feature window. Tests and callers that need the real lake position use this, not the hash layout. */
+  regionLayout(tx: number, ty: number): WaterFeatureLayout | undefined {
+    return this.layoutFor(tx, ty)?.layout;
+  }
   private forcedWater(tx: number, ty: number): boolean {
     const reg = this.layoutFor(tx, ty); if (!reg) return false;
-    return isForcedWater(reg.seed, reg.lx, reg.ly, reg.layout);
+    // ADR-386: a spillway channel is water too (its tiles are flow-encoded in load()/sampleAt).
+    return isForcedWater(reg.seed, reg.lx, reg.ly, reg.layout) || spillLevelAt(reg.layout, reg.lx, reg.ly) !== undefined;
+  }
+  /**
+   * ADR-386: noise-aware siting for one region's elevated lake, then its spillway (see spillwayFor).
+   * The hash layout is only the baseline: the lake's cardinal/distance are re-picked by the height
+   * field, not the hash. Candidates are the two free cardinals (neither the lake nor the pond uses
+   * them) at the hash distance and ±5/±10/±15/±20 tiles along the same cardinal. A candidate is valid only
+   * when no biome sea lies within disc + SITING_SEA_MARGIN, so every sited lake has a full land shore
+   * (the ADR-383 ~5% no-land-shore case cannot occur for a sited lake). Valid candidates are scored
+   * by the MEAN base height in the shelf ring (disc+1..disc+2 — all land by validity; the mean, not
+   * the min: one low tile must not tank a whole direction), ties broken by closeness to the hash
+   * placement. No valid candidate → the region has no elevated lake
+   * (layout.elevatedLake = undefined): skipping beats a sea-merged one.
+   * Probing uses the BASE field (el = null: no bowl, no spillway), so there is no circularity — the
+   * bowl only ever raises terrain, and a base field clear of sea stays clear once the bowl is in.
+   * (originX, originY) is the region's absolute origin; all layout coords are region-local.
+   */
+  private siteElevatedLake(originX: number, originY: number, regionSeed: number, layout: WaterFeatureLayout): void {
+    if (!this.elevated) return;
+    const el = layout.elevatedLake; if (!el) return;
+    const opts = this.elevated;
+    const cardinals: readonly (readonly [number, number])[] = [[1, 0], [0, -1], [-1, 0], [0, 1]]; // E, N, W, S
+    const cardOf = (x: number, y: number): number => (Math.abs(x) < 2 ? (y > 0 ? 3 : 1) : (x > 0 ? 0 : 2));
+    const hashCard = cardOf(el.x, el.y);
+    const free = [0, 1, 2, 3].filter((i) => i !== cardOf(layout.lake.x, layout.lake.y) && i !== cardOf(layout.pond.x, layout.pond.y));
+    const ordered = [hashCard, ...free.filter((i) => i !== hashCard)];
+    const d0 = Math.round(Math.max(Math.abs(el.x), Math.abs(el.y)) - 0.5);
+    const isSea = (lx: number, ly: number): boolean => this.bandOf(this.noiseAt(originX + lx, originY + ly)).tile === 1;
+    const baseHeight = (lx: number, ly: number): number =>
+      this.heightFromNoise(originX + lx, originY + ly, this.noiseAt(originX + lx, originY + ly), null, null);
+    let best: { x: number; y: number; ringMean: number; dOff: number; order: number } | undefined;
+    let hashScore: number | undefined;
+    for (let order = 0; order < ordered.length; order++) {
+      const ci = ordered[order]!; const [dx, dy] = cardinals[ci]!;
+      for (const off of SITING_DIST_STEPS) {
+        const d = d0 + off;
+        if (d < opts.minDistance || d > opts.maxDistance) continue;
+        const cx = Math.round(dx * d) + 0.5, cy = Math.round(dy * d) + 0.5;
+        // One pass: valid only when no biome sea lies within disc + margin; score is the MEAN base
+        // height of the shelf ring (disc+1 .. disc+2 — all land by validity). The mean, not the min:
+        // one low tile must not tank a whole direction, and the mean is what "high surrounding land" is.
+        const R = el.r + SITING_SEA_MARGIN;
+        let ok = true, ringSum = 0, ringN = 0;
+        for (let y = Math.floor(cy - R - 1); y <= Math.ceil(cy + R + 1) && ok; y++)
+          for (let x = Math.floor(cx - R - 1); x <= Math.ceil(cx + R + 1); x++) {
+            const dist = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+            if (dist > R) continue;
+            if (isSea(x, y)) { ok = false; break; }
+            if (dist > el.r) { ringSum += baseHeight(x, y); ringN++; }
+          }
+        if (!ok) continue;
+        const cand = { x: cx, y: cy, ringMean: ringN ? ringSum / ringN : 0, dOff: Math.abs(off), order };
+        if (order === 0 && off === 0) hashScore = cand.ringMean;
+        if (!best || cand.ringMean > best.ringMean || (cand.ringMean === best.ringMean && (cand.dOff < best.dOff || (cand.dOff === best.dOff && cand.order < best.order)))) best = cand;
+      }
+    }
+    if (!best) {
+      // Fallback tier: closer in (below the knob's minDistance, still on a free cardinal — clear of
+      // the diagonal spawn patches and of the lake/pond on their own axes). A lake a little closer
+      // beats no lake at all; only regions where every 84..104 placement touches the sea get here.
+      for (let order = 0; order < ordered.length; order++) {
+        const ci = ordered[order]!; const [dx, dy] = cardinals[ci]!;
+        for (const d of [83, 78, 73, 68, 63]) {
+          const cx = Math.round(dx * d) + 0.5, cy = Math.round(dy * d) + 0.5;
+          const R = el.r + SITING_SEA_MARGIN;
+          let ok = true, ringSum = 0, ringN = 0;
+          for (let y = Math.floor(cy - R - 1); y <= Math.ceil(cy + R + 1) && ok; y++)
+            for (let x = Math.floor(cx - R - 1); x <= Math.ceil(cx + R + 1); x++) {
+              const dist = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+              if (dist > R) continue;
+              if (isSea(x, y)) { ok = false; break; }
+              if (dist > el.r) { ringSum += baseHeight(x, y); ringN++; }
+            }
+          if (!ok) continue;
+          const cand = { x: cx, y: cy, ringMean: ringN ? ringSum / ringN : 0, dOff: 0, order };
+          if (!best || cand.ringMean > best.ringMean) best = cand;
+        }
+      }
+    }
+    if (!best) { layout.elevatedLake = undefined; return; } // skipped: no placement clear of the sea
+    // The hash placement stands unless another direction is CLEARLY higher ground (by
+    // SITING_HEIGHT_MARGIN) — a hair's difference is noise, not a reason to move the lake.
+    if (hashScore !== undefined && best.ringMean < hashScore + SITING_HEIGHT_MARGIN) {
+      const [dx, dy] = cardinals[hashCard]!;
+      best = { x: Math.round(dx * d0) + 0.5, y: Math.round(dy * d0) + 0.5, ringMean: hashScore, dOff: 0, order: 0 };
+    }
+    layout.elevatedLake = { x: best.x, y: best.y, r: el.r, level: el.level };
+    layout.spillway = this.spillwayFor(originX, originY, regionSeed, layout);
+  }
+
+  /**
+   * ADR-386: the spillway from a sited lake's rim down to lower water, or undefined when the lake is
+   * closed (no spillway: nothing to connect to, so no waterfall). The spill target is the nearest
+   * sea-level water (biome sea, or a forced lake/river/pond at level 0) within SPILLWAY_TARGET_RANGE
+   * of the rim. The walk starts at the rim breach — the 4-neighbour of a disc tile with the lowest
+   * base height — and aims at the target: each step keeps (or barely increases) the distance to it,
+   * taking the lowest ground among those steps, until a tile adjacent to lower water. It gives up
+   * when boxed in, when it would leave the region's own span, or past its step budget
+   * (the Manhattan distance + slack, capped at SPILLWAY_MAX_LEN). A breach directly adjacent to
+   * lower water is also closed: a 1-tile channel has no tiles[1], so no 2-level falls — just a
+   * 3..6-level drop to the sea (fall damage going down, unclimbable back up). When the rim already touches
+   * lower water (a river passing the lake), no channel is carved: the junction face itself is the
+   * waterfall (see tilemap.ts).
+   * Channel levels: breach at L-1, then the waterfall — one 2-level drop to L-3 — then 1 per tile
+   * to a floor of 1, running flat to the sea. A 2-level drop is the steepest face that stays
+   * climbable/swimmable both ways (MAX_UNAIDED_CLIMB is 3, and drops of <= 3 cost no fall damage),
+   * so the waterfall connects the two water bodies instead of barring them.
+   */
+  private spillwayFor(originX: number, originY: number, regionSeed: number, layout: WaterFeatureLayout): Spillway | undefined {
+    const el = layout.elevatedLake; if (!el || !this.elevated) return undefined;
+    const r = el.r, L = el.level;
+    const isLowWater = (lx: number, ly: number): boolean => {
+      if (this.bandOf(this.noiseAt(originX + lx, originY + ly)).tile === 1) return true;
+      const k = waterFeatureAt(regionSeed, lx, ly, layout);
+      return k === "lake" || k === "river" || k === "pond";
+    };
+    const inDisc = (lx: number, ly: number): boolean => elevatedLakeDist(layout, lx, ly) <= r;
+    const inWindow = (lx: number, ly: number): boolean => Math.abs(lx) <= SPILLWAY_WINDOW && Math.abs(ly) <= SPILLWAY_WINDOW;
+    const baseHeight = (lx: number, ly: number): number =>
+      this.heightFromNoise(originX + lx, originY + ly, this.noiseAt(originX + lx, originY + ly), null, null);
+    const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
+    // Nearest lower water to the lake (the spill target): ring scan out from the rim so the closest
+    // sea is found first. Pure steepest descent was tried first and stalled on the terrace plateaus
+    // (only ~2% of lakes spilled); aiming at the sea reaches it in the overwhelming majority of cases.
+    const cx = Math.floor(el.x), cy = Math.floor(el.y);
+    let target: { x: number; y: number } | undefined;
+    const maxRing = el.r + SPILLWAY_TARGET_RANGE;
+    outer: for (let ring = el.r + 1; ring <= maxRing; ring++) {
+      for (let y = cy - ring; y <= cy + ring; y++) for (let x = cx - ring; x <= cx + ring; x++) {
+        if (Math.max(Math.abs(x - cx), Math.abs(y - cy)) !== ring) continue;
+        if (!inWindow(x, y) || inDisc(x, y)) continue;
+        if (isLowWater(x, y)) { target = { x, y }; break outer; }
+      }
+    }
+    if (!target) return undefined; // no lower water in range — closed lake
+    // Rim breach: the rim tile closest to the spill target, and among the near ones the lowest —
+    // the lake spills where the rim is low AND the sea is near, so the walk does not have to fight
+    // its way around the disc to reach the water. (Lowest-height alone faced away from the sea in
+    // most seeds and the walk boxed itself in against the disc.)
+    let start: { x: number; y: number } | undefined; let startH = Infinity; let startD = Infinity;
+    for (let y = cy - r - 1; y <= cy + r + 1; y++) for (let x = cx - r - 1; x <= cx + r + 1; x++) {
+      if (inDisc(x, y)) continue;
+      if (!N4.some(([dx, dy]) => inDisc(x + dx, y + dy))) continue;
+      const d = Math.hypot(x + 0.5 - (target.x + 0.5), y + 0.5 - (target.y + 0.5));
+      startD = Math.min(startD, d);
+    }
+    for (let y = cy - r - 1; y <= cy + r + 1; y++) for (let x = cx - r - 1; x <= cx + r + 1; x++) {
+      if (inDisc(x, y)) continue;
+      if (!N4.some(([dx, dy]) => inDisc(x + dx, y + dy))) continue;
+      const d = Math.hypot(x + 0.5 - (target.x + 0.5), y + 0.5 - (target.y + 0.5));
+      if (d > startD + 2) continue;
+      const h = baseHeight(x, y);
+      if (h < startH) { startH = h; start = { x, y }; }
+    }
+    if (!start) return undefined;
+    if (isLowWater(start.x, start.y)) return undefined; // rim already meets lower water — junction face is the falls
+    // Walk toward the target: each step keeps (or barely increases) the distance to it, and among
+    // those steps takes the lowest ground — a stream that aims at the sea down the fall line, not a
+    // straight ditch. The channel carves through hills (a gorge) where the fall line demands it.
+    // Bounded by twice the Euclidean distance + slack, capped at SPILLWAY_MAX_LEN: the walk needs
+    // detour room around the disc rim and the low ground, and Manhattan + 12 proved too tight for
+    // mid-range targets (it regressed the spill rate vs 2x Euclidean + 8).
+    const path: { x: number; y: number }[] = [start];
+    const seen = new Set<string>([`${start.x},${start.y}`]);
+    const distTo = (x: number, y: number): number => Math.hypot(x + 0.5 - (target!.x + 0.5), y + 0.5 - (target!.y + 0.5));
+    const maxSteps = Math.min(SPILLWAY_MAX_LEN, 2 * Math.ceil(distTo(start.x, start.y)) + 8);
+    let cur = start;
+    let end: { x: number; y: number } | undefined;
+    for (let step = 0; step < maxSteps && !end; step++) {
+      for (const [dx, dy] of N4) {
+        const nx = cur.x + dx, ny = cur.y + dy;
+        if (inDisc(nx, ny) || seen.has(`${nx},${ny}`)) continue;
+        if (isLowWater(nx, ny)) { end = { x: nx, y: ny }; break; }
+      }
+      if (end) break;
+      const curD = distTo(cur.x, cur.y);
+      let best: { x: number; y: number; h: number } | undefined;
+      for (const [dx, dy] of N4) {
+        const nx = cur.x + dx, ny = cur.y + dy;
+        if (inDisc(nx, ny) || seen.has(`${nx},${ny}`) || !inWindow(nx, ny)) continue;
+        if (distTo(nx, ny) > curD + 0.5) continue; // never walk away from the sea
+        const h = baseHeight(nx, ny);
+        if (!best || h < best.h) best = { x: nx, y: ny, h };
+      }
+      if (!best) return undefined; // boxed in — closed lake
+      path.push({ x: best.x, y: best.y }); seen.add(`${best.x},${best.y}`);
+      cur = best;
+    }
+    if (!end) return undefined; // never reached lower water — closed lake
+    // A breach directly adjacent to lower water leaves a 1-tile channel with no tiles[1] —
+    // no 2-level falls, just a 3..6-level drop to the sea (fall damage + unclimbable back
+    // up). Treat it as closed: the junction face is the falls.
+    if (path.length < 2) return undefined;
+    const tiles = path.map((p, i) => ({ ...p, level: Math.max(1, i === 0 ? L - 1 : L - 2 - i) }));
+    const xs = tiles.map((t) => t.x), ys = tiles.map((t) => t.y);
+    return { tiles, end, bbox: { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) } };
+  }
+
+  /** ADR-386: spillway channel level at (tx, ty), or undefined. */
+  private spillwayAt(tx: number, ty: number): number | undefined {
+    if (!this.elevated || !this.water) return undefined;
+    const reg = this.layoutFor(tx, ty); if (!reg) return undefined;
+    return spillLevelAt(reg.layout, reg.lx, reg.ly);
+  }
+  /** ADR-386: the elevated-lake hold and spillway level at (tx, ty) from ONE layout lookup (load()
+   *  and sampleAt() call this per tile; separate elevatedLakeAt/spillwayAt calls would triple it). */
+  private lakeAndSpill(tx: number, ty: number): { el: { level: number; r: number; dist: number } | undefined; sp: number | undefined } {
+    if (!this.elevated || !this.water) return { el: undefined, sp: undefined };
+    const reg = this.layoutFor(tx, ty); if (!reg) return { el: undefined, sp: undefined };
+    const sp = spillLevelAt(reg.layout, reg.lx, reg.ly);
+    const held = reg.layout.elevatedLake;
+    if (!held) return { el: undefined, sp };
+    const dist = Math.hypot(reg.lx + 0.5 - held.x, reg.ly + 0.5 - held.y);
+    if (dist > held.r + this.elevated.rimWidth) return { el: undefined, sp };
+    return { el: { level: held.level, r: held.r, dist }, sp };
   }
   /**
    * ADR-383: the elevated lake holding (tx, ty) — its surface level, radius and distance from its centre —
@@ -136,6 +388,7 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     if (!this.elevated || !this.water) return undefined;
     const reg = this.layoutFor(tx, ty); if (!reg) return undefined;
     const el = reg.layout.elevatedLake;
+    if (!el) return undefined; // ADR-386: siting skipped this region's lake
     const dist = Math.hypot(reg.lx + 0.5 - el.x, reg.ly + 0.5 - el.y);
     if (dist > el.r + this.elevated.rimWidth) return undefined;
     return { level: el.level, r: el.r, dist };
@@ -156,7 +409,10 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
   heightAt(tx: number, ty: number): number { return this.heightFromNoise(tx, ty, this.noiseAt(tx, ty)); }
   private heightFromNoise(tx: number, ty: number, biome: number,
     /** ADR-383: precomputed elevated-lake hold for this tile (undefined = look it up; null = none). */
-    el: { level: number; r: number; dist: number } | null | undefined = undefined): number {
+    el: { level: number; r: number; dist: number } | null | undefined = undefined,
+    /** ADR-386: spillway level for this tile (undefined = look it up; null = known absent — the
+     *  caller already checked, so the lookup is skipped; a number is the channel level itself). */
+    spLevel: number | null | undefined = undefined): number {
     const seed = this.opts.seed >>> 0; const H = this.opts.heightMax ?? HEIGHT_MAX;
     const field = 0.55 * valueNoise(seed ^ HEIGHT_SALT, tx, ty, 48)
       + 0.30 * valueNoise(seed ^ HEIGHT_SALT ^ 0x111, tx, ty, 18)
@@ -172,6 +428,14 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     const gentleDetail = Math.floor(field + biome);
     const localDetail = Math.floor(gentleDetail + (detail - gentleDetail) * blend);
     const natural = Math.max(0, Math.min(H, Math.floor(plateau * relief) + localDetail));
+    // ADR-386: a spillway channel overrides the bowl (the rim breach cuts the beach shelf) and the
+    // natural field alike — the channel is carved water at its own descending levels. The base-field
+    // probe (el === null, spLevel === null) never sees it: the spillway is computed from the base
+    // field, not part of it.
+    if (spLevel === undefined) {
+      const sp = this.spillwayAt(tx, ty);
+      if (sp !== undefined) return sp;
+    } else if (spLevel !== null) return spLevel;
     // ADR-383: elevated lake bowl. Inside the disc the bed sits at the water surface level (the stored height
     // is the ADR-263/297 flow encoding of it — see load()/sampleAt — so heightAt reports the surface level,
     // matching terrainLevel of the loaded chunk). Around it a 1-tile beach shelf clamped to [level+1, level+3]:
@@ -195,8 +459,10 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
   sampleAt(tx: number, ty: number): { tile: number; height: number } {
     const n = this.noiseAt(tx, ty);
     const tile = this.tileFromNoise(tx, ty, n, this.bandOf(n));
-    const el = this.elevatedLakeAt(tx, ty);
-    const height = el && el.dist <= el.r ? flowWaterRaw(el.level) : this.heightFromNoise(tx, ty, n, el);
+    const { el, sp } = this.lakeAndSpill(tx, ty);
+    // ADR-386: one layout lookup per tile (lakeAndSpill); the hold / spill level are threaded into
+    // heightFromNoise as already-known (el ?? null, null) so it does not look them up again.
+    const height = sp !== undefined ? flowWaterRaw(sp) : el && el.dist <= el.r ? flowWaterRaw(el.level) : this.heightFromNoise(tx, ty, n, el ?? null, null);
     return { tile, height };
   }
   private tileFromNoise(tx: number, ty: number, n: number, band: NonNullable<ProceduralOptions["bands"]>[number]): number {
@@ -258,8 +524,11 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
       // ADR-383: elevated-lake water stores the ADR-263/297 flow encoding of its surface level, so the
       // renderer (renderTileHeight), terrainLevel and waterSurfaceAt all read the lake surface, not the
       // flat ADR-182 level. Every other tile stores its heightFromNoise level (bowl included) as before.
-      const el = this.elevatedLakeAt(tx, ty);
-      c.height[i] = el && el.dist <= el.r ? flowWaterRaw(el.level) : this.heightFromNoise(tx, ty, n, el);
+      // ADR-386: spillway channel water stores the flow encoding of its own descending level likewise.
+      // One layout lookup per tile (lakeAndSpill); the hold / spill level are threaded into
+      // heightFromNoise as already-known (el ?? null, null) so it does not look them up again.
+      const { el, sp } = this.lakeAndSpill(tx, ty);
+      c.height[i] = sp !== undefined ? flowWaterRaw(sp) : el && el.dist <= el.r ? flowWaterRaw(el.level) : this.heightFromNoise(tx, ty, n, el ?? null, null);
       // No land resources on water (forced features or biome). Band chance still uses biome band kinds.
       if (tile !== 1 && tile !== 8 && band.nodeKinds?.length && rng.next() < (band.nodeChance ?? 0)) {
         nodes.push({ tx, ty, kind: rng.pick(band.nodeKinds) }); occupied.add(i);

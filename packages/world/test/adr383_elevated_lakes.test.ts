@@ -5,7 +5,6 @@
  * ADR-263/297 flow encoding for its surface, the same depth / swim / crossing rules as a normal lake.
  */
 import { describe, it, expect } from "vitest";
-import { fnv1a } from "@engine/core";
 import {
   ProceduralGenerator, CHUNK_SIZE, HEIGHT_MAX, WATER_FEATURE_RADIUS,
   waterFeatureLayout, waterFeatureAt, elevatedLakeAt, elevatedLakeDist,
@@ -24,7 +23,9 @@ describe("ADR-383 elevated lake layout", () => {
   it("every seed gets one elevated lake on a free cardinal, above sea level, inside the survey window", () => {
     for (const seed of seeds(40)) {
       const L = waterFeatureLayout(seed);
-      const el = L.elevatedLake;
+      // ADR-386: waterFeatureLayout is the hash baseline and always returns one; only the generator's
+      // sited layout may skip the lake (no placement clear of the sea).
+      const el = L.elevatedLake!;
       expect(el.level).toBeGreaterThanOrEqual(4);
       expect(el.level).toBeLessThanOrEqual(7);
       expect(el.r).toBeGreaterThanOrEqual(6);
@@ -49,18 +50,23 @@ describe("ADR-383 elevated lake layout", () => {
 
   it("knobs move the lake (level / radius / distance ranges are honoured)", () => {
     const L = waterFeatureLayout(42, { minLevel: 9, maxLevel: 9, minRadius: 5, maxRadius: 5, minDistance: 90, maxDistance: 90 });
-    expect(L.elevatedLake.level).toBe(9);
-    expect(L.elevatedLake.r).toBe(5);
-    expect(Math.hypot(L.elevatedLake.x, L.elevatedLake.y)).toBeCloseTo(90, 0);
+    expect(L.elevatedLake!.level).toBe(9);
+    expect(L.elevatedLake!.r).toBe(5);
+    expect(Math.hypot(L.elevatedLake!.x, L.elevatedLake!.y)).toBeCloseTo(90, 0);
   });
 });
 
 describe("ADR-383 elevated lake tiles, surface and bowl", () => {
   it("the disc is water whose rendered surface is the elevated level (not the flat sea level)", () => {
+    // ADR-386: the lake's position is the SITED one (g.regionLayout), not the hash baseline — siting
+    // moves most lakes to higher ground clear of the sea, and skips ~2% of regions outright.
+    let sited = 0;
     for (const seed of seeds(24)) {
       const g = new ProceduralGenerator({ seed });
-      const L = waterFeatureLayout(seed);
+      const L = g.regionLayout(0, 0)!;
       const el = L.elevatedLake;
+      if (!el) continue;
+      sited++;
       const cx = Math.floor(el.x), cy = Math.floor(el.y);
       const s = g.sampleAt(cx, cy);
       expect(isWaterId(s.tile)).toBe(true);
@@ -74,15 +80,19 @@ describe("ADR-383 elevated lake tiles, surface and bowl", () => {
       expect(renderTileHeight(ls.tile, ls.height)).toBe(0);
       expect(terrainLevel(ls.tile, ls.height)).toBeLessThan(50); // not flow-encoded
     }
+    expect(sited).toBeGreaterThanOrEqual(20); // ~2% of regions skip the lake; the rest are covered
   });
 
   it("load() chunks agree with sampleAt() across the whole disc + rim, deterministically", () => {
+    let sited = 0;
     for (const seed of seeds(12)) {
-      const L = waterFeatureLayout(seed);
-      const el = L.elevatedLake;
-      const cx = Math.floor(el.x), cy = Math.floor(el.y);
       const g1 = new ProceduralGenerator({ seed });
       const g2 = new ProceduralGenerator({ seed });
+      const L = g1.regionLayout(0, 0)!;
+      const el = L.elevatedLake;
+      if (!el) continue;
+      sited++;
+      const cx = Math.floor(el.x), cy = Math.floor(el.y);
       const x0 = cx - el.r - 5, x1 = cx + el.r + 5, y0 = cy - el.r - 5, y1 = cy + el.r + 5;
       const loaded = new Map<string, ReturnType<typeof g1.load>["chunk"]>();
       for (let cy2 = Math.floor(y0 / CHUNK_SIZE); cy2 <= Math.floor(y1 / CHUNK_SIZE); cy2++)
@@ -106,13 +116,15 @@ describe("ADR-383 elevated lake tiles, surface and bowl", () => {
         expect(s.height).toBe(c.getHeight(lx, ly));
       }
     }
+    expect(sited).toBeGreaterThanOrEqual(10); // ~2% of regions skip the lake; the rest are covered
   });
 
   it("the bowl holds: shelf land sits in [level+1, level+3] and the outer rim never drops below level+1", () => {
     for (const seed of seeds(40)) {
       const g = new ProceduralGenerator({ seed });
-      const L = waterFeatureLayout(seed);
+      const L = g.regionLayout(0, 0)!;
       const el = L.elevatedLake;
+      if (!el) continue;
       const cx = Math.floor(el.x), cy = Math.floor(el.y);
       for (let y = cy - el.r - 5; y <= cy + el.r + 5; y++) for (let x = cx - el.r - 5; x <= cx + el.r + 5; x++) {
         const d = elevatedLakeDist(L, x, y);
@@ -127,8 +139,9 @@ describe("ADR-383 elevated lake tiles, surface and bowl", () => {
   it("every land tile touching the lake is climbable from the water (rise <= MAX_UNAIDED_CLIMB 3)", () => {
     for (const seed of seeds(40)) {
       const g = new ProceduralGenerator({ seed });
-      const L = waterFeatureLayout(seed);
+      const L = g.regionLayout(0, 0)!;
       const el = L.elevatedLake;
+      if (!el) continue;
       const cx = Math.floor(el.x), cy = Math.floor(el.y);
       for (let y = cy - el.r - 1; y <= cy + el.r + 1; y++) for (let x = cx - el.r - 1; x <= cx + el.r + 1; x++) {
         if (elevatedLakeDist(L, x, y) > el.r) continue;
@@ -142,13 +155,16 @@ describe("ADR-383 elevated lake tiles, surface and bowl", () => {
   });
 
   it("the lake is deep inside and, where it has a land shore, shallow at it — like a normal lake", () => {
-    // A lake merged with a biome sea has no land shore at all (~5% of seeds), so the shallow assertion
-    // is conditional on a land shore existing; the proportion with a shore is bounded separately.
-    let withShore = 0;
+    // ADR-386: noise-aware siting guarantees every sited lake a full land shore (no sea within
+    // disc+2), so the shallow-shore assertion is unconditional now — the ADR-383 sea-merge
+    // conditional (a lake merged with a biome sea has no shore) cannot occur for a sited lake.
+    let withShore = 0, sited = 0;
     for (const seed of seeds(40)) {
       const g = new ProceduralGenerator({ seed });
-      const L = waterFeatureLayout(seed);
+      const L = g.regionLayout(0, 0)!;
       const el = L.elevatedLake;
+      if (!el) continue;
+      sited++;
       const t = (x: number, y: number): number => g.tileAt(x, y);
       expect(waterDepthAt(t, Math.floor(el.x), Math.floor(el.y))).toBe(WaterDepth.Deep);
       let sawShallow = false, hasShore = false;
@@ -160,14 +176,16 @@ describe("ADR-383 elevated lake tiles, surface and bowl", () => {
         }
       if (hasShore) { withShore++; expect(sawShallow).toBe(true); }
     }
-    expect(withShore).toBeGreaterThanOrEqual(36); // >= 90% of seeds have a land shore
+    expect(sited).toBeGreaterThanOrEqual(36);
+    expect(withShore).toBe(sited); // every sited lake has a land shore (ADR-386 siting)
   });
 
   it("the lake never drowns a spawn patch", () => {
     for (const seed of seeds(24)) {
       const g = new ProceduralGenerator({ seed });
-      const L = waterFeatureLayout(seed);
+      const L = g.regionLayout(0, 0)!;
       const el = L.elevatedLake;
+      if (!el) continue;
       for (const p of computeSpawnPoints(g)) {
         const d = Math.hypot(p.x - el.x, p.y - el.y);
         expect(d).toBeGreaterThan(el.r + 5);
@@ -187,7 +205,7 @@ describe("ADR-383 elevated lake tiles, surface and bowl", () => {
   it("elevatedLakes: false (and waterFeatures: false) leave no elevated surface", () => {
     for (const seed of seeds(12)) {
       const L = waterFeatureLayout(seed);
-      const el = L.elevatedLake;
+      const el = L.elevatedLake!;
       const cx = Math.floor(el.x), cy = Math.floor(el.y);
       for (const g of [new ProceduralGenerator({ seed, elevatedLakes: false }), new ProceduralGenerator({ seed, waterFeatures: false })]) {
         const s = g.sampleAt(cx, cy);
@@ -202,17 +220,20 @@ describe("ADR-383 elevated lake tiles, surface and bowl", () => {
   it("far regions get their own elevated lake too", () => {
     const seed = 424242;
     const g = new ProceduralGenerator({ seed });
+    let sited = 0;
     for (const [rx, ry] of [[2, -1], [-3, 2]] as const) {
-      // Region layout is seeded from the region key; recompute it the way the generator does.
-      const regionSeed = fnv1a(`${rx},${ry}`, seed >>> 0);
-      const rl = waterFeatureLayout(regionSeed);
+      // ADR-386: the region's SITED layout, not the hash baseline.
+      const rl = g.regionLayout(rx * 512, ry * 512)!;
       const el = rl.elevatedLake;
+      if (!el) continue;
+      sited++;
       const tx = rx * 512 + Math.floor(el.x), ty = ry * 512 + Math.floor(el.y);
       const s = g.sampleAt(tx, ty);
       expect(isWaterId(s.tile)).toBe(true);
       expect(renderTileHeight(s.tile, s.height)).toBe(el.level);
       expect(g.heightAt(tx, ty)).toBe(el.level);
     }
+    expect(sited).toBeGreaterThanOrEqual(1);
   });
 });
 

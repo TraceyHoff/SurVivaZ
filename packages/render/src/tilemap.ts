@@ -28,13 +28,22 @@ const PALETTE: Record<number, [number, number, number]> = {
 };
 const SHALLOW_RGB = [0x41, 0xb5, 0xcc] as const, DEEP_RGB = [0x18, 0x46, 0x90] as const; // ADR-184: turquoise shore -> deep blue (ADR-253: shallow #41b5cc, same as Canvas2D C2D_SHALLOW)
 /** ADR-253 cliff face flags (aColor.a): face normal +x, +y, -x, -y. */
+/** ADR-386 waterfall face flags: the same four normals, offset by 4 — a water cliff face whose drop
+ *  is >= 2 levels reads as falling water (animated streaks in the fragment shader) instead of a
+ *  static cliff. Only water tiles ever emit them; land cliffs keep flags 2..5. */
 export const CLIFF_PX = 2, CLIFF_PY = 3, CLIFF_NX = 4, CLIFF_NY = 5;
+export const WATERFALL_PX = 6, WATERFALL_PY = 7, WATERFALL_NX = 8, WATERFALL_NY = 9;
+/** A cliff face reads as a waterfall when the water above it drops this many levels (a 1-level step
+ *  is an ordinary stream ledge; the ADR-386 spillway's falls drop is exactly 2). */
+export const WATERFALL_MIN_DROP = 2;
 /** ADR-254: dim shade for cliff faces turned away from the camera (was 0 / collapsed). Keeps far-side ledges readable. */
 export const CLIFF_HIDDEN_SHADE = 0.28;
 /** Cliff face shade by its normal in view space: +u (screen lower-right) 0.62, +v (screen lower-left) 0.8,
- *  else ADR-254 CLIFF_HIDDEN_SHADE (far-side silhouette instead of collapsing the face). */
+ *  else ADR-254 CLIFF_HIDDEN_SHADE (far-side silhouette instead of collapsing the face). Waterfall
+ *  faces (6..9) share their cliff normal's shade (flag - 4). */
 export function cliffShade(flag: number, view: number): number {
-  const n = [[1, 0], [0, 1], [-1, 0], [0, -1]][flag - CLIFF_PX]; if (!n) return 0;
+  const f = flag >= WATERFALL_PX ? flag - 4 : flag;
+  const n = [[1, 0], [0, 1], [-1, 0], [0, -1]][f - CLIFF_PX]; if (!n) return 0;
   const k = view & 3, c = VIEW_COS[k]!, s = VIEW_SIN[k]!; const u = c * n[0]! - s * n[1]!, v = s * n[0]! + c * n[1]!;
   return u > 0.5 ? 0.62 : v > 0.5 ? 0.8 : CLIFF_HIDDEN_SHADE;
 }
@@ -52,6 +61,15 @@ const hash = (x: number, y: number): number => {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 };
 
+/** ADR-386: the cliff flag for one face of a tile — a waterfall flag (6..9) when a WATER tile's face
+ *  drops WATERFALL_MIN_DROP or more levels to a neighbour that exists, else the plain cliff flag
+ *  (2..5). A missing neighbour (view edge / unloaded chunk, NO_TILE_HEIGHT) never reads as a
+ *  waterfall, so the screen edge never shimmers. Land cliffs never get a waterfall flag. */
+export function cliffFlagFor(water: boolean, normalFlag: number, topZ: number, neighbourLow: number): number {
+  if (water && neighbourLow > NO_TILE_HEIGHT && topZ - neighbourLow >= WATERFALL_MIN_DROP) return normalFlag + 4;
+  return normalFlag;
+}
+
 const VS = /* glsl */ `#version 300 es
 precision highp float; precision highp int;
 layout(location=0) in vec3 aPos;     // world x, y, z (tile units / levels)
@@ -60,17 +78,18 @@ ${GLSL_COMMON}
 uniform vec3 uIso; // tileW/2, tileH/2, zStep
 uniform float uZFactor;
 uniform vec2 uRot; // ADR-253 view rotation (cos, sin) of the quarter turn: world (x, y) -> view (u, v)
-out vec3 vColor; out vec2 vWorld; flat out int vFlags;
+out vec3 vColor; out vec2 vWorld; flat out int vFlags; out float vZ; // ADR-386: vZ is the tile height (levels) the falls streaks scroll down
 void main() {
   vec2 w = vec2(uRot.x * aPos.x - uRot.y * aPos.y, uRot.y * aPos.x + uRot.x * aPos.y);
   vec2 iso = vec2((w.x - w.y) * uIso.x, (w.x + w.y) * uIso.y - aPos.z * uIso.z);
   float key = w.x + w.y + aPos.z * uZFactor;
-  int fl = int(aColor.a * 255.0 + 0.5); vColor = aColor.rgb; vWorld = aPos.xy;
+  int fl = int(aColor.a * 255.0 + 0.5); vColor = aColor.rgb; vWorld = aPos.xy; vZ = aPos.z;
   if (fl >= 2) { // ADR-253/254 cliff face: shade by view-space normal; far faces keep a dim silhouette (no collapse)
-    vec2 n = fl == 2 ? vec2(1, 0) : fl == 3 ? vec2(0, 1) : fl == 4 ? vec2(-1, 0) : vec2(0, -1);
+    int nf = fl >= 6 ? fl - 4 : fl; // ADR-386: waterfall faces (6..9) share the cliff normals (2..5)
+    vec2 n = nf == 2 ? vec2(1, 0) : nf == 3 ? vec2(0, 1) : nf == 4 ? vec2(-1, 0) : vec2(0, -1);
     vec2 nv = vec2(uRot.x * n.x - uRot.y * n.y, uRot.y * n.x + uRot.x * n.y);
     float sh = nv.x > 0.5 ? 0.62 : nv.y > 0.5 ? 0.8 : 0.28; // 0.28 = CLIFF_HIDDEN_SHADE
-    vColor *= sh; fl = 2;
+    vColor *= sh; fl = fl >= 6 ? 6 : 2;
   }
   gl_Position = vec4(isoToClip(iso), keyToNdc(key), 1.0);
   vFlags = fl;
@@ -78,7 +97,7 @@ void main() {
 
 const FS = /* glsl */ `#version 300 es
 precision highp float; precision highp int;
-in vec3 vColor; in vec2 vWorld; flat in int vFlags;
+in vec3 vColor; in vec2 vWorld; flat in int vFlags; in float vZ; // ADR-386: vZ is the tile height (levels) the falls streaks scroll down
 uniform float uTime, uWet, uSnow, uPuddles, uWetDarken, uIce;
 uniform vec3 uSkyRefl, uSeason;
 layout(location=0) out vec4 oColor;
@@ -89,7 +108,19 @@ float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 *
 ${SEASON_GROUND_GLSL}
 void main() {
   vec3 c = vColor;
-  if (vFlags == 1) {
+  if (vFlags == 6) {
+    // ADR-386: waterfall face — bright streaks scrolling DOWNWARD (the vZ term rises with uTime,
+    // so a fixed streak slides to lower vZ), faster than the flat-water drift, plus foam flecks
+    // riding the fall. "along" is monotonic along either face (+x faces vary in y, +y faces in x).
+    // Smooth value noise, not hashed cells, so the fall flows instead of popping. No speckle,
+    // season tint, ice, puddles or snow: it is moving water, not ground (it does not ice over in
+    // winter — the flat water does).
+    float along = vWorld.x + vWorld.y;
+    float streak = vnoise(vec2(along * 2.0, vZ * 1.5 + uTime * 1.0));
+    float band = 0.5 + 0.5 * sin(vZ * 9.0 + uTime * 6.0 + along * 2.0);
+    c *= 0.85 + 0.3 * streak * band;
+    c += step(0.8, streak) * step(0.5, band) * 0.2;
+  } else if (vFlags == 1) {
     // animated water: two travelling wave bands + sparkle
     float w = sin(vWorld.x * 2.3 + uTime * 1.3) * sin(vWorld.y * 1.7 - uTime * 0.9);
     float w2 = sin((vWorld.x + vWorld.y) * 4.0 + uTime * 2.1);
@@ -102,8 +133,8 @@ void main() {
     float n = h21(floor(vWorld * 8.0));
     c *= 0.92 + 0.16 * n;
   }
-  if (vFlags != 1) c = seasonGround(c, vWorld, uSeason); // ADR-239
-  if (vFlags != 1) {
+  if (vFlags != 1 && vFlags != 6) c = seasonGround(c, vWorld, uSeason); // ADR-239
+  if (vFlags != 1 && vFlags != 6) {
     // surface overlays (procedural fallback for the 64x32 overlay tiles): wet ground, puddles, snow cover
     float m = vnoise(vWorld * 0.9) * 0.65 + vnoise(vWorld * 3.1 + 11.0) * 0.35;
     if (uWet > 0.001) {
@@ -184,13 +215,14 @@ export class TilemapRenderer {
         idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
       }
       // Cliff faces on every side whose neighbour is lower (ADR-253/254): far faces keep a dim silhouette (CLIFF_HIDDEN_SHADE).
+      // ADR-386: a water tile's face is a waterfall face (flag +4) when it drops >= WATERFALL_MIN_DROP levels.
       const side = SIDE[id] ?? pal;
       const low = (nx: number, ny: number): number => { const h = tileHeight(map, nx, ny); return h <= NO_TILE_HEIGHT ? NO_TILE_HEIGHT : h - (tileIsWater(map, nx, ny) ? 0.25 : 0); };
       const bx = low(x + 1, y), by = low(x, y + 1), bnx = low(x - 1, y), bny = low(x, y - 1);
-      if (bx < zt) quad([[x + 1, y, zt], [x + 1, y + 1, zt], [x + 1, y + 1, bx], [x + 1, y, bx]], side[0], side[1], side[2], CLIFF_PX);
-      if (by < zt) quad([[x, y + 1, zt], [x + 1, y + 1, zt], [x + 1, y + 1, by], [x, y + 1, by]], side[0], side[1], side[2], CLIFF_PY);
-      if (bnx < zt) quad([[x, y + 1, zt], [x, y, zt], [x, y, bnx], [x, y + 1, bnx]], side[0], side[1], side[2], CLIFF_NX);
-      if (bny < zt) quad([[x + 1, y, zt], [x, y, zt], [x, y, bny], [x + 1, y, bny]], side[0], side[1], side[2], CLIFF_NY);
+      if (bx < zt) quad([[x + 1, y, zt], [x + 1, y + 1, zt], [x + 1, y + 1, bx], [x + 1, y, bx]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PX, zt, bx));
+      if (by < zt) quad([[x, y + 1, zt], [x + 1, y + 1, zt], [x + 1, y + 1, by], [x, y + 1, by]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PY, zt, by));
+      if (bnx < zt) quad([[x, y + 1, zt], [x, y, zt], [x, y, bnx], [x, y + 1, bnx]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NX, zt, bnx));
+      if (bny < zt) quad([[x + 1, y, zt], [x, y, zt], [x, y, bny], [x + 1, y, bny]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NY, zt, bny));
     }
     const n = verts.length / 3;
     const buf = new ArrayBuffer(n * 16); const f = new Float32Array(buf); const u8 = new Uint8Array(buf);

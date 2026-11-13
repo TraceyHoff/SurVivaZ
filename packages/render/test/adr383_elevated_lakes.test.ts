@@ -4,16 +4,20 @@
  * level for ordinary water. This pins that contract at the tilemap level.
  */
 import { describe, expect, it } from "vitest";
-import { ProceduralGenerator, CHUNK_SIZE, TileMap, waterFeatureLayout, WATER_SURFACE_HEIGHT } from "@engine/world";
+import { ProceduralGenerator, CHUNK_SIZE, TileMap, WATER_SURFACE_HEIGHT } from "@engine/world";
 import { tileHeight } from "../src/tilemap.js";
 
 describe("ADR-383: elevated lakes render at their own surface level", () => {
   it("tileHeight is the elevated level over the lake and the flat sea level over the ordinary lake", () => {
+    // ADR-386: the lake's position is the SITED one (g.regionLayout), not the hash baseline.
+    let sited = 0;
     for (let i = 0; i < 8; i++) {
       const seed = ((i * 40503 + 9) >>> 0) || 1;
       const g = new ProceduralGenerator({ seed });
-      const L = waterFeatureLayout(seed);
+      const L = g.regionLayout(0, 0)!;
       const el = L.elevatedLake;
+      if (!el) continue;
+      sited++;
       const map = new TileMap();
       for (const [cx, cy] of [[Math.floor(el.x), Math.floor(el.y)], [Math.floor(L.lake.x), Math.floor(L.lake.y)]] as const) {
         const ccx = Math.floor(cx / CHUNK_SIZE), ccy = Math.floor(cy / CHUNK_SIZE);
@@ -31,5 +35,6 @@ describe("ADR-383: elevated lakes render at their own surface level", () => {
         }
       expect(rimMin).toBeGreaterThan(el.level);
     }
+    expect(sited).toBeGreaterThanOrEqual(6); // ~2% of regions skip the lake; the rest are covered
   });
 });

@@ -7,7 +7,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ProceduralGenerator, CHUNK_SIZE, TileMap,
-  waterFeatureLayout, waterDepthAt, WaterDepth,
+  waterDepthAt, WaterDepth,
 } from "@engine/world";
 import {
   profileFromDepths, structuralCrossing, decideCrossing, legUncrossableAtPlan, WATER_DATA,
@@ -27,11 +27,15 @@ function transect(g: ProceduralGenerator, cx: number, cy: number, r: number) {
 
 describe("ADR-383 elevated lake: AI water crossing parity", () => {
   it("the elevated lake's depth profile has a normal lake's shape, and the same crossing rule governs both", () => {
+    // ADR-386: the lake's position is the SITED one (g.regionLayout), not the hash baseline.
+    let sited = 0;
     for (let i = 0; i < 16; i++) {
       const seed = ((i * 2654435761) >>> 0) || 1;
       const g = new ProceduralGenerator({ seed });
-      const L = waterFeatureLayout(seed);
+      const L = g.regionLayout(0, 0)!;
       const el = L.elevatedLake;
+      if (!el) continue;
+      sited++;
       const elevated = transect(g, Math.floor(el.x), Math.floor(el.y), el.r);
       const normal = transect(g, Math.floor(L.lake.x), Math.floor(L.lake.y), L.lake.r);
       for (const p of [elevated, normal]) {
@@ -49,15 +53,20 @@ describe("ADR-383 elevated lake: AI water crossing parity", () => {
       }
       expect(elevated.deep).toBeGreaterThan(0);
     }
+    expect(sited).toBeGreaterThanOrEqual(12); // ~2% of regions skip the lake; the rest are covered
   });
 
   it("the elevated lake has a wadeable shore where it has a land shore (a lake merged with a biome sea has none)", () => {
-    let withShore = 0;
+    // ADR-386: noise-aware siting guarantees every sited lake a full land shore, so the shore
+    // assertion is unconditional now (the ADR-383 sea-merge case cannot occur for a sited lake).
+    let withShore = 0, sited = 0;
     for (let i = 0; i < 40; i++) {
       const seed = ((i * 2654435761) >>> 0) || 1;
       const g = new ProceduralGenerator({ seed });
-      const L = waterFeatureLayout(seed);
+      const L = g.regionLayout(0, 0)!;
       const el = L.elevatedLake;
+      if (!el) continue;
+      sited++;
       const t = (x: number, y: number): number => g.tileAt(x, y);
       let sawShallow = false, hasShore = false;
       for (let y = Math.floor(el.y) - el.r - 1; y <= Math.floor(el.y) + el.r + 1; y++)
@@ -68,17 +77,21 @@ describe("ADR-383 elevated lake: AI water crossing parity", () => {
         }
       if (hasShore) { withShore++; expect(sawShallow).toBe(true); }
     }
-    expect(withShore).toBeGreaterThanOrEqual(36); // >= 90% of seeds have a land shore
+    expect(sited).toBeGreaterThanOrEqual(36);
+    expect(withShore).toBe(sited); // every sited lake has a land shore (ADR-386 siting)
   });
 });
 
 describe("ADR-383 elevated lake: terrain flow sees the elevated surface", () => {
   it("waterSurfaceAt reads the elevated level at the lake and the flat level at the ordinary lake", () => {
+    let sited = 0;
     for (let i = 0; i < 8; i++) {
       const seed = ((i * 40503 + 9) >>> 0) || 1;
       const g = new ProceduralGenerator({ seed });
-      const L = waterFeatureLayout(seed);
+      const L = g.regionLayout(0, 0)!;
       const el = L.elevatedLake;
+      if (!el) continue;
+      sited++;
       const map = new TileMap();
       for (const [cx, cy] of [[Math.floor(el.x), Math.floor(el.y)], [Math.floor(L.lake.x), Math.floor(L.lake.y)]] as const) {
         const ccx = Math.floor(cx / CHUNK_SIZE), ccy = Math.floor(cy / CHUNK_SIZE);
@@ -95,5 +108,6 @@ describe("ADR-383 elevated lake: terrain flow sees the elevated surface", () => 
           if (![1, 8].includes(map.getTile(x, y))) { dry = [x, y]; break outer; }
       if (dry) expect(waterSurfaceAt(terrain, dry[0], dry[1])).toBeUndefined();
     }
+    expect(sited).toBeGreaterThanOrEqual(6); // ~2% of regions skip the lake; the rest are covered
   });
 });

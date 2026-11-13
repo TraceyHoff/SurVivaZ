@@ -37,8 +37,27 @@ export interface WaterFeatureLayout {
   lake: { x: number; y: number; r: number };
   pond: { x: number; y: number; r: number };
   river: { angle: number; phase: number; amp: number; period: number; halfLen: number; width: number; offset: number };
-  /** ADR-383: elevated lake — centre, radius and water surface level (above the flat sea level 0). */
-  elevatedLake: { x: number; y: number; r: number; level: number };
+  /** ADR-383: elevated lake — centre, radius and water surface level (above the flat sea level 0).
+   *  ADR-386: undefined when the generator's noise-aware siting found no placement clear of the sea —
+   *  the region has no elevated lake at all (better a missing lake than a sea-merged one).
+   *  `waterFeatureLayout` itself always returns one (the hash baseline); only sited layouts skip. */
+  elevatedLake: { x: number; y: number; r: number; level: number } | undefined;
+  /** ADR-386: spillway + waterfall, if the sited lake spills to lower water (undefined = closed lake,
+   *  or no lake). Set by the generator's siting pass, never by `waterFeatureLayout` (which has no
+   *  height field to walk). Tiles are region-local coords in walk order, starting at the rim breach. */
+  spillway?: Spillway | undefined;
+}
+
+/** ADR-386: a spillway channel from an elevated lake's rim down to lower water. `tiles[0]` is the rim
+ *  breach (the first tile outside the disc, at level L-1); `tiles[1]` is the waterfall (level L-3, a
+ *  2-level drop off the breach); later tiles step down 1 per tile to a floor of 1, then run flat to the
+ *  sea. `end` is the sea-level water tile the channel meets (biome sea or a forced lake/river/pond at
+ *  level 0) — the only place the elevated water touches lower water. `bbox` bounds the channel for a
+ *  cheap lookup (most tiles are outside it). */
+export interface Spillway {
+  tiles: { x: number; y: number; level: number }[];
+  end: { x: number; y: number };
+  bbox: { x0: number; y0: number; x1: number; y1: number };
 }
 
 /** Seed-derived lake / pond centres and river parameters (stable for the life of the world). */
@@ -95,21 +114,23 @@ export function riverPoint(layout: WaterFeatureLayout, u: number): { x: number; 
   return { x: u * c - v * s, y: u * s + v * c };
 }
 
-/** Euclidean distance from the tile centre (tx+0.5, ty+0.5) to the elevated lake's centre. */
+/** Euclidean distance from the tile centre (tx+0.5, ty+0.5) to the elevated lake's centre (Infinity when the region has no elevated lake). */
 export function elevatedLakeDist(layout: WaterFeatureLayout, tx: number, ty: number): number {
-  return Math.hypot(tx + 0.5 - layout.elevatedLake.x, ty + 0.5 - layout.elevatedLake.y);
+  const el = layout.elevatedLake; if (!el) return Infinity;
+  return Math.hypot(tx + 0.5 - el.x, ty + 0.5 - el.y);
 }
 
 /** Water surface level of the elevated lake covering (tx, ty), or undefined when the tile is not in it. */
 export function elevatedLakeAt(seed: number, tx: number, ty: number, layout = waterFeatureLayout(seed)): number | undefined {
-  return elevatedLakeDist(layout, tx, ty) <= layout.elevatedLake.r ? layout.elevatedLake.level : undefined;
+  const el = layout.elevatedLake; if (!el) return undefined;
+  return elevatedLakeDist(layout, tx, ty) <= el.r ? el.level : undefined;
 }
 
 /** Which guaranteed feature covers (tx, ty). Elevated lake > lake > pond > river so the elevated disc swallows
  *  a river crossing it (the river runs at sea level either side) and small ponds are not erased by a river crossing. */
 export function waterFeatureAt(seed: number, tx: number, ty: number, layout = waterFeatureLayout(seed)): WaterFeatureKind {
   const x = tx + 0.5, y = ty + 0.5;
-  if (elevatedLakeDist(layout, tx, ty) <= layout.elevatedLake.r) return "elevatedLake";
+  if (layout.elevatedLake && elevatedLakeDist(layout, tx, ty) <= layout.elevatedLake.r) return "elevatedLake";
   const dlx = x - layout.lake.x, dly = y - layout.lake.y;
   if (dlx * dlx + dly * dly <= layout.lake.r * layout.lake.r) return "lake";
   const dpx = x - layout.pond.x, dpy = y - layout.pond.y;

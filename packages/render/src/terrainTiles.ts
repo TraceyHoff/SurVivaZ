@@ -17,6 +17,7 @@ import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, renderTileHeight, waterShoreT
 import { SEASON_GROUND_GLSL } from "./season.js";
 import { terrainDropEdges, DROP_EDGE_GLSL } from "./dropEdges.js";
 import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/util.js";
+import { WATERFALL_MIN_DROP } from "./tilemap.js";
 import type { AtlasManager } from "./assets/atlasManager.js";
 import type { Rect } from "./camera.js";
 import { TileId, TERRAIN_SPRITES, isWaterTile } from "./ids.js";
@@ -226,7 +227,12 @@ export class TileTerrain {
       const z = renderTileHeight(id, c.height[i]!) - (water ? 0.25 : 0); // ADR-182: one flat water surface
       const pu = hAt(x + 1, y), pv = hAt(x, y + 1);
       const drops = water ? [0, 0, 0, 0] : terrainDropEdges(z, pu, pv, hAt(x - 1, y), hAt(x, y - 1));
-      const mask = (pu < z ? 1 : 0) | (pv < z ? 2 : 0);
+      // ADR-386: on a waterfall face (a water tile dropping >= 2 levels to a neighbour that exists)
+      // the skirt is suppressed, so the animated mesh falls face shows in full (32 px for a 2-level
+      // drop); a 1-level ledge keeps its skirt (it covers the 1-level mesh face, as before), and a
+      // missing neighbour keeps its skirt too (the mesh face there runs to the void, not a falls).
+      const dropX = pu > -99 ? z - pu : 0, dropY = pv > -99 ? z - pv : 0;
+      const mask = (pu < z && !(water && dropX >= WATERFALL_MIN_DROP) ? 1 : 0) | (pv < z && !(water && dropY >= WATERFALL_MIN_DROP) ? 2 : 0);
       if (art && g) { // ADR-246: gt_ layers (base, edges by priority, shore/bank | water or ice, leaves)
         const grazed = this.grazedAt ? (X: number, Y: number): boolean => this.grazedAt!(wx(X, Y), wy(X, Y)) : undefined;
         groundLayers(tileAt, x, y, art - 1, tintAt, L, groundHash(tx, ty), grazed); let n = 0;

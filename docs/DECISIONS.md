@@ -7788,3 +7788,180 @@ moves). Both err toward "skip and re-pick", which cannot freeze the bot; a
 door-aware reachability check is a follow-up. The waterfall rule (ADR-386) is still
 queued after this: elevated and sea-level lakes connect only via a waterfall, and
 waterfalls do not exist yet.
+
+## ADR-386: Waterfalls — elevated lakes never merge with the sea; the only connection is a waterfall (SurVivaZ)
+
+Decision: noise-aware siting + a real waterfall feature. The hash layout is now only the
+baseline: `siteElevatedLake` probes the BASE height field (`heightFromNoise(..., null, null)`:
+no bowl, no spillway — no circularity, since the bowl only raises terrain) and picks the lake's
+cardinal/position by it. Candidates are the two free cardinals (neither the lake nor the pond
+uses them) at the hash distance and ±5/±10/±15/±20 tiles, all inside [84, 104] from the region
+origin. Valid only when no biome sea lies within disc + 2 (disc + beach shelf + 1 land margin),
+so every sited lake has a full land shore. Scoring is the MEAN base height in the shelf ring
+(disc+1..disc+2), not the min — one low tile must not tank a direction. The hash placement
+stands unless a challenger beats its mean by ≥ `SITING_HEIGHT_MARGIN` = 1 level. Fallback tier
+if nothing in 84–104 is valid: distances [83, 78, 73, 68, 63] on the free cardinals (still
+clear of the diagonal spawn patches and the lake/pond axes). No valid candidate →
+`layout.elevatedLake = undefined`: the region is SKIPPED, never sea-merged.
+`WaterFeatureLayout.elevatedLake` is now `{...} | undefined`; `elevatedLakeDist` returns
+Infinity when there is no lake, and `elevatedLakeAt` / `waterFeatureAt` guard for it.
+Unchanged: one lake per 512-tile region, radius 6–10, level 4–7, bowl + beach shelf clamped
+[L+1, L+3] (rise ≤ 3 from the water, so a swimmer can always climb out).
+
+`spillwayFor` runs for every sited lake. Target = nearest sea-level water (biome sea, or a
+forced lake/river/pond at level 0) within `SPILLWAY_TARGET_RANGE` = 64 tiles beyond the rim,
+found by ring scan. Breach = the rim tile (4-neighbour of a disc tile) closest to the target,
+and among the near ones the lowest. Walk: 4-connected; each step keeps (or barely increases,
+≤ +0.5) the distance to the target and takes the lowest ground among those steps; bounded by
+`maxSteps = min(SPILLWAY_MAX_LEN = 64, 2×ceil(Euclidean breach→target) + 8)`; gives up when
+boxed in, when it would leave the region's own span (`SPILLWAY_WINDOW` = 255), or past its
+step budget. If the rim already touches lower water (a river passing the lake), no channel is
+carved — the junction face itself is the waterfall. Channel levels: `tiles[0] = L−1`
+(breach), `tiles[1] = L−3` (the waterfall — one 2-level drop), then −1/tile to a floor of 1,
+running flat to the sea. Gate fix (length-1 spillways): a breach directly adjacent to lower
+water would leave a 1-tile channel with no `tiles[1]` — no 2-level falls, just a 3..6-level
+drop to the sea (fall damage going down, unclimbable back up). `spillwayFor` now returns
+undefined when `path.length < 2`, treating those lakes as closed (15/2,000 seeds in the
+gate's probe; the lake keeps its full land shore). Every spillway therefore has ≥ 2 tiles,
+so the 2-level falls always exists. A 2-level drop is the steepest face that stays climbable/swimmable
+both ways (MAX_UNAIDED_CLIMB is 3; drops ≤ 3 cost no fall damage via `terrainFallDamage`).
+Encoding: spillway tiles are ordinary flow water (`flowWaterRaw(level)`), stored in `load()` /
+`sampleAt()` like the disc. `forcedWater` includes spillway tiles (so `surface()` makes them
+shallow tile 8 — fordable; a 1-wide channel always has land neighbours). `heightFromNoise`
+consults the spillway before the bowl (the breach cuts the shelf); base-field probes skip it.
+`layoutFor`'s non-zero-region window was extended from ±120 to the full 512-tile region span
+(features sit within ±120, but a spillway may run to the region edge; region 0 already had no
+cutoff; each tile belongs to exactly one region, so no overlap). Per-tile cost is fused into
+one layout lookup via `lakeAndSpill()` (load/sampleAt thread the hold + spill level into
+`heightFromNoise` as already-known, so it does not re-look them up).
+
+Rendering (`packages/render/src/tilemap.ts`, `terrainTiles.ts`): the mesh renderer already
+emits a water-coloured cliff face on every side whose neighbour is lower; the textured
+renderer draws no side faces for water, so the mesh face is the visible face. New flags
+`WATERFALL_PX..NY` = 6..9 (cliff flags 2..5 + 4), `WATERFALL_MIN_DROP` = 2,
+`cliffFlagFor(water, normalFlag, topZ, neighbourLow)`: the waterfall flag only when the
+neighbour exists (`NO_TILE_HEIGHT` = −99 never counts, so the view edge never shimmers) and
+the drop is ≥ 2. Land cliffs never get it. `cliffShade` handles 6..9 (same shade as its cliff
+normal). VS: waterfall faces (6..9) share cliff normals, collapse to `vFlags` 6, plus a new
+`vZ` varying (tile height in levels). FS: `vFlags == 6` branch — bright streaks scrolling
+DOWNWARD (smooth `vnoise`, `vZ * 1.5 + uTime * 1.0`), a sine band, foam flecks; excluded from
+speckle, season tint, ice, puddles and snow (it does not ice over in winter — the flat water
+does). No generated/faked art, no recolors, no reused sprites, no binary art: the falls are
+runtime-painted shader water on the existing mesh face, exactly like the flat water's
+animation. Textured skirt: water tiles get a skirt on sides whose neighbour is lower; zStep
+is 16 px/level, so a 2-level falls face is 32 px and the 16 px skirt would hide its top
+half — the skirt is now suppressed on waterfall faces (water tile, drop ≥
+`WATERFALL_MIN_DROP` to an existing neighbour — imported from tilemap.js; no import cycle,
+tilemap never imports terrainTiles). A 1-level ledge keeps its skirt (it covers the 1-level
+mesh face, as before); a missing neighbour keeps its skirt (the mesh face there runs to the
+void). Canvas2D (fallback renderer) draws no cliff faces at all, so the falls there read only
+as a stepped stream.
+
+Behaviour: waterfall tiles are ordinary flow water — swimming, wetness, fishing, water
+depth, flow frontier all automatic; the channel reads Shallow (fordable) by the depth rule;
+AI crossing treats it as a ford; the falls are passable both ways by swimming (2-level rise
+≤ climb 3; going down costs no fall damage) — for every spillway, since all have ≥ 2 tiles
+after the gate fix above. It connects the two water bodies; it does not
+bar them. No particles (no waterfall sprite can be added without shipped art), no sound (no
+sound hooks in gameplay). A one-way falls (unclimbable up) was NOT implemented — it would
+need a water-landing fall-damage exemption + a climb rule; recorded as a follow-up.
+Note: the junction face (a sited lake's rim directly touching a river/lake/pond at level 0,
+18/490 = 3.7% of sited lakes) is the same one-way-trap shape as the length-1 spillway —
+a 4–7 level drop with fall damage down and no climb back — and it is NOT fixed by the
+length-1 guard. It predates ADR-386 (ADR-383 already let a river touch the disc) and is
+queued as a follow-up: either step the junction down or treat it as barred/closed.
+Feasibility probed with the fix: extending siting validity to also reject forced low water
+within disc+2 would re-site 16 of the 18 junction lakes to a clean cardinal/distance and
+skip 2 (skip rate 2.0% → ~2.4%); that is a siting-rule change, not a one-line guard, so it
+stays queued rather than riding in the fix commit.
+
+ADR-383 parity preserved: an elevated lake still behaves like a normal lake (same
+ford/swim/around AI crossing rule, `waterSurfaceAt` reads the elevated surface, a dug channel
+below the rim floods from it, chunk-boundary streaming intact, `sampleAt` agrees
+tile-for-tile — tested: `load()` agrees with `sampleAt()` across the whole spillway, and the
+codec round-trip preserves the flow-encoded channel levels). The ADR-383 ~5% no-land-shore
+case is GONE for sited lakes: siting guarantees every sited lake a full land shore (0
+no-shore lakes in 200 seeds; the skip is the escape hatch, not a merge).
+
+Siting statistics (500 seeds, region 0): sited 490/500 (98.0%), skipped 10 (2.0%); moved
+from the hash placement 409/490 (83.5%, mean move 84.3 tiles); with spillway/waterfall
+235/490 (48.0%), closed lakes 255 (52.0%); spillway length mean 20.4, min 1, max 62;
+sea-touch tiles within disc+2: 0; no-land-shore lakes: 0; rim touches a river/lake/pond
+(junction face is the falls): 18 (3.7%); river crosses the disc: 0. [Gate fix, re-measured
+on the fixed tree: with spillway/waterfall 234/490 (47.8%), closed lakes 256 (52.2%);
+spillway length mean 20.5, min 2, max 62 — the one length-1 case in this 500-seed sample
+is now a closed lake. 2,000-seed probe on the fixed tree: sited 1,964, with spillway 906,
+0 length-1, tiles[1] correct on every spillway. All other buckets identical.] Far regions (120
+samples: 40 seeds × regions [2,−1], [−3,2], [1,1]): sited 116 (96.7%), skipped 4 (3.3%),
+with spillway 62 (53.4% of sited), sea-touch 0. 200-seed check: sited 197/200 (98.5%),
+spillway 102/197 (51.8%). Skip justification (500 seeds): every skipped region's hash
+placement itself touches the sea — the skip is a sea-merge avoided, not a siting failure.
+Before the fallback tier, skips were 8.8%; the fallback rescued most (→ 2.0%). Dead ends
+measured along the way: pure steepest-descent walk stalled on terrace plateaus (spill rate
+1.7%); aiming at the nearest sea raised it to 32.8%; target-aware breach raised it to
+47.8%; a `Manhattan + 12` step budget regressed it to 43.9% (mid-range targets need detour
+slack — reverted to `2×Euclid + 8`, cap 64, giving 48.0–51.8%); shrinking the target range
+64→48 cost ~4% (restored to 64).
+
+Tests: 14 new ADR-386 tests (world 9, gameplay 2, render 3), all passing — siting across
+200 seeds (zero sea-touch, radius 6–10, level 4–7, skip rate ≤ 5%, every sited lake has a
+land shore), skip justification across 500 seeds, far-region siting, spillway structure
+(4-connected, L−1 / L−3 / −1-per-tile to floor 1, end tile sea-level water 4-adjacent to the
+last channel tile, only the last spillway tile touches sea, spillway presence ≥ 30% of
+sited lakes), no flat merge anywhere, spillway Shallow/fordable with `load()` agreeing with
+`sampleAt()`, `waterSurfaceAt` reading the descending surfaces, the falls drop climbable
+both ways with no fall damage, `cliffFlagFor` unit tests, and a mock-GL mesh test (exactly
+one waterfall quad, flag 6, on a hand-built 2-level water drop; a 1-level ledge, a land
+cliff and a view-edge face stay plain cliffs). Gate-fix regression tests (world, +2): the
+15 named length-1 seeds from the gate's 2,000-seed probe are closed lakes (spillway
+undefined, lake still sited), and every spillway over a 2,000-seed sweep has ≥ 2 tiles
+with `tiles[1]` at L−3 — the 200-seed structure sample could not see a 1.6%-of-spillways
+defect, so the sweep is the probe as a test. ADR-383 tests updated to the sited layout
+and passing (world 12/12, gameplay 3/3, render 1/1).
+
+Gate fix (length-1 spillways; commit on top of 94be460): the gate's 2,000-seed probe found 15
+length-1 spillways (1.6% of spillways) whose single breach tile dropped 3–6 levels straight
+to the sea — fall damage going down, unclimbable back up, and the world test throwing on
+`tiles[1]`. Fix: `spillwayFor` returns undefined when `path.length < 2` (same treatment as
+the existing junction case), so those lakes are closed lakes. Regression tests (world, +2):
+the 15 named seeds are closed lakes (spillway undefined, lake still sited), and a
+2,000-seed sweep asserts every spillway has ≥ 2 tiles with `tiles[1]` at L−3. Re-measured
+on the fixed tree: 500 seeds sited 490, with spillway 234 (was 235), spillway length mean
+20.5, min 2, max 62; 2,000-seed probe sited 1,964, with spillway 906 (was 921), 0
+length-1. Verification (fix tree): world 100 passed (98 + 2 new), gameplay 2,107 passed,
+3 skipped, render 509 passed, 2 skipped; typecheck EXIT 0 all 11 projects (pinned TS
+5.9.3); canaries adr203 3/3, adr252-live 8/8, adr331 2/2, adr385 live replay 1/1. Also
+corrected with the fix: the ADR-386 entry's "min 1" / "passable both ways" claims, the
+GLSL honest cut (gate-validated with glslangValidator 16.6.0 — both stages exit 0, no
+errors/warnings), the render test's stale header comment, and `siteElevatedLake`'s JSDoc
+(candidates are scored by the MEAN shelf-ring height, not the lowest; distance steps are
+±5/±10/±15/±20, not ±10/±20). The junction face stays queued (see Behaviour note above).
+
+Results (full suite, this tree): gameplay 2,107 passed, 3 skipped; client 896 passed;
+server 155; net 119; world 98; render 509 passed, 2 skipped; core 87; input 74; persist
+61 passed (the known autosave bench flake passed this run); assets 215; testkit 2.
+Total 4,323 passed, 0 failed, 5 skipped (651 test files passed, 4 skipped; ADR-385 gate
+total was 4,310 passed, 1 known persist flake, 5 skipped — the delta is +12 new ADR-386
+tests and the persist flake passing this run). Typecheck EXIT 0 all 11 projects (pinned TS
+5.9.3). Canaries: adr203 3/3, adr252-live 8/8, adr331 2/2, adr385 live replay 1/1.
+Chunk-load (`time-386.mts`, medians of 5 runs): siting a far region one-time 6.11 ms;
+region-0 first touch 0.02 ms; `load()` lake-area 3.957 ms/chunk vs base 4.207; ordinary
+3.899 vs 4.040. Earlier runs showed the opposite direction, so the honest reading is no
+regression shown, cost unchanged within run-to-run noise. No speedup claimed, no phone ms
+claimed. No graphics-quality change, no new art, no wire change, no gameplay/balance
+change beyond the siting + waterfall addition.
+
+Known limits (follow-ups, not blockers): the GLSL shader changes were validated by a real
+compiler by the gate — glslangValidator 16.6.0, both shader stages exit 0, no errors, no
+warnings (the `-V` SPIR-V path rejects `#version 300 es` shaders for unrelated reasons;
+plain validation is the correct check for the WebGL2 GLSL ES 3.00 the game compiles). Mesh
+waterfall-face visibility in textured mode
+relies on the skirt-suppression reasoning, not a visual run. `layoutFor`'s window extension
+changes region-creation behaviour for far tiles (one-time ~6 ms siting per newly visited
+region; memoized, cap 16 with oldest eviction, re-creation is deterministic). Closed lakes
+(52%) have no waterfall — by design: the bowl holds the water, there is no spill. One-way
+falls (unclimbable up) not implemented. The junction face (rim directly touching level-0
+water, 18/490 = 3.7% of sited lakes) is the same one-way-trap shape as the length-1
+spillway and stays queued — see the Behaviour note above; it is not fixed by the length-1
+guard. No particles, no sound. Canvas2D fallback reads the
+falls only as a stepped stream.
