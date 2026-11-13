@@ -6,7 +6,7 @@ import { BuildingGrid, loadBuildPieces } from "@engine/world";
 import {
   importTexturePacker, mergeTexturePacker, parseFrameName, STATE_ANIMS, weatherTargets, setWeatherTable, DEFAULT_WEATHER_TABLE,
   readDayFraction, readWeather, readWind, loadRenderTuning, DEFAULT_STYLE, parseGradingKeyframes, sampleKeyframes, lutSizeFromImage, identityLut,
-  visibleChunkKeys, cutawayRegion, swayFromManifest, type TPJsonHash,
+  visibleChunkKeys, cutawayRegion, tileKey, swayFromManifest, type TPJsonHash,
 } from "../src/index.js";
 
 const frame = (x: number, y: number, w: number, h: number, extra: Record<string, unknown> = {}) => ({ frame: { x, y, w, h }, rotated: false, trimmed: false, spriteSourceSize: { x: 0, y: 0, w, h }, sourceSize: { w, h }, pivot: { x: 0.5, y: 0.9 }, ...extra });
@@ -115,7 +115,8 @@ describe("culling + cutaway", () => {
     const g = new BuildingGrid(registry); const f = registry.byKey("floor").id, r = registry.byKey("roof").id;
     for (let y = 0; y < 4; y += 2) for (let x = 0; x < 4; x += 2) { g.place(f, 10 + x, 10 + y, 0); g.place(r, 10 + x, 10 + y, 1); }
     const reg = cutawayRegion(g, 11, 11, 0)!;
-    expect(reg.has("10,10")).toBe(true); expect(reg.has("13,13")).toBe(true); expect(reg.has("20,20")).toBe(false);
+    // ADR-381: cutaway regions are Set<number> of packed tileKey values, not "x,y" strings.
+    expect(reg.has(tileKey(10, 10))).toBe(true); expect(reg.has(tileKey(13, 13))).toBe(true); expect(reg.has(tileKey(20, 20))).toBe(false);
     expect(cutawayRegion(g, 30, 30, 0)).toBeNull();
   });
   it("ADR-309: a floor under a missing roof stays in the cutaway when neighbors are roofed", () => {
@@ -126,8 +127,8 @@ describe("culling + cutaway", () => {
       if (!(x === 11 && y === 11)) g.place(r, x, y, 1);
     }
     const hole = cutawayRegion(g, 11, 11, 0)!;
-    expect(hole.has("11,11")).toBe(true);
-    expect(hole.has("10,10")).toBe(true);
+    expect(hole.has(tileKey(11, 11))).toBe(true);
+    expect(hole.has(tileKey(10, 10))).toBe(true);
     expect(cutawayRegion(g, 30, 30, 0)).toBeNull();
   });
 });

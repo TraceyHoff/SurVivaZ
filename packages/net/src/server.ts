@@ -231,6 +231,26 @@ export class NetServer {
   private stamp = new Int32Array(0);
   private stampSeq = 0;
   private posY = new Float64Array(0);
+  /**
+   * ADR-375: per-tick scratch reused across clients and ticks so replicate() stops allocating per client
+   * per tick. All of these are fully rewritten (or length-reset then filled) on every use and never retained
+   * past the client iteration / prioritize() call that uses them; replicate() is single-threaded and
+   * synchronous, so sharing them is safe.
+   */
+  private replMust: number[] = [];
+  private replMustEs: EntityState[] = [];
+  private replRest: number[] = [];
+  private replRestEs: EntityState[] = [];
+  private prioScore = new Float64Array(0);
+  private prioSorted = new Float64Array(0);
+  /** Reused prioritize() output: only the first `ids.length` entries are valid; the buffer is overwritten on the next call. */
+  private prioOrder: number[] = [];
+  private prioHead: number[] = [];
+  private prioTail: number[] = [];
+  private prioCx: number[] = [];
+  private prioCy: number[] = [];
+  private prioTmpIds: number[] = [];
+  private prioTmpEs: EntityState[] = [];
   readonly perf = { captureMs: 0, sendMs: 0, encoded: 0, shared: 0, relevantHits: 0, relevantBuilds: 0 };
   private readonly opts: NetServerOptions;
 
@@ -667,7 +687,6 @@ export class NetServer {
     }
     const t1 = now(); this.perf.captureMs = t1 - t0;
     const tick = w.tick;
-    const globalSet = new Set(globals);
     // ADR-369: one pass over cur (below) fills curArr and the per-tick positions; the old code walked cur.keys()
     // three times plus a full posX.fill(NaN). Every id in cur gets a posX/posY write in that pass, and every reader
     // of posX/posY only touches ids in cur (prioritize / distantThrottle) or ids guarded by curArr (linger),
@@ -684,8 +703,11 @@ export class NetServer {
       let m = enc.get(es); if (!m) { m = new Map(); enc.set(es, m); }
       const k = old ?? NO_BASE; let r = m.get(k);
       if (r === undefined) {
+        // ADR-375: keep the writer itself in the per-tick cache instead of snapshotBits()'s byte copy.
+        // The writer is written exactly once, by this call, and never mutated afterwards, so its internal
+        // buffer is stable for the rest of the tick; appendWriter() reads it without copying.
         const bw = new BitWriter();
-        r = writeEntityRecord(bw, this.schema, id, es, old) ? { ...bw.snapshotBits(), id } : null;
+        r = writeEntityRecord(bw, this.schema, id, es, old) ? { w: bw, bits: bw.bitLength, id } : null;
         if (r && r.id !== id) r = null;
         m.set(k, r); this.perf.encoded++;
       } else this.perf.shared++;
@@ -710,8 +732,10 @@ export class NetServer {
       const base = s.lastAckTick >= 0 ? s.views.get(s.lastAckTick) : undefined;
       if (!base) s.fullSnapshots++;
       const view = new Map<number, EntityState>(); // what the client will hold once it decodes this snapshot
-      const must: number[] = []; const rest: number[] = []; const restEs: EntityState[] = []; const mustEs: EntityState[] = [];
-      const ownedIds = new Set<number>();
+      // ADR-375: reuse the server-level scratch lists (length-reset, then filled by consider() below).
+      // They hold no references past this client iteration: the view Map keeps the EntityStates, not the lists.
+      const must = this.replMust, mustEs = this.replMustEs, rest = this.replRest, restEs = this.replRestEs;
+      must.length = 0; mustEs.length = 0; rest.length = 0; restEs.length = 0;
       const consider = (id: number, isMust: boolean): void => {
         if (stamp[id] === seq) return; const es0 = curArr[id]; if (!es0) return; stamp[id] = seq;
         let es = es0;
@@ -720,7 +744,7 @@ export class NetServer {
         if (old === es) { view.set(id, es); return; }
         if (isMust) { must.push(id); mustEs.push(es); } else { rest.push(id); restEs.push(es); }
       };
-      for (const e of owned.get(s.clientId) ?? []) { const id = this.netIds.netIdOf(e); if (id !== undefined) { ownedIds.add(id); consider(id, true); } }
+      for (const e of owned.get(s.clientId) ?? []) { const id = this.netIds.netIdOf(e); if (id !== undefined) consider(id, true); }
       for (const id of globals) consider(id, true);
       if (grid) {
         // ADR-369: cache this client's relevant netIds across ticks. InterestGrid already maintains the client's
@@ -775,18 +799,22 @@ export class NetServer {
       if (base) for (const id of base.keys()) if (stamp[id] !== seq || curArr[id] === undefined) writeDespawn(bw, id);
       for (let i = 0; i < must.length; i++) {
         const id = must[i]!, es = mustEs[i]!; const r = record(id, es, base?.get(id));
-        if (r) bw.appendBits(r.bytes, r.bits); view.set(id, es);
+        if (r) bw.appendWriter(r.w); view.set(id, es);
       }
       if (rest.length > 1 && bw.byteLength < this.budgetBytes) {
         const order = this.prioritize(rest, s, owned.get(s.clientId) ?? [], tick, Math.min(rest.length, (this.budgetBytes >> 2) + 64));
-        const ri = rest.slice(), re = restEs.slice();
-        for (let k = 0; k < order.length; k++) { rest[k] = ri[order[k]!]!; restEs[k] = re[order[k]!]!; }
+        // ADR-375: permute through reused scratch instead of rest.slice() / restEs.slice() copies.
+        const tmpIds = this.prioTmpIds, tmpEs = this.prioTmpEs;
+        tmpIds.length = rest.length; tmpEs.length = rest.length;
+        for (let k = 0; k < rest.length; k++) { tmpIds[k] = rest[k]!; tmpEs[k] = restEs[k]!; }
+        for (let k = 0; k < order.length; k++) { rest[k] = tmpIds[order[k]!]!; restEs[k] = tmpEs[order[k]!]!; }
       }
       const budgetBits = this.budgetBytes * 8 - 2;
       const thr = s.throttle === undefined ? this.opts.distantThrottle : (s.throttle ?? undefined); let vx: number[] | undefined, vy: number[] | undefined;
       if (thr && thr.interval > 1) {
+        // ADR-375: no ownedIds Set — the owned entities are already in hand; netIdOf() is a Map lookup.
         vx = []; vy = [];
-        for (const id of ownedIds) { const x = this.posX[id]; if (x !== undefined && !Number.isNaN(x)) { vx.push(x); vy.push(this.posY[id]!); } }
+        for (const e of owned.get(s.clientId) ?? []) { const id = this.netIds.netIdOf(e); if (id === undefined) continue; const x = this.posX[id]; if (x !== undefined && !Number.isNaN(x)) { vx.push(x); vy.push(this.posY[id]!); } }
         if (!vx.length) vx = undefined;
       }
       for (let i = 0; i < rest.length; i++) {
@@ -806,7 +834,7 @@ export class NetServer {
           s.stats.deferred += rest.length - i;
           break;
         }
-        bw.appendBits(r.bytes, r.bits); view.set(id, es);
+        bw.appendWriter(r.w); view.set(id, es);
         if (id >= s.lastSent.length) { const g = new Int32Array(Math.max(id + 1, s.lastSent.length * 2)); g.set(s.lastSent); s.lastSent = g; }
         s.lastSent[id] = tick + 1;
       }
@@ -826,13 +854,23 @@ export class NetServer {
     this.pings();
   }
 
-  /** Order by distance to the client's owned entities, discounted by staleness (ticks since last sent). */
+  /**
+   * Order by distance to the client's owned entities, discounted by staleness (ticks since last sent).
+   * ADR-375: all working storage is reused server-level scratch — the old code allocated a Float64Array,
+   * an order array, a sorted score copy, and head/tail arrays (+ a concat copy) per client per tick.
+   * Returns the reused prioOrder buffer: only the first `ids.length` entries are valid, and the caller
+   * must consume it before the next prioritize() call. The order produced is identical to the old code:
+   * same scores, same stable sort, same threshold/head/tail partition (including ties at the threshold,
+   * which fill `head` in index order until `limit`, with the rest in `tail` in index order).
+   */
   private prioritize(ids: number[], s: SessionState, owned: Entity[], tick: number, limit = ids.length): number[] {
     const w = this.world; const tf = w.store(Transform); const px = this.posX, py = this.posY;
-    const cx: number[] = [], cy: number[] = [];
+    const n = ids.length;
+    const cx = this.prioCx, cy = this.prioCy; cx.length = 0; cy.length = 0;
     for (const e of owned) { const i = entityIndex(e); if (tf.has(i)) { const sl = tf.slot(i); cx.push(tf.data.x[sl]!); cy.push(tf.data.y[sl]!); } }
-    const score = new Float64Array(ids.length); const order = ids.map((_, i) => i);
-    for (let k = 0; k < ids.length; k++) {
+    if (this.prioScore.length < n) { const c = Math.max(n, (this.prioScore.length || 64) * 2); this.prioScore = new Float64Array(c); this.prioSorted = new Float64Array(c); }
+    const score = this.prioScore;
+    for (let k = 0; k < n; k++) {
       const id = ids[k]!; let d2 = 0;
       const x = id < px.length ? px[id]! : NaN, y = id < py.length ? py[id]! : NaN;
       if (cx.length && x === x) {
@@ -842,15 +880,19 @@ export class NetServer {
       const ls = id < s.lastSent.length ? s.lastSent[id]! : 0; const stale = ls ? tick + 1 - ls : 1;
       score[k] = d2 / (stale * stale);
     }
+    const order = this.prioOrder; order.length = n;
+    for (let k = 0; k < n; k++) order[k] = k;
+    if (limit <= 0) return order; // old code: threshold undefined, every index lands in `tail` in order
+    if (limit >= n) { order.sort((a, b) => score[a]! - score[b]!); return order; }
     // Only the first ~limit can fit the budget: find the score threshold with a typed-array sort, fully order just those.
-    let pick = order;
-    if (limit < ids.length) {
-      const sorted = score.slice().sort(); const thr = sorted[limit - 1]!;
-      const head: number[] = [], tail: number[] = [];
-      for (const k of order) (score[k]! <= thr && head.length < limit ? head : tail).push(k);
-      head.sort((a, b) => score[a]! - score[b]!); pick = head.concat(tail);
-    } else order.sort((a, b) => score[a]! - score[b]!);
-    return pick;
+    const sorted = this.prioSorted; sorted.set(score.subarray(0, n)); sorted.subarray(0, n).sort();
+    const thr = sorted[limit - 1]!;
+    const head = this.prioHead, tail = this.prioTail; head.length = 0; tail.length = 0;
+    for (let k = 0; k < n; k++) (score[k]! <= thr && head.length < limit ? head : tail).push(k);
+    head.sort((a, b) => score[a]! - score[b]!);
+    for (let k = 0; k < head.length; k++) order[k] = head[k]!;
+    for (let k = 0; k < tail.length; k++) order[head.length + k] = tail[k]!;
+    return order;
   }
 
   private flushEvents(s: SessionState, tick: number): void {
@@ -865,7 +907,8 @@ export class NetServer {
   }
 }
 
-interface EncodedRecord { bytes: Uint8Array; bits: number; id: number }
+/** ADR-375: the cached record keeps its writer (written once, never mutated after) so appendWriter() can read it without a snapshotBits() byte copy. */
+interface EncodedRecord { w: BitWriter; bits: number; id: number }
 const NO_BASE = Symbol("full");
 const NO_CHUNKS: ReadonlySet<string> = new Set();
 const now = (): number => (globalThis as { performance?: { now(): number } }).performance?.now() ?? 0;

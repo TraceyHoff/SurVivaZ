@@ -6,7 +6,7 @@ import { loadManifest, mergeManifests, type ManifestJson } from "@engine/assets"
 import { FLOOR_HEIGHT_LEVELS, DEFAULT_ISO } from "@engine/world";
 import {
   attachToWorld, BuildGhost, chimneySmokePoint, crackAnim, isoZDepthFactor, isEnclosurePieceKey, pieceArtRow, PieceCoverIndex, pieceDepthKey, pieceHiddenByStory, pieceShouldCutaway,
-  ROT_EXACT_PIVOT, splitTierKey, streamingFallbackKeys, triArtRow, type BuildPieceDefT,
+  ROT_EXACT_PIVOT, splitTierKey, streamingFallbackKeys, tileKey, triArtRow, type BuildPieceDefT,
 } from "../src/index.js";
 
 const ROOT = join(__dirname, "../../..");
@@ -97,7 +97,7 @@ describe("gridless cutaway (client has no BuildingGrid)", () => {
     c.add(0, 0, 1, 1, 1, false, false); return c;
   };
   it("inside on the ground floor: region = the building footprint", () => {
-    const r = house().region(1, 1, 0)!; expect(r.size).toBe(16); expect(r.has("3,3")).toBe(true); expect(r.has("4,4")).toBe(false);
+    const r = house().region(1, 1, 0)!; expect(r.size).toBe(16); expect(r.has(tileKey(3, 3))).toBe(true); expect(r.has(tileKey(4, 4))).toBe(false);
   });
   it("on the upper floor under the roof: still cut (roof covers)", () => { expect(house().region(2, 2, 1)?.size).toBe(16); });
   it("outside / on top: no cutaway", () => { expect(house().region(6, 6, 0)).toBeNull(); expect(house().region(1, 1, 3)).toBeNull(); });
@@ -108,7 +108,7 @@ describe("gridless cutaway (client has no BuildingGrid)", () => {
       if (!(x === 1 && y === 1)) c.add(x, y, 1, 1, 1, false, true);
     }
     const r = c.region(1, 1, 0)!;
-    expect(r.has("1,1")).toBe(true);
+    expect(r.has(tileKey(1, 1))).toBe(true);
     expect(r.size).toBe(16);
     expect(c.region(2, 2, 0)?.size).toBe(16);
   });

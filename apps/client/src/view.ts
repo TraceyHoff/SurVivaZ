@@ -24,9 +24,9 @@ import { clanPieceTint, clanPieceTintPair } from "./clan-tint.js";
 import { pieceVariantOpts } from "./piece-variant.js";
 import { DoorView, doorArt } from "./door-view.js";
 import { loadManifest, buildPieceVisual, type AssetRegistry } from "@engine/assets";
-import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard } from "@engine/render";
+import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard, setResizeSlicing } from "@engine/render";
 import { countFraction } from "./load-progress.js";
-import { isWarmupCandidate, type WarmupResult } from "@engine/render";
+import { isWarmupCandidate, warmupPageBudget, type WarmupResult } from "@engine/render";
 import { VehicleView, type RiderPlacement, type VehicleSnapshot, type VehicleRenderDef } from "@engine/render";
 import { Vehicle as GVehicle, VehicleSeats, VehicleState, Hitch, vehicleDefOf, localPlayerVehicle } from "@engine/gameplay";
 import { netIdOf } from "@engine/net";
@@ -247,6 +247,10 @@ export class IsoView {
   }
   /** ADR-370: boot warm-up result (first-view page-ins), read by main.ts for the load-cost breakdown. */
   warmupResult: WarmupResult | undefined;
+  /** ADR-380: ms per boot sub-phase inside IsoView.create (renderer / manifest / painted / registry.* / warmup /
+   *  variants / lighting), read by main.ts into the ?diag=1 load-cost breakdown. The registry step is split by
+   *  atlas.rebuildTimings; without it (Canvas2D) the whole setRegistry call is one "registry" phase. */
+  bootPhases: { name: string; ms: number }[] = [];
   /** ADR-240: `charArt` setting (?charArt= / localStorage): v1 (default), v2s = local player only, v2s-all = every character. */
   charArt: CharArt = parseCharArt(new URLSearchParams(globalThis.location?.search ?? "").get("charArt"), (() => { try { return globalThis.localStorage?.getItem("charArt"); } catch { return null; } })());
   private charArtMapper?: CharArtMapper;
@@ -334,6 +338,12 @@ export class IsoView {
   get appearanceEnabled(): boolean { return this.view.isRegistered(Appearance); }
 
   static async create(canvas: HTMLCanvasElement, base: string, ov: ViewOverrides = {}, onStage: (stage: string, f: number, label?: string) => void = () => {}): Promise<IsoView> {
+    // ADR-380: split the boot load-cost bucket into sub-phases (cheap performance.now() marks, no allocations per
+    // frame — this runs once at boot; the split is what Tracey's next ?diag=1 shows, so the 28.5 s boot can be cut
+    // where it actually costs instead of by guessing).
+    const phases: { name: string; ms: number }[] = [];
+    const phase = (name: string, t0: number): void => { phases.push({ name, ms: Math.round(performance.now() - t0) }); };
+    let t0 = performance.now();
     onStage("renderer", 0);
     const q0 = new URLSearchParams(location.search);
     // WebGL2 -> Canvas2D sprites -> (main.ts) debug. Probe a FRESH canvas: a lost/blocked context on #game must not decide.
@@ -350,11 +360,13 @@ export class IsoView {
       onError: (e) => { if (e.kind !== "context-restored" && e.kind !== "context-lost") /* ADR-199: gl-recovery already reports the loss (one overlay, not two) */ showRenderError(`Renderer: ${e.kind}`, `${e.message}${e.detail ? `\n${e.detail.slice(0, 300)}` : ""}\nTry ?gl=lowend or ?safe=1 — please report this text.`); } });
     } catch (e) { console.warn("[view] IsoRenderer failed", e); renderer = make2d(); }
     { const c = renderer.capabilities; console.info(`[view] gl ${c.renderer} mobile=${c.mobile} lowEnd=${c.lowEnd} flags=${c.flags.join(",")} fallbacks=${c.fallbacks.join("; ")}`); (globalThis as { __renderCaps?: unknown }).__renderCaps = c; }
+    phase("renderer", t0); t0 = performance.now();
     onStage("manifest", 0);
     const packBase = `${base}art/pack/`;
     const { registry } = await loadMergedManifest(`${base}art/`);
     onStage("atlases", 0);
     const sources = sourcesFromManifest(registry, packBase + "manifest.json", {}, { probeSiblings: false });
+    phase("manifest", t0); t0 = performance.now();
     // Task 34: generated bee / owl / apiary atlases — paint them and point their sources at blob URLs (the
     // fragment's debug/*.png paths are never fetched). Only for atlases the merged registry actually has.
     for (const [k, src] of await task34AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
@@ -395,13 +407,28 @@ export class IsoView {
     const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[]), ...(TASK355_ATLAS_KEYS as readonly string[]), ...(TASK361_ATLAS_KEYS as readonly string[])]);
     const expected = [...registry.atlases.keys()].filter((k) => !custom.includes(k) && !paintedAtlas.has(k)).length;
     const stopWatch = watchResources(/\.(png|webp|ktx2|avif|jpe?g)(\?|$)/i, (n, bytes) => onStage("atlases", countFraction(n, expected), `Loading sprite atlases (${n}/${expected}${bytes ? `, ${(bytes / 1048576).toFixed(1)} MB` : ""})`));
-    try { await renderer.atlas.setRegistry(registry, sources); } finally { stopWatch(); }
+    // ADR-380: the initial setRegistry has no frames to protect — disable the ADR-190 resize slicer for it (its
+    // per-6ms frame yields turn resize CPU into several seconds of wall time during boot); re-tiers keep slicing.
+    // The registry split comes from atlas.rebuildTimings; without it (Canvas2D) the whole call is one phase.
+    phase("painted", t0); t0 = performance.now();
+    setResizeSlicing(false);
+    try { await renderer.atlas.setRegistry(registry, sources); } finally { setResizeSlicing(true); stopWatch(); }
+    const rt = renderer.atlas?.rebuildTimings;
+    if (rt) for (const [k, label] of [["fetchDecode", "registry.fetch"], ["fitBudget", "registry.fitBudget"], ["halveSide", "registry.halveSide"], ["layout", "registry.layout"], ["upload", "registry.upload"], ["tables", "registry.tables"], ["bodies", "registry.bodies"], ["restore", "registry.restore"]] as const) phases.push({ name: label, ms: Math.round(rt[k]) });
+    else phases.push({ name: "registry", ms: Math.round(performance.now() - t0) });
+    t0 = performance.now();
     // ADR-370: warm-up window — page the visible-pin lazy sheets (furniture / buildings / openings /
     // defenses stream pages, in view at almost any spawn) in before the first paint, at near-player
     // priority, bounded so a slow device just gets a soft start instead of a stalled boot.
     // Resident atlases are already on the GPU; the window only covers lazy pages.
+    // ADR-374: no firstView set is knowable here — no world, player or camera target exists yet,
+    // so tier-0 ordering cannot happen at boot (it happens at world entry in main.ts
+    // drainFirstView, once frames have synced the view). The page count is clamped to the
+    // stream pool (warmupPageBudget: 12 on a low-memory pool, not 24); warmupFirstView clamps
+    // again internally, so the cap holds even if this call site is ever bypassed.
     const warmupKeys = [...registry.atlases.keys()].filter((k) => isWarmupCandidate(k));
-    const warmupResult = await renderer.atlas.warmupFirstView?.(warmupKeys);
+    const warmupResult = await renderer.atlas.warmupFirstView?.(warmupKeys, { maxPages: warmupPageBudget(renderer.atlas.streamPoolSlots?.()) });
+    phase("warmup", t0); t0 = performance.now();
     onStage("atlases", 1); onStage("variants", 0);
     const pv = await assetFetch(packBase + "piece_variants.json").then((r) => (r.ok ? r.json() : null)).catch(() => null) as { pieces?: Record<string, string[]> } | null;
     if (pv?.pieces) renderer.atlas.setPieceVariants(pv.pieces);
@@ -409,14 +436,16 @@ export class IsoView {
       const h = await assetFetch(`${packBase}atlases/${a}.hands.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
       if (h?.hands) renderer.atlas.setHands(a, h);
     }
+    phase("variants", t0); t0 = performance.now();
     onStage("lighting", 0);
     const tuningUrl = `${base}art/survival_fx/render_tuning.json`;
     const look = await renderer.loadLook(tuningUrl);
     const lights = new LightTable(); lights.load(await assetFetch(tuningUrl).then((r) => (r.ok ? r.json() : null)).catch(() => null));
     if (look.warnings.length) console.info("render tuning:", look.warnings);
     renderer.camera.zoom = DESKTOP_ZOOM; // main.ts attachZoom then sizes it per viewport (ADR-100)
+    phase("lighting", t0);
     onStage("ready", 0);
-    const view = new IsoView(renderer, registry, ov, lights); view.base = base; view.warmupResult = warmupResult ?? undefined; return view;
+    const view = new IsoView(renderer, registry, ov, lights); view.base = base; view.warmupResult = warmupResult ?? undefined; view.bootPhases = phases; return view;
   }
 
   private ghost: BuildGhost | undefined;

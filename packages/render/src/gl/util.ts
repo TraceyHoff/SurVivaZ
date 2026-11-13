@@ -8,7 +8,22 @@ export class RenderGLError extends Error {
 /** Per-context shader policy: fragment shaders are rewritten to mediump when highp is unavailable or forced. */
 const fragMediump = new WeakMap<WebGL2RenderingContext, boolean>();
 export function setFragmentMediump(gl: WebGL2RenderingContext, on: boolean): void { fragMediump.set(gl, on); }
-export interface FrameStats { drawCalls: number; sprites: number; lights: number; tiles: number; chunks: number; particles: number; staticChunks: number; staticInstances: number; cpuMs: number }
+export interface FrameStats { drawCalls: number; sprites: number; lights: number; tiles: number; chunks: number; particles: number; staticChunks: number; staticInstances: number; cpuMs: number; /** ADR-381: last frame's per-phase render CPU (ms); shared record, see PhaseTimer. */ phases?: RenderPhaseMs }
+/** ADR-381: per-phase CPU inside IsoRenderer.render() — the phone's `frame cpu` is one number (15.7 ms at 22 draws),
+ *  which cannot say whether the time is prep, sprite gather, light, bloom or composite. These splits are the
+ *  measurement that answers that on the phone via ?diag=1. */
+export interface RenderPhaseMs { prep: number; sprites: number; upload: number; lightsPrep: number; scene: number; light: number; bloom: number; composite: number; weather: number }
+export const newPhaseMs = (): RenderPhaseMs => ({ prep: 0, sprites: 0, upload: 0, lightsPrep: 0, scene: 0, light: 0, bloom: 0, composite: 0, weather: 0 });
+/** Cheap per-phase wall clock: one reused record, no per-frame allocation. Callers pass performance.now()
+ *  readings (so the class is unit-testable with synthetic timestamps); split(name) records the ms since the
+ *  previous split/start. A phase that did not run this frame keeps its last value — callers zero it explicitly. */
+export class PhaseTimer {
+  readonly ms: RenderPhaseMs = newPhaseMs();
+  private last = 0;
+  start(now: number): void { this.last = now; }
+  split(name: keyof RenderPhaseMs, now: number): void { this.ms[name] = now - this.last; this.last = now; }
+  zero(name: keyof RenderPhaseMs): void { this.ms[name] = 0; }
+}
 export const newStats = (): FrameStats => ({ drawCalls: 0, sprites: 0, lights: 0, tiles: 0, chunks: 0, particles: 0, staticChunks: 0, staticInstances: 0, cpuMs: 0 });
 
 export function compile(gl: WebGL2RenderingContext, type: number, src: string, label: string): WebGLShader {

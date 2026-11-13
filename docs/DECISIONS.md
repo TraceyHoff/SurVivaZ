@@ -6711,3 +6711,632 @@ so Tracey's eyes on the live build are still the real check — especially the W
 and bench numbers above are single-VM, noisy, and not a benchmark claim. Deliberately not
 changed: loot tables, reclaim values, `SITE_CHANCE` beyond 0.15, the per-chunk one-site rule,
 `ABANDONED_SCAN_RADIUS`, and anything in the stairs (ADR-372) or passenger (ADR-371) slices.
+
+## ADR-374: Render warm-up actually pumps — first-view pages land before the first paint (SurVivaZ)
+
+**Context.** Tracey reported the game is very slow and laggy on her phone since the
+ADR-368–370 batch, especially at the beginning and when moving through new areas. The
+performance investigation (PROFILE.md §2) proved ADR-370's warm-up window is structurally
+stalled: `AtlasManager.beginFrame()` (`atlasManager.ts:1360`) is the only place that resets
+`streamStarts` and `uploadsThisFrame`, and its only caller is `sprites.prepare()` — i.e. only
+during a rendered frame. `warmupFirstView()` requested up to 24 pages at prio 1, then polled
+for up to 1500 ms without ever calling `beginFrame()` or `pump()`; after 2 stream starts + 2
+GPU uploads both gates stalled (`STREAM_UPLOADS_PER_FRAME = 2`, `PAGE_UPLOADS_PER_FRAME = 2`).
+`iso` is only assigned after `IsoView.create` resolves (`main.ts:139`), so no frame renders
+during the boot window. Expected result: resident ≈ alreadyResident + ~2, `timedOut: true`,
+ms ≈ 1500 — boot ~1.5 s longer AND the first view still blurry, with the remaining ~20 pages
+then landing at 2 uploads/frame during the first gameplay frames. Confirmed on Tracey's Galaxy
+A16 (?diag=1, 2026-11-12, live build 07062533 — see PROFILE.md §8): boot warm-up 22/26 pages
+resident in 1,506 ms (TIMED OUT, 4 pending), 9 pages still pending after the 1,628 ms
+warmup-drain. The 22 resident were already resident before the poll (resident atlases / the
+ADR-307 prefetch); the stalled poll itself added only ~2 — so this fix is judged on the
+pending count going to ~0 inside the window, not on the resident count. The warm-up is only
+~1.5 s of a 28.5 s boot; the rest of boot is a separate investigation (ADR-380), and this ADR
+claims no boot-time fix. Two further defects in the
+same path: `view.ts` called `warmupFirstView(warmupKeys)` with no opts (no `firstView`, no
+`maxPages` — `warmupKeysForSprites()` unused at boot, so tier-0 ordering never happened), and
+`warmupPageBudget()` existed but was never called (the 24-page cap was not clamped to the
+12-slot low-memory stream pool).
+
+**Decision — pump inside the wait loop (gap-fill tick).** New `AtlasManager.pumpWarmupTick()`:
+the per-frame page-in budget reset that `beginFrame()` does, without a rendered frame. It
+resets `streamStarts` / `uploadsThisFrame`, releases the next decoded pages waiting for their
+upload turn (at most `PAGE_UPLOADS_PER_FRAME`), and re-drives `pump()`. Deliberately NOT
+`beginFrame()`: it does not advance `this.frame` (the LRU clock, and the `unloadIdleStream`
+cadence that runs off it — a warm-up tick can never evict a page), and it does no frame-table
+GL upload (dirty rows upload on the first rendered frame's `beginFrame`). The tick itself
+issues no GL calls; the only GL work it can trigger is `pageIn`'s own `texSubImage3D`
+uploads — the same uploads a rendered frame performs, on the same context, which IsoRenderer
+owns and which is current (`setRegistry` has run before the boot warm-up; no other GL user
+runs during the boot window). The 2/frame caps are unchanged: the tick resets the same
+counters `beginFrame` resets, to the same limits. `warmupFirstView()` calls the tick once per
+poll (16 ms) **only when no rendered frame has run since the last poll** (tracked via
+`this.frame`): at boot no frames exist, so every poll pumps; at world entry frames are
+running, so `beginFrame` already pumps and the tick stays out of the way — at most one extra
+pump per poll, each bounded by the same 2/frame caps, inside the same bounded 1500 ms window.
+`warmupDrain()` is deliberately untouched: during the world-entry drain frames are running
+(the rAF loop drives `iso.render` every frame), so it is already pumped, and adding a tick
+there would only double-pump the same frames.
+
+**Decision — clamp the request count to the real pool.** `warmupFirstView()` now computes its
+cap as `warmupPageBudget(this.streamPoolSlots(), opts.maxPages ?? WARMUP_MAX_PAGES)` via the
+new `streamPoolSlots()` (capacity of the main manifest stream-sheet pool: 24 desktop / 12
+low-memory; the 2/1-slot oversize stream pool is not counted, so the clamp is conservative).
+A 12-slot low-memory pool caps at 12 pages, not 24. The clamp lives inside
+`warmupFirstView()` so it holds for every caller, and the boot call site in `view.ts` also
+passes it explicitly (`{ maxPages: warmupPageBudget(renderer.atlas.streamPoolSlots?.()) }`).
+
+**Decision — first-view set where it is knowable (world entry, not boot).** At boot no
+first-view set is knowable — no world, player or camera target exists yet — so tier-0
+ordering cannot happen there, and the boot call keeps the visible-pin set (now pool-clamped).
+At world entry it is knowable: `main.ts` `drainFirstView()` now reads the sprite ids from
+`iso.view` (the view world, synced by the frames that have already run — the rAF loop drives
+`iso.render` from `useWorld` on, so by the time `waitForWorldReady` resolves the view holds
+`Sprite` components for the entities actually around the player), turns them into page keys
+with `warmupKeysForSprites()`, and calls `warmupFirstView(keys, { firstView: keys })` — those
+pages sort tier 0 — before the existing `warmupDrain()`. A failure in that step is caught
+and logged, never blocks `ready`: the drain still runs and the overlay still lifts on its own
+timeout. Worst case the world-entry warm-up adds one more bounded 1500 ms wait before `ready`
+(the same bound the drain already had); in practice it returns as soon as the pages land.
+The result is recorded in the load-cost breakdown (`?diag=1`) alongside the drain note.
+
+**Measurement — stubbed-manager regression test, not a browser.** Chrome is blocked in this
+VM (it refuses localhost navigation), so there is no live frame-time measurement; the proof
+is a gated fake manager in the new `packages/render/test/adr374_warmup_pump.test.ts` (5
+tests), whose fake `request`/`pump` mirror the real gates (a page-in only starts while
+`streamStarts < STREAM_UPLOADS_PER_FRAME`; only a pump tick resets it) with a 5 ms simulated
+landing delay. Before / after on the same fake, 12 tier-1 pages, default 1500 ms window
+(3 runs of a throwaway probe; the wall-clock ms is noisy on this loaded VM — the 16 ms polls
+slip — the resident counts are stable):
+
+| | requested | resident | stillPending | timedOut | ms |
+|---|---|---|---|---|---|
+| Before (tick stubbed = old wait loop) | 12 | 2 | 10 | true | 1507–1562 |
+| After (fix) | 12 | 12 | 0 | false | 315 / 661 / 392 |
+
+Judged on the pending count, as the phone data requires: before, 10 of the 12 requested pages
+were still pending when the window expired (timedOut); after, 0 are pending and the window
+returns early. The resident count is the wrong yardstick here — on the phone most pages were
+already resident before the poll, so the fix's visible effect is pending → 0, not a higher
+resident number.
+
+The clamp on the same fake, 20 candidates: 12-slot pool → requested 12, skipped 8,
+resident 12; 24-slot pool → requested 20, skipped 0; no stream pool → falls back to
+`WARMUP_MAX_PAGES` (24); explicit `maxPages: 5` still wins (requested 5). The test file
+fails on pre-fix code (4 of 5 fail: the landing test gets resident 2, the clamp test gets
+requested 20, the tick unit test has no method to call, the frozen-frame test never ticks;
+the fifth test encodes the old stall and passes on old code by design) and passes with the
+fix (5/5). No graphics-quality change: no resolution / mip / preset / compass change, no
+new art; the per-frame upload budgets are untouched for rendered frames.
+
+**Validation.** New `packages/render/test/adr374_warmup_pump.test.ts` (5 tests, all pass).
+Render suite: 75 files, 498 tests, all pass. Targeted client tests (`adr370_load_cost`,
+`perf_budget`, both warm-up files): 4 files, 25 tests, all pass. `pnpm -r typecheck`
+(lockfile-pinned TS 5.9.3): EXIT 0, all 11 projects. Client suite (`apps/client/test`):
+174 files passed, 13 failed; 858 tests passed, 12 failed, 0 skipped — every failure
+characterised in the ADR-374 report as pre-existing (9 art-file/count assertions + 3
+ENOENT art-file unhandled errors on this sparse checkout, 2 timeouts reproduced identically
+with the change stashed, 1 timing-sensitive UI test that passes standalone); none is caused
+by this change. `warmupDrain()` unchanged, so the existing
+ADR-370 drain test is unaffected; the ADR-370 fake manager keeps passing unmodified (its
+`pools` field is absent, so `streamPoolSlots()` returns undefined and the budget falls back
+to `WARMUP_MAX_PAGES`).
+
+**Honest cuts.** No live visual check: the blurry start has not been seen fixed on Tracey's
+phone — her eyes on the live build are still the real check, especially the first paint after
+boot and the first seconds after entering a world, and the pending counts in `?diag=1` (boot
+warm-up pending should go to ~0; warmup-drain pending should drop from 9). This ADR does NOT
+fix the 28.5 s boot (ADR-380) or the in-game 15.7 ms frame CPU (ADR-381): the warm-up is
+only ~1.5 s of the boot, and the in-game frame cost is a separate problem. The before/after
+numbers above are from a
+stubbed manager (fake decode + fake landing delay), not a GPU: real page-in cost per page
+(fetch + `createImageBitmap` + upload) is device- and art-dependent, so 12 pages may still
+take a visible fraction of the window on a slow phone — the window is bounded and the
+timeout keeps boot soft either way. Not changed: `warmupDrain()`, the per-frame budgets,
+`prefetch()` (same idle-poll shape, out of scope — it is only called from creator previews,
+not boot), and anything in the sim / net / world-streaming slices.
+
+
+## ADR-375: Net replicate — cut per-tick allocations (SurVivaZ)
+
+**Context.** The performance investigation (PROFILE.md §3) measured `net.server.replicate` as the
+single biggest system in the real-play harness (~5.3 ms/tick; send/encode ~2.5 ms/tick) with heavy
+per-tick allocation that predates ADR-368/369: per client per tick a `view` Map, must/rest arrays,
+and `prioritize()`'s Float64Array + order array + sorted score copy + head/tail arrays (+ a
+concat copy), plus one `BitWriter` + `snapshotBits()` byte copy per encoded entity record. ADR-369's
+dirty-driven capture is a real-play win and its relevant-netId cache is worth ~0 ms — neither is
+touched here. The wire protocol stays v8; no format change, no replication-semantics change.
+
+**What changed.** `packages/net/src/server.ts` (replicate + prioritize): must/rest/mustEs/restEs are
+reused server-level scratch lists (length-reset per client); `prioritize()` works entirely on reused
+scratch (score/sorted Float64Arrays, order/head/tail/cx/cy arrays) and returns the reused order buffer
+— same scores, same stable sort, same threshold/head/tail partition including ties at the threshold;
+the rest reorder permutes through reused scratch instead of `rest.slice()` / `restEs.slice()`; the
+per-tick encoded-record cache keeps the `BitWriter` itself instead of a `snapshotBits()` byte copy
+(the writer is written once and never mutated after, so `appendWriter()` reads it without copying);
+the dead per-tick `globalSet` is removed and the per-client `ownedIds` Set is replaced by reading the
+owned entities' netIds directly. `packages/net/src/bits.ts`: new `BitWriter.appendWriter()` (bit-identical
+to appending a `snapshotBits()` copy) and `reset()` (zeroes used bytes first, because `writeBits` ORs).
+`packages/net/src/state.ts`: `writeSpawnComp`'s sparse-vs-dense choice reuses two module-level scratch
+writers instead of allocating two `BitWriter`s + a snapshot copy per wide-component spawn (synchronous,
+never re-entrant, so sharing is safe). Deliberately not changed: `captureState` (ADR-376), the
+relevant-netId cache, the per-client `view` Map (it is the stored delta baseline), the per-tick `enc`
+and `chunkIds` maps, and the grid-sync viewpoint arrays.
+
+**Behaviour — identical bytes on the wire.** New `packages/net/test/adr375_replicate_allocs.test.ts`
+(5 tests): `appendWriter` matches `appendBits(snapshotBits())` at aligned and unaligned offsets;
+`reset()` leaves no stale 1-bits; a scripted 2-client run (300 entities, `budgetBytes: 256`,
+interest off, 40 ticks — exercises the prioritize limit path, the shared record cache and the order
+tail) hashes byte-identically to the pre-375 baseline (SHA-256
+`0e5064c6c59ecb774f362dc91f7e8770db138ded6809dd3f9b8cd59d64586222`); under a 64-byte budget the
+nearest entity's spawn is sent on tick 1, the farthest is not, and the tail drains within 90 ticks
+(no starvation). Full net suite: 41 files, 117/117 pass (including the 5 new tests and the copied probe).
+
+**Measured — no speedup demonstrable, reported honestly.** The expected ~0.5–1.5 ms/tick did not
+materialise in any measurement on this VM, so none is claimed. CPU-time bench (same scenarios as the
+profiling worker's probe, timed with `process.cpuUsage()` over 120 ticks because wall time on this
+1.5-CPU box is descheduling-dominated — wall was 4–10× CPU in the same runs): total CPU ms/tick,
+medians of 3 runs, before → after: 1c×10k 10% moving 12.52 → 12.68, idle 7.08 → 7.14, 100% moving
+23.81 → 22.95, 4c×10k 12.47 → 13.10, travelling 5 tiles/tick 11.59 → 12.16, 40 tiles/tick 11.38 →
+12.10 — every delta inside the run-to-run ranges. GC in the same runs (median ms per 120 ticks):
+342.7 → 386.8, 191.1 → 176.0, 615.5 → 642.4, 283.6 → 281.3, 287.6 → 295.3, 306.9 → 387.9 — also
+flat, ranges overlapping widely. The wall-clock probe and real-play harness could not be compared at
+all: the after-window ran under extreme VM contention (harness replicate 28.1 / 41.5 / 28.7 ms/tick
+vs 6.5 before, with capture — untouched code — also 3–6× worse), so those after numbers measure the
+neighbours, not this change. Why so little: in these scenarios the send path is a small share of the
+tick (capture's O(N) fresh-Map allocation dominates) and the removed allocations are small in absolute
+terms (tens of encodes and a small `rest` per client per tick). The allocation cut is real — zero
+per-client-per-tick arrays in `prioritize()`, zero `slice()` copies, zero `snapshotBits()` copies per
+record — but its payoff, if any, is in fewer GC pauses under real multi-client play, not in mean
+ms/tick here; ADR-376 (captureState) is where the big allocation lives.
+
+**Validation.** New `packages/net/test/adr375_replicate_allocs.test.ts`, 5/5 passing; full net suite
+41 files, 117/117. `pnpm -r typecheck` passes with lockfile-pinned TypeScript 5.9.3.
+
+**Honest cuts.** No live play check: whether this (or any of ADR-374–379) moves the lag Tracey feels
+on her phone is still for her eyes on the live build — this slice on its own has no measurable
+effect on this VM, and the harness numbers that would speak to real play were unusable under VM
+contention. If the gate wants a sharper verdict, re-run the harness on a quiet machine (or with the
+CPU-time method used here) rather than trusting the wall-clock after numbers in the slice REPORT.md.
+
+## ADR-376: captureState O(N) floor — in-place WorldState, generation-stamped flags (SurVivaZ)
+
+**Context.** The performance investigation (PROFILE.md §3) measured `captureState` at
+~0.3 µs/entity/tick even at 0% dirty: the floor is an O(N) allocation problem, not a dirty
+problem — a fresh ~N-entry `WorldState` Map every tick, plus two `Set.has` per entity
+(`touched`, `dirty`), plus a `prev.get` per entity. ADR-369's dirty-driven capture is a real
+win (real-play harness capture 2.02–2.48 vs pristine 2.74–3.29 ms/tick) and stays. This slice
+cuts the floor underneath it, in `packages/net/src/state.ts` only. Wire protocol stays v8.
+
+**Decision — update the WorldState Map in place.** `captureState` now returns `prev` itself,
+mutated, instead of a fresh Map: clean entities are skipped with no `Map.get` and no
+`Map.set` (their entry already sits in the map with its previous immutable `EntityState`);
+changed entities are rebuilt exactly as before and `out.set` in place. **Contract change:**
+callers must NOT retain `prev` as a snapshot — copy it (`new Map(prev)`) first if the old
+contents are needed. The only production caller is `NetServer.replicate`, which only ever
+passes its own `prevState` straight into the next capture; per-client `base` maps are the
+separate per-tick `view` maps (fresh each tick, holding `EntityState` refs), `StaticServer`
+keeps its own chunk maps, and the client's `history` maps come from `decodeDelta` — none of
+them alias the captured map, so none of them is affected. `EntityState` objects stay
+immutable and structurally shared exactly as before. A non-`Map` `ReadonlyMap` passed as
+`prev` is copied, not mutated (`prev instanceof Map` guard).
+
+**Decision — generation-stamped Uint16Arrays instead of Sets.** Two module-level
+`Uint16Array(1 << 20)` (`dirtyMarks`, `touchedMarks`, indexed by entity index — always
+< 2^20 by core's `INDEX_MASK`, so no growth and no bounds check) plus a 16-bit generation
+bumped per call replace the `touched`/`dirty` Sets: a stamp write on mark, a typed-array
+read on test, no hashing. Wrap (fill + restart) is a once-per-65535-calls event. Stamps are
+written and read inside a single call, so sharing them across worlds/servers is safe.
+`captureState` is not re-entrant.
+
+**Decision — the leave scan.** Entities that left are dropped by a key scan over the map,
+but only when needed: the scan runs only if `out.size > live`, where `live` counts distinct
+live netIds stamped this tick (a third stamp array, `seenMarks`, indexed by netId, doubling
+to the largest netId ever assigned — the same growth the server's own netId-indexed
+`curArr`/`stamp` already do). No-leave ticks skip the scan entirely. `live` is a distinct
+count, not `ns.size`, because two live entities can share a netId in hand-built worlds
+(the world's environment singleton already holds netId 1) — using `ns.size` would skip the
+scan and resurrect a stale entry, which the ADR-376 tests pin. A first capture (`prev`
+undefined) rebuilds everything, as before, even if the change bits were already cleared.
+
+**Tests updated for the contract change.** Three existing files held a `prev` snapshot and
+used it as an `encodeDelta` base or a `.toBe` reference after the next capture; they now
+take a `new Map(prev)` copy (or hold the `EntityState` ref) before capturing:
+`packages/net/test/delta.test.ts`, `packages/net/test/adr369_net_replication.test.ts`
+(its `.toBe(s0…)` comparisons now use a pre-capture copy), and
+`apps/server/test/container_bandwidth.test.ts`. No assertion was weakened — the same stats,
+the same decoded-state equality, the same byte-size bounds.
+
+**Verification.** New `packages/net/test/adr376_capture_floor.test.ts` (6 tests): the
+returned map `toBe`s `prev` and an idle tick changes nothing; a first capture with no prev
+still captures everything after `clearChanges`; destroy + NetId-removal drops the entries,
+`encodeDelta` against a pre-capture copy reports exactly those despawns, later ticks do not
+resurrect them, and a newcomer joins cleanly; leave + same-netId re-add in one tick
+reflects the new entity; a 100-entity mass leave keeps the 50 survivors' exact
+`EntityState` objects under churn with index reuse; a scripted change sequence produces
+deterministic, decodable delta bytes. Full net suite: 42 files, 118 tests, all pass
+(includes the 6 new tests and the probe's 3). `pnpm -r typecheck` EXIT 0 with the
+lockfile-pinned TypeScript 5.9.3.
+
+**Measurement — the floor is cut ~4.5×; the dirty path is within noise on this VM.**
+`captureState`-alone micro-probe (profiling worker's probe, 1k/5k/10k × 0%/10%/100% dirty,
+40 samples each, median of run-medians; baseline 3 runs, after 6 runs, same VM):
+
+| entities | 0% dirty before → after | 10% dirty before → after | 100% dirty before → after |
+|---|---|---|---|
+| 1k | 0.124 → 0.045 ms | 0.229 → 0.131 ms | 0.547 → 0.579 ms |
+| 5k | 0.872 → 0.221 ms | 1.446 → 0.677 ms | 3.200 → 5.43 ms |
+| 10k | 1.941 → 0.421 ms | 3.421 → 3.29 ms | 7.541 → 55.08 ms |
+
+The 0%-dirty floor is the clean win: 0.19 → 0.042 µs/entity/tick, ranges
+non-overlapping at 5k/10k (10k: before 1.913–2.261, after 0.412–0.467 ms). At harness
+scale (~3,692 entities) that floor saving is ~(0.19 − 0.04) µs × 3,692 ≈ 0.55 ms/tick
+— arithmetic from the micro-probe, not a harness measurement (see below). The 10% and
+100% medians are NOT usable as a before/after claim on this VM: other agents were running
+full vitest suites concurrently on the shared 1.5-CPU box, and the after-runs' dirty-path
+p90s run 60–196 ms (VM descheduling + GC pauses; PROFILE.md already proved maxima
+> ~15 ms are descheduling, wall 51 ms vs CPU 2 ms on identical work). The p10s — the
+least-contended samples — show the dirty path roughly flat to ~20% better (10k 100%:
+before p10 median 7.04 ms, after 7.7 ms across 6 runs; 10k 10%: 3.13 → 1.23 ms), so no
+dirty-path regression is visible, but no dirty-path speedup is claimed either. The
+expected 0.3–0.8 ms/tick in the brief is the floor saving above; the dirty path was
+never the floor.
+
+**Measurement — real-play harness A/B is inconclusive (VM contention, not the change).**
+`apps/client/perf/run.ts --seconds 15` (300 ticks, 3,692 entities): baseline capture
+4.51 / 9.59 / 8.10 ms/tick (median 8.10), totals 40.3 / 50.5 / 46.6; after capture
+10.67–18.37 (median 12.8 then 15.3 over 6 runs), totals 96.7–129.7. The whole harness
+got ~2.3× slower, including code this slice never touches (`send/encode` 6.7–8.6 →
+15.9–23.6 ms/tick) while up to 28 foreign vitest workers were running — so the harness
+cannot separate this change from contention, and no harness number is claimed either
+way. Heap Δ shows no consistent difference (baseline 6.3 / 27.2 / 31.8 MB; after 1.3 /
+20.7 / 34.3 / 56.7 / −19.9 / 101.6 MB across 6 runs) — the one-Map-per-tick saving is
+swamped by everything else the harness allocates.
+
+**Wire identity — snapshot bytes identical to two decimals in all 8 probe scenarios.**
+The probe's `bytesPerClientTick` totals moved by 1 in two scenarios (201 → 202,
+228 → 229), which looked like a wire change until the transport bytes were split by
+message type (header byte 2: Snapshot = 5, Ping = 15): the entire difference is
+wall-clock `NetServer.pings()` — one 9-byte Ping per 1000 ms of wall time, counted by the
+probe's transport. Snapshot-only bytes/client/tick, pristine vs after: 201.45 / 201.45,
+32.75 / 32.75, 642.03 / 642.03, 48.57 / 48.57, 137.07 / 137.07, 182.28 / 182.28,
+210.30 / 210.30, 228.45 / 228.45. `encodesPerTick` is identical in every scenario
+(21 / 2 / 71 / 4 / 14 / 75 / 21 / 22). Protocol stays v8; no format change.
+
+**Honest cuts.** No live-phone check: the numbers above are all from this VM, and the
+harness A/B that would show the saving in real play is inconclusive for contention
+reasons — Tracey's eyes on her phone are still the real check, and the saving only
+shows up as ~0.5 ms/tick of a ~15 ms/tick budget, so it is a floor cut, not a fix for
+the lag by itself. The 4 MB of stamp arrays (2 × 1M × 2 bytes) is static, allocated
+lazily on first capture. Deliberately not changed: `prioritize()`/send (ADR-375's
+worker), the per-client relevant cache, the per-entity rebuild path, the wire format,
+and the fully-idle-tick skip (the harness is never fully idle, and the floor cut already
+covers it — skipping capture on fully-idle ticks would only help truly idle worlds).
+
+## ADR-377: animalAI — cache the animal lists, square the distances (SurVivaZ)
+
+**Context.** Profiling (PROFILE.md §3) put `gameplay.animalAI` at ~2.2 ms/tick in the
+real-play harness — the #1 sim cost — and ~2.6 µs/animal/tick open-ground, ~5 µs in a walled
+base. Two suspects: the system spread + sorted the animal query every tick (a fresh array
+for the dead sweep, `[...query].sort(...)`, plus a fresh array for the live list,
+`[...world.query([Animal, Transform], [Dead, Pet])]`), and `Math.hypot` everywhere a
+comparison would do. No gameplay or balance change was wanted: animals must behave
+identically, just cheaper.
+
+**Decision — cache both lists, keyed on `ComponentStore.membership`.** `animalAISystem`
+(`packages/gameplay/src/population.ts`) now keeps a per-world (WeakMap) cache of the dead
+list (ascending by entity id, exactly as the old sort produced) and the live list (rebuilt
+with the same query expression, so its order — reverse-dense of the Animal store, the query
+driver — is identical). A list rebuilds only when a membership counter of a store that
+gates its membership moves: Animal/Dead for the dead list, Animal/Transform/Dead/Pet for
+the live list. `membership` bumps on add/remove and never on field writes (the ADR-315
+precedent), and it only ever increases, so a spawn and a destroy in the same tick still
+invalidate (net-zero churn cannot hide). The live list is re-validated after the dead
+sweep, because the sweep's corpse destroys and loot-bag Transform adds move the counters.
+Field writes by this system itself (state/thinkAt/goal) never invalidate. Dead animals,
+new spawns, and mid-run pets all invalidate through the same counters (a pet gains Pet,
+a corpse gains Dead, a spawn adds Animal).
+
+**Decision — squared distances where only ordering/comparison matters.** `homeD`,
+threat `d`, retaliation `d` and territory `d` are now squared distances (`d2`), compared
+against squared thresholds (leash, aggro range, flee range, attack range + 0.4, press-home).
+The nearest-threat tie-break (`d2 === threat.d2 && p < threat.e`) keeps the lower entity
+id on ties, as before. The one true distance is kept: movement still uses
+`Math.hypot(dx, dy)` for normalisation and `Math.min(sp, d)`. `nearestClaimHostile`
+(still `Math.hypot` inside) is untouched — it runs only for tame defenders with a tribe.
+No tuning values changed; nothing in `packages/gameplay/data/*.json` was touched.
+
+**Deliberately not done — threat-evaluation staggering.** The code has no think-gate for
+threat scanning: `thinkAt` gates attack cooldowns and wander re-rolls only. Gating the
+scan on `thinkAt` would delay flee/engage by up to the think interval — a behaviour
+change, not a pure optimisation — so the scan still runs every tick for every live animal.
+
+**Behaviour identity — proven, not asserted.** New
+`packages/gameplay/test/adr377_animal_ai.test.ts` (7 tests) pins the exact decisions of
+a deterministic 800-tick world (160 animals + 16 pets + 20 zombies + 4 walking players,
+open ground and walled base): every live animal's id/kind/state/position/goal/thinkAt/hp,
+every loot bag's id/position, and the entity count, hashed. Golden hashes are identical
+before and after the fix (open `64878346`, base `6402418b`), and identical again in the
+direct-call micro-bench scenario (open `12102476`, base `db95b565`, 2,200 calls each).
+Targeted tests cover the cache transitions directly: dead-sweep loot drops in ascending
+animal-id order; a wolf spawned mid-run attacks on its first tick; destroying an animal
+mid-run neither crashes nor stalls the others; a pet made mid-run leaves the live list
+(its wander goal freezes); the nearest-threat tie breaks to the lower entity id. The
+squared-distance boundary risk is a rounding one only: `d <= R` vs `d2 <= R²` can differ
+by an ulp at an exact boundary, and the golden hashes (which cover thousands of
+comparisons) show no flip.
+
+**Measured — honest numbers, and where they are weak.** All numbers on this VM (shared
+1.5-CPU box) while six investigation workers measured at the same time; absolute ms are
+NOT phone ms and the full-sim probes were contention-polluted — load averages 4–14
+during the runs, and every system inflated together (e.g. `zombieAI` base x3 went
+2.07 → 8.3 ms/tick between windows with no code change). The controlled result is an
+interleaved micro-benchmark (direct `animalAISystem` calls, 2,000 calls, same 160-animal
+worlds, fix/baseline alternating within minutes): open ground fixed 1.85 ms/call
+(median of 3: 1.85, 2.34, 1.66) vs baseline 3.76 (3.04, 3.84, 3.76) — about 1.9 ms/call
+saved, non-overlapping ranges, most of it the per-tick spread/sort allocation and the
+dead-sweep generator scan, not just the `hypot`s. Walled base was inconclusive there
+(fixed 9.25 [5.05–9.41] vs baseline 6.90 [6.24–12.45] — overlapping ranges, and the
+micro-bench teleports players through walls so animals pathfind constantly, 5–12 ms/call
+vs the probe's 1.4–1.8, a pathological scenario). The sim-breakdown probe, bench215 and
+the real-play harness could not resolve the effect in this window: breakdown baselines
+(open x1 0.82, base x1 1.64, open x3 0.77, base x3 3.82 ms/tick) vs after-runs under heavy
+load (2.65, 8.99, 8.84, 22.80) are not comparable; bench215 after-runs 2–3 timed out
+(>300 s test timeout) under load (baseline open 1.27, base 3.77); harness animalAI
+baseline 5.89 ms/tick median (already 2.7× PROFILE.md's 2.17 — heavy load) vs after
+19.69, with a contemporaneous baseline of 13.82 in the same saturated window as the load
+fell — overlapping ranges, no conclusion. The expected ~0.5–1 ms/tick is therefore NOT
+claimed for real play: the fix is measurably cheaper per call on open ground, provably
+behaviour-identical, and shows no slowdown anywhere it could be measured. The real-play
+number needs a quiet box or Tracey's phone.
+
+**Validation.** Neighbouring suites pass with the fix: animals / population / pets /
+task14 / task15 / task32 / adr353 / adr319 / adr377 / adr368 — 10 files, 122 tests, all
+passing. `pnpm -r typecheck` with the lockfile-pinned TypeScript 5.9.3: EXIT 0, all
+projects. The full gameplay suite could not complete in this window: the run was
+starved by concurrent sibling workers (11 s of CPU in 17 min of wall time) and was
+killed; the gate must run it on a quieter box before any push.
+
+## ADR-379: Chunk-load budget enforcement — make `maxLoadTimeMs` real (SurVivaZ)
+
+**Context.** The profiling worker (PROFILE.md §4) found the chunk-load budget absent in
+practice: `maxLoadTimeMs = 2` was checked only *between* chunks and the first chunk was
+always admitted, so a 4-chunk update cost ≥2.8 ms of terrain gen alone and a single median
+site chunk (4.3 ms) blew the budget 2× by itself; 22–23 of 23–24 boot updates and 10–11 of
+11 teleport-burst updates exceeded 2 ms. `maxLoadsPerUpdate = 4` was the only effective cap.
+The FIFO drain itself was fine (no starvation, queue keeps up at vehicle speed) — purely
+the time budget was not enforced. Tracey's symptom this addresses: laggy all the time,
+worse at boot and when moving through new areas while a lot loads at once.
+
+**Decision — enforce the budget after every install, and predict before the next chunk.**
+In `packages/world/src/chunkManager.ts` `update()`, the load loop now (a) checks elapsed
+wall time *after* every chunk install and stops when it reaches `maxLoadTimeMs`, and (b)
+before starting the next chunk, stops when elapsed + the cost of the chunk just loaded
+would exceed the budget. Load cost is `provider.load` + `install`, so the `onLoad` stamp
+(`apps/server/src/game.ts`: abandoned sites) counts against the budget. A chunk that
+starts always finishes — the budget never aborts the current chunk, only further chunks
+in that update — so there is no half-installed chunk and no starvation: the first chunk
+of an update is always admitted. No change to load radius, cache size, unload margin, or
+FIFO order (the ADR-370 nearest-first revert stays reverted — it starved far chunks and
+broke ADR-252 bots). `maxLoadsPerUpdate` stays 4 in `game.ts` as the hard cap for cheap
+chunks; the time budget governs. The knobs are not data-driven (single hardcoded call
+site in `game.ts:187`), so the tuning stays there with an ADR-379 comment; no data file
+owns them.
+
+**Why no separate "cap at 2 after a site chunk" rule.** The task's first prescription
+was to lower `maxLoadsPerUpdate` to 2 when a site chunk was just loaded; its alternative
+was to account stamp cost in the budget so a site chunk consumes the budget it used. This
+ADR takes the alternative, because with a time budget configured the cap rule is
+unobservable — a site chunk's own cost (≥ the budget) already ends its update via the
+after-install check — and without a budget a "site chunk" could only be guessed from cost,
+which misfires on JIT-warm-up chunks (proved while implementing: the guess capped the
+`streaming.test.ts` "respects per-update load budget" case at 2 loads on a slow first
+chunk). The stamp-cost accounting is what makes the rule unnecessary, and it composes
+with time-sliced stamping (ADR-378, reverted from this batch pending a redesign — see
+that ADR's follow-up) without either side knowing about the other: a sliced stamp costs
+less per tick, so more chunks fit that tick's budget.
+
+**Performance.** Recreated the profiling worker's scenarios as a temporary vitest bench
+against the real server wiring (`ChunkManager` + `ProceduralGenerator` + the `game.ts`
+`onLoad` hook with resource nodes + `stampAbandonedChunk`), 3 seeds × 3 runs each, before
+vs after. Plain-chunk updates (no site stamped) — the thing this ADR can fix:
+
+| scenario | over-2 ms fraction (wall) before → after | median (wall) before → after |
+|---|---|---|
+| S5 boot drain (52 chunks) | 98% → 44% | 2.5 ms → 2.0 ms |
+| S4 vehicle speed (200 updates) | 64% → 35% | 2.3 ms → 1.6 ms |
+| S6 teleport burst (25 chunks) | 95% → 37% | 2.7 ms → 1.8 ms |
+
+Loads/update moved from {1: 73, 2: 82, 3: 77} to {1: 228, 2: 117, 3: 2} on boot — the
+3-chunk update is essentially gone (the two remaining 3-load updates are cheap-chunk
+updates that fit the budget, which is correct behaviour). Boot drain takes more updates
+(median 24 → 35) and still completes every time (52/52 chunks, pending 0); the vehicle
+queue still keeps up (maxPending 4, same as before). CPU-time medians agree with the
+wall-clock direction (plain-only CPU median 3.0 → 1.9 ms on boot). No speedup is claimed
+for total chunk work — the same chunks load, spread over more updates; that is the point.
+
+**Honest cuts.** Plain-chunk updates do not reach ~0% over budget: 35–44% still exceed
+2 ms on wall clock. The residual is single-chunk cost, which no between-chunk budget can
+remove: a 1-load update over 2 ms is one slow chunk (first-chunk JIT warm-up, GC, or VM
+descheduling — wall p95 runs 60–100 ms on this shared-CPU VM while CPU medians sit near
+2 ms), and the prediction uses the last chunk's cost, so per-chunk variance (0.7–1.3 ms)
+can push a predicted-1.6 ms 2-chunk update to ~2.2 ms. Updates containing a site chunk
+are still ~93–100% over 2 ms (median ~10 ms CPU) — a site chunk alone is 4–9 ms, so no
+chunk-count rule can fix it; that is the job of time-sliced stamping (ADR-378, reverted
+from this batch pending a redesign), and this ADR's accounting is what will let a sliced
+stamp share the budget instead of blowing it. The
+numbers are VM-noisy (after-runs ran under heavier contention than before-runs); the
+loads/update distribution and the fake-clock regression tests are the deterministic
+evidence, the ms are the direction. No live phone check: Tracey's eyes are still the
+real check for boot and new-area hitches.
+
+**Tests changed deliberately, and one server-suite finding.** The budget spreads
+loading over more ticks, so a test that asserts on streamed content after a
+fixed tick count is now wrong by design: `apps/server/test/craft_queue.test.ts`
+(pre-81a7b11 save) asserted restored pieces after `tick(5)`, and failed under
+parallel load (0 pieces — the pieces' chunks had not streamed yet) while passing
+standalone; it now ticks until `chunks.pendingLoads` drains before asserting,
+which is what the test means (save-load correctness, not streaming speed). The
+same 9-file set passes 27/27 with that change. The remaining server-suite
+failures seen during validation are 5 s timeouts in save/load + network tests
+that also fail on the pristine copy under the same parallel load (4/27 there),
+i.e. pre-existing contention flakiness on this shared-CPU VM, not a regression
+from this patch — verified by an A/B with the budget disabled (27/27 pass) and
+by the standalone passes. The ADR-252 bot live test (`adr252_ai_humans_live`,
+8 tests) passes: the FIFO order the bots depend on is untouched.
+
+## ADR-380: Boot time — split the boot bucket, then cut the dominant cost (SurVivaZ)
+
+**Context.** Tracey's Galaxy A16 (`?diag=1`, 2026-11-12) shows boot = 28,506 ms (84% of the 34,041 ms total load). The ADR-370 warm-up explains only 1,506 ms of it, so ~27 s is elsewhere — but `boot` was recorded as ONE bucket (`main.ts:124` → `IsoView.create` resolving), so the split between renderer init, manifest, runtime-painted atlases, `setRegistry` (fetch + decode + rescale + upload + sprite tables), warm-up, variants and lighting was unknown from code alone. Inside `setRegistry` → `rebuild()` the candidates, in likely order: fetch + decode of the resident atlas set (a `Promise.all` over all atlases, colour + emissive + up to 3 masks, `fitToPage` resizes, KTX2→ASTC transcode); `fitBudget` / `halveSide` image rescales (the ADR-220 comment says they "take seconds"); `upload()` of 19 layers @2048 px with full mip chains (~187 MB through `texImage2D` on a Mali GPU); the sprite runtime-table loop (`list.find` per sprite, O(S×A): 5,326 sprites × ~654 atlases); body page-ins; runtime-painted atlases and the ~1 MB pack manifest parse. The ADR-307 prefetch warms Cache Storage in parallel with the bundle, so network fetches may already be cache hits — decode + rescale + upload are the costs it cannot hide.
+
+**Decision — split the boot bucket into sub-phases in `?diag=1`.** `LoadCostBreakdown.recordSub(stage, name, ms)` (load-progress.ts, pure) records a sub-phase inside an already-recorded phase; sub-phases are a split of the parent, never added to the total, and render as `boot 28506ms (84%) [renderer 120ms · manifest 340ms · registry.fetch 9200ms · ...] · total 34041ms`. `IsoView.create` times each step (renderer / manifest / painted / registry.* / warmup / variants / lighting) and stores them on the view (`view.bootPhases`); `AtlasManager.rebuildTimings` times the rebuild phases (fetchDecode / fitBudget / halveSide / layout / upload / tables / bodies / restore) and `IsoView.create` folds them in as `registry.*` sub-phases (a single `registry` phase when the timings are unavailable, e.g. the Canvas2D renderer). `main.ts` records the sub-phases after `boot` and adds an `other` remainder (boot total minus the timed phases: module start, BootUI, menu setup) when it is positive. The instrumentation is a handful of `performance.now()` marks at boot only — no per-frame cost, no allocations in the render loop.
+
+**Decision — sprite runtime tables: Map lookups, byte-identical.** The rebuild-time table build is extracted to exported pure `buildSpriteTables(registry, list)` (atlasManager.ts): two id→atlas/index Maps built once replace `list.find` / `list.findIndex` / `list.indexOf` per sprite. The output is byte-identical — the same atlas object and index per sprite, and -1 for a missing dirFrames page (`list[-1]` is undefined, so `dirFrameIndex` falls back to `d.frame` exactly as before) — proven by a test that builds both the old loop (copied verbatim) and the new function on the real merged manifest (762 atlases, 4,947 sprites, 348,144 dirFrames entries) and deep-equals them. `frameTintRows` gets the same treatment (one Map per call instead of `list.find` per tinted sprite) and is now computed once per rebuild and reused for the OOM re-uploads instead of once per upload call. Measured on this VM (shared 1.5-CPU box, medians of 7 runs each, interleaved, three separate runs): old loop 6,908–9,517 ms → new loop 981–1,688 ms — 5.6–8.4×. Absolute ms are VM ms, not phone ms; the phone saving is unknown until the new `?diag=1` split lands, but the ratio is the evidence. A probe of the new loop shows the remaining ~1.0–1.7 s (VM) is allocation-bound, not lookup-bound: Map lookups alone are 169 ms; the rest is `Int32Array.from` per dirFrames entry (348,144 entries), per-sprite `Int16Array` state anims, and object allocation — a flat-typed-array redesign would be needed to cut it further, and is deliberately not in this slice.
+
+**Decision — resize slicing off during the initial `setRegistry`.** The ADR-190 resizer (`resizeImage` → `sliced()`) yields one frame per 6 ms of resize work so a mid-game re-tier cannot freeze a frame — but during boot there are no frames to protect, and the yield turns resize CPU into wall time at ~2.7× (one ~16 ms frame per 6 ms slice at 60 fps). Every boot resize goes through it: `fitToPage` in the load phase, `fitBudget`'s downscales, `halveSide`. New `setResizeSlicing(on)` (atlasManager.ts, exported via `@engine/render`) disables the yield; `IsoView.create` turns it off around the initial `setRegistry` only (restored in `finally`) — re-tiers keep slicing. The loading bar does not lose information from this: no new progress arrives during the rescale steps (the bar's target is set by fetch completions, which happen before), it just stops easing for the burst instead of easing while boot stretches. Proven by test, not by phone ms: with a fake clock/yield, 120 jobs × 3 ms complete with 0 frame yields while slicing is off (360 ms of work in one frame's worth of wall time) versus ~60 yields with slicing on; re-enabling restores the ≤6 ms (+1 job) per-frame cap.
+
+**Not changed.** Full stays the default preset and full-resolution rendering; no resolution, mip-level, texture-quality, bloom or lighting change; compass untouched; no new art, recolors, or binary art; no gameplay, balance, or tuning values; the warm-up window is untouched (ADR-374 owns it); chunk loading is untouched (ADRs 378/379 own it); re-tier slicing, `RESIZE_SLICE_MS`, and the resize memoization are untouched; `BOOT_STAGES` weights and the loading bar are untouched.
+
+**Validation.** New `packages/render/test/adr380_boot.test.ts` (2 tests): real-registry table equality + timing (above) and the slicer on/off/yield-restore test. New `apps/client/test/adr380_boot_load_cost.test.ts` (4 tests): sub-phase formatting, total unchanged by subs, unknown-stage/invalid-sub handling, subs coexisting with notes; the ADR-370 format output is unchanged when there are no subs. `pnpm --filter @engine/render typecheck` and `pnpm --filter @engine/client typecheck` pass with lockfile-pinned TypeScript 5.9.3 (the render typecheck initially failed: `AtlasRT` was not exported while the new public `buildSpriteTables` names it — `AtlasRT` and `SpriteRT` are now exported). Neighbouring suites run in this slice: render `retier_sliced`, `adr370_warmup`, `dirframes`, `frametable_rows` and client `load_progress`, `adr370_load_cost` — all pass; the full gate runs the rest.
+
+**Honest cuts.** No live browser measurement was possible in this VM (Chrome refuses localhost navigation), so no phone ms are claimed for any cut: the tables saving is a VM ratio, the slicer saving is a mechanism proof (yields 60 → 0 for 360 ms of resize work), and the fetch/decode and upload phases are still unmeasured headlessly — the new `?diag=1` boot split is the instrument that measures them, on Tracey's phone, after this ships. The 28.5 s boot is therefore NOT claimed fixed by this slice: the tables cut is real but small against 28.5 s, and the slicer cut's phone size is unknown until the split lands. What still needs Tracey's eyes: a fresh `?diag=1` screenshot after this lands, reading the new boot sub-phase bracket — whichever sub-phase still dominates is the next cut. If `registry.upload` dominates, the fix is a GL-side change (upload batching / fewer mip levels) that cannot be validated headlessly and needs its own slice; if `registry.fetch` dominates, the fix is in decode (KTX2 for resident atlases needs build-time transcoding, also its own slice).
+
+## ADR-381: In-game frame CPU — per-phase timings, cutaway cache, static piece cache (SurVivaZ)
+
+**Apply order note.** This entry is appended after the ADR-373 tail in the patch, but in
+apply order it follows ADR-380 (boot): the gate agent applies 374, then 375, 376, 377, 378,
+379, 380, then 381, and this entry lands after ADR-380's entry. Expected tail text after
+all eight apply: `... ADR-380 ...` followed by this `## ADR-381: In-game frame CPU` entry.
+This patch's `docs/DECISIONS.md` hunk anchors on the ADR-373 entry, the last in the base —
+the same convention as the 371/372/373 patches, which all anchored on ADR-370 and were
+resolved by applying in order at gate time.
+
+**Context.** Tracey's Galaxy A16 (Mali-G68) reports an in-game frame of 15.7 ms CPU at only
+22 draws / 228 sprites with 1,056 entities in view (`?diag=1`). Frame cpu is
+`IsoRenderer.render()` wall time — JS CPU for the whole render call, so 22 draws cannot cost
+15.7 ms: it is render-PREP, not draw calls, and the same thread also runs sim (~9.8 ms/tick)
+and net replicate (~5.3 ms/tick), so a real frame is far over the 16.7 ms budget. The game is
+not GPU-bound and not VRAM-bound (186.7/256 MB, 0 evictions) — it is JS-CPU-bound on the
+render thread. Code-reading found the suspects, and a headless bench
+(`packages/render/test/adr381_prepare_bench.test.ts`, stub atlas + stub GL, 1,200 sprites +
+800 pieces) confirmed the shape before any fix: `gatherPieces` dominates (~9.6 ms for 800
+pieces vs ~2.6 ms for the 1,200-sprite loop), an active indoor cutaway roughly doubles the
+cost, and the per-frame cutaway BFS itself costs ~1.35 ms/call (gridless `PieceCoverIndex.region`)
+while the grid path (`cutawayRegion`, demo/test-only in production) costs ~6.17 ms/call.
+`seasonPick` and the focus setup are NOT measurable culprits (ablations within noise).
+Two PROFILE.md suspects turned out wrong for the real client: the client never calls
+`setSpatialIndex` (only the render demo does), so the `cx.spatial` branch in `prepare()` is
+dead in production, and it never calls `setBuildingGrid`, so the grid `cutawayRegion` path
+does not run in production — the production cutaway is the gridless `PieceCoverIndex.region`.
+`updateBuildingTiers` runs every 15th frame, not per frame, and the `Array.from(...).sort(...)`
+in `sprites.ts` runs only on static-chunk rebuild, not per draw.
+
+**What changed.**
+1. **Per-phase timings (instrumentation).** `packages/render/src/gl/util.ts` gains
+`RenderPhaseMs` (prep / sprites / upload / lightsPrep / scene / light / bloom / composite /
+weather), `newPhaseMs()`, and a `PhaseTimer` class (one reused record, no per-frame
+allocation; callers pass `performance.now()` readings, so it is unit-testable with synthetic
+timestamps; `zero(name)` marks a phase that did not run without advancing the clock).
+`IsoRenderer.render()` splits the timer around each phase and stores the last frame's
+values on `stats.phases` next to `stats.cpuMs`; `apps/client/src/diag.ts` shows them in the
+`?diag=1` overlay as a `phases prep … spr … upl … lit … scn … lgt … blm … cmp … wth …` line,
+so the split is measurable on Tracey's phone after this ships.
+2. **Cutaway cache.** `prepare()` recomputes the cutaway region only when its inputs change
+— the player tile/level, the `PieceCoverIndex` fingerprint + size (gridless path), or
+`BuildingGrid.version` (grid path); otherwise the cached `Set<number>` is returned (callers
+only `.has()` it, read-only, so sharing is safe). A standing-still player indoors used to
+pay the flood-fill every frame. `PieceCoverIndex` gains a rolling 32-bit fingerprint
+(bumped per `add()`, reset in `clear()`); both `region()` and the grid `cutawayRegion` now
+use packed numeric tile keys (`tileKey`, `(x + 32768) * 65536 + (y + 32768)`, the same bound
+as the existing chunk keys) and an index queue instead of `q.shift()` and per-tile string
+keys. `footprintHits` / `gatherPieces` take `Set<number>`.
+3. **Per-part static piece cache.** `gatherPieces` used to rebuild every static piece's
+instances every frame — per-column slice loop, crack block, and a per-frame FNV hash over
+every static piece's floats — then rebuild every static chunk's GPU buffer whenever the
+chunk checksum moved. Now each part (a piece has up to 3: 2 L-corner arms + post) is cached
+under a 32-field signature covering every input to its instances (visual/variant/rotation/
+level/layer/ghost/damage/tint/season/resolved frame/deck/crack/view quarter/layout version/
+entity index/night/piece anchor); static means not dynamic, so cutaway/alpha/occlusion/
+animated need no fields (static pieces have cutaway=false, alpha=1, occT=0, animated=false)
+and fire>0 pieces are never cached. On a hit, the slice loop, crack block and FNV hash are
+skipped; the chunk sum is the XOR of its parts' per-part hashes ^ total float count
+(order-independent, so dense reordering alone does not rebuild); the instance list is
+rebuilt from cache entries only for changed chunks, and unchanged chunks keep their GPU
+buffer. The ADR-328 keep-alive (a chunk whose pieces are all dynamic this frame stays
+alive but empty so its fade-in clock survives) is preserved, now driven by the per-frame
+dynamic-part count. One intentional behaviour difference: a chunk whose pieces are all
+hidden while off screen used to have its static buffer deleted via its stale empty scratch
+entry and rebuilt on return; it is now kept by the off-screen sweep (the sum comparison
+still rebuilds it if any piece changed while hidden) — correct, and one fewer rebuild.
+4. **Alloc removals in the same loop.** `AtlasManager.pieceInfo` (fresh `{fw,fh,layer}` per
+call, twice per piece per frame) is cached per atlas layout version; `viewRect` is inlined
+in `gatherPieces` (it allocated a fresh `{x,y,w,h}` per piece per frame); the common
+single-part case reuses one scratch part object instead of `parts.push({...})` per piece.
+The per-frame `pieceChecks` checksum map is gone (replaced by the per-part hashes).
+
+**Performance.** Headless bench `packages/render/test/adr381_prepare_bench.test.ts`
+(PERF=1, stub atlas + stub GL, 1,200 sprites + 800 pieces, medians of 7 runs × 500 frames
+of `SpriteBatch.prepare()`), run twice patched and twice on pristine
+(`~/workspace/SurVivaZ-perf`, 0706253) on the same shared 1.5-CPU VM. The box itself
+swings hard between runs (sprites-only, a path this patch does not touch, measured 2.57,
+1.01, 3.08 and 0.95 ms across the four runs — a 3x swing), so no single ms figure is
+claimable; only same-evening paired comparisons are. Pair A (pristine vs patched ~15 min
+apart): pieces-only 9.17 → 7.77, mixed outdoor 12.81 → 11.54, mixed indoor 20.80 → 11.38.
+Pair B (pristine vs patched minutes apart): pieces-only 5.13 → 2.40, mixed outdoor
+6.45 → 3.56, mixed indoor 6.39 → 5.22. Control scenario sprites-only is flat in both
+pairs (2.57 → 3.08, 1.01 → 0.95), as expected. Read conservatively: `prepare()` is
+~1.2–2x faster on piece-heavy scenes, with the indoor gain the most consistent; the
+bimodal slow cluster the unpatched indoor runs showed (25–28 ms, likely GC churn from
+the per-frame allocations this patch removes) never appears in either patched run (tight
+9.4–13.5 and 4.6–6.4). The direct flood-fill numbers are NOT claimable: `cover.region`
+measured 0.29 / 0.51 pristine vs 0.61 / 0.39 patched and `cutawayRegion` 1.02 / 3.54 vs
+6.00 / 2.06 across the same runs, and a standalone 4-variant diagnostic scored the
+pristine-style string+shift loop slowest and the patched key-once loop fastest — the
+reverse of the first isolated comparison. One robust lesson survived the diagnostic:
+computing the tile key once per neighbour beats twice (1.49 vs 2.76 ms/call), so
+`cutawayRegion` hoists it. No phone ms are claimed; the stub resolve understates the
+production `resolvePiece` cost, so the bench over-weights the cached slice/hash work.
+
+**Validation.** New `packages/render/test/adr381_phases.test.ts` (5 tests, run in normal CI):
+PhaseTimer splits with synthetic timestamps (incl. `zero()` not advancing the clock);
+`PieceCoverIndex.region` numeric keys + fingerprint change/reset; `prepare()` twice on an
+unchanged world produces identical visible output with no extra static rebuilds; moving one
+piece inside its chunk triggers exactly one static rebuild; the cutaway cache returns the
+same Set object for a stationary player and recomputes after the player moves a tile or a
+piece moves. Updated `packages/render/test/assets.test.ts` and
+`packages/render/test/modular.test.ts` cutaway tests to numeric keys (the latter was caught
+by typecheck, not by the test run). Headless bench
+`packages/render/test/adr381_prepare_bench.test.ts` (PERF=1 only) measures `prepare()` by
+scene plus both flood-fills directly; a standalone 5-batch BFS bench
+(`adr381_bfs_bench.test.ts`) is included for the same measurements in isolation.
+Typecheck clean with lockfile-pinned TypeScript 5.9.3 (`@engine/render` and
+`@engine/client`, both EXIT 0). Render suite: 498 passed, 2 skipped, 0 failed (75 files).
+Client suite: 861 passed, 9 failed (10 files failed of 187) — all 9 failed tests and the
+3 file-level failures (adr216_lights, adr274_medical_icons, adr277_status_atlas, ENOENT
+at import) are missing-art-file / art-count assertions in this sparse checkout (ENOENT
+`ui_atlas.json`, `pets_dog_lab.png`, `items_build.png`, `render_tuning.json`; 705 audio
+files without m4a twins; atlas-cell and fragment-key assertions against files the sparse
+tree lacks). Proven pre-existing, not regressions: the same 10 files run isolated on
+pristine fail a DIFFERENT set — 7 tests, all in adr242_art_fill — because pristine is a
+FULL checkout (it has `pets_dog_lab.png` and `items_build.png`; the sparse tree does not)
+while the working copy is sparse, so the art-test failure sets track the checkout, not
+the code; and none of the failing tests imports the changed modules (the only shared
+import is the `@engine/render` package index, and every failing assertion is about files
+on disk). The patched failures reproduce identically isolated and in the full suite
+(stable, not flaky). The gate's earlier server+client run had the same 9-failure count
+from the same class.
+
+**Not changed.** No graphics-quality change; no new art; no gameplay/balance change; no wire
+change; the visible output of an unchanged world is bit-identical (asserted by test); the
+static cache keeps `resolvePiece` running per frame (single-stage cache — skipping it would
+need entry-stored resolve outputs plus fire/swing state in the signature, too risky for the
+extra ~10–20%); the cutaway keeps its pre-existing one-frame cover lag (the cut reads last
+frame's cover, because `gatherPieces` rebuilds the cover after the cut is computed).
+
+**Honest cuts.** The bench is a stub-atlas, stub-GL headless measure on this VM — its absolute
+ms are not phone ms; only the split and the patched-vs-pristine deltas are evidence, and VM
+noise is ±30–50%, so only large deltas are claimable. The stub `resolvePiece` understates
+the production resolve cost (real page/texture work), so the bench over-weights the cached
+slice/hash work relative to production. No live visual verification was possible here:
+Tracey's eyes on the live build are still the real check, including a fresh `?diag=1` after
+the fix to see the new phase split (prep vs sprites vs upload vs lights) on her A16.

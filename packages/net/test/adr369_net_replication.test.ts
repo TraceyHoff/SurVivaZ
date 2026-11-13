@@ -50,23 +50,25 @@ describe("ADR-369 dirty-driven captureState", () => {
   it("an idle tick reuses every entity state; a non-replicated write changes nothing", () => {
     const { w, schema, ids, ents } = worldWithMobs(200);
     const s0 = captureState(w, schema, undefined); w.clearChanges();
+    // ADR-376: captureState mutates `prev` in place, so the reference states are a copy taken before the next capture.
+    const first = new Map(s0);
     const s1 = captureState(w, schema, s0); w.clearChanges();
-    for (const id of ids) expect(s1.get(id)).toBe(s0.get(id));
+    for (const id of ids) expect(s1.get(id)).toBe(first.get(id));
     w.setField(ents[0]!, Control, "buttons", 3); // Control is not networked: no replicated change
     const s2 = captureState(w, schema, s1); w.clearChanges();
-    for (const id of ids) expect(s2.get(id)).toBe(s0.get(id));
+    for (const id of ids) expect(s2.get(id)).toBe(first.get(id));
     w.setField(ents[5]!, Buff, "power", 2);
     const s3 = captureState(w, schema, s2); w.clearChanges();
-    for (const id of ids) if (id !== 1005) expect(s3.get(id)).toBe(s0.get(id));
-    expect(s3.get(1005)).not.toBe(s0.get(1005));
+    for (const id of ids) if (id !== 1005) expect(s3.get(id)).toBe(first.get(id));
+    expect(s3.get(1005)).not.toBe(first.get(1005));
     const ti = schema.indexOf(Transform, w)!; const bi = schema.indexOf(Buff, w)!;
-    expect(s3.get(1005)!.get(ti)).toBe(s0.get(1005)!.get(ti)); // untouched component structurally shared
-    expect(s3.get(1005)!.get(bi)).not.toBe(s0.get(1005)!.get(bi));
+    expect(s3.get(1005)!.get(ti)).toBe(first.get(1005)!.get(ti)); // untouched component structurally shared
+    expect(s3.get(1005)!.get(bi)).not.toBe(first.get(1005)!.get(bi));
     w.remove(ents[6]!, Buff); // removal still detected via the removal record, not the dirty set
     const s4 = captureState(w, schema, s3);
-    expect(s4.get(1006)).not.toBe(s0.get(1006));
+    expect(s4.get(1006)).not.toBe(first.get(1006));
     expect(s4.get(1006)!.has(bi)).toBe(false);
-    for (const id of ids) if (id !== 1005 && id !== 1006) expect(s4.get(id)).toBe(s0.get(id));
+    for (const id of ids) if (id !== 1005 && id !== 1006) expect(s4.get(id)).toBe(first.get(id));
   });
   it("multi-component change + removal round-trips exactly (two-pointer mask write)", () => {
     const w = makeWorld(); const schema = new NetSchema(w);
@@ -75,10 +77,11 @@ describe("ADR-369 dirty-driven captureState", () => {
       .add(a, Secret, { gold: 5 }).add(a, Chest, { items: 9 });
     const s0 = captureState(w, schema, undefined); w.clearChanges();
     w.setField(a, Buff, "power", 4); w.setField(a, Secret, "gold", 6); w.remove(a, Chest);
+    const s0base = new Map(s0); // ADR-376: captureState mutates `prev` in place
     const s1 = captureState(w, schema, s0);
-    const wr = new BitWriter(); const stats = encodeDelta(wr, schema, s1, s0);
+    const wr = new BitWriter(); const stats = encodeDelta(wr, schema, s1, s0base);
     expect(stats).toEqual({ spawns: 0, despawns: 0, changes: 1 });
-    const d = decodeDelta(new BitReader(wr.finish()), schema, s0);
+    const d = decodeDelta(new BitReader(wr.finish()), schema, s0base);
     expect(d.state).toEqual(s1);
     expect(d.changed.get(1)?.removed).toEqual([schema.indexOf(Chest, w)]);
   });

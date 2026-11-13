@@ -40,6 +40,17 @@ export class BitWriter implements FieldWriter {
   }
   /** Copy of the raw bytes written so far (with bitLength, for appendBits). */
   snapshotBits(): { bytes: Uint8Array; bits: number } { return { bytes: this.buf.slice(0, this.byteLength), bits: this.pos }; }
+  /**
+   * ADR-375: append another writer's bits without copying its bytes — reads its internal buffer directly.
+   * Bit-identical to appendBits(src.snapshotBits().bytes, src.bitLength). The source must not be written to
+   * afterwards while the appended bits matter (callers keep the source immutable once cached).
+   */
+  appendWriter(src: BitWriter): void { this.appendBits(src.buf, src.pos); }
+  /**
+   * ADR-375: reuse this writer for a fresh record. writeBits ORs into the buffer, so the previously used
+   * bytes must be zeroed first — otherwise stale 1-bits would leak into the new content.
+   */
+  reset(): void { this.buf.fill(0, 0, this.byteLength); this.pos = 0; }
   /** Roll back to an earlier bit position (used to drop a record that blew the budget). */
   truncate(bitPos: number): void {
     if (bitPos > this.pos) return;

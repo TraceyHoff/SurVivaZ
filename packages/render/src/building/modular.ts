@@ -95,34 +95,48 @@ export function pieceDepthKey(ax: number, ay: number, fw: number, fh: number, z:
   return ax + fw + ay + fh - 2 + 1.95 + z * zf + bias;
 }
 
+/**
+ * ADR-381: numeric tile key — the cutaway flood-fill used to build a "x,y" string per tile per frame
+ * (PieceCoverIndex.add per footprint tile, region() BFS, hideOtherStory/footprintHits per entity/piece).
+ * Same packing as the chunk keys (chunkKeyOf / cellKey): tile coords must stay within ±32768, which
+ * the world already assumes elsewhere. Exact and collision-free inside that bound.
+ */
+export const tileKey = (x: number, y: number): number => (x + 32768) * 65536 + (y + 32768);
+
 /** Cover index: which tiles have a deck/roof piece per level (from the pieces drawn last frame). */
 export class PieceCoverIndex {
-  /** "x,y" -> bit mask of levels with any piece; roofs/decks tracked separately */
-  private any = new Map<string, number>(); private deck = new Map<string, number>(); private roof = new Map<string, number>();
+  /** tileKey -> bit mask of levels with any piece; roofs/decks tracked separately */
+  private any = new Map<number, number>(); private deck = new Map<number, number>(); private roof = new Map<number, number>();
   size = 0;
-  clear(): void { this.any.clear(); this.deck.clear(); this.roof.clear(); this.size = 0; }
+  /** ADR-381: rolling fingerprint of the pieces added since clear() (order-sensitive, 32-bit) — the
+   *  renderer's cutaway cache keys on it, so a region is recomputed only when the cover content changed. */
+  fingerprint = 0;
+  clear(): void { this.any.clear(); this.deck.clear(); this.roof.clear(); this.size = 0; this.fingerprint = 0; }
   add(ax: number, ay: number, fw: number, fh: number, level: number, deck: boolean, roof: boolean): void {
     const bit = 1 << Math.min(30, level); this.size++;
+    this.fingerprint = (Math.imul(this.fingerprint, 31) ^ tileKey(ax, ay) ^ (fw * 7 + fh * 13 + level) ^ (deck ? 1 : 0) ^ (roof ? 2 : 0)) >>> 0;
     for (let y = ay; y < ay + fh; y++) for (let x = ax; x < ax + fw; x++) {
-      const k = `${x},${y}`;
+      const k = tileKey(x, y);
       this.any.set(k, (this.any.get(k) ?? 0) | bit);
       if (deck) this.deck.set(k, (this.deck.get(k) ?? 0) | bit);
       if (roof) this.roof.set(k, (this.roof.get(k) ?? 0) | bit);
     }
   }
   /** Same semantics as cutawayRegion(grid): tiles of the building around (tx,ty) when that building has cover above `level`. */
-  region(tx: number, ty: number, level: number, maxTiles = 600): Set<string> | null {
+  region(tx: number, ty: number, level: number, maxTiles = 600): Set<number> | null {
     const above = ~((2 << Math.min(30, level)) - 1); const bit = 1 << Math.min(30, level);
-    const covered = (k: string): boolean => (((this.any.get(k) ?? 0) & above) !== 0) || (((this.roof.get(k) ?? 0) & (bit | above)) !== 0);
-    const inside = (k: string): boolean => covered(k) || ((this.deck.get(k) ?? 0) & bit) !== 0;
-    const k0 = `${tx},${ty}`; if (!inside(k0)) return null;
-    const seen = new Set<string>([k0]); const q: [number, number][] = [[tx, ty]];
+    const covered = (k: number): boolean => (((this.any.get(k) ?? 0) & above) !== 0) || (((this.roof.get(k) ?? 0) & (bit | above)) !== 0);
+    const inside = (k: number): boolean => covered(k) || ((this.deck.get(k) ?? 0) & bit) !== 0;
+    const k0 = tileKey(tx, ty); if (!inside(k0)) return null;
+    const seen = new Set<number>([k0]);
+    // ADR-381: index queue, not q.shift() — shift() is O(n) per dequeue, so a 600-tile fill was ~180k moves/frame.
+    const qx: number[] = [tx], qy: number[] = [ty]; let head = 0;
     let anyCover = covered(k0);
-    while (q.length && seen.size < maxTiles) {
-      const [x, y] = q.shift()!;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-        const nx = x + dx, ny = y + dy, k = `${nx},${ny}`;
-        if (!seen.has(k) && inside(k)) { seen.add(k); q.push([nx, ny]); if (covered(k)) anyCover = true; }
+    while (head < qx.length && seen.size < maxTiles) {
+      const x = qx[head]!, y = qy[head]!; head++;
+      for (let d = 0; d < 4; d++) {
+        const nx = x + (d === 0 ? 1 : d === 1 ? -1 : 0), ny = y + (d === 2 ? 1 : d === 3 ? -1 : 0), k = tileKey(nx, ny);
+        if (!seen.has(k) && inside(k)) { seen.add(k); qx.push(nx); qy.push(ny); if (covered(k)) anyCover = true; }
       }
     }
     return anyCover ? seen : null;

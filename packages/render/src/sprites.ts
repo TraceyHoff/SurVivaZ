@@ -32,10 +32,12 @@ import { LayerCache, activeExpression, readAppearanceSlot, type AppearanceBindin
 import { nearestCutoff } from "./gl/fallback.js";
 import { PRIO_NEAR } from "./gl/vram.js";
 import { DeckNeighbors, rotSideMask, deckTopPx, pieceTieBreak, exactTieBreak, vertexPostGlBias, DECK_EDGE_EPS, DECK_SEAM_BAND, DECK_SEAM_SHIFT } from "./building/deckFaces.js";
-import { crackAnim, lCornerArmPivots, PieceCoverIndex, pieceHiddenByStory, pieceShouldCutaway, ROT_EXACT_PIVOT, ROT_NO_OCCLUDE, ROT_DECK_LIFT, ROT_VERTEX_POST } from "./building/modular.js";
+import { crackAnim, lCornerArmPivots, PieceCoverIndex, pieceHiddenByStory, pieceShouldCutaway, tileKey, ROT_EXACT_PIVOT, ROT_NO_OCCLUDE, ROT_DECK_LIFT, ROT_VERTEX_POST } from "./building/modular.js";
 import { InteriorRoute, inInteriorRegion, interiorOrder, type InteriorRegion } from "./vehicles/interiorPass.js";
 
 export const INSTANCE_FLOATS = 40;
+/** ADR-381: per-part static-cache signature fields (see gatherPieces) — every input to a static part's instances. */
+export const PIECE_SIG_N = 32;
 /**
  * ADR-195: Flat (deck) pieces take ground-plane depth, so two same-level neighbours have EXACTLY equal depth on
  * every pixel they share (an edge strip / thickness face of one over the other's top) and z-fight. Each Flat instance
@@ -480,6 +482,8 @@ export class SpriteBatch {
   private crackRes: ResolvedFrame = newResolved();
   /** Gridless cutaway (client has no BuildingGrid): cover of the pieces drawn last frame / being gathered this frame. */
   private cover = new PieceCoverIndex(); private coverNext = new PieceCoverIndex();
+  /** ADR-381: cached cutaway region (see prepare) — invalidated by player tile/level or cover/grid change. */
+  private cutCache: { grid: BuildingGrid | undefined; tx: number; ty: number; level: number; rev: number; fp: number; size: number; result: Set<number> | null } | null = null;
   /** Pieces drawn with streaming fallback art this frame (tier page not resident yet) / crack overlays drawn. */
   tierFallbacks = 0; crackOverlays = 0;
   private statics = new Map<string, StaticChunk>();
@@ -488,8 +492,22 @@ export class SpriteBatch {
    * gather — a chunk emptied only because its pieces went dynamic must not be deleted (see the rebuild loop). */
   private dynamicChunkKeys = new Set<string>();
   // per-frame scratch reused across frames (no allocations in the gather/sort hot paths)
-  private pieceChecks = new Map<string, number>(); private pieceTmp: number[] = [];
+  private pieceTmp: number[] = [];
   private pieceParts: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean }[] = [];
+  /** ADR-381: scratch single-part object — the common case (no L-corner arms) reuses it instead of allocating one per piece per frame. */
+  private piecePartScratch: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean } = { vis: 0, rot: 0, layer: 0, x: 0, y: 0, last: true };
+  /** ADR-381: per-part static cache. A static piece's instances are a pure function of its signature (see PIECE_SIG_N):
+   *  on a hit the slice loop, crack block and per-frame FNV hash are skipped and the chunk sum comes from the stored
+   *  per-part hashes. Keyed by dense slot * 4 + part index (≤3 parts: 2 L arms + post); the signature (incl. entity
+   *  index) guards slot reuse after swap-remove. */
+  private pieceCache = new Map<number, { sig: Float64Array; tmp: Float32Array; len: number; hash: number; crack: boolean }>();
+  private pieceSig = new Float64Array(PIECE_SIG_N);
+  /** ADR-381: per-frame chunk aggregates (chunk key -> xor of part hashes, total floats, static/dynamic part counts). */
+  private chunkAgg = new Map<string, { xor: number; floats: number; statics: number; dynamics: number }>();
+  /** ADR-381: per-frame static-part slots per chunk (packed slot*4+partIdx, dense order) — the rebuild list is built from these. */
+  private chunkSlots = new Map<string, number[]>();
+  /** ADR-381: AtlasManager.pieceInfo allocates a fresh {fw,fh,layer} per call; its result is stable per layout version. */
+  private pieceInfoCache = new Map<number, { fw: number; fh: number; layer: number } | null>(); private pieceInfoLayout = -1;
   private ckCache = new Map<number, string>();
   private lateOrder = new Uint32Array(0); private lateBuf = new Float32Array(0);
   /** Adaptive sort stats: frames where the incremental (insertion) pass sufficed vs fell back to a full sort. */
@@ -750,13 +768,30 @@ export class SpriteBatch {
       }
     }
     const playerLevel = hasFocus ? terrainZToFloor(fwz, Math.max(0, cx.groundZAt?.(Math.floor(fwx), Math.floor(fwy)) ?? 0)) : 0;
-    const cut = !hasFocus ? null : cx.grid ? cutawayRegion(cx.grid, Math.floor(fwx), Math.floor(fwy), playerLevel, 600, (sid) => atlas.isRoof(sid))
-      : this.cover.region(Math.floor(fwx), Math.floor(fwy), playerLevel);
+    // ADR-381: the cutaway region is recomputed only when its inputs change — the player tile/level, or the
+    // cover content (gridless path: PieceCoverIndex.fingerprint, bumped per piece added) / grid version
+    // (grid path: BuildingGrid.version, bumped on place/remove). A standing-still player indoors used to pay
+    // a 600-tile BFS with a string key per tile every frame; the region is read-only downstream, so returning
+    // the cached Set is safe.
+    let cut: Set<number> | null = null;
+    if (hasFocus) {
+      const ctx = Math.floor(fwx), cty = Math.floor(fwy);
+      const cc = this.cutCache;
+      if (cx.grid) {
+        if (!cc || cc.grid !== cx.grid || cc.tx !== ctx || cc.ty !== cty || cc.level !== playerLevel || cc.rev !== cx.grid.version) {
+          cut = cutawayRegion(cx.grid, ctx, cty, playerLevel, 600, (sid) => atlas.isRoof(sid));
+          this.cutCache = { grid: cx.grid, tx: ctx, ty: cty, level: playerLevel, rev: cx.grid.version, fp: 0, size: 0, result: cut };
+        } else cut = cc.result;
+      } else if (!cc || cc.grid !== undefined || cc.tx !== ctx || cc.ty !== cty || cc.level !== playerLevel || cc.fp !== this.cover.fingerprint || cc.size !== this.cover.size) {
+        cut = this.cover.region(ctx, cty, playerLevel);
+        this.cutCache = { grid: undefined, tx: ctx, ty: cty, level: playerLevel, rev: 0, fp: this.cover.fingerprint, size: this.cover.size, result: cut };
+      } else cut = cc.result;
+    }
     this.cutawayActive = !!cut;
     const hideOtherStory = (x: number, y: number, z: number): boolean => {
       if (!cut) return false;
       const tx = Math.floor(x), ty = Math.floor(y);
-      if (!cut.has(`${tx},${ty}`)) return false;
+      if (!cut.has(tileKey(tx, ty))) return false;
       return terrainZToFloor(z, Math.max(0, cx.groundZAt?.(tx, ty) ?? 0)) !== playerLevel;
     };
     // focus screen rect (from its current frame; fallback 32x56) for the occlusion test
@@ -1108,7 +1143,15 @@ export class SpriteBatch {
     let key: string | undefined; try { key = atlas.registry?.sprite(vis).key; } catch { key = undefined; }
     const t = deckTopPx(key); if (atlas.registry) this.deckTops.set(vis, t); return t;
   }
-  private gatherPieces(cx: PrepareContext, bp: ReturnType<World["store"]>, hasFocus: boolean, fwx: number, fwy: number, playerLevel: number, cut: Set<string> | null): void {
+  /** ADR-381: AtlasManager.pieceInfo allocates a fresh object per call and is called twice per piece per frame
+   *  (decks pass + main loop); the result is stable per atlas layout version, so cache it per visual id. */
+  private cachedPieceInfo(atlas: AtlasManager, vis: number): { fw: number; fh: number; layer: number } | null {
+    if (this.pieceInfoLayout !== atlas.layoutVersion) { this.pieceInfoCache.clear(); this.pieceInfoLayout = atlas.layoutVersion; }
+    let v = this.pieceInfoCache.get(vis);
+    if (v === undefined) { v = atlas.pieceInfo(vis); this.pieceInfoCache.set(vis, v); }
+    return v;
+  }
+  private gatherPieces(cx: PrepareContext, bp: ReturnType<World["store"]>, hasFocus: boolean, fwx: number, fwy: number, playerLevel: number, cut: Set<number> | null): void {
     const { world, atlas, rect } = cx; const tr = world.store(Transform);
     const pieceLit = cx.bindings.pieceLit, pieceScale = cx.bindings.pieceScale;
     const d = bp.data as Record<string, ArrayLike<number>>;
@@ -1120,13 +1163,21 @@ export class SpriteBatch {
     this.coverNext.clear(); this.tierFallbacks = 0; this.streamFallbacks = 0; this.crackOverlays = 0;
     const focusFront = hasFocus ? (() => { const pr = viewRect(Math.floor(fwx), Math.floor(fwy), 1, 1, vq); return pr.x + pr.y + pr.w + pr.h; })() : 0;
     const scratch = this.staticScratch; for (const v of scratch.values()) v.length = 0;
-    const checksums = this.pieceChecks; checksums.clear(); this.dynamicChunkKeys.clear(); let lastCx = NaN, lastCy = NaN, lastVis = true; this.culledChunks = 0;
+    // ADR-381: per-frame chunk aggregates + slot lists (see the rebuild loop below); the piece cache is bounded —
+    // on heavy churn it is dropped wholesale and rebuilt (one frame of full recompute, then cached again).
+    const chunkAgg = this.chunkAgg; chunkAgg.clear();
+    for (const s of this.chunkSlots.values()) s.length = 0;
+    if (this.pieceCache.size > bp.size * 2 + 64) this.pieceCache.clear();
+    const aggFor = (ck: string): { xor: number; floats: number; statics: number; dynamics: number } => {
+      let a = chunkAgg.get(ck); if (!a) chunkAgg.set(ck, (a = { xor: 0, floats: 0, statics: 0, dynamics: 0 })); return a;
+    };
+    this.dynamicChunkKeys.clear(); let lastCx = NaN, lastCy = NaN, lastVis = true; this.culledChunks = 0;
     // ADR-197: deck neighbour map (every non-ghost deck, not chunk-culled: a visible piece's neighbour may be off screen)
     const decks = this.decks; decks.clear();
     for (let k = 0; k < bp.size; k++) {
       if (d.ghost![k]! || !flatLayer(d.layer![k]!, false)) continue; const vis0 = d.visualId![k]!; if (atlas.isRoof(vis0)) continue;
       const top0 = this.deckTop(atlas, vis0); if (top0 === undefined) continue;
-      const ts0 = tr.slot(entityIndex(bp.dense[k]!)); if (ts0 < 0) continue; const inf = atlas.pieceInfo(vis0); const r0 = d.rotation![k]! & 3;
+      const ts0 = tr.slot(entityIndex(bp.dense[k]!)); if (ts0 < 0) continue; const inf = this.cachedPieceInfo(atlas, vis0); const r0 = d.rotation![k]! & 3;
       const w0 = inf ? (r0 & 1 ? inf.fh : inf.fw) : 1, h0 = inf ? (r0 & 1 ? inf.fw : inf.fh) : 1;
       decks.add(Math.floor(tr.data.x[ts0]!), Math.floor(tr.data.y[ts0]!), w0, h0, d.level![k]!, top0);
     }
@@ -1142,9 +1193,11 @@ export class SpriteBatch {
       const parts = this.pieceParts; parts.length = 0;
       { const v0 = d.visualId![k]!, r0 = d.rotation![k]!, arm = atlas.lArmOf(v0);
         if (arm >= 0) for (const a of lCornerArmPivots(tr.data.x[ts]!, tr.data.y[ts]!, r0)) parts.push({ vis: arm, rot: a.rot | ROT_EXACT_PIVOT | ROT_DECK_LIFT, layer: 1, x: a.x, y: a.y, last: false });
-        parts.push({ vis: v0, rot: r0, layer: d.layer![k]!, x: tr.data.x[ts]!, y: tr.data.y[ts]!, last: true }); }
+        // ADR-381: the common single-part case reuses one scratch object instead of allocating one per piece per frame.
+        const p0 = this.piecePartScratch; p0.vis = v0; p0.rot = r0; p0.layer = d.layer![k]!; p0.x = tr.data.x[ts]!; p0.y = tr.data.y[ts]!; p0.last = true; parts.push(p0); }
       let anyHit = false;
-      for (const part of parts) {
+      for (let pi = 0; pi < parts.length; pi++) {
+        const part = parts[pi]!;
         const vis = part.vis; const rotRaw = part.rot; const rot = rotRaw & 3; const exact = (rotRaw & ROT_EXACT_PIVOT) !== 0; const level = d.level![k]!; const layer = part.layer;
         const ghost = d.ghost![k]!; const dmg = d.damageStage![k]!; const tints = cx.bindings.pieceTints?.(e); const tint = tints ? tints[0] : d.tint![k]! >>> 0;
         // tier page streaming in: draw the bare-key / other resident tier / family default art instead of nothing
@@ -1173,11 +1226,16 @@ export class SpriteBatch {
           if (fire > 0) { const fa = atlas.fireAnim(drawVis); if (fa >= 0 && atlas.resolve(drawVis, fa, 0, fireAnimTime(cx.now, i), 0, res)) { animated = true; res.flipX = flip; res.hasDamageFrames = hd; } }
           else if (pst < 0) { const ua = atlas.namedAnim(drawVis, "unlit"); if (ua >= 0 && atlas.resolve(drawVis, ua, 0, 0, 0, res)) { res.flipX = flip; res.hasDamageFrames = hd; } }
         }
-        const info = atlas.pieceInfo(vis); const sway = atlas.swayOf(vis);
+        const info = this.cachedPieceInfo(atlas, vis); const sway = atlas.swayOf(vis);
         if (res.atlas >= 0) atlas.markUsedAt(res.atlas); // drawn building art counts as recently used: without this, fitBudget's idle demotion could cold-shrink walls/foundations/ceilings while characters stayed pinned at 1x
         const fw = info ? (rot & 1 ? info.fh : info.fw) : 1, fh = info ? (rot & 1 ? info.fw : info.fh) : 1;
         const ax = Math.floor(part.x), ay = Math.floor(part.y);
-        const vr = viewRect(ax, ay, fw, fh, vq); const vax = vr.x, vay = vr.y, vfw = vr.w, vfh = vr.h; // view footprint
+        // ADR-381: viewRect inlined — it allocates a fresh {x,y,w,h} per call (once per piece per frame).
+        let vax: number, vay: number, vfw: number, vfh: number;
+        if (vq === 1) { vax = -ay - fh; vay = ax; vfw = fh; vfh = fw; }
+        else if (vq === 2) { vax = -ax - fw; vay = -ay - fh; vfw = fw; vfh = fh; }
+        else if (vq === 3) { vax = ay; vay = -ax - fw; vfw = fh; vfh = fw; }
+        else { vax = ax; vay = ay; vfw = fw; vfh = fh; } // view footprint
         const roof = atlas.isRoof(vis);
         this.coverNext.add(ax, ay, fw, fh, level, layer === PIECE_LAYER_DECK, roof);
         // roofs are deck-layer (0) pieces placed on the level above the walls and drawn from that level's floor (= wall top)
@@ -1220,86 +1278,135 @@ export class SpriteBatch {
         const bias = (roof ? 0.05 : layer * 0.01) + (exact ? exactTieBreak(pu, pv, ghost > 0) : pieceTieBreak(vax, vay, ghost > 0)) + (rotRaw & ROT_VERTEX_POST ? vertexPostGlBias(hh, zf / zs) : 0) + (zs > 0 ? (lift / zs) * zf : 0); // roofs above every other layer of the cell; ADR-197 unique tie-break
         const deckTop = flat && !exact && cx.pieceAnchor !== "front" ? this.deckTop(atlas, vis) : undefined;
         const deckMask = deckTop === undefined ? 0 : rotSideMask(decks.mask(ax, ay, fw, fh, level, deckTop), vq); // view sides
-        tmp.length = 0;
-        // per-column slices: columns c = x - y over the footprint
-        const cMin = vax - (fy - 1), cMax = (fx - 1) - vay;
-        const single = flat || exact || cMin === cMax;
-        for (let c = cMin; c <= cMax; c++) {
-          // front-most tile in column c: maximise x+y with x-y=c inside footprint
-          let best = -1e9;
-          for (let tyy = vay; tyy < fy; tyy++) { const txx = c + tyy; if (txx >= vax && txx < fx) best = Math.max(best, txx + tyy); }
-          // depth anchor: the front-most tile's centre (front-corner pivot) or its front corner (centre pivot, whose
-          // pixels extend down to that corner and must not be clipped by the terrain in front of the pivot)
-          const front = cx.pieceAnchor === "front" ? 1 : 1.95;
-          const key = (exact ? pu + pv - 1 + front : single ? fx + fy - 2 + front : best + front) + z * zf + bias;
-          const colCenter = c * hw - sx; // relative to pivot (px)
-          const sliceL = single || c === cMin ? -OPEN : colCenter - hw / 2;
-          const sliceR = single || c === cMax ? OPEN : colCenter + hw / 2;
-          // slice foot = screen y of the front corner of its front-most tile, relative to pivot
-          const footDy = single ? 0 : (best + 2) * hh - z * zs - sy;
-          const o = this.writeOne(sx, sy, key, psc, res, flags, (i * 0.618034) % 1, alpha, sliceL, sliceR, tint, footDy, 0, ghost, dmgOverlay, 0);
-          o[27] = occT;
-          if (deckMask) { o[38] = deckMask | (vfw << 4) | (vfh << 8); o[39] = deckTop!; }
-          if (sway) { o[24] = sway[0]!; o[25] = sway[1]!; o[26] = sway[2]!; } // SpriteDef.sway (+ masks.sway weights in the shader)
-          if (tints?.[1]) writeTint2(o, tints[1]);
-          for (let q = 0; q < INSTANCE_FLOATS; q++) tmp.push(o[q]!);
-          if (single) break;
+        // ADR-381: static-part cache. A static part's instances are a pure function of the signature below
+        // (every resolve input + the resolved frame + deck/crack state + view/layout epoch + entity index, so
+        // slot reuse after swap-remove cannot alias). Dynamic parts (ghost / cutaway / fading / animated) are
+        // never cached: their tmp changes per frame. On a hit, skip the slice loop, crack block and per-frame
+        // FNV hash; the chunk sum comes from the stored per-part hashes and the rebuild list is built from
+        // entries only if the chunk sum changed (see the rebuild loop below).
+        const cacheKey = k * 4 + pi;
+        let cacheHit = false;
+        let entry = dynamic ? undefined : this.pieceCache.get(cacheKey);
+        if (!dynamic) {
+          const s = this.pieceSig;
+          s[0] = vis; s[1] = d.variant![k]!; s[2] = rotRaw; s[3] = level; s[4] = layer; s[5] = ghost; s[6] = dmg;
+          s[7] = tint; s[8] = tints?.[1] ?? 0; s[9] = pst; s[10] = psc;
+          s[11] = tr.data.x[ts]!; s[12] = tr.data.y[ts]!; s[13] = tr.data.z[ts]!;
+          s[14] = spk.sid; s[15] = spk.flags; s[16] = drawVis;
+          s[17] = res.entry; s[18] = res.atlas; s[19] = res.ax; s[20] = res.ay; s[21] = res.flipX ? 1 : 0; s[22] = res.hasDamageFrames ? 1 : 0;
+          s[23] = deckTop ?? -1; s[24] = deckMask; s[25] = lift; s[26] = crack ? 1 : 0;
+          s[27] = vq; s[28] = atlas.layoutVersion; s[29] = i; s[30] = nightSet?.has(vis) ? 1 : 0; s[31] = cx.pieceAnchor === "front" ? 1 : 0;
+          if (entry) {
+            cacheHit = true;
+            for (let q = 0; q < PIECE_SIG_N; q++) if (s[q] !== entry.sig[q]) { cacheHit = false; break; }
+          }
+          if (cacheHit) {
+            const ck = this.chunkKeyOf(Math.floor(ax / CHUNK_SIZE), Math.floor(ay / CHUNK_SIZE));
+            const agg = aggFor(ck); agg.xor ^= entry!.hash; agg.floats += entry!.len; agg.statics++;
+            let slots = this.chunkSlots.get(ck); if (!slots) this.chunkSlots.set(ck, (slots = []));
+            slots.push(cacheKey);
+            if (entry!.crack) this.crackOverlays++;
+          }
         }
-        if (crack) {
-          const r = this.crackRes; const ck0 = tmp[2]!; // on top of the piece (its first instance's key + epsilon)
-          const o = this.writeOne(sx, sy, ck0 + 0.002, 1, r, flags, 0, alpha, -OPEN, OPEN, 0, 0, 0, 0, 0, 0);
-          o[27] = occT; for (let q = 0; q < INSTANCE_FLOATS; q++) tmp.push(o[q]!); this.crackOverlays++;
-        }
-        if (dynamic) {
-          // ADR-328: remember the chunk even when the piece is off screen (below): it is empty of static
-          // pieces only while this piece is dynamic, and deleting it would reset its fade-in clock.
-          this.dynamicChunkKeys.add(this.chunkKeyOf(Math.floor(ax / CHUNK_SIZE), Math.floor(ay / CHUNK_SIZE)));
-          if (sx < rect.x0 - 512 || sx > rect.x1 + 512 || sy < rect.y0 - 256 || sy > rect.y1 + 1024) continue;
-          for (let j = 0; j < tmp.length; j += INSTANCE_FLOATS) this.pushOcc(tmp, j, occT, cx.style.occlusion.mode);
-        } else {
-          const ck = this.chunkKeyOf(Math.floor(ax / CHUNK_SIZE), Math.floor(ay / CHUNK_SIZE));
-          let list = scratch.get(ck); if (!list) scratch.set(ck, (list = []));
-          for (let j = 0; j < tmp.length; j++) list.push(tmp[j]!);
-          let h = checksums.get(ck) ?? 0x811c9dc5;
-          for (let j = 0; j < tmp.length; j++) h = Math.imul(h ^ Math.round(tmp[j]! * 64), 16777619) >>> 0;
-          checksums.set(ck, h);
+        if (!cacheHit) {
+          tmp.length = 0;
+          // per-column slices: columns c = x - y over the footprint
+          const cMin = vax - (fy - 1), cMax = (fx - 1) - vay;
+          const single = flat || exact || cMin === cMax;
+          for (let c = cMin; c <= cMax; c++) {
+            // front-most tile in column c: maximise x+y with x-y=c inside footprint
+            let best = -1e9;
+            for (let tyy = vay; tyy < fy; tyy++) { const txx = c + tyy; if (txx >= vax && txx < fx) best = Math.max(best, txx + tyy); }
+            // depth anchor: the front-most tile's centre (front-corner pivot) or its front corner (centre pivot, whose
+            // pixels extend down to that corner and must not be clipped by the terrain in front of the pivot)
+            const front = cx.pieceAnchor === "front" ? 1 : 1.95;
+            const key = (exact ? pu + pv - 1 + front : single ? fx + fy - 2 + front : best + front) + z * zf + bias;
+            const colCenter = c * hw - sx; // relative to pivot (px)
+            const sliceL = single || c === cMin ? -OPEN : colCenter - hw / 2;
+            const sliceR = single || c === cMax ? OPEN : colCenter + hw / 2;
+            // slice foot = screen y of the front corner of its front-most tile, relative to pivot
+            const footDy = single ? 0 : (best + 2) * hh - z * zs - sy;
+            const o = this.writeOne(sx, sy, key, psc, res, flags, (i * 0.618034) % 1, alpha, sliceL, sliceR, tint, footDy, 0, ghost, dmgOverlay, 0);
+            o[27] = occT;
+            if (deckMask) { o[38] = deckMask | (vfw << 4) | (vfh << 8); o[39] = deckTop!; }
+            if (sway) { o[24] = sway[0]!; o[25] = sway[1]!; o[26] = sway[2]!; } // SpriteDef.sway (+ masks.sway weights in the shader)
+            if (tints?.[1]) writeTint2(o, tints[1]);
+            for (let q = 0; q < INSTANCE_FLOATS; q++) tmp.push(o[q]!);
+            if (single) break;
+          }
+          if (crack) {
+            const r = this.crackRes; const ck0 = tmp[2]!; // on top of the piece (its first instance's key + epsilon)
+            const o = this.writeOne(sx, sy, ck0 + 0.002, 1, r, flags, 0, alpha, -OPEN, OPEN, 0, 0, 0, 0, 0, 0);
+            o[27] = occT; for (let q = 0; q < INSTANCE_FLOATS; q++) tmp.push(o[q]!); this.crackOverlays++;
+          }
+          if (dynamic) {
+            // ADR-328: remember the chunk even when the piece is off screen (below): it is empty of static
+            // pieces only while this piece is dynamic, and deleting it would reset its fade-in clock.
+            const dck = this.chunkKeyOf(Math.floor(ax / CHUNK_SIZE), Math.floor(ay / CHUNK_SIZE));
+            this.dynamicChunkKeys.add(dck);
+            aggFor(dck).dynamics++;
+            if (sx < rect.x0 - 512 || sx > rect.x1 + 512 || sy < rect.y0 - 256 || sy > rect.y1 + 1024) continue;
+            for (let j = 0; j < tmp.length; j += INSTANCE_FLOATS) this.pushOcc(tmp, j, occT, cx.style.occlusion.mode);
+          } else {
+            const ck = this.chunkKeyOf(Math.floor(ax / CHUNK_SIZE), Math.floor(ay / CHUNK_SIZE));
+            // per-part FNV over tmp (fresh seed per part — the chunk sum XORs part hashes, so dense
+            // reordering alone does not change the sum and does not rebuild).
+            let h = 0x811c9dc5;
+            for (let j = 0; j < tmp.length; j++) h = Math.imul(h ^ Math.round(tmp[j]! * 64), 16777619) >>> 0;
+            if (!entry) { entry = { sig: new Float64Array(PIECE_SIG_N), tmp: new Float32Array(0), len: 0, hash: 0, crack: false }; this.pieceCache.set(cacheKey, entry); }
+            entry.sig.set(this.pieceSig); // filled above; the slice loop does not touch the scratch
+            entry.len = tmp.length;
+            if (entry.tmp.length < tmp.length) entry.tmp = new Float32Array(tmp.length);
+            entry.tmp.set(tmp as unknown as ArrayLike<number>);
+            entry.hash = h; entry.crack = crack;
+            const agg = aggFor(ck); agg.xor ^= h; agg.floats += tmp.length; agg.statics++;
+            let slots = this.chunkSlots.get(ck); if (!slots) this.chunkSlots.set(ck, (slots = []));
+            slots.push(cacheKey);
+          }
         }
       }
     }
     { const t = this.cover; this.cover = this.coverNext; this.coverNext = t; }
-    // rebuild changed static chunks, drop empty ones
-    for (const [ck, list] of scratch) {
-      const sum = (checksums.get(ck) ?? 0) ^ list.length;
+    // ADR-381: rebuild only chunks whose static content changed. A chunk's sum is the XOR of its static parts'
+    // per-part hashes ^ its total float count (order-independent, so dense reordering alone does not rebuild).
+    // Unchanged chunks keep their GPU buffer and are just marked seen; the instance list is rebuilt from the
+    // per-part cache entries only for changed chunks. Chunks with no static parts this frame are kept alive
+    // only while their pieces are dynamic (ADR-328); otherwise the sweep below drops them when on screen
+    // (off-screen chunks are kept by that sweep either way — a hidden off-screen chunk's buffer used to be
+    // deleted here via its stale empty scratch entry and rebuilt on return; keeping it is correct because the
+    // sum comparison still rebuilds it if any piece changed while it was hidden).
+    for (const [ck, agg] of chunkAgg) {
+      const sum = (agg.xor ^ agg.floats) >>> 0;
       let sc = this.statics.get(ck);
-      if (list.length === 0) {
-        if (sc && this.dynamicChunkKeys.has(ck)) {
+      if (agg.statics === 0) {
+        if (sc && agg.dynamics > 0) {
           // ADR-328: every static piece in this chunk is dynamic this frame (a swinging door, a faded
           // occluder) — keep the chunk alive but empty instead of deleting it, so its fade-in clock
           // (born) survives the swing and the piece does not blink back in on the swing's last frame.
-          // The key stays in scratch, so the chunk keeps its `seen` while the swing plays; a chunk
-          // emptied by demolition (no dynamic piece) is still dropped below.
           if (sc.count !== 0) { sc.count = 0; sc.checksum = sum; sc.maxZ = 0; this.staticRebuilds++; }
           sc.seen = this.frameNo;
-          continue;
-        }
-        if (sc) { this.gl.deleteBuffer(sc.vbo); this.gl.deleteVertexArray(sc.vao); this.statics.delete(ck); } scratch.delete(ck); continue;
+        } else if (sc) { this.gl.deleteBuffer(sc.vbo); this.gl.deleteVertexArray(sc.vao); this.statics.delete(ck); }
+        continue;
       }
-      if (!sc || sc.checksum !== sum) {
-        const gl = this.gl;
-        if (!sc) { const vbo = gl.createBuffer()!; const [cxs, cys] = ck.split(",").map(Number) as [number, number]; sc = { vbo, vao: this.makeVao(vbo), count: 0, checksum: 0, cx: cxs, cy: cys, maxZ: 0, seen: 0, born: cx.now }; this.statics.set(ck, sc); }
-        // sort within chunk back-to-front for nicer edge blending
-        const cnt = list.length / INSTANCE_FLOATS; const F = INSTANCE_FLOATS; const order = Array.from({ length: cnt }, (_, j) => j).sort((a, b) => (list[a * F + 2]! - list[b * F + 2]!) || (list[a * F + 1]! - list[b * F + 1]!) || (list[a * F]! - list[b * F]!) || (list[a * F + 4]! - list[b * F + 4]!)); // ADR-197: total order
-        const buf = new Float32Array(list.length); let maxZ = 0;
-        order.forEach((j, o) => { for (let q = 0; q < INSTANCE_FLOATS; q++) buf[o * INSTANCE_FLOATS + q] = list[j * INSTANCE_FLOATS + q]!; });
-        for (let j = 0; j < cnt; j++) maxZ = Math.max(maxZ, -(buf[j * INSTANCE_FLOATS + 1]! - 0));
-        gl.bindBuffer(gl.ARRAY_BUFFER, sc.vbo); gl.bufferData(gl.ARRAY_BUFFER, buf, gl.STATIC_DRAW);
-        sc.count = cnt; sc.checksum = sum; sc.maxZ = maxZ; this.staticRebuilds++;
-      }
+      if (sc && sc.checksum === sum) { sc.seen = this.frameNo; this.staticInstances += sc.count; continue; }
+      // changed: rebuild the instance list from the per-part cache entries (fresh or cached tmp)
+      let list = scratch.get(ck); if (!list) scratch.set(ck, (list = [])); else list.length = 0;
+      const slots = this.chunkSlots.get(ck) ?? [];
+      for (const key of slots) { const en = this.pieceCache.get(key)!; for (let j = 0; j < en.len; j++) list.push(en.tmp[j]!); }
+      const gl = this.gl;
+      if (!sc) { const vbo = gl.createBuffer()!; const [cxs, cys] = ck.split(",").map(Number) as [number, number]; sc = { vbo, vao: this.makeVao(vbo), count: 0, checksum: 0, cx: cxs, cy: cys, maxZ: 0, seen: 0, born: cx.now }; this.statics.set(ck, sc); }
+      // sort within chunk back-to-front for nicer edge blending
+      const cnt = list.length / INSTANCE_FLOATS; const F = INSTANCE_FLOATS; const order = Array.from({ length: cnt }, (_, j) => j).sort((a, b) => (list[a * F + 2]! - list[b * F + 2]!) || (list[a * F + 1]! - list[b * F + 1]!) || (list[a * F]! - list[b * F]!) || (list[a * F + 4]! - list[b * F + 4]!)); // ADR-197: total order
+      const buf = new Float32Array(list.length); let maxZ = 0;
+      order.forEach((j, o) => { for (let q = 0; q < INSTANCE_FLOATS; q++) buf[o * INSTANCE_FLOATS + q] = list[j * INSTANCE_FLOATS + q]!; });
+      for (let j = 0; j < cnt; j++) maxZ = Math.max(maxZ, -(buf[j * INSTANCE_FLOATS + 1]! - 0));
+      gl.bindBuffer(gl.ARRAY_BUFFER, sc.vbo); gl.bufferData(gl.ARRAY_BUFFER, buf, gl.STATIC_DRAW);
+      sc.count = cnt; sc.checksum = sum; sc.maxZ = maxZ; this.staticRebuilds++;
       sc.seen = this.frameNo;
       this.staticInstances += sc.count;
     }
     for (const sc of this.statics.values()) if (sc.seen !== this.frameNo && !this.chunkOnScreen(sc.cx, sc.cy, rect, hw, hh)) { sc.seen = this.frameNo; this.culledChunks++; }
-    for (const [ck, sc] of this.statics) if (sc.seen !== this.frameNo) { this.gl.deleteBuffer(sc.vbo); this.gl.deleteVertexArray(sc.vao); this.statics.delete(ck); }
+    for (const [ck, sc] of this.statics) if (sc.seen !== this.frameNo) { this.gl.deleteBuffer(sc.vbo); this.gl.deleteVertexArray(sc.vao); this.statics.delete(ck); scratch.delete(ck); this.chunkSlots.delete(ck); }
   }
 
   upload(): void {
@@ -1458,8 +1565,8 @@ export function visibleChunkKeys(rect: Rect, hw: number, hh: number, zs: number,
   return out;
 }
 
-/** Set of packed tile keys ("x,y") forming the building the focus stands in, or null when not in a roofed building. */
-export function cutawayRegion(grid: BuildingGrid, tx: number, ty: number, level: number, maxTiles = 600, isRoofSprite: (spriteId: number) => boolean = () => false): Set<string> | null {
+/** Set of packed tile keys (tileKey, see building/modular.ts) forming the building the focus stands in, or null when not in a roofed building. */
+export function cutawayRegion(grid: BuildingGrid, tx: number, ty: number, level: number, maxTiles = 600, isRoofSprite: (spriteId: number) => boolean = () => false): Set<number> | null {
   // anything on a higher level (roofs included: deck pieces of level+1) covers the tile; isRoofSprite is kept for
   // roof pieces gameplay places on the walls' own level. ADR-309: a floor under a missing ceiling still counts if
   // this connected footprint has cover somewhere (so indoor zoom does not pop in roof holes).
@@ -1474,20 +1581,22 @@ export function cutawayRegion(grid: BuildingGrid, tx: number, ty: number, level:
   };
   const inside = (x: number, y: number): boolean => covered(x, y) || grid.at(x, y, level, PIECE_LAYER_DECK) !== 0;
   if (!inside(tx, ty)) return null;
-  const seen = new Set<string>(); const q: [number, number][] = [[tx, ty]]; seen.add(`${tx},${ty}`);
+  const seen = new Set<number>([tileKey(tx, ty)]);
+  // ADR-381: index queue, not q.shift() — shift() is O(n) per dequeue, so a 600-tile fill was ~180k moves/frame.
+  const qx: number[] = [tx], qy: number[] = [ty]; let head = 0;
   let anyCover = covered(tx, ty);
-  while (q.length && seen.size < maxTiles) {
-    const [x, y] = q.shift()!;
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-      const nx = x + dx, ny = y + dy, k = `${nx},${ny}`;
-      if (!seen.has(k) && inside(nx, ny)) { seen.add(k); q.push([nx, ny]); if (covered(nx, ny)) anyCover = true; }
+  while (head < qx.length && seen.size < maxTiles) {
+    const x = qx[head]!, y = qy[head]!; head++;
+    for (let d = 0; d < 4; d++) {
+      const nx = x + (d === 0 ? 1 : d === 1 ? -1 : 0), ny = y + (d === 2 ? 1 : d === 3 ? -1 : 0), k = tileKey(nx, ny);
+      if (!seen.has(k) && inside(nx, ny)) { seen.add(k); qx.push(nx); qy.push(ny); if (covered(nx, ny)) anyCover = true; }
     }
   }
   return anyCover ? seen : null;
 }
 
-function footprintHits(region: Set<string>, ax: number, ay: number, fw: number, fh: number): boolean {
-  for (let y = ay - 1; y <= ay + fh; y++) for (let x = ax - 1; x <= ax + fw; x++) if (region.has(`${x},${y}`)) return true;
+function footprintHits(region: Set<number>, ax: number, ay: number, fw: number, fh: number): boolean {
+  for (let y = ay - 1; y <= ay + fh; y++) for (let x = ax - 1; x <= ax + fw; x++) if (region.has(tileKey(x, y))) return true;
   return false;
 }
 

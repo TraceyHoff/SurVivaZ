@@ -82,7 +82,7 @@ export function zombiePose(timeSec: number, moving: boolean, reducedMotion: bool
  * warmup-drain); the warm-up itself is a note, because it runs *inside* the boot phase and
  * must not be double-counted in the total.
  */
-export interface CostStage { name: string; ms: number }
+export interface CostStage { name: string; ms: number; /** ADR-380: sub-phases inside this phase (never added to the total — they split it, not extend it). */ subs?: CostStage[] }
 export class LoadCostBreakdown {
   private stages: CostStage[] = [];
   private notes: string[] = [];
@@ -91,6 +91,16 @@ export class LoadCostBreakdown {
     if (typeof name !== "string" || !name || !Number.isFinite(ms) || ms < 0) return;
     this.stages.push({ name, ms: Math.round(ms) });
   }
+  /**
+   * ADR-380: record a sub-phase inside an already-recorded phase (e.g. the boot sub-phases from IsoView.create:
+   * manifest / painted / registry.fetch / registry.upload / warmup / ...). Sub-phases are a split of the parent,
+   * never an addition to the total; subs for an unknown parent or invalid values are ignored.
+   */
+  recordSub(stage: string, name: string, ms: number): void {
+    if (typeof name !== "string" || !name || !Number.isFinite(ms) || ms < 0) return;
+    const s = this.stages.find((x) => x.name === stage); if (!s) return;
+    (s.subs ??= []).push({ name, ms: Math.round(ms) });
+  }
   /** Attach a free-form note (e.g. a warm-up sub-timing with its page counts). */
   note(text: string): void { if (typeof text === "string" && text) this.notes.push(text); }
   get totalMs(): number { return this.stages.reduce((s, x) => s + x.ms, 0); }
@@ -98,7 +108,10 @@ export class LoadCostBreakdown {
   format(): string {
     if (!this.stages.length && !this.notes.length) return "load cost: not measured yet";
     const total = this.totalMs;
-    const parts = this.stages.map((s) => `${s.name} ${s.ms}ms${total > 0 ? ` (${Math.round((s.ms / total) * 100)}%)` : ""}`);
+    const parts = this.stages.map((s) => {
+      const base = `${s.name} ${s.ms}ms${total > 0 ? ` (${Math.round((s.ms / total) * 100)}%)` : ""}`;
+      return s.subs?.length ? `${base} [${s.subs.map((u) => `${u.name} ${u.ms}ms`).join(" · ")}]` : base;
+    });
     const head = parts.length ? `load cost: ${parts.join(" · ")} · total ${total}ms` : "load cost:";
     return this.notes.length ? `${head}; ${this.notes.join("; ")}` : head;
   }

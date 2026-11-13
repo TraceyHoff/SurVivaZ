@@ -36,6 +36,9 @@ export function startDiag(src: DiagSources): { afterRender(): void } | undefined
       const vs = Object.entries(v ?? {}).filter(([, x]) => typeof x !== "object").map(([n, x]) => `${n}=${typeof x === "number" && x > 1e5 ? `${Math.round(x / 1048576)}M` : x}`);
       if (vs.length) L.push(`vram ${vs.join(" ")}`);
       L.push(`frame draws ${f.drawCalls ?? "?"} sprites ${f.sprites ?? "?"} cpu ${(f.cpuMs ?? 0).toFixed(1)}ms`);
+      // ADR-381: per-phase render CPU (last frame, ms) — which part of the 15.7 ms frame the phone is paying for.
+      const ph = (r.stats as unknown as { phases?: Record<string, number> }).phases;
+      if (ph) L.push(`phases prep ${ph.prep?.toFixed(1)} spr ${ph.sprites?.toFixed(1)} upl ${ph.upload?.toFixed(1)} lit ${ph.lightsPrep?.toFixed(1)} scn ${ph.scene?.toFixed(1)} lgt ${ph.light?.toFixed(1)} blm ${ph.bloom?.toFixed(1)} cmp ${ph.composite?.toFixed(1)} wth ${ph.weather?.toFixed(1)}`);
       const lc = src.loadCost?.(); if (lc) L.push(lc);
       L.push(`glError ${glErr ? "0x" + glErr.toString(16) : "none"} centre ${pixel} cam ${r.camera.x.toFixed(1)},${r.camera.y.toFixed(1)} z${r.camera.zoom}`);
       if (c.fallbacks.length) L.push(`fallbacks: ${c.fallbacks.join("; ")}`);

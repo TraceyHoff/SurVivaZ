@@ -184,6 +184,10 @@ export function createGameServer(o: GameServerOptions): GameServer {
   }) : undefined;
   let localPlayerIds = 1; // no store: ids only need to be unique for this run
   const loadRadius = o.loadRadius ?? 2;
+  // ADR-379: maxLoadTimeMs is a real budget now — ChunkManager checks elapsed time after every chunk install
+  // (load + onLoad stamp) and won't start a chunk the last chunk's cost says won't fit, so plain-chunk
+  // updates stop at ~2 loads (~1.6 ms) and a site chunk ends its update. maxLoadsPerUpdate stays 4 as the
+  // hard cap for cheap chunks. Load radius, cache size, unload margin and FIFO order unchanged.
   const chunks = new ChunkManager({ provider: persist?.provider ?? generator, loadRadius, unloadMargin: 1, cacheSize: 64, maxLoadsPerUpdate: 4, maxLoadTimeMs: 2 });
   const defs = gameplayDefs(world);
   const resIds = new Map<number, number>();

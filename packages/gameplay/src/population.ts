@@ -113,15 +113,42 @@ const animAt = (world: World, e: Entity, anim: Anim): void => { if (world.has(e,
  * still cannot attack on sight. Each species keeps its own non-combat behaviour (flee ranges, wander radii).
  */
 const THREATS: number[] = []; const THREAT_LIST_MAX = 48;
+/**
+ * ADR-377: cached animal lists. animalAISystem used to spread + sort the dead sweep and spread the live
+ * list out of the query generator every tick — a fresh array (+ sort) per tick for a set that only changes
+ * when an animal spawns/dies, gains/loses Dead, or becomes a pet. Both lists rebuild only when a
+ * membership counter of a store that gates membership moves (ComponentStore.membership bumps on
+ * add/remove, never on field writes — the ADR-315 precedent), so this system's own field writes
+ * (state/thinkAt/goal) never invalidate. The dead list stays sorted ascending by entity id, exactly as
+ * the old `[...query].sort((x, y) => x - y)` produced; the live list is rebuilt with the same query
+ * expression, so its order (reverse-dense of the Animal store, the query driver) is identical too.
+ * Per-world (WeakMap): tests run many worlds through this module-level system. The live list is
+ * re-validated after the dead sweep because the sweep's corpse destroys and loot-bag Transform adds
+ * move the counters.
+ */
+interface AnimalListCache {
+  dead: Entity[]; deadAnimal: number; deadDead: number;
+  live: Entity[]; liveAnimal: number; liveTransform: number; liveDead: number; livePet: number;
+}
+const animalListCaches = new WeakMap<World, AnimalListCache>();
 export function animalAISystem(world: World, dt: number): void {
   if (!isAuthority(world) || world.isReplaying) return;
   const index = installSpatialIndex(world); const unwalk = gameplayDefs(world).worldgen.unwalkableTiles; const defs = animalDefs();
   // Task 29: hoisted component stores + chase limit. world.get() copies the component into a fresh
   // object per call (~0.8us for Animal alone); the loops below read store data directly instead.
-  const aStore = world.store(Animal); const tfStore = world.store(Transform);
+  const aStore = world.store(Animal); const tfStore = world.store(Transform); const deadStore = world.store(Dead);
   const chaseLimit = populationData().ai.tuning?.chaseLimitTiles ?? 18;
   const tileBlocked: TileBlocked = (tx, ty) => unwalk.has(populationTile(world, tx, ty));
-  for (const e of [...world.query([Animal, Dead])].sort((x, y) => x - y)) {
+  let cache = animalListCaches.get(world);
+  if (cache === undefined) {
+    cache = { dead: [], deadAnimal: -1, deadDead: -1, live: [], liveAnimal: -1, liveTransform: -1, liveDead: -1, livePet: -1 };
+    animalListCaches.set(world, cache);
+  }
+  if (cache.deadAnimal !== aStore.membership || cache.deadDead !== deadStore.membership) {
+    cache.dead = [...world.query([Animal, Dead])].sort((x, y) => x - y);
+    cache.deadAnimal = aStore.membership; cache.deadDead = deadStore.membership;
+  }
+  for (const e of cache.dead) {
     const as = aStore.slot(entityIndex(e)); const aD = aStore.data;
     if (aD.state[as]! !== AnimalState.Dead) {
       dropAnimalLoot(world, e); world.setField(e, Animal, "state", AnimalState.Dead);
@@ -132,7 +159,15 @@ export function animalAISystem(world: World, dt: number): void {
   // there is an animal to process, so a world with no animals (and those components unregistered)
   // behaves exactly like before (no throw). THREATS is only consumed by that loop, so skipping its
   // fill here is unobservable.
-  const animals = [...world.query([Animal, Transform], [Dead, Pet])]; // ADR-145: pets are driven by petSystem
+  // ADR-377: cached live list, rebuilt only when Animal/Transform/Dead/Pet membership moves (see the
+  // cache note above). Re-validated here, after the dead sweep, because the sweep's corpse destroys
+  // and loot-bag Transform adds move the counters.
+  const petStore = world.store(Pet);
+  if (cache.liveAnimal !== aStore.membership || cache.liveTransform !== tfStore.membership || cache.liveDead !== deadStore.membership || cache.livePet !== petStore.membership) {
+    cache.live = [...world.query([Animal, Transform], [Dead, Pet])]; // ADR-145: pets are driven by petSystem
+    cache.liveAnimal = aStore.membership; cache.liveTransform = tfStore.membership; cache.liveDead = deadStore.membership; cache.livePet = petStore.membership;
+  }
+  const animals = cache.live;
   if (animals.length === 0) return;
   const hStore = world.store(Health); const anStore = world.store(AnimState);
   const mountReg = world.isRegistered(Mount);
@@ -161,24 +196,25 @@ export function animalAISystem(world: World, dt: number): void {
     const hurt = hp !== undefined && maxHp !== undefined && hp < maxHp; const scared = hurt && hp! <= maxHp! * def.fleeHpFrac;
     const anSlot = anStore.slot(ei); const anD = anStore.data;
     const aggressive = !!def.attack && def.aggro.mode !== "passive" && !scared;
-    const homeD = Math.hypot(tx - aHomeX, ty - aHomeY);
-    let threat: { e: Entity; x: number; y: number; d: number } | undefined;
+    // ADR-377: squared home distance — homeD is only ever compared against ranges, never used as a value.
+    const homeDx = tx - aHomeX, homeDy = ty - aHomeY; const homeD2 = homeDx * homeDx + homeDy * homeDy;
+    let threat: { e: Entity; x: number; y: number; d2: number } | undefined;
     const tame = owned || world.has(e, Tamed); // ADR-113 / ADR-319: domesticated animals neither flee nor attack
     const tr = Math.max(def.fleeRange, aggressive ? def.aggro.leashRange : 0);
     if (!tame && few) for (let i = 0; i < THREATS.length; i += 3) {
       const p = THREATS[i]! as Entity, px = THREATS[i + 1]!, py = THREATS[i + 2]!; const ddx = px - tx, ddy = py - ty; if (ddx * ddx + ddy * ddy > tr * tr) continue;
       if (lureable && luresMount(world, def.key, p)) continue;
-      const d = Math.hypot(px - tx, py - ty); if (!threat || d < threat.d || (d === threat.d && p < threat.e)) threat = { e: p, x: px, y: py, d };
+      const d2 = ddx * ddx + ddy * ddy; if (!threat || d2 < threat.d2 || (d2 === threat.d2 && p < threat.e)) threat = { e: p, x: px, y: py, d2 };
     }
     else if (!tame) for (const p of index.queryRadius(tx, ty, tr)) {
-      if (!world.has(p, Survival) || world.has(p, Dead) || (lureable && luresMount(world, def.key, p))) continue; const pt = world.get(p, Transform)!; const d = Math.hypot(pt.x - tx, pt.y - ty);
-      if (!threat || d < threat.d || (d === threat.d && p < threat.e)) threat = { e: p, x: pt.x, y: pt.y, d };
+      if (!world.has(p, Survival) || world.has(p, Dead) || (lureable && luresMount(world, def.key, p))) continue; const pt = world.get(p, Transform)!; const pdx = pt.x - tx, pdy = pt.y - ty; const d2 = pdx * pdx + pdy * pdy;
+      if (!threat || d2 < threat.d2 || (d2 === threat.d2 && p < threat.e)) threat = { e: p, x: pt.x, y: pt.y, d2 };
     }
     let state = aState, gx = aGoalX, gy = aGoalY;
     // Task 15: chase limit — an engaged animal gives up once it is farther than this from home (tighter than
     // the old 2x leashRange rule when the limit is smaller). Territory defenders below are exempt: they use
     // their own claim-range branch, not this one.
-    const pressHome = Math.min(def.aggro.leashRange * 2, chaseLimit);
+    const pressHome = Math.min(def.aggro.leashRange * 2, chaseLimit); const pressHome2 = pressHome * pressHome; const leash2 = def.aggro.leashRange * def.aggro.leashRange;
     // Task 15: retaliation — a hurt wild animal engages its recent attacker even outside aggro.range, as long
     // as the attacker is close (within leashRange) and recent (retaliateSeconds). The attacker overrides the
     // scanned threat (defending yourself takes priority over a bystander). Scared animals never retaliate
@@ -189,8 +225,8 @@ export function animalAISystem(world: World, dt: number): void {
       if (la && world.tick - la.tick <= gameplayDefs(world).ai.retaliateSeconds * DEFAULT_TICK_HZ) {
         const at = world.get(la.e, Transform);
         if (at && world.has(la.e, Survival) && !world.has(la.e, Dead)) {
-          const d = Math.hypot(at.x - tx, at.y - ty);
-          if (d <= def.aggro.leashRange) { threat = { e: la.e, x: at.x, y: at.y, d }; retaliating = true; }
+          const rdx = at.x - tx, rdy = at.y - ty; const d2 = rdx * rdx + rdy * rdy;
+          if (d2 <= leash2) { threat = { e: la.e, x: at.x, y: at.y, d2 }; retaliating = true; }
         }
       }
     }
@@ -202,24 +238,24 @@ export function animalAISystem(world: World, dt: number): void {
     // defensive-when-hurt) only apply to non-tameables. An engaged or retaliating tameable still presses
     // its actual attacker (the branch above), so self-defence is unchanged.
     const safeTarget = threat !== undefined && !retaliating && inSpawnSafeRadius(world, threat.x, threat.y);
-    const wants = aggressive && threat && !safeTarget && ((engaged || retaliating) ? threat.d <= def.aggro.leashRange && homeD <= pressHome
-      : !isTameableAnimalKey(def.key) && threat.d <= def.aggro.range && (def.aggro.mode === "hostile" || (def.aggro.mode === "territorial" && homeD <= def.aggro.leashRange) || (def.aggro.mode === "defensive" && hurt)));
+    const wants = aggressive && threat && !safeTarget && ((engaged || retaliating) ? threat.d2 <= leash2 && homeD2 <= pressHome2
+      : !isTameableAnimalKey(def.key) && threat.d2 <= def.aggro.range * def.aggro.range && (def.aggro.mode === "hostile" || (def.aggro.mode === "territorial" && homeD2 <= leash2) || (def.aggro.mode === "defensive" && hurt)));
     // Task 14: tame animals defend their owner's claim. Passive farm animals have no species attack, so they
     // get a generic bite; goat/cow reuse their own attack. Movement still goes through creatureStep, so a
     // fenced-in defender strains at the fence instead of teleporting through it.
-    let territory: { e: Entity; x: number; y: number; d: number } | undefined;
+    let territory: { e: Entity; x: number; y: number; d2: number } | undefined;
     if (tame) {
       const tribe = tamedOwnerTribe(world, e);
       if (tribe) {
         if (zombies === undefined) zombies = [...world.query([Zombie, Transform], [Dead])];
         const z = nearestClaimHostile(world, tx, ty, TERRITORY_DEFEND_RANGE, tribe, zombies);
-        if (z !== undefined) { const zt = world.get(z, Transform)!; territory = { e: z, x: zt.x, y: zt.y, d: Math.hypot(zt.x - tx, zt.y - ty) }; }
+        if (z !== undefined) { const zt = world.get(z, Transform)!; const zdx = zt.x - tx, zdy = zt.y - ty; territory = { e: z, x: zt.x, y: zt.y, d2: zdx * zdx + zdy * zdy }; }
       }
     }
     if (territory) {
       state = AnimalState.Attack; gx = territory.x; gy = territory.y;
       const range = def.attack?.range ?? TERRITORY_BITE.range, damage = def.attack?.damage ?? TERRITORY_BITE.damage, cd = def.attack?.cooldownSeconds ?? TERRITORY_BITE.cooldownSeconds;
-      if (territory.d <= range + 0.4) {
+      if (territory.d2 <= (range + 0.4) * (range + 0.4)) {
         gx = tx; gy = ty;
         if (world.tick >= aThinkAt) {
           applyDamage(world, territory.e, damage, e); animAt(world, e, Anim.Attack);
@@ -228,14 +264,14 @@ export function animalAISystem(world: World, dt: number): void {
       }
     } else if (wants && threat && def.attack) {
       state = AnimalState.Attack; gx = threat.x; gy = threat.y;
-      if (threat.d <= def.attack.range + 0.4) {
+      if (threat.d2 <= (def.attack.range + 0.4) * (def.attack.range + 0.4)) {
         gx = tx; gy = ty;
         if (world.tick >= aThinkAt) {
           applyDamage(world, threat.e, def.attack.damage, e); animAt(world, e, Anim.Attack);
           world.setField(e, Animal, "thinkAt", world.tick + Math.max(1, Math.round(def.attack.cooldownSeconds / dt)));
         }
       }
-    } else if (threat && threat.d <= def.fleeRange && (!aggressive || scared || def.aggro.mode === "passive" || !def.attack)) {
+    } else if (threat && threat.d2 <= def.fleeRange * def.fleeRange && (!aggressive || scared || def.aggro.mode === "passive" || !def.attack)) {
       state = AnimalState.Flee; const ang = Math.atan2(ty - threat.y, tx - threat.x); gx = tx + Math.cos(ang) * 4; gy = ty + Math.sin(ang) * 4;
     } else if (scared && state === AnimalState.Flee) { /* keep running to the last goal */ }
     else if (world.tick >= aThinkAt || state === AnimalState.Flee || state === AnimalState.Attack) {

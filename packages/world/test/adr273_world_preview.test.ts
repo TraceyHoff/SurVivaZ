@@ -70,8 +70,14 @@ describe("ADR-272 sampled seed preview and wilderness", () => {
 it("the wall-clock streaming budget stops before the four-chunk cap and always makes progress", () => {
   let clock = 0; const spy = vi.spyOn(performance, "now").mockImplementation(() => clock);
   try {
+    // ADR-379: the budget is predictive — a chunk costs 1.2 ms against a 2 ms budget, so only one fits per
+    // update (1.2 + 1.2 > 2); the first chunk is always admitted, so the drain still makes progress.
     const cm = new ChunkManager({ provider: { load(cx, cy) { clock += 1.2; return { chunk: new Chunk(cx, cy), nodes: [] }; } }, maxLoadsPerUpdate: 4, maxLoadTimeMs: 2 });
-    cm.setSource({ id: 1, x: 0, y: 0 }); cm.update(); expect(cm.stats.loads).toBe(2); expect(cm.pendingLoads).toBe(23);
-    cm.update(); expect(cm.stats.loads).toBe(4);
+    cm.setSource({ id: 1, x: 0, y: 0 }); cm.update(); expect(cm.stats.loads).toBe(1); expect(cm.pendingLoads).toBe(24);
+    cm.update(); expect(cm.stats.loads).toBe(2);
+    // Cheaper chunks fit two per update: 0.8 + 0.8 <= 2, but a third (1.6 + 0.8 > 2) does not.
+    const cm2 = new ChunkManager({ provider: { load(cx, cy) { clock += 0.8; return { chunk: new Chunk(cx, cy), nodes: [] }; } }, maxLoadsPerUpdate: 4, maxLoadTimeMs: 2 });
+    cm2.setSource({ id: 1, x: 0, y: 0 }); cm2.update(); expect(cm2.stats.loads).toBe(2); expect(cm2.pendingLoads).toBe(23);
+    cm2.update(); expect(cm2.stats.loads).toBe(4);
   } finally { spy.mockRestore(); }
 });

@@ -89,6 +89,10 @@ describe("apps/server craft queue", () => {
     expect(w.getField(P.e, PlayerId, "id")).toBe(fx.pid);
     const hp = w.getField(P.e, Health, "hp")!; expect(hp).toBeGreaterThanOrEqual(41); expect(hp).toBeLessThan(45); // saved 41, then regen
     expect(countItem(w, P.e, id("wood"))).toBe(7);
+    // ADR-379: the chunk-load budget spreads view streaming over more ticks, so the saved pieces' chunks
+    // may not be installed yet after a fixed tick count — wait for the queue to drain before asserting
+    // on restored chunk entities (the pieces are the thing under test here, not the streaming speed).
+    for (let g = 0; g < 200 && s.gs.chunks.pendingLoads > 0; g++) s.tick(1);
     const pieces = [...w.query([BuildPiece])].filter((e) => { const t = w.get(e, Transform)!; return Math.abs(t.x - fx.pieceX) < 3 && Math.abs(t.y - fx.pieceY) < 3; });
     expect(pieces.length).toBeGreaterThan(0);
     for (const e of w.query([CraftQueue])) expect(e === P.e ? w.resource(CraftQueuesRes).jobs(e) : [e]).toEqual([]); // only a fresh empty queue may exist

@@ -36,7 +36,7 @@ import type { RectTable } from "./texturePacker.js";
 import { PageLRU, PRIO_NEAR, VramAccountant, rgbaBytes, type VramStats } from "../gl/vram.js";
 import { blockBytes, GL_FORMAT, ktx2Target, loadKtx2, loadKtx2Rgba, type Ktx2Target } from "./ktx2.js";
 import { assetFetch, isRidePageKey, withAssetSlot } from "./asset-fetch.js";
-import { WARMUP_MAX_PAGES, WARMUP_POLL_MS, WARMUP_PRIO, WARMUP_WINDOW_MS, isWarmupCandidate, sortWarmupKeys, type WarmupResult } from "./warmup.js";
+import { WARMUP_MAX_PAGES, WARMUP_POLL_MS, WARMUP_PRIO, WARMUP_WINDOW_MS, isWarmupCandidate, sortWarmupKeys, warmupPageBudget, type WarmupResult } from "./warmup.js";
 import type { CompressedTextureSupport } from "../gl/capabilities.js";
 import { isEnclosurePieceKey, lCornerArmPiece, streamingFallbackKeys } from "../building/modular.js";
 
@@ -82,7 +82,8 @@ export const STATE_ANIMS: readonly (readonly string[])[] = ANIM_STATE_NAMES.map(
 /** @deprecated use core `AnimState` (ADR-093); kept as an alias so render callers read one numbering. */
 export { CoreAnimState as AnimStateId };
 
-interface SpriteRT {
+/** ADR-380: exported so buildSpriteTables (public) can name its tables in its signature. */
+export interface SpriteRT {
   atlasIdx: number; anchorX: number; anchorY: number;
   anims: Animation[];
   /** per anim: atlas index of each dirFrames entry (facing-split pages, Art 62e55cf), or null (legacy layout via frame()) */
@@ -96,7 +97,8 @@ interface SpriteRT {
   /** From the manifest's `building` block: footprint, layer, frames[rotation][damageStage]. */
   building?: { fw: number; fh: number; layer: number; frames: number[][] };
 }
-interface AtlasRT { key: string; id: number; source: AtlasSource; img: ImageLike | null; emis: ImageLike | null; scale: number;
+/** ADR-380: exported so buildSpriteTables (public) can name its atlas rows in its signature. */
+export interface AtlasRT { key: string; id: number; source: AtlasSource; img: ImageLike | null; emis: ImageLike | null; scale: number;
   masks: Partial<Record<MaskName, ImageLike>>; maskUrls: Partial<Record<MaskName, string>>; base: number; count: number; fw: number; fh: number; cols: number; layer: number; px: number; py: number;
   /** streamed wearable page: not loaded at rebuild (see header); w1/h1 = 1x page size */ lazy?: { w1: number; h1: number; state: 0 | 1 | 2; pool: number; prio?: number };
   /** budget tier: cold art is downscaled before hot art (see fitBudget) */ cold?: boolean;
@@ -321,13 +323,23 @@ const nextFrame = (): Promise<void> => new Promise<void>((r) => { if (typeof req
 let yieldImpl = nextFrame; let sliceClock = now;
 /** Tests: replace the "wait for the next frame" primitive and the clock used by the slicer (null: defaults). */
 export function setResizeYield(y: (() => Promise<void>) | null, clock?: () => number): void { yieldImpl = y ?? nextFrame; sliceClock = clock ?? now; }
+/**
+ * ADR-380: boot runs the same resizes as a re-tier (fitBudget / halveSide / fitToPage) but has no frames to protect —
+ * the 6 ms slice + frame yield turns ~1 s of resize CPU into several seconds of wall time (one frame per slice: at
+ * 60 fps each 6 ms of resize work costs ~16 ms of wall, so the resizes alone can stretch boot by a low-single-digit
+ * multiple of their own CPU time). IsoView.create disables slicing around the initial setRegistry only; re-tiers keep
+ * it on, so a mid-game re-tier still cannot freeze a frame. Only call while no resize jobs are in flight (the toggle
+ * resets the slice clock, so a job mid-slice would lose its budget).
+ */
+let slicingEnabled = true;
+export function setResizeSlicing(on: boolean): void { slicingEnabled = on; sliceStart = -1; }
 /** Run `job` serialized behind earlier jobs; yields one frame first once the current slice spent RESIZE_SLICE_MS. */
 export function sliced<T>(job: () => Promise<T> | T): Promise<T> {
   pendingJobs++;
   const run = async (): Promise<T> => {
     try {
       if (sliceStart < 0) sliceStart = sliceClock();
-      if (sliceClock() - sliceStart >= RESIZE_SLICE_MS) { resizeStats.yields++; await yieldImpl(); sliceStart = sliceClock(); }
+      if (slicingEnabled && sliceClock() - sliceStart >= RESIZE_SLICE_MS) { resizeStats.yields++; await yieldImpl(); sliceStart = sliceClock(); }
       return await job();
     } finally { if (--pendingJobs === 0) sliceStart = -1; }
   };
@@ -534,6 +546,9 @@ export class AtlasManager {
   sideShift: number = SIDE_SHIFT;
   /** How fitBudget met the budget (diag): pool reserve actually kept, hot atlases demoted to cold. */
   fitInfo: { reserveMB: number; reserveWantedMB: number; demoted: number; /** ADR-237: sheets kept x1 while the hot tier is halved */ pinned?: string[] } = { reserveMB: 0, reserveWantedMB: 0, demoted: 0 };
+  /** ADR-380: ms per phase of the last rebuild (diag: the ?diag=1 boot sub-phases). Undefined until a rebuild
+   *  completes; IsoView.create reads it right after the initial setRegistry. */
+  rebuildTimings: { fetchDecode: number; fitBudget: number; halveSide: number; layout: number; upload: number; tables: number; bodies: number; restore: number } | undefined = undefined;
   /** Override the hot/cold budget tier per atlas key (default defaultAtlasTier). */
   atlasTier?: (key: string, info: { bodies: boolean; wearShare: number }) => AtlasTier;
   /** Atlas keys used recently (renderer marks them); always treated hot at the next rebuild. */
@@ -742,6 +757,11 @@ export class AtlasManager {
   }
 
   private async rebuild(registry: AssetRegistry, sources: Map<string, AtlasSource>): Promise<void> {
+    // ADR-380: per-phase ms for the ?diag=1 boot split (fetchDecode = fetch + decode + fitToPage of the resident
+    // set; layout = pack/plan + the sort/rect/classify planning around the rescale steps; tables = the sprite
+    // runtime tables + tint rows + resolve* passes). Cleared here so a failed rebuild leaves no stale split.
+    const ph = { fetchDecode: 0, fitBudget: 0, halveSide: 0, layout: 0, upload: 0, tables: 0, bodies: 0, restore: 0 };
+    this.rebuildTimings = undefined;
     const prevHeld = this.held; const held: [string, string][] = [];
     // seamless rebuild (re-tier / zoom): remember the lazy pages resident now (local player, nearby characters, visible
     // stream/building art) so the new layout pages them back in before the renderer draws again (see `settling`)
@@ -767,6 +787,7 @@ export class AtlasManager {
     this.placeholderCache.clear();
     const bodyPages = bodyAtlasKeys(registry); this.bodyPageKeys = bodyPages;
     const bodyKeys = new Set<string>(); if (this.ktx2Target && this.streamWearables) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src?.ktx2 && bodyPages.has(a.key) && !lazyKeys.has(a.key) && !vehKeys.has(a.key) && !bldKeys.has(a.key) && !streamKeys.has(a.key) && !/^(blob|data):/.test(src.url)) bodyKeys.add(a.key); }
+    const ldT0 = now();
     await Promise.all([...registry.atlases.values()].map(async (a) => {
       const src = sources.get(a.key); if (!src) throw new Error(`no image source for atlas "${a.key}"`);
       if (lazyKeys.has(a.key) || vehKeys.has(a.key) || legacy.has(a.key) || bldKeys.has(a.key) || bodyKeys.has(a.key) || streamKeys.has(a.key)) {
@@ -789,6 +810,8 @@ export class AtlasManager {
       for (const m of Object.keys(masks) as MaskName[]) { const f = await fitToPage(masks[m]!, img.width, img.height); if (f) masks[m] = f; else { delete masks[m]; delete maskUrls[m]; } }
       list.push({ key: a.key, id: a.id, source: src, img, emis, scale, masks, maskUrls, base: 0, count: src.rects ? src.rects.length : a.columns * a.rows, fw: a.frameW, fh: a.frameH, cols: a.columns, layer: 0, px: 0, py: 0 });
     }));
+    ph.fetchDecode += now() - ldT0;
+    const layT0 = now();
     list.sort((a, b) => a.id - b.id); lazyList.sort((a, b) => a.id - b.id);
     addDirFrameRects(registry, [...list, ...lazyList]);
     // ADR-220: the live layout (pools, LRUs, frame entries, fallback caches) stays intact while the new one is planned:
@@ -852,59 +875,55 @@ export class AtlasManager {
     const visHold = groups.map((g) => (CHAR_POOL_CLS.has(g.cls) ? 0 : this.poolReserveBytes(g.lazy, g.minSlots, list, 1)));
     // buildings must not starve vehicles / the stream floor (furniture, decor): they hold veh 1x + STREAM_FLOOR_SLOTS at 1x
     const bldHold = groups.reduce((t, g, i) => t + (g.cls === "veh" ? visHold[i]! : g.cls === "stream" ? this.poolReserveBytes(g.lazy, Math.min(g.minSlots, STREAM_FLOOR_SLOTS), list, 1) : 0), 0);
-    this.registryForTier = registry; await this.fitBudget(list, reserve, keep); this.sideScale = (await halveSide(list, this.sideShift)) ? 1 / (1 << this.sideShift) : 1;
+    ph.layout += now() - layT0; // sort + rect tables + pool-group planning, before the rescale steps
+    this.registryForTier = registry;
+    const fbT0 = now(); await this.fitBudget(list, reserve, keep); ph.fitBudget += now() - fbT0;
+    const hsT0 = now(); this.sideScale = (await halveSide(list, this.sideShift)) ? 1 / (1 << this.sideShift) : 1; ph.halveSide += now() - hsT0;
+    const layT1 = now();
     const layout = (): void => { this.pack(list); this.pools = []; groups.forEach((g, i) => this.planPool(g.lazy, g.minSlots, list, g.cls, g.cap, g.share, g.cls === "wear" ? visHold.slice(i + 1).reduce((t, b) => t + b, 0) : g.cls === "bld" ? bldHold : 0)); let b = this.totalFrames; for (const a of lazyList) { a.base = b; b += a.count; } this.totalFrames = b; };
     this.planningRebuild = false;
     this.gen++; this.queue = []; this.layoutVersion++; this.fallbackCache.clear(); this.lArmCache.clear();
     layout();
+    ph.layout += now() - layT1;
     const all = [...list, ...lazyList];
     this.settling = true; // from the first new texture until the old residency is restored: the renderer holds its last frame
     try {
-    this.upload(list, this.frameTintRows(registry, all), all);
+    // ADR-380: tint rows are pure given (registry, all) — compute once and reuse for the OOM re-uploads (was
+    // recomputed per upload call, each doing a list.find per tinted sprite). Timed under `tables`, not `upload`.
+    const tintT0 = now(); const tintRows = this.frameTintRows(registry, all); ph.tables += now() - tintT0;
+    const upT0 = now();
+    this.upload(list, tintRows, all);
     const lim = this.limitProblem(); if (lim) { this.uploadErrors.push(lim); console.error("[render] " + lim); this.onError?.({ kind: "limits", message: lim }); }
     while ((this.oomFlag || this.gl.getError() === this.gl.OUT_OF_MEMORY) && this.downscale > MIN_ATLAS_DOWNSCALE) {
       this.oomFlag = false;
       // the driver refused the arrays: halve again and re-upload (once per step)
       const msg = `atlas upload out of GPU memory at ${this.gpuMB()} MB (downscale ${this.downscale}); retrying at ${this.downscale / 2}`;
       console.warn("[render] " + msg); this.onError?.({ kind: "oom", message: msg });
-      await scaleList(list, 0.5); this.downscale /= 2; this.coldDownscale = Math.max(MIN_ATLAS_DOWNSCALE / 2, this.coldDownscale / 2); layout(); this.upload(list, this.frameTintRows(registry, all), all);
+      await scaleList(list, 0.5); this.downscale /= 2; this.coldDownscale = Math.max(MIN_ATLAS_DOWNSCALE / 2, this.coldDownscale / 2); layout(); this.upload(list, tintRows, all);
     }
     if (this.oomFlag) { this.oomFlag = false; const msg = `atlas arrays still out of GPU memory at the minimum downscale x${this.downscale}`; this.uploadErrors.push(msg); this.onFault?.("atlas", msg); }
+    ph.upload += now() - upT0;
     list.push(...lazyList);
-    // sprite runtime tables
-    const sprites: (SpriteRT | undefined)[] = [];
-    for (const s of registry.allSprites()) {
-      const id = s.id;
-      const at = list.find((a) => a.id === s.atlas.id); if (!at) continue;
-      const stateAnim = new Int16Array(STATE_ANIMS.length);
-      STATE_ANIMS.forEach((names, st) => {
-        let idx = 0; for (const n of names) { const i = s.animList.findIndex((a) => a.name === n); if (i >= 0) { idx = i; break; } }
-        stateAnim[st] = idx;
-      });
-      const damage: number[] = [];
-      const dmgAnim = s.animations.get("damaged");
-      for (let st = 1; st <= 3; st++) {
-        const named = s.animations.get(`damage${st}`);
-        if (named) damage[st] = named.frames[0]!;
-        else if (dmgAnim) damage[st] = dmgAnim.frames[Math.min(st - 1, dmgAnim.frames.length - 1)]!;
-      }
-      const b = s.building;
-      const dirAt = s.animList.map((an) => an.dirFrames ? Int32Array.from(an.dirFrames, (d) => list.findIndex((x) => x.id === d.atlas.id)) : null);
-      const dirF = s.animList.map((an, k) => an.dirFrames ? Int32Array.from(an.dirFrames, (d, j) => dirFrameIndex(list[dirAt[k]![j]!], d)) : null);
-      sprites[id] = { atlasIdx: list.indexOf(at), anchorX: s.anchor.x, anchorY: s.anchor.y, anims: s.animList, dirAt, dirF, stateAnim, damage,
-        ...(b ? { building: { fw: b.footprint.w, fh: b.footprint.h, layer: b.layer, frames: b.frames } } : {}) };
-    }
+    // sprite runtime tables (ADR-380: buildSpriteTables — Map lookups, byte-identical to the old list.find loop)
+    const tbT0 = now();
+    const sprites = buildSpriteTables(registry, list);
     this.usedMark = new Uint8Array(list.length); this.crispMark = []; this.atlases = list; this.atlasById = new Map(list.map((a) => [a.id, a])); this.sprites = sprites; this.registry = registry; this.headGroup.clear(); this.resolveSway(); this.resolveVariants(); this.resolveRoofs(); this.resolveEnclosures(); this.resolveHands();
     this.uploadTints();
     this.maskPixels.clear();
+    ph.tables += now() - tbT0;
     // body pages: resident from the first frame (prio 0: no budget refusal; one slot each, so never evicted)
     const g0 = this.gen; const bodies = list.filter((a) => a.lazy && this.poolOfA(a)?.cls === "body");
+    const bdT0 = now();
     await Promise.all(bodies.map(async (a) => { a.lazy!.prio = 0; a.lazy!.state = 1; try { await this.pageIn(a, g0); } catch (e) { reportRenderError(`body page-in ${a.key}`, e, true); } if ((a.lazy!.state as number) !== 2) { a.lazy!.state = 0; const m = `body page ${a.key} not resident`; if (this.uploadErrors.length < 32) this.uploadErrors.push(m); } }));
+    ph.bodies += now() - bdT0;
     // previously resident pages (closest first) back in before drawing resumes: no undressed / missing-art frames
     const back = list.filter((a) => a.lazy && a.lazy.state === 0 && wasResident.has(a.key) && this.poolOfA(a)).sort((x, y) => wasResident.get(x.key)! - wasResident.get(y.key)!);
+    const rsT0 = now();
     await Promise.all(back.map(async (a) => { const pr = wasResident.get(a.key)!; a.lazy!.prio = pr; if (!this.poolOn(this.poolOfA(a)!, pr)) return; a.lazy!.state = 1; try { await this.pageIn(a, g0); } catch { /* re-requested by pageReady */ } if ((a.lazy!.state as number) !== 2) a.lazy!.state = 0; }));
+    ph.restore += now() - rsT0;
     this.held = held; this.version++;
     for (const [k, u] of prevHeld) this.assets.release(k, u);
+    this.rebuildTimings = { ...ph };
     } finally { this.settling = false; }
   }
   /** True while a rebuild has replaced the GPU arrays but not yet restored the pages that were resident before it
@@ -1185,10 +1204,11 @@ export class AtlasManager {
   /** frame entry -> tint row (sprites with SpriteDef.tints get their own row; 0 = globals). */
   private frameTintRows(registry: AssetRegistry, list: AtlasRT[]): Map<number, number> {
     const rows: AtlasManager["tintRows"] = [null]; const map = new Map<number, number>();
+    const byId = new Map(list.map((a) => [a.id, a])); // ADR-380: was list.find per tinted sprite
     for (const s of registry.allSprites()) {
       const tints = s.tints; // typed SpriteDef.tints (batch 11/12)
       if (!tints || !Object.keys(tints).length) continue;
-      const at = list.find((a) => a.id === s.atlas.id); if (!at) continue;
+      const at = byId.get(s.atlas.id); if (!at) continue;
       const row = rows.length; rows.push(tints);
       const mark = (f: number) => { if (f >= 0 && f < at.count) map.set(at.base + f, row); };
       for (const an of s.animList) for (let d = 0; d < an.directions; d++) for (const f of an.frames) mark(f + d * an.dirStride);
@@ -1466,6 +1486,30 @@ export class AtlasManager {
     for (let i = 0; i < 600 && g === this.gen && want.some((a) => a.lazy!.state === 1 || this.queue.includes(a)); i++) await new Promise((r) => setTimeout(r, 16));
   }
   /**
+   * ADR-374: one warm-up pump tick — the per-frame page-in budget reset that beginFrame() does,
+   * without a rendered frame. Resets the stream-start and GPU-upload counters, releases the next
+   * decoded pages waiting for their upload turn (at most PAGE_UPLOADS_PER_FRAME), and re-drives
+   * pump(). Deliberately NOT beginFrame(): it does not advance `this.frame` (the LRU clock, and
+   * the unloadIdleStream cadence that runs off it — a warm-up tick can never evict a page), and it
+   * does no frame-table GL upload (dirty rows upload on the first rendered frame's beginFrame).
+   * The tick itself issues no GL calls; the only GL work it can trigger is pageIn's own
+   * texSubImage3D uploads — the same uploads a rendered frame performs, on the same context,
+   * which IsoRenderer owns and which is current (setRegistry has run before the boot warm-up;
+   * no other GL user runs during the boot window). The 2/frame caps are unchanged: the tick
+   * resets the same counters beginFrame resets, to the same limits.
+   */
+  pumpWarmupTick(): void {
+    this.streamStarts = 0; this.uploadsThisFrame = 0;
+    while (this.uploadWaiters?.length && this.uploadsThisFrame < PAGE_UPLOADS_PER_FRAME) { this.uploadsThisFrame++; this.uploadWaiters.shift()!(); }
+    if (this.queue.length) this.pump();
+  }
+  /** ADR-374: slots of the main manifest stream-sheet pool (24 desktop / 12 low-memory) — the
+   * warm-up page budget clamps to it. The oversize stream pool (2 / 1 slots) is not counted:
+   * the clamp is conservative. Undefined when no stream pool is planned yet. */
+  streamPoolSlots(): number | undefined {
+    return this.pools?.find((p) => p.cls === "stream")?.lru.capacity;
+  }
+  /**
    * ADR-370: warm-up window — request the first-view / visible-pin lazy pages first, at
    * near-player priority, and wait (bounded) for them to land before the first paint.
    * Reuses request()/pump()/pageIn: prio WARMUP_PRIO (1) is <= PRIO_NEAR, so the pages are
@@ -1473,12 +1517,23 @@ export class AtlasManager {
    * (PAGE_UPLOADS_PER_FRAME) and never jump the local player's own pages. A timeout never
    * blocks boot: the caller continues with a soft start, and the world-ready warm-up
    * (main.ts drainFirstView) retries the drain once the player has spawned.
+   *
+   * ADR-374: the wait loop used to idle — beginFrame() is the only place that resets
+   * streamStarts / uploadsThisFrame, and it only runs during a rendered frame, which does not
+   * exist yet at boot (iso is assigned after IsoView.create resolves). After 2 stream starts +
+   * 2 GPU uploads both gates stalled, so the 1500 ms window expired with ~2 pages landed and
+   * the first view still blurry. Each poll now gap-fills with pumpWarmupTick() when no rendered
+   * frame has run since the last poll, so the window becomes real page-ins instead of idle
+   * waiting. When frames ARE running (world entry), beginFrame already pumps and the tick
+   * stays out of the way — at most one extra pump per poll, each bounded by the same 2/frame
+   * caps, inside the same bounded window. The request count is clamped to the stream pool
+   * (warmupPageBudget): a 12-slot low-memory pool caps at 12 pages, not 24.
    */
   async warmupFirstView(keys: Iterable<string>, opts: { firstView?: Iterable<string>; maxPages?: number; timeoutMs?: number } = {}): Promise<WarmupResult> {
     const t0 = Date.now();
     const firstView = new Set(opts.firstView ?? []);
     const ordered = sortWarmupKeys([...new Set(keys)], firstView).filter((k) => isWarmupCandidate(k, firstView));
-    const maxPages = Math.max(0, opts.maxPages ?? WARMUP_MAX_PAGES);
+    const maxPages = warmupPageBudget(this.streamPoolSlots(), opts.maxPages ?? WARMUP_MAX_PAGES);
     const timeoutMs = Math.max(0, opts.timeoutMs ?? WARMUP_WINDOW_MS);
     const want: AtlasRT[] = [];
     let alreadyResident = 0, skipped = 0;
@@ -1493,7 +1548,13 @@ export class AtlasManager {
     for (const a of want) this.request(a, WARMUP_PRIO);
     const g = this.gen;
     const deadline = t0 + timeoutMs;
-    while (g === this.gen && want.some((a) => a.lazy!.state !== 2) && Date.now() < deadline) await new Promise((r) => setTimeout(r, WARMUP_POLL_MS));
+    let lastFrame = this.frame;
+    while (g === this.gen && want.some((a) => a.lazy!.state !== 2) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, WARMUP_POLL_MS));
+      // ADR-374: pump while no rendered frame is doing it — the boot window has no frames at all.
+      if (g === this.gen && want.some((a) => a.lazy!.state !== 2) && this.frame === lastFrame) this.pumpWarmupTick();
+      lastFrame = this.frame;
+    }
     const landed = want.filter((a) => a.lazy!.state === 2).length;
     return { requested: want.length, alreadyResident, resident: alreadyResident + landed, stillPending: want.length - landed, skipped, ms: Date.now() - t0, timedOut: want.some((a) => a.lazy!.state !== 2) };
   }
@@ -1992,6 +2053,41 @@ export function addDirFrameRects(registry: AssetRegistry, atlases: AtlasRT[]): v
 /** Atlas-local frame-table index of one dirFrames entry. */
 export function dirFrameIndex(a: AtlasRT | undefined, d: { frame: number; rect?: DirFrameRect }): number {
   if (!a || !d.rect) return d.frame; const r = a.extra?.byRect.get(d.rect); if (r !== undefined) return r; return a.extra?.byKey.get(`${d.rect.x},${d.rect.y},${d.rect.w},${d.rect.h}`) ?? d.frame;
+}
+/**
+ * ADR-380: sprite runtime tables (atlas index, per-anim dirFrames pages/frames, state anims, damage frames) for a
+ * rebuild. Was O(S×A): `list.find` / `list.findIndex` / `list.indexOf` per sprite — 5,326 sprites × ~654 atlases,
+ * plus one findIndex per dirFrames entry. Now two id->atlas/index Maps built once; the output is byte-identical:
+ * the same atlas object and index per sprite, and -1 for a missing dirFrames page (`list[-1]` is undefined, so
+ * dirFrameIndex falls back to d.frame exactly as before). Pure given (registry, list) — `list` must already include
+ * the lazy atlases (rebuild pushes them in first) and have `addDirFrameRects` applied.
+ */
+export function buildSpriteTables(registry: AssetRegistry, list: AtlasRT[]): (SpriteRT | undefined)[] {
+  const byId = new Map(list.map((a) => [a.id, a]));
+  const idxById = new Map(list.map((a, i) => [a.id, i]));
+  const sprites: (SpriteRT | undefined)[] = [];
+  for (const s of registry.allSprites()) {
+    const id = s.id;
+    const at = byId.get(s.atlas.id); if (!at) continue;
+    const stateAnim = new Int16Array(STATE_ANIMS.length);
+    STATE_ANIMS.forEach((names, st) => {
+      let idx = 0; for (const n of names) { const i = s.animList.findIndex((a) => a.name === n); if (i >= 0) { idx = i; break; } }
+      stateAnim[st] = idx;
+    });
+    const damage: number[] = [];
+    const dmgAnim = s.animations.get("damaged");
+    for (let st = 1; st <= 3; st++) {
+      const named = s.animations.get(`damage${st}`);
+      if (named) damage[st] = named.frames[0]!;
+      else if (dmgAnim) damage[st] = dmgAnim.frames[Math.min(st - 1, dmgAnim.frames.length - 1)]!;
+    }
+    const b = s.building;
+    const dirAt = s.animList.map((an) => an.dirFrames ? Int32Array.from(an.dirFrames, (d) => idxById.get(d.atlas.id) ?? -1) : null);
+    const dirF = s.animList.map((an, k) => an.dirFrames ? Int32Array.from(an.dirFrames, (d, j) => dirFrameIndex(list[dirAt[k]![j]!], d)) : null);
+    sprites[id] = { atlasIdx: idxById.get(s.atlas.id)!, anchorX: s.anchor.x, anchorY: s.anchor.y, anims: s.animList, dirAt, dirF, stateAnim, damage,
+      ...(b ? { building: { fw: b.footprint.w, fh: b.footprint.h, layer: b.layer, frames: b.frames } } : {}) };
+  }
+  return sprites;
 }
 /** Atlases only the legacy full-size layout of facing-split sprites (anims with dirFrames) uses: sprite.atlas of such
  *  sprites, unless a sprite without dirFrames or any dirFrames entry also uses it. Art may delete these pages. */

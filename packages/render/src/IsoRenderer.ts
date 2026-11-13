@@ -38,7 +38,7 @@ import { CompositePass } from "./composite.js";
 import { WeatherPass, WeatherState, weatherTargets } from "./weather.js";
 import { computeDayLighting, dimWeatherInto, newDayLighting, undergroundInto, type DayLighting } from "./timeOfDay.js";
 import { isoZDepthFactor } from "./depth.js";
-import { assertFramebuffer, createTexture, newStats, RenderGLError, setFragmentMediump, type FrameStats } from "./gl/util.js";
+import { assertFramebuffer, createTexture, newStats, PhaseTimer, RenderGLError, setFragmentMediump, type FrameStats } from "./gl/util.js";
 import { clampDrawingBuffer, detectCapabilities, parseGlFlags, type GlFlag, type RenderCapabilities, type RenderError } from "./gl/capabilities.js";
 import { RENDER_COMPONENTS } from "./components.js";
 import { DEFAULT_STYLE, mergeStyle, type StyleConfig, type StylePatch } from "./style.js";
@@ -152,6 +152,8 @@ export class IsoRenderer implements Renderer {
   readonly chimneySmoke = new ChimneySmoke();
   style: StyleConfig;
   stats: FrameStats = newStats();
+  /** ADR-381: per-phase render CPU (last frame, ms) — reused record, attached to stats each frame for ?diag=1. */
+  readonly phaseTimer = new PhaseTimer();
   lighting: DayLighting = computeDayLighting(0.5, undefined, newDayLighting());
   /** ADR-263 (Task 36): 0..1 underground darkness around the camera focus (the client eases it from the player's depth). */
   underground = 0;
@@ -504,6 +506,7 @@ export class IsoRenderer implements Renderer {
     if (!this.freezeClock && this.quality.feed(dt * 1000) && this.lastCss[0] > 0) this.applyQuality();
     this.vfx.maxActive = Math.round(2048 * this.quality.tier.particles);
     const stats = (this.stats = newStats());
+    const pt = this.phaseTimer; pt.start(t0); // ADR-381: per-phase CPU for ?diag=1 (see gl/util.ts PhaseTimer)
     this.frameCount++; this.totalFrames++; const probe = this.frameCount === 1 || this.frameCount === 60; const diag = this.diagState;
     const pass = (name: string): void => { if (probe) { const e = gl.getError(); if (diag.enabled || e !== gl.NO_ERROR) diag.passErrors[name] = glErrorName(e); } };
     const gl = this.gl; const style = this.style;
@@ -585,14 +588,18 @@ export class IsoRenderer implements Renderer {
     // Keep preparing while pages settle: a later atlas revision invalidates all destination meshes.
     if (this.prepareQuarter && this.tilemap) this.tiles.prepareView(this.tilemap, this.atlas, this.activeKeys);
     this.updateBuildingTiers(world, rect);
+    pt.split("prep", performance.now()); // section 0 (day/weather/season/tiers) ends here
     this.sprites.prepare({
       world, alpha, rect, atlas: this.atlas, depthMin: minKey, depthRange: maxKey - minKey, tickHz: this.tickHz, style,
       bindings: this.bindings, spatial: this.spatial, activeKeys: this.activeKeys, grid: this.grid, groundZAt: this.tilemap ? (x: number, y: number) => tileHeight(this.tilemap!, x, y) : undefined, pieceAnchor: this.pieceAnchor,
       transformSource: this.transformSource, vfx: this.vfx, now: this.time, statusFx: this.statusHook, zoom: this.camera.zoom,
     });
+    pt.split("sprites", performance.now());
     this.sprites.upload();
+    pt.split("upload", performance.now());
     pass("prep");
     this.lights.prepare(world, alpha, rect, this.settings.lights, this.transformSource, { emitter: this.bindings.emitter, lit: this.bindings.lit, kinds: this.emitterKinds });
+    pt.split("lightsPrep", performance.now());
 
     // --- 1. scene pass ---------------------------------------------------------------------
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.sceneFbo);
@@ -634,6 +641,7 @@ export class IsoRenderer implements Renderer {
     this.sprites.drawLate(this.viewU, this.depthU, this.atlas, this.time, ws.wind + 0.15, style, stats);
     gl.disable(gl.BLEND); gl.disable(gl.DEPTH_TEST);
     pass("scene");
+    pt.split("scene", performance.now());
     const clearBg = this.backdrop ?? day.sky;
 
     // --- 2. light pass ---------------------------------------------------------------------
@@ -641,9 +649,11 @@ export class IsoRenderer implements Renderer {
     this.lights.draw(this.viewU, amb, style.daylightLightScale + (1 - style.daylightLightScale) * day.glow, this.time, stats); // fires/lamps swell as it darkens
 
     pass("light");
+    pt.split("light", performance.now());
     // --- 3. composite ----------------------------------------------------------------------
     const bloomOn = style.bloom.strength > 0 && !diag.safe && this.quality.tier.bloom;
     if (bloomOn) this.bloom.draw(this.sceneTex!, this.emisTex!, style.bloom.radiusPx, stats);
+    if (bloomOn) pt.split("bloom", performance.now()); else pt.zero("bloom"); // off: no time attributed (last stays at the split)
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, this.w, this.h);
     let lutA = this.styleLut, lutB: LutBinding | null = null, lutMix = 0;
@@ -663,14 +673,17 @@ export class IsoRenderer implements Renderer {
     });
     stats.drawCalls++;
     pass("composite");
+    pt.split("composite", performance.now());
     if (probe) this.probe(stats, clearBg);
     else if (this._sync) this.watch(stats);
 
     // --- 4. weather particles --------------------------------------------------------------
     if (this.settings.weather) this.weather.draw(this.w, this.h, this.camera.x * this.camera.scale, this.camera.y * this.camera.scale, this.camera.dpr, ws, this.time, amb, stats, this.quality.tier.weather);
+    if (this.settings.weather) pt.split("weather", performance.now()); else pt.zero("weather");
 
     stats.staticChunks = this.sprites.staticChunksDrawn; stats.staticInstances = this.sprites.staticInstances;
     stats.cpuMs = performance.now() - t0;
+    stats.phases = pt.ms; // ADR-381: shared record — the diag overlay reads the last frame's splits
     if (this.tilemap && this.w > 0 && this.h > 0 && !this.atlas.settling && !gl.isContextLost()) { this.prepareQuarter = false; this.completeFrames++; }
   }
 

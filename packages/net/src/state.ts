@@ -50,26 +50,72 @@ export function readComp(schema: NetSchema, ci: number, slot: number): number[] 
 }
 
 /**
+ * Generation-stamped dirty/touched flags, indexed by entity index (ADR-376): no hashing
+ * in the per-entity loop. Entity indices are < 2^20 (core INDEX_MASK), so fixed-size
+ * arrays need no growth and no bounds check. A 16-bit generation makes a wrap
+ * (fill + restart) a once-per-65535-calls event. Stamps are written and read inside a
+ * single captureState call, so sharing them across worlds/servers is safe.
+ */
+const MAX_ENTITY_INDEX = 1 << 20;
+let stampGen = 0;
+let dirtyMarks: Uint16Array | undefined;
+let touchedMarks: Uint16Array | undefined;
+/**
+ * Generation-stamped "seen this capture" flags, indexed by netId (ADR-376): used by the
+ * leave-scan to tell live netIds from stale map entries. NetIds are monotonic u32, so
+ * this grows (doubling, stamps preserved) to the largest netId ever assigned — the same
+ * growth the server's own netId-indexed curArr/stamp already do.
+ */
+let seenMarks: Uint16Array | undefined;
+
+/** Next stamp generation, allocating/resetting the mark arrays as needed. */
+function nextStampGen(): { gen: number; dirty: Uint16Array; touched: Uint16Array; seen: Uint16Array } {
+  let d = dirtyMarks; let t = touchedMarks; let s = seenMarks;
+  if (!d || !t || !s) {
+    d = new Uint16Array(MAX_ENTITY_INDEX); t = new Uint16Array(MAX_ENTITY_INDEX); s = new Uint16Array(1024);
+    dirtyMarks = d; touchedMarks = t; seenMarks = s; stampGen = 0;
+  }
+  if (++stampGen === 0x10000) { d.fill(0); t.fill(0); s.fill(0); stampGen = 1; }
+  return { gen: stampGen, dirty: d, touched: t, seen: s };
+}
+
+/**
  * Server: capture replicated state of every entity that has a NetId. Entities with no change bit
  * and no removal this tick reuse the previous tick's (immutable) EntityState, so cost scales with churn.
  * `exclude` = component indices never put on the wire (scope "none"). Must run in the network phase.
+ *
+ * ADR-376: the returned map IS `prev`, updated in place — no fresh N-entry Map per tick, and no
+ * per-entity Map.get / Set.has for clean entities (generation-stamped Uint16Arrays indexed by
+ * entity index / netId replace the two Sets). Callers must NOT retain `prev` as a snapshot:
+ * copy it (`new Map(prev)`) first if the old contents are needed. `prev` must be a Map
+ * previously returned by captureState (or undefined); a non-Map ReadonlyMap is copied, not
+ * mutated. EntityState objects stay immutable and structurally shared exactly as before, so
+ * the snapshot bytes for the same inputs are unchanged (protocol still v8).
  */
 export function captureState(world: World, schema: NetSchema, prev: WorldState | undefined, exclude?: ReadonlySet<number>): Map<number, EntityState> {
   const ns = world.store(NetId);
-  const touched = new Set<number>();
-  for (const st of schema.stores) for (const e of world.removed(st.def)) touched.add(entityIndex(e));
+  const { gen, dirty, touched } = nextStampGen();
+  let seen = seenMarks!;
   // ADR-369: dirty entity indices from the stores' own change iterators (O(changed), not O(entities x stores)).
   // changedIndices() yields an index only while the component is still present; removals are covered by `touched`
   // and NetId adds by the NetId store below, so an index in neither set provably has no replicated change.
-  const dirty = new Set<number>();
-  for (const st of schema.stores) for (const i of st.changedIndices()) dirty.add(i);
-  for (const i of ns.changedIndices()) dirty.add(i);
-  const out = new Map<number, EntityState>();
+  for (const st of schema.stores) for (const e of world.removed(st.def)) touched[entityIndex(e)] = gen;
+  for (const st of schema.stores) for (const i of st.changedIndices()) dirty[i] = gen;
+  for (const i of ns.changedIndices()) dirty[i] = gen;
+  const out = prev instanceof Map ? prev : new Map<number, EntityState>(prev);
+  const stores = schema.stores; const hasPrev = prev !== undefined;
+  // Distinct live netIds this tick (not ns.size: two live entities can share a netId
+  // in hand-built worlds, and the env singleton already holds one).
+  let live = 0;
   for (let k = 0; k < ns.size; k++) {
     const index = entityIndex(ns.dense[k]!); const netId = ns.data.id[k]!;
-    const old = prev?.get(netId);
-    const stores = schema.stores; const isTouched = touched.has(index);
-    if (old && !isTouched && !dirty.has(index)) { out.set(netId, old); continue; }
+    if (netId >= seen.length) { const grown = new Uint16Array(Math.max(netId + 1, seen.length * 2)); grown.set(seen); seen = grown; seenMarks = grown; }
+    if (seen[netId] !== gen) { seen[netId] = gen; live++; }
+    // Unchanged entities already sit in `out` with their previous (immutable) state: nothing to
+    // do, no Map.get, no Map.set. A first capture (no prev) rebuilds everything, as before.
+    if (hasPrev && touched[index] !== gen && dirty[index] !== gen) continue;
+    const old = out.get(netId);
+    const isTouched = touched[index] === gen;
     const es = new Map<number, CompValues>(); let same = !!old;
     for (let ci = 0; ci < stores.length; ci++) {
       const st = stores[ci]!;
@@ -86,6 +132,9 @@ export function captureState(world: World, schema: NetSchema, prev: WorldState |
     }
     out.set(netId, same && old!.size === es.size ? old! : es);
   }
+  // Entities that left: `out` is bigger than the live set, so scan its keys once and drop the
+  // ones not stamped live this tick. No-leave ticks skip the scan entirely (size check).
+  if (out.size > live) for (const id of out.keys()) if (seen[id] !== gen) out.delete(id);
   return out;
 }
 /** Structural equality, so an entity whose dirty bit was set without a real change keeps its old object. */
@@ -145,14 +194,22 @@ export function writeEntityRecord(w: BitWriter, schema: NetSchema, netId: number
   }
   return true;
 }
+/**
+ * ADR-375: scratch writers for the sparse-vs-dense spawn choice. writeSpawnComp runs synchronously and
+ * never re-enters itself, so sharing two module-level writers is safe; reset() zeroes the used bytes
+ * (writeBits ORs) before each use. This drops two BitWriter allocations + one snapshotBits() byte copy
+ * per wide-component spawn. Narrow components (<= 8 fields) never touch them.
+ */
+const spawnSparseScratch = new BitWriter();
+const spawnDenseScratch = new BitWriter();
 /** Spawn body of one component: dense, or (wide components, mostly zero) a zero-run/sparse list, whichever is smaller. */
 function writeSpawnComp(w: BitWriter, specs: readonly FieldSpec[], v: CompValues): void {
   if (specs.length <= 8) { specs.forEach((s, i) => writeWire(w, s, v[i]!)); return; }
   const nz: number[] = []; for (let i = 0; i < specs.length; i++) if (!Object.is(v[i], 0)) nz.push(i);
-  const sp = new BitWriter(); sp.writeVarUint(nz.length); let q = -1; for (const i of nz) { sp.writeVarUint(i - q - 1); q = i; writeWire(sp, specs[i]!, v[i]!); }
-  const dn = new BitWriter(); specs.forEach((s, i) => writeWire(dn, s, v[i]!));
-  const sparse = sp.bitLength < dn.bitLength; const src = (sparse ? sp : dn).snapshotBits();
-  w.writeBool(sparse); w.appendBits(src.bytes, src.bits);
+  const sp = spawnSparseScratch; sp.reset(); sp.writeVarUint(nz.length); let q = -1; for (const i of nz) { sp.writeVarUint(i - q - 1); q = i; writeWire(sp, specs[i]!, v[i]!); }
+  const dn = spawnDenseScratch; dn.reset(); specs.forEach((s, i) => writeWire(dn, s, v[i]!));
+  const sparse = sp.bitLength < dn.bitLength;
+  w.writeBool(sparse); w.appendWriter(sparse ? sp : dn);
 }
 function readSpawnComp(r: BitReader, specs: readonly FieldSpec[]): number[] {
   if (specs.length <= 8 || !r.readBool()) return specs.map((s) => readWire(r, s));

@@ -17,8 +17,9 @@ describe("96-slot Container replication bandwidth", () => {
     // move one stack's count in slot 63 (deposit/withdraw/split all write single slots)
     const st = w.store(G.Container); const slot = st.slot(e & 0xfffff);
     st.data.counts[slot * N + 63] = 500; st.markChanged(e & 0xfffff);
+    const s0base = new Map(s0); // ADR-376: captureState mutates `prev` in place
     const s1 = captureState(w, schema, s0); w.clearChanges();
-    const d1 = new BitWriter(); const stats = encodeDelta(d1, schema, s1, s0); const deltaBytes = d1.finish().length;
+    const d1 = new BitWriter(); const stats = encodeDelta(d1, schema, s1, s0base); const deltaBytes = d1.finish().length;
     expect(stats.changes).toBe(1);
     // whole-array cost is ~96 x (2+2+4+2+4) = 1344 B; one slot must be tiny
     expect(spawnBytes).toBeGreaterThan(N * 14);
@@ -35,7 +36,8 @@ describe("96-slot Container replication bandwidth", () => {
     // a full stack move (item+count+tick+durability+crafter in 2 slots) is still well under 5% of the array
     for (const f of ["items", "counts", "createdTick", "durability", "crafterId"] as const) { st.data[f][slot * N + 10] = 0; st.data[f][slot * N + 95] = 3; }
     st.markChanged(e & 0xfffff);
-    const s2 = captureState(w, schema, s1); const d2 = new BitWriter(); encodeDelta(d2, schema, s2, s1);
+    const s1base = new Map(s1); // ADR-376: captureState mutates `prev` in place
+    const s2 = captureState(w, schema, s1); const d2 = new BitWriter(); encodeDelta(d2, schema, s2, s1base);
     expect(d2.finish().length).toBeLessThan(N * 14 * 0.05);
     console.log(`[container96] spawn ${spawnBytes} B, 1-slot change ${deltaBytes} B`);
   });

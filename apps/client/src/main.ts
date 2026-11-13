@@ -18,7 +18,7 @@ let camRot: CameraRotateControl | undefined; // ADR-253
 import { mountUi } from "./ui-root.js";
 import { showRenderError, glInfo } from "./glcheck.js";
 import { BUILD_HASH, errorLog, installGlobalErrorCapture, logRecoverable } from "./error-log.js";
-import { assetBytes, setAssetCacheVersion, setRenderErrorSink } from "@engine/render";
+import { assetBytes, setAssetCacheVersion, setRenderErrorSink, Sprite, type WarmupResult } from "@engine/render";
 import { startDiag } from "./diag.js";
 import { installFullscreenRestore, exitFullscreen } from "./fullscreen.js";
 import { uiRoot, safeAreaInsets } from "./ui-root.js";
@@ -617,11 +617,28 @@ const defaultUrl = serverParam ?? `${location.protocol === "https:" ? "wss" : "w
  * server with gameplay.ready — until then the server freezes this player's vitals, diseases, pet hunger
  * and pack spoilage, so nothing drains while the player is still loading in.
  */
-/** ADR-370: bounded warm-up drain after the world is ready — the first frames already draw under the loading overlay, so their stream page-ins are queued; wait for the queue to drain (or the window to expire) before the overlay lifts. */
+/** ADR-370: bounded warm-up drain after the world is ready — the first frames already draw under the loading overlay, so their stream page-ins are queued; wait for the queue to drain (or the window to expire) before the overlay lifts.
+ * ADR-374: before draining, page the sprites actually on screen tier-0. The boot warm-up could
+ * only page visible-pin art (no world existed yet, so no first-view set was knowable); now the
+ * player has spawned and frames have synced the view world, so the sprite ids in iso.view are
+ * the first view — warmupKeysForSprites turns them into page keys and warmupFirstView requests
+ * them first (it pumps while it waits, so this does not stall the way the boot window used
+ * to). The drain after it covers whatever the draws queued. A failure here must never block
+ * ready: the drain still runs and the overlay still lifts on its own timeout. */
 const drainFirstView = async (): Promise<void> => {
-  const drain = iso ? await iso.renderer.atlas.warmupDrain?.() : undefined;
+  if (!iso) return;
+  const atlas = iso.renderer.atlas;
+  let warm: WarmupResult | undefined;
+  try {
+    const spriteIds: number[] = [];
+    for (const ve of iso.view.query([Sprite])) { const id = iso.view.getField(ve, Sprite, "spriteId"); if (id !== undefined) spriteIds.push(id); }
+    const keys = atlas.warmupKeysForSprites?.(spriteIds) ?? [];
+    if (keys.length) warm = await atlas.warmupFirstView?.(keys, { firstView: keys });
+  } catch (e) { console.warn("first-view warm-up failed", e); }
+  const drain = await atlas.warmupDrain?.();
   if (!drain) return;
   loadCost.record("warmup-drain", drain.ms);
+  if (warm) loadCost.note(`world-entry warm-up: ${warm.resident}/${warm.requested + warm.alreadyResident} first-view pages resident in ${warm.ms}ms${warm.timedOut ? ` (timed out, ${warm.stillPending} pending)` : ""}`);
   loadCost.note(drain.drained ? `first-view pages drained in ${drain.ms}ms` : `${drain.pending} first-view page(s) still pending after ${drain.ms}ms`);
 };
 const signalReady = async (): Promise<void> => {
@@ -648,7 +665,16 @@ if (creatorShot) {
   runCreatorShot(creatorShot).catch((e: unknown) => { (window as { __creatorReady?: unknown }).__creatorReady = { ok: false, seed: creatorShot.seed, error: String(e) }; });
 } else if (boot) {
   void (async () => {
-    await isoReady; loadCost.record("boot", performance.now() - bootT0);
+    await isoReady; const bootMs = performance.now() - bootT0; loadCost.record("boot", bootMs);
+    // ADR-380: split the boot bucket into the sub-phases IsoView.create timed (renderer / manifest / painted /
+    // registry.* / warmup / variants / lighting). The remainder ("other": module start, BootUI, menu setup) is
+    // whatever the timed phases do not cover — it must stay >= 0, so a clock-skew negative is dropped, never shown.
+    if (iso?.bootPhases?.length) {
+      let sub = 0;
+      for (const p of iso.bootPhases) { loadCost.recordSub("boot", p.name, p.ms); sub += p.ms; }
+      const other = Math.round(bootMs - sub);
+      if (other > 0) loadCost.recordSub("boot", "other", other);
+    }
     if (iso?.warmupResult) { const w = iso.warmupResult; loadCost.note(`boot warm-up: ${w.resident}/${w.requested + w.alreadyResident} first-view pages resident in ${w.ms}ms${w.timedOut ? ` (timed out, ${w.stillPending} pending)` : ""}`); }
     loadProgress.complete(); await boot.finish("Ready");
     let notice: string | undefined, page: string | null = null;

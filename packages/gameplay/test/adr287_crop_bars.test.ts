@@ -31,7 +31,9 @@ describe("ADR-287 crop inspection bars", () => {
     expect(decoded).toEqual(before); expect(decoded.get(500)!.has(schema.indexOf(G.Crop, w)!)).toBe(true);
     w.clearChanges(); w.set(c, G.Crop, { growth: 1 }); G.cropGrowthSystem(w);
     const grown = [...w.query([G.GrownPlant])][0]!; w.add(grown, NetId, { id: 501 });
-    const after = captureState(w, schema, before); const delta = new BitWriter(); encodeDelta(delta, schema, after, before);
+    // ADR-376: captureState mutates `prev` in place, so the base for the delta is a copy taken before this capture.
+    const beforeBase = new Map(before);
+    const after = captureState(w, schema, before); const delta = new BitWriter(); encodeDelta(delta, schema, after, beforeBase);
     const result = decodeDelta(new BitReader(delta.finish()), schema, decoded).state;
     expect(result).toEqual(after); expect(result.get(500)).toBeUndefined();
     expect(result.get(501)!.has(schema.indexOf(G.GrownPlant, w)!)).toBe(true);
