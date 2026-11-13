@@ -31,11 +31,13 @@ PREV = "/workspace/assets/preview"
 PAGE_KEY = "gt_waterfall"
 NF, FPS = 6, 8
 PAD = 2  # 1x bleed around each trimmed frame and the page edge
-# Diamond centre in the 64x64 (1x) paint box — same as a 68x52 ground cell after its 2 px pad is stripped.
-CX, CY = 32, 16
+# Diamond centre in the paint box — same world point as a 68x52 ground cell after its 2 px pad is stripped.
+# 16 px of headroom above the diamond lets pool mist and splash droplets rise off the impact edge.
+HEAD = 16
 FW, HW, HH = 64, 32, 16
 RES = 8
-AH = 64  # paint height at 1x: 32 px diamond + 32 px (2-level) skirt
+AH = 64 + HEAD  # headroom + 32 px diamond + 32 px (2-level) skirt
+CX, CY = 32, HH + HEAD
 
 # Waterfall palette: same teal family as gt_water (WCOL) but its own tones and marks
 # (elongated downward streaks, foam rolls, mist) — not a recolor of the lake ripples.
@@ -77,28 +79,40 @@ FLIP = {
     "gt_waterfall_pool_ny": "gt_waterfall_pool_nx",
 }
 
-# ---- geometry at RES in the 64x64 1x paint box ------------------------------------------------
+# ---- geometry at RES in the 64xAH 1x paint box ------------------------------------------------
 _ys, _xs = np.mgrid[0:AH * RES, 0:FW * RES].astype(np.float64)
 SX = (_xs + .5) / RES - HW
-SY = (_ys + .5) / RES - HH
+SY = (_ys + .5) / RES - CY
 U = (SX / HW + SY / HH) / 2 + .5
 V = (SY / HH - SX / HW) / 2 + .5
 TOP = (np.abs(SX) / HW + np.abs(SY) / HH) <= 1 + 0.6 / HH
 
 
-def face(facing: str, sk: float):
-    """Parallelogram of one iso cliff face extruded `sk` px down from the diamond edge. Returns mask, along [0,1], depth px."""
+def face(facing: str, sk: float, bulge=True):
+    """Parallelogram of one iso cliff face extruded `sk` px down from the diamond edge.
+
+    `bulge` fattens the mid-drop by a couple of px so the curtain reads as a convex sheet, not a flat stair riser.
+    Returns mask, along [0,1], depth px (may run a little past `sk` for foot churn).
+    """
     if facing == "px":
         # +x / lower-right: edge E(u=1,v=0) -> S(u=1,v=1)
         along = np.clip(1 - SX / HW, 0, 1)
         depth = SY - (HH - SX / 2)
-        m = (SX >= 0) & (SX <= HW) & (depth > -0.6) & (depth <= sk)
+        extra = 0.0
+        if bulge:
+            mid = np.sin(np.pi * np.clip(depth / max(sk, 1e-3), 0, 1))
+            extra = 2.6 * np.clip(mid, 0, 1)
+        m = (SX >= -extra) & (SX <= HW + extra) & (depth > -0.6) & (depth <= sk + 1.8)
     else:
         # -x / upper-left (far): edge N(u=0,v=0) -> W(u=0,v=1)
         along = np.clip(-SX / HW, 0, 1)
         depth = SY + HH + SX / 2
-        m = (SX <= 0) & (SX >= -HW) & (depth > -0.6) & (depth <= sk)
-    return m, along, np.clip(depth, 0, sk)
+        extra = 0.0
+        if bulge:
+            mid = np.sin(np.pi * np.clip(depth / max(sk, 1e-3), 0, 1))
+            extra = 2.6 * np.clip(mid, 0, 1)
+        m = (SX <= extra) & (SX >= -HW - extra) & (depth > -0.6) & (depth <= sk + 1.8)
+    return m, along, depth
 
 
 def _snap_rgb(rgb, pal):
@@ -124,7 +138,7 @@ def downs(rgb, a_solid, a_mist, f, pal_solid=SOLID):
     mist = (~solid) & (a_m > 0.04)
     if mist.any():
         out[mist, :3] = _snap_rgb(col, MISTC + ["#ffffff"])[mist]
-        out[mist, 3] = np.clip(a_m[mist] * 255, 0, 220).astype(np.uint8)
+        out[mist, 3] = np.clip(a_m[mist] * 255, 0, 235).astype(np.uint8)
     return Image.fromarray(out, "RGBA")
 
 
@@ -168,52 +182,52 @@ def _streak_field(along, depth, ph, seed):
 def paint_sheet(facing, levels, frame):
     b = Buf()
     sk = 16 * levels
-    m, along, depth = face(facing, sk)
+    m, along, depth = face(facing, sk, bulge=True)
     ph = frame / NF
-    field, scroll = _streak_field(along, depth, ph, seed=8100 + levels * 13 + (0 if facing == "px" else 29))
-    # cel bands
+    scroll = depth / 16.0 + ph
+    midness = 1 - np.abs(along - .5) * 2  # 1 at the curtain's camera-facing bulge, 0 at the sides
+    # base: convex cel curtain (dark edges, lit mid) — no depth-only bands, those read as stairs
     b.fill(m, P["mid"])
-    b.fill(m & (field < .40), P["trough"])
-    b.fill(m & (field < .28), P["deep"])
-    b.fill(m & (field > .62), P["lite"])
-    # hard shade along the outer edge of the parallelogram, highlight on the inner
-    if facing == "px":
-        outer, inner = along < .22, along > .78
-    else:
-        outer, inner = along < .22, along > .78
-    b.fill(m & outer & (field < .7), P["deep"])
-    b.fill(m & inner & (field > .5), P["lite"])
-    # vertical streak columns, slightly sinuous with downward flow (integer frequencies => seamless)
-    n_st = 6 + levels  # a few more columns on the taller sheet
-    wavy = along * n_st + 0.18 * np.sin((scroll * 2 + along) * 2 * np.pi) + vn1(along, 5, 9310) * .2
-    thin = np.abs((wavy % 1.0) - .5) < (0.10 + 0.03 * (field - .4))
-    b.fill(m & thin & (field > .38), P["streak"])
-    # brighter core in the middle of the strongest columns, sliding down
-    core = thin & (np.abs((wavy % 1.0) - .5) < 0.04) & (field > .5) & (np.sin((scroll * 3) * 2 * np.pi) > 0)
-    b.fill(m & core, P["shine"])
-    # sparse sparkles riding the cores
-    spark = (np.abs(vn1((scroll * 2 + along * 9) % 1.0, 13, 9420) - .5) < .03) & (field > .55) & thin
-    b.fill(m & spark, P["shine"])
-    # a few foam dashes riding the fall (not a foam cap)
-    foam = (vn1((scroll + along * 2.4) % 1.0, 9, 9500 + levels) > .88) & thin & (field > .45)
-    b.fill(m & foam, P["foam"])
-    b.fill(m & foam & (vn1(along, 8, 9511) > .55), P["foam_sh"])
-    # thin foam thread at the rim only (the lip tile carries the curl)
-    rim = m & (depth < (1.15 + .35 * np.sin((along * 5 + ph * 2 * np.pi))))
+    b.fill(m & (along < .18), P["deep"])
+    b.fill(m & (along > .82), P["trough"])
+    b.fill(m & (midness > .45), P["lite"])
+    # long vertical streaks of varying brightness; each column has its own phase so highlights
+    # travel down independently instead of forming a horizontal step
+    centers = (0.15, 0.32, 0.50, 0.67, 0.84)
+    widths = (0.055, 0.085, 0.11, 0.075, 0.05)
+    streak = np.zeros_like(along)
+    for i, (c, w) in enumerate(zip(centers, widths)):
+        wave = 0.03 * np.sin((scroll * 2 + i * 1.15) * 2 * np.pi)
+        d = np.abs(along - (c + wave))
+        pulse = 0.42 + 0.58 * (0.5 + 0.5 * np.sin((scroll * 2 + i * 0.85) * 2 * np.pi))
+        streak = np.maximum(streak, np.clip(1 - d / w, 0, 1) ** 1.15 * pulse)
+    b.fill(m & (streak > .22), P["lite"])
+    b.fill(m & (streak > .48), P["streak"])
+    b.fill(m & (streak > .78), P["shine"])
+    # a few foam dashes riding the brightest columns
+    foam = m & (streak > .62) & (vn1((scroll + along * 2.1) % 1.0, 9, 9500 + levels) > .86)
+    b.fill(foam, P["foam"])
+    # thin foam thread at the rim (the lip tile carries the curl)
+    rim = m & (depth < (1.15 + .35 * np.sin((along * 5 + ph * 2 * np.pi)))) & (depth > -0.2)
     b.fill(rim, P["foam_sh"])
     b.fill(rim & (depth < 0.7), P["foam"])
-    # soft mist wisps in the skirt, looping (rise = scroll wraps)
-    if levels >= 1:
-        # a couple of soft blobs whose centres travel down
-        for i, (ao, bo) in enumerate(((0.28, 0.15), (0.62, 0.55), (0.45, 0.0))):
-            cy = ((bo + ph) % 1.0) * sk
-            cx = ao + 0.04 * np.sin((ph + i) * 2 * np.pi)
-            r = 3.2 + (i % 2)
-            # distance in (along * face-width-ish, depth) — along is 0-1 over ~32 px
-            d2 = ((along - cx) * 28) ** 2 + ((depth - cy) * 1.0) ** 2
-            wisp = m & (d2 < (r * 3.2) ** 2)
-            amt = np.clip(1 - np.sqrt(d2) / (r * 3.2), 0, 1) ** 1.4 * 0.45
-            b.add_mist(wisp, amt, P["mist"] if i % 2 == 0 else P["mist2"])
+    # white churn where the sheet meets the next tier (the foot)
+    foot_w = 3.6 + 1.2 * np.sin(along * 7 + ph * 2 * np.pi)
+    foot = m & ((sk - depth) < foot_w) & (depth > sk - 6)
+    b.fill(foot, P["foam_sh"])
+    b.fill(foot & ((sk - depth) < foot_w * 0.6), P["foam"])
+    b.fill(foot & ((sk - depth) < 1.4) & (midness > .15), P["shine"])
+    for i in range(4):
+        a0 = (i + .45) / 4
+        bob = 1.1 * abs(np.sin(np.pi * ((ph + i * 0.25) % 1.0)))
+        blob = m & (((along - a0) * 22) ** 2 + (depth - (sk - 1.6 - bob)) ** 2 / 2.2 < 1.0)
+        b.fill(blob, P["foam"])
+        b.fill(blob & ((along - a0) ** 2 * 400 + (depth - (sk - 1.2 - bob)) ** 2 < 0.35), P["shine"])
+    # soft mist at the foot (the pool carries the bigger puff)
+    for i, ao in enumerate((0.3, 0.7)):
+        cy = sk - 1.0 - 2.0 * ((ph + i * 0.5) % 1.0)
+        d2 = ((along - ao) * 26) ** 2 + (depth - cy) ** 2
+        b.add_mist(m & (d2 < 8 ** 2), np.clip(1 - np.sqrt(d2) / 8, 0, 1) ** 1.2 * 0.4, P["mist2"])
     return b.finish()
 
 
@@ -259,63 +273,75 @@ def paint_lip(facing, frame):
 
 
 def paint_pool(facing, frame):
+    """Impact overlay only (no full-diamond refill) so the foam, droplets and mist read at game scale on top of gt_water."""
     b = Buf()
     ph = frame / NF
-    # unique agitated surface — radial from the impact edge, not the lake fbm
     if facing == "px":
         # splash of a PX fall lands on the dest's -x (NW) edge
-        impact, along, dist = (U < 0.55) & TOP, V, U
+        along, dist = V, U
+        on = (U < 0.72) & (np.abs(V - .5) < .62)
     else:
-        impact, along, dist = (U > 0.45) & TOP, V, 1 - U
-    # base agitated water across the diamond (dedicated swirl, different seed/shape than gt_water)
-    swirl = fbm(U * 1.1 + 0.25 * np.sin(2 * np.pi * ph), V * 1.1 - ph * 0.0, 6100, ((4, .5), (9, .3), (16, .2)))
-    # bias brighter toward the impact, calmer opposite
-    swirl = swirl + 0.08 * (1 - np.clip(dist, 0, 1))
-    # expanding rings from the impact edge, period 1 in ph
-    ring = np.abs(((dist * 3.2 - ph) % 1.0) - .5)
-    b.fill(TOP, P["mid"])
-    b.fill(TOP & (swirl < .40), P["trough"])
-    b.fill(TOP & (swirl < .28), P["deep"])
-    b.fill(TOP & (swirl > .62), P["lite"])
-    b.fill(TOP & (ring < .06) & (dist < 0.7) & (swirl > .4), P["streak"])
-    # foam shelf along the impact
-    wob = (vn1(along, 8, 6200) - .5) * .03
-    shelf = TOP & (dist < 0.10 + 0.025 * np.sin(2 * np.pi * ph + along * 7) + wob)
-    b.fill(shelf, P["foam_sh"])
-    b.fill(shelf & (dist < 0.055 + 0.02 * np.sin(2 * np.pi * (ph * 2 + along * 5))), P["foam"])
-    # bouncing foam blobs along the impact, looping
+        along, dist = V, 1 - U
+        on = (U > 0.28) & (np.abs(V - .5) < .62)
+    area = TOP & on
+    # a little roiling teal under the foam so the churn sits in water, not on empty
+    roil = area & (dist < 0.30 + 0.04 * np.sin(2 * np.pi * ph + along * 5))
+    b.fill(roil, P["lite"])
+    b.fill(roil & (dist < 0.16), P["streak"])
+    # bright cel foam bank along the impact — thick enough to read at 1x
+    wob = (vn1(along, 8, 6200) - .5) * .05
+    bank = area & (dist < 0.22 + 0.045 * np.sin(2 * np.pi * ph + along * 6.5) + wob)
+    b.fill(bank, P["foam_sh"])
+    b.fill(bank & (dist < 0.14 + 0.03 * np.sin(2 * np.pi * (ph * 2 + along * 5))), P["foam"])
+    b.fill(bank & (dist < 0.07), P["shine"])
+    # expanding foam ring (two phases) — a visible white ring, not a teal ripple
+    for off in (0.0, 0.5):
+        rr = 0.14 + 0.20 * ((ph + off) % 1.0)
+        fade = np.sin(np.pi * ((ph + off) % 1.0))
+        ring = area & (np.abs(dist - rr) < (0.04 + 0.015 * fade)) & (dist < 0.48) & (fade > 0.15)
+        b.fill(ring, P["foam"] if off == 0 else P["foam_sh"])
+        b.fill(ring & (np.abs(dist - rr) < 0.018) & (fade > .4), P["shine"])
+    # chunky bouncing foam blobs along the impact
     for i in range(5):
         a0 = (i + 0.5) / 5
-        bounce = 0.03 + 0.025 * abs(np.sin(np.pi * ((ph + i * 0.2) % 1.0)))
-        blob = TOP & ((along - a0) ** 2 * 28 + (dist - bounce) ** 2 * 70 < 0.055)
+        bounce = 0.05 + 0.05 * abs(np.sin(np.pi * ((ph + i * 0.2) % 1.0)))
+        blob = area & ((along - a0) ** 2 * 14 + (dist - bounce) ** 2 * 28 < 0.08)
         b.fill(blob, P["foam"])
-        b.fill(blob & (dist < bounce * 0.55), P["shine"])
-    # sparkles on the roil
-    sp = TOP & (vn1((U * 8 + ph) % 1.0, 17, 6300) > .92) & (vn1((V * 8 - ph * 0.5) % 1.0, 15, 6310) > .7)
-    b.fill(sp & (swirl > .5), P["shine"])
-    # soft mist rising from the impact, looping: puffs travel "up" (smaller screen y) and wrap
-    for i in range(4):
-        a0 = (i + 0.25) / 4
-        life = (ph + i * 0.25) % 1.0
-        # start at the impact, drift toward the far side / up
+        b.fill(blob & ((along - a0) ** 2 * 30 + (dist - bounce * 0.55) ** 2 * 50 < 0.03), P["shine"])
+    # splash droplets kicking up from the impact, ballistic hop, seamless over 6 frames
+    for i in range(7):
+        life = (ph + i * 0.17) % 1.0
+        t = (i + 0.35) / 7
+        hop = np.sin(np.pi * life)
         if facing == "px":
-            # NW edge: screen toward top-left
-            px = (0.08 + along * 0)  # will use uv near U=0, V=a0
-            cu, cv = 0.06 + 0.04 * life, a0 + 0.04 * np.sin(life * 2 * np.pi)
+            # NW edge in SX/SY: N (0,-16) -> W (-32, 0)
+            sx0, sy0 = -HW * t, -HH + HH * t
+            sx, sy = sx0 + 2.4 * life, sy0 - (6.5 + (i % 3)) * hop
         else:
-            cu, cv = 0.94 - 0.04 * life, a0 + 0.04 * np.sin(life * 2 * np.pi)
-        # also lift in screen y: subtract from SY
-        lift = life * 10  # px at 1x
-        d2 = ((U - cu) * 32) ** 2 + ((V - cv) * 32) ** 2 + 0  # uv ellipse
-        # shift the sample in screen space by lift: compare against SY + lift
-        # approximate: a uv circle plus a screen-y lift by moving the centre up
-        sx_c = (cu - cv) * HW
-        sy_c = (cu + cv - 1) * HH - lift
-        d2 = (SX - sx_c) ** 2 + (SY - sy_c) ** 2
-        r = 6.5 + 2.5 * life
-        amt = np.clip(1 - np.sqrt(d2) / r, 0, 1) ** 1.2 * (np.sin(np.pi * life) * 0.72)
-        wisp = d2 < (r * 1.05) ** 2
-        b.add_mist(wisp, amt, P["mist"] if i % 2 == 0 else P["mist2"])
+            # SE edge: E (32, 0) -> S (0, 16)
+            sx0, sy0 = HW - HW * t, HH * t
+            sx, sy = sx0 - 2.4 * life, sy0 - (6.5 + (i % 3)) * hop
+        rx, ry = 1.7 + 0.5 * (i % 2), 1.5 + 0.4 * hop
+        drop = ((SX - sx) / rx) ** 2 + ((SY - sy) / ry) ** 2 <= 1
+        # mid-hop is solid foam; ends sit in the bank (seamless)
+        b.fill(drop, P["foam"])
+        hi = ((SX - sx + 0.4) / (rx * 0.45)) ** 2 + ((SY - sy + 0.3) / (ry * 0.45)) ** 2 <= 1
+        b.fill(hi, P["shine"])
+    # soft mist puff rising at the impact edge (headroom above the diamond)
+    for i in range(3):
+        life = (ph + i / 3) % 1.0
+        t = (i + 0.5) / 3
+        fade = np.sin(np.pi * life)
+        if facing == "px":
+            sx0, sy0 = -HW * t, -HH + HH * t
+            sx, sy = sx0 + 1.5 * life, sy0 - 12.0 * life
+        else:
+            sx0, sy0 = HW - HW * t, HH * t
+            sx, sy = sx0 - 1.5 * life, sy0 - 12.0 * life
+        r = 7.5 + 5.0 * life
+        d2 = (SX - sx) ** 2 + (SY - sy) ** 2
+        b.add_mist(d2 < (r * 1.05) ** 2, np.clip(1 - np.sqrt(d2) / r, 0, 1) ** 1.15 * (0.85 * fade),
+                   P["mist"] if i % 2 == 0 else P["mist2"])
     return b.finish()
 
 
