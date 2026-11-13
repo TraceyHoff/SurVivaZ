@@ -5477,7 +5477,15 @@
     "wagon_medium": 5475,
     "wagon_medium_covered": 5476,
     "wagon_small": 5477,
-    "wagon_small_covered": 5478
+    "wagon_small_covered": 5478,
+    "gt_waterfall_lip_nx": 5479,
+    "gt_waterfall_lip_px": 5480,
+    "gt_waterfall_pool_nx": 5481,
+    "gt_waterfall_pool_px": 5482,
+    "gt_waterfall_sheet_1_nx": 5483,
+    "gt_waterfall_sheet_1_px": 5484,
+    "gt_waterfall_sheet_2_nx": 5485,
+    "gt_waterfall_sheet_2_px": 5486
   },
   "sounds": {
     "amb_rain": 1,

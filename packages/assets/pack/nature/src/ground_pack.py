@@ -113,7 +113,7 @@ def main():
         # Spring pages (artpass_spring_ground.py) and grazed grass (artpass_batch1.py) are
         # packed outside this SEAS list. Dropping them here would wipe those atlases.
         return (key.startswith('gt_spring') or key.startswith('gt_grazed')
-                or key.startswith('gt_grass_grazed')
+                or key.startswith('gt_grass_grazed') or key.startswith('gt_waterfall')
                 or (key.startswith('gt_') and key.endswith('_spring')))
     m['atlases'] = [a for a in m['atlases'] if not a['key'].startswith('gt_') or _retain_gt(a['key'])]
     m['sprites'] = [s for s in m['sprites'] if not s['key'].startswith('gt_') or _retain_gt(s['key'])]
