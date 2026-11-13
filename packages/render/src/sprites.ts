@@ -892,7 +892,7 @@ export class SpriteBatch {
         // ADR-244 (b): a v2 combat/ranged/pose/sleep sheet streams; until its page is in, the doll plays the resident core
         // idle (body + every layer follow dollAnim), never a missing/placeholder body
         // ADR-322: the same while the lazy cz_ride body page streams in (requested here: only riders ever ask for it)
-        if (bodyL && ok && res.atlas >= 0 && (!atlas.streamPageReady(res.atlas, sprio) || (res.anim.startsWith("ride_") && !atlas.pageReadyAt(res.atlas, sprio)))) { const ia = atlas.animIndex(sid, "idle"); if (ia >= 0 && atlas.resolve(sid, ia, f, t, 0, res)) this.streamBodyFallbacks++; }
+        if (bodyL && ok && res.atlas >= 0 && (!atlas.streamPageReady(res.atlas, sprio) || ((res.anim.startsWith("ride_") || res.anim.startsWith("crouch_")) && !atlas.pageReadyAt(res.atlas, sprio)))) { const ia = atlas.animIndex(sid, "idle"); if (ia >= 0 && atlas.resolve(sid, ia, f, t, 0, res)) this.streamBodyFallbacks++; }
         if (bodyL) { dollAnim = res.anim; if (ok && res.atlas >= 0) atlas.markUsedAt(res.atlas); }
       } else {
         // ADR-218: a lit fire sprite (station bonfire: Fuel.lit, frame 0 = idle) loops its idle anim on the render clock

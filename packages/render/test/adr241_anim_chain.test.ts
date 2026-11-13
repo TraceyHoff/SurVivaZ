@@ -61,13 +61,13 @@ describe("ADR-241 anim states + per-entity chains", () => {
     const r = reg(); const am = tables(r); const v2 = id(r, "v2s_body_male"), v1 = id(r, "body_male");
     const name = (sid: number, st: number, c: AnimChainCtx) => am.animName(sid, am.chainAnim(sid, animChainFor(st, c), st));
     expect(name(v2, AnimState.Attack, { weaponClass: "axe" })).toBe("attack_axe"); expect(name(v1, AnimState.Attack, { weaponClass: "axe" })).toBe("attack");
-    expect(name(v2, AnimState.Crouch, { moving: true })).toBe("crouch_walk"); expect(name(v1, AnimState.Crouch, { moving: true })).toBe("walk");
+    expect(name(v2, AnimState.Crouch, { moving: true })).toBe("crouch_walk"); expect(name(v1, AnimState.Crouch, { moving: true })).toBe("crouch_walk");
     expect(name(v2, AnimState.Sit, { driver: true })).toBe("vehicle"); expect(name(v2, AnimState.Block, {})).toBe("block"); expect(name(v1, AnimState.Block, {})).toBe("block");
     expect(name(v1, AnimState.BlockHit, {})).toBe("block_hit");
     const hasLie = am.findAnim(v2, "sleep_lie") >= 0; expect(name(v2, AnimState.Sleep, { bed: "lie" })).toBe(hasLie ? "sleep_lie" : "sleep");
     for (let s = 0; s < ANIM_STATE_NAMES.length; s++) for (const c of CTXS) expect(am.animName(v1, am.chainAnim(v1, animChainFor(s, c), s))).toBeDefined();
-    // paper doll: a wear layer without crouch_walk pulls the whole doll down the chain together
-    expect(am.animName(v2, am.sharedChainAnim(v2, [{ sprite: v2 }, { sprite: v1 }], animChainFor(AnimState.Crouch, { moving: true })!, AnimState.Crouch))).toBe("walk");
+    // paper doll: v1 now ships crouch_walk, so a v2+v1 doll stays on crouch_walk together
+    expect(am.animName(v2, am.sharedChainAnim(v2, [{ sprite: v2 }, { sprite: v1 }], animChainFor(AnimState.Crouch, { moving: true })!, AnimState.Crouch))).toBe("crouch_walk");
   });
   it("fully customized v1 dolls share block rather than falling down to idle", () => {
     const r = reg(); const am = tables(r);

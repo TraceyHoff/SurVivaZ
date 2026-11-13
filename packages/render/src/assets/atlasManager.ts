@@ -35,7 +35,7 @@ import type { AssetManager } from "@engine/core";
 import type { RectTable } from "./texturePacker.js";
 import { PageLRU, PRIO_NEAR, VramAccountant, rgbaBytes, type VramStats } from "../gl/vram.js";
 import { blockBytes, GL_FORMAT, ktx2Target, loadKtx2, loadKtx2Rgba, type Ktx2Target } from "./ktx2.js";
-import { assetFetch, isRidePageKey, withAssetSlot } from "./asset-fetch.js";
+import { assetFetch, isLazyDollPageKey, withAssetSlot } from "./asset-fetch.js";
 import { WARMUP_MAX_PAGES, WARMUP_POLL_MS, WARMUP_PRIO, WARMUP_WINDOW_MS, isWarmupCandidate, sortWarmupKeys, warmupPageBudget, type WarmupResult } from "./warmup.js";
 import type { CompressedTextureSupport } from "../gl/capabilities.js";
 import { isEnclosurePieceKey, lCornerArmPiece, streamingFallbackKeys } from "../building/modular.js";
@@ -140,7 +140,7 @@ export function bodyAtlasKeys(registry: AssetRegistry): Set<string> {
   try { for (const b of ["male", "female"]) { const x = cat?.bodySprite?.(b); if (x) ids.add(x.sprite); } } catch { /* catalog shape differs: key rule only */ }
   for (const s of registry.allSprites()) if (ids.has(s.id)) { out.add(s.atlas.key); for (const a of s.animList) for (const d of a.dirFrames ?? []) out.add(d.atlas.key); }
   for (const k of out) if (isV2StreamSheet(k)) out.delete(k); // ADR-244 (b)
-  for (const k of out) if (isRidePageKey(k)) out.delete(k); // ADR-322: the body's ride page streams (wear pool), never eager
+  for (const k of out) if (isLazyDollPageKey(k)) out.delete(k); // ride / crouch body pages stream (wear pool), never eager
   return out;
 }
 /** Art vehicle sheets: `veh_*` atlases loaded from files (the procedural placeholders are blob: URLs and stay resident). */
@@ -2130,8 +2130,8 @@ export function wearableOnlyAtlases(registry: AssetRegistry): Set<string> {
   // an atlas shared with anything else (bodies, mirrors, world props) stays resident
   for (const s of registry.allSprites()) if (!wear.has(s.id)) for (const k of pagesOf(s)) out.delete(k);
   for (const k of out) if (isV2StreamSheet(k)) out.delete(k); // ADR-244 (b): per-group v2 sheets go to the stream pool
-  // ADR-322: every seated-rider page (body + all 430 layers, ~111 MB) is lazy: paged in only when a rider is drawn
-  for (const s of registry.allSprites()) for (const k of pagesOf(s)) if (isRidePageKey(k)) out.add(k);
+  // ADR-322 / crouch: every ride / crouch doll page (body + all live layers) is lazy: paged in only when that anim is drawn
+  for (const s of registry.allSprites()) for (const k of pagesOf(s)) if (isLazyDollPageKey(k)) out.add(k);
   return out;
 }
 

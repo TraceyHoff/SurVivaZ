@@ -26,6 +26,7 @@ NA = {a[0]: a[1] for a in rig.ANIMS}
 def rigframe(anim, i):
     if anim in rig.BLOCK_ANIMS: return anim, i, rig.BLOCK_ANIMS[anim]
     if anim in rig.RIDE_ANIMS: return anim, i, rig.RIDE_ANIMS[anim]
+    if anim in rig.CROUCH_ANIMS: return anim, i, rig.CROUCH_ANIMS[anim]
     if anim == "hit": return "hit", i, rig.HIT_N
     if anim in NA: return anim, i, NA[anim]
     if anim == "blink": return "idle", [0, 3, 0][i], 4

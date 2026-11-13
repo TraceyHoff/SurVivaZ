@@ -10,13 +10,13 @@ import { AtlasManager, COLD_ATLAS_RE, HOT_ATLAS_RE, VISIBLE_PIN_RE } from "../sr
 const tierFromAtlasManager = (k: string): number => {
   if (!k) return 4;
   if (VISIBLE_PIN_RE.test(k)) return 1;
-  if (/^cz_ride_/.test(k) || COLD_ATLAS_RE.test(k)) return 4;
+  if (/^cz_(ride|crouch)_/.test(k) || COLD_ATLAS_RE.test(k)) return 4;
   if (HOT_ATLAS_RE.test(k)) return 2;
   return 3;
 };
 
 describe("ADR-370 warm-up ordering (pure)", () => {
-  it("tiers first-view, then visible-pin, then hot, then other, then cold/ride last", () => {
+  it("tiers first-view, then visible-pin, then hot, then other, then cold/ride/crouch last", () => {
     expect(warmupAtlasTier("gt_grass")).toBe(1);
     expect(warmupAtlasTier("furniture_chair")).toBe(1);
     expect(warmupAtlasTier("buildings_cabin")).toBe(1);
@@ -32,6 +32,7 @@ describe("ADR-370 warm-up ordering (pure)", () => {
     expect(warmupAtlasTier("hair_long")).toBe(4);
     expect(warmupAtlasTier("tops_tee")).toBe(4);
     expect(warmupAtlasTier("cz_ride_0_0")).toBe(4);
+    expect(warmupAtlasTier("cz_crouch_body_0")).toBe(4);
     expect(warmupAtlasTier("fx_snowflake")).toBe(4);
     expect(warmupAtlasTier("death_bag")).toBe(4);
     expect(warmupAtlasTier("")).toBe(4);
@@ -47,7 +48,7 @@ describe("ADR-370 warm-up ordering (pure)", () => {
     const keys = ["gt_grass", "furniture_chair", "buildings_cabin", "building_wall", "building_t2",
       "openings_door", "defenses_spikes", "characters", "body_male", "animals_wolf", "tiles_grass",
       "ui_icons", "sdf_text", "crops", "veh_cart", "nature_crops", "hair_long", "tops_tee",
-      "cz_ride_0_0", "fx_snowflake", "death_bag", "furniture_far", ""];
+      "cz_ride_0_0", "cz_crouch_body_0", "fx_snowflake", "death_bag", "furniture_far", ""];
     for (const k of keys) expect(warmupAtlasTier(k), k).toBe(tierFromAtlasManager(k));
   });
 
@@ -92,6 +93,7 @@ describe("ADR-370 warm-up prefetch (ADR-307 extension)", () => {
       { key: "gt_grass", image: "atlases/gt_grass.png", residency: "stream" },
       { key: "hair_long", image: "atlases/hair_long.png", residency: "stream" },
       { key: "cz_ride_0_0", image: "atlases/cz_ride_0_0.png", residency: "stream" },
+      { key: "cz_crouch_body_0", image: "atlases/cz_crouch_body_0.png", residency: "stream" },
       { key: "crops", image: "atlases/crops.png", residency: "stream" },
       { key: "veh_cart", image: "atlases/veh_cart.png", residency: "stream" },
     ],

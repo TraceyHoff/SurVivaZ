@@ -13,7 +13,6 @@ const headAt = (i: number) => ({ x: (i % 8) - 3, y: REF.y - 2 - (i % 2) });
 function setup(neck: boolean) {
   const cz = json("customization/manifest.customization.json");
   for (const b of cz.sprites.filter((s: any) => /^body_/.test(s.key))) {
-    b.animations.crouch = JSON.parse(JSON.stringify(b.animations.idle)); // synthetic crouch (no art yet)
     if (!neck) continue;
     b.attach = { ...(b.attach ?? {}), head: REF };
     for (const a of Object.values<any>(b.animations)) { if (!a.dirFrames) continue; a.frameMeta ??= {}; a.dirFrames.forEach((_: unknown, i: number) => { a.frameMeta[`df:${i}`] = { anchors: { ...(a.frameMeta[`df:${i}`]?.anchors ?? {}), head: headAt(i) } }; }); }
@@ -29,7 +28,7 @@ const HEAD = new Set(["hair", "hat", "face", "eyes"]);
 
 describe("head anchor in the 2D creator / Canvas2D paper doll", () => {
   const neck = setup(true), flat = setup(false);
-  for (const anim of ["idle", "walk", "sit", "swim", "crouch"]) it(`${anim}: all 8 facings offset head layers by head - attach.head, others stay put`, () => {
+  for (const anim of ["idle", "walk", "sit", "swim", "crouch_idle", "crouch_walk"]) it(`${anim}: all 8 facings offset head layers by head - attach.head, others stay put`, () => {
     for (let k = 0; k < 8; k++) {
       const L = previewLayers2D(neck.registry, neck.binding, neck.look, k, 0, undefined, anim);
       const body = L.find((l) => l.layer.slot === "body")!; expect(body).toBeDefined(); expect(L.filter((l) => HEAD.has(l.layer.slot)).length).toBeGreaterThanOrEqual(3);

@@ -42,6 +42,12 @@ describe("ADR-269 cloth mask art contract", () => {
             // Seated mount-riding poses: own cells on append-only cz_ride_ pages, never the bandana's.
             expect(d.atlas, name).toMatch(/^cz_ride_accessory_/);
             expect(ref.animations[name].dirFrames.some((b: M) => b.atlas === d.atlas && b.frame === d.frame && JSON.stringify(b.rect) === JSON.stringify(d.rect))).toBe(false);
+          } else if (name.startsWith("crouch_")) {
+            // Crouch poses: own cells on append-only cz_crouch_ pages, never the bandana's (1x1 blanks may share a page clear rect).
+            expect(d.atlas, name).toMatch(/^cz_crouch_accessory_/);
+            if ((d.rect?.w ?? 0) > 1 && (d.rect?.h ?? 0) > 1) {
+              expect(ref.animations[name].dirFrames.some((b: M) => b.atlas === d.atlas && JSON.stringify(b.rect) === JSON.stringify(d.rect))).toBe(false);
+            }
           } else expect(d.atlas, name).toBe(want);
         }
       }

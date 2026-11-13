@@ -67,11 +67,15 @@ export async function assetBytes(url: string): Promise<ArrayBuffer> {
 
 /** ADR-322: `cz_ride_<slot>_<n>` doll pages (ride_idle / ride_walk / ride_gallop): never prefetched, never resident. */
 export const isRidePageKey = (key: string): boolean => /^cz_ride_/.test(key);
+/** `cz_crouch_<slot>_<n>` doll pages (crouch_idle / crouch_walk): streamed like ride pages, never prefetched. */
+export const isCrouchPageKey = (key: string): boolean => /^cz_crouch_/.test(key);
+/** Streamed extra doll-anim pages (ride + crouch): wear-pool, not eager body, not warmed at boot. */
+export const isLazyDollPageKey = (key: string): boolean => isRidePageKey(key) || isCrouchPageKey(key);
 /** Resident boot images we want warm before / during setRegistry. Streamed pages stay on-demand. */
 export function shouldPrefetchAtlas(key: string, image: string, residency?: string): boolean {
   if (!key || !image || /^(blob|data):/i.test(image)) return false;
   if (/^veh_/.test(key) || /^building_t\d+$/.test(key)) return false;
-  if (isRidePageKey(key)) return false; // ADR-322: seated rider pages (~111 MB) stream only while someone rides
+  if (isLazyDollPageKey(key)) return false; // ride / crouch doll pages stream on use, not at boot
   if (/(^|\/)customization(\/|_v2)/i.test(image) && !/^body_/.test(key)) return false;
   if (residency === "stream" && !/^body_/.test(key) && !/^gt_/.test(key)) return false;
   return true;

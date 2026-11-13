@@ -15,7 +15,7 @@ def star(c, x, y, r, rp="gold", rot=0.0):
 # --- sit (AnimState.Sit, vehicles): bent legs hip -> knee -> foot. Standing anims keep the straight hip -> foot tube.
 def legpath(c, side):
     K = c.K
-    return [K["hips"][side], K["knees"][side], K["feet"][side]] if K.get("sit") else [K["hips"][side], K["feet"][side]]
+    return [K["hips"][side], K["knees"][side], K["feet"][side]] if (K.get("sit") or K.get("crouched")) else [K["hips"][side], K["feet"][side]]
 def along(c, pts, t):
     L = [math.dist(a, b) for a, b in zip(pts, pts[1:])]; tot = sum(L) or 1; s = max(0.0, min(1.0, t)) * tot
     for (a, b), l in zip(zip(pts, pts[1:]), L):

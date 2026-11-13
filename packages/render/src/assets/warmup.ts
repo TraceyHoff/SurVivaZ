@@ -40,8 +40,8 @@ export const WARMUP_POLL_MS = 16;
 const VISIBLE_PIN_RE = /^(gt_|furniture(_|$)|buildings?(_|$)|openings(_|$)|defenses(_|$))/;
 const HOT_ATLAS_RE = /(^|[_/-])(tiles?|terrain|ground|characters?|bod(y|ies)|base|resources|decor|items|animals|equipment|held|buildings?|openings|furniture|fog|ui|fonts?|sdf)([_@/-]|$)/i;
 const COLD_ATLAS_RE = /(^brand_|lod\d*|_far|distant|rare|_huge|_big|^fx_|death_bag|critters|wear|cosmetic|hair|hats?|accessor|tops?|bottoms?|shoes|faces?|eyes)/i;
-/** ADR-322: seated-rider doll pages stream only while someone rides — never a warm-up page. */
-const RIDE_PAGE_RE = /^cz_ride_/;
+/** ADR-322 / crouch: seated-rider and crouch doll pages stream on use — never a warm-up page. */
+const LAZY_DOLL_PAGE_RE = /^cz_(ride|crouch)_/;
 
 /**
  * Warm-up tier of an atlas key (lower = page it sooner).
@@ -56,7 +56,7 @@ export function warmupAtlasTier(key: string, firstView?: ReadonlySet<string>): n
   if (!key) return 4;
   if (firstView?.has(key)) return 0;
   if (VISIBLE_PIN_RE.test(key)) return 1;
-  if (RIDE_PAGE_RE.test(key) || COLD_ATLAS_RE.test(key)) return 4;
+  if (LAZY_DOLL_PAGE_RE.test(key) || COLD_ATLAS_RE.test(key)) return 4;
   if (HOT_ATLAS_RE.test(key)) return 2;
   return 3;
 }

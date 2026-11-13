@@ -4351,6 +4351,336 @@
    "masksKtx2": {
     "tintmask": "atlases/cz_ride_top_17.tintmask.ktx2"
    }
+  },
+  {
+   "key": "cz_crouch_body_0",
+   "image": "atlases/cz_crouch_body_0.png",
+   "frameW": 616,
+   "frameH": 272,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_body_0@2x.png",
+     "ktx2": "atlases/cz_crouch_body_0@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_body_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_body_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_body_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_accessory_0",
+   "image": "atlases/cz_crouch_accessory_0.png",
+   "frameW": 656,
+   "frameH": 768,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_accessory_0@2x.png",
+     "ktx2": "atlases/cz_crouch_accessory_0@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_accessory_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_accessory_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_accessory_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_bottom_0",
+   "image": "atlases/cz_crouch_bottom_0.png",
+   "frameW": 1016,
+   "frameH": 1016,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_bottom_0@2x.png",
+     "ktx2": "atlases/cz_crouch_bottom_0@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_bottom_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_bottom_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_bottom_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_bottom_1",
+   "image": "atlases/cz_crouch_bottom_1.png",
+   "frameW": 512,
+   "frameH": 72,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_bottom_1@2x.png",
+     "ktx2": "atlases/cz_crouch_bottom_1@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_bottom_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_bottom_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_bottom_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_eyes_0",
+   "image": "atlases/cz_crouch_eyes_0.png",
+   "frameW": 336,
+   "frameH": 112,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_eyes_0@2x.png",
+     "ktx2": "atlases/cz_crouch_eyes_0@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_eyes_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_eyes_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_eyes_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_face_0",
+   "image": "atlases/cz_crouch_face_0.png",
+   "frameW": 808,
+   "frameH": 168,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_face_0@2x.png",
+     "ktx2": "atlases/cz_crouch_face_0@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_face_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_face_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_face_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_hair_0",
+   "image": "atlases/cz_crouch_hair_0.png",
+   "frameW": 1016,
+   "frameH": 1016,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_hair_0@2x.png",
+     "ktx2": "atlases/cz_crouch_hair_0@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_hair_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_hair_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_hair_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_hair_1",
+   "image": "atlases/cz_crouch_hair_1.png",
+   "frameW": 824,
+   "frameH": 984,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_hair_1@2x.png",
+     "ktx2": "atlases/cz_crouch_hair_1@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_hair_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_hair_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_hair_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_hands_0",
+   "image": "atlases/cz_crouch_hands_0.png",
+   "frameW": 864,
+   "frameH": 368,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_hands_0@2x.png",
+     "ktx2": "atlases/cz_crouch_hands_0@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_hands_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_hands_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_hands_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_hat_0",
+   "image": "atlases/cz_crouch_hat_0.png",
+   "frameW": 984,
+   "frameH": 992,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_hat_0@2x.png",
+     "ktx2": "atlases/cz_crouch_hat_0@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_hat_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_hat_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_hat_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_hat_1",
+   "image": "atlases/cz_crouch_hat_1.png",
+   "frameW": 936,
+   "frameH": 880,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_hat_1@2x.png",
+     "ktx2": "atlases/cz_crouch_hat_1@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_hat_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_hat_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_hat_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_shoes_0",
+   "image": "atlases/cz_crouch_shoes_0.png",
+   "frameW": 944,
+   "frameH": 688,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_shoes_0@2x.png",
+     "ktx2": "atlases/cz_crouch_shoes_0@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_shoes_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_shoes_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_shoes_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_top_0",
+   "image": "atlases/cz_crouch_top_0.png",
+   "frameW": 1000,
+   "frameH": 1008,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_top_0@2x.png",
+     "ktx2": "atlases/cz_crouch_top_0@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_top_0.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_top_0.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_top_0.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_top_1",
+   "image": "atlases/cz_crouch_top_1.png",
+   "frameW": 1008,
+   "frameH": 1016,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_top_1@2x.png",
+     "ktx2": "atlases/cz_crouch_top_1@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_top_1.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_top_1.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_top_1.tintmask.ktx2"
+   }
+  },
+  {
+   "key": "cz_crouch_top_2",
+   "image": "atlases/cz_crouch_top_2.png",
+   "frameW": 776,
+   "frameH": 432,
+   "columns": 1,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/cz_crouch_top_2@2x.png",
+     "ktx2": "atlases/cz_crouch_top_2@2x.ktx2"
+    }
+   ],
+   "masks": {
+    "tintmask": "atlases/cz_crouch_top_2.tintmask.png"
+   },
+   "ktx2": "atlases/cz_crouch_top_2.ktx2",
+   "masksKtx2": {
+    "tintmask": "atlases/cz_crouch_top_2.tintmask.ktx2"
+   }
   }
  ],
  "sprites": [
@@ -30167,6 +30497,1716 @@
         "seat": {
          "x": -0.3,
          "y": -6.14
+        }
+       }
+      }
+     }
+    },
+    "crouch_idle": {
+     "frames": [
+      0,
+      1
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 2,
+     "loop": true,
+     "dirFrames": [
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 361,
+        "y": 109,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 68,
+        "y": 164,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 240,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 270,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 390,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.516129,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 364,
+        "y": 55,
+        "w": 34,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.925926
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 392,
+        "y": 109,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.925926
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 300,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 330,
+        "y": 163,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 102,
+        "y": 164,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 360,
+        "y": 163,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 421,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.548387,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 150,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 102,
+        "y": 0,
+        "w": 34,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.927273
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 452,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.927273
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 180,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.909091
+       }
+      }
+     ],
+     "frameMeta": {
+      "df:0": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -2.86,
+         "y": -7.93,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.5,
+         "y": -12,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:8": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -3.04,
+         "y": -8.75,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.67,
+         "y": -12.68,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:1": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.7,
+         "y": -9.77,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": false
+        },
+        "handL": {
+         "x": 8,
+         "y": -9.31,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": false
+        }
+       }
+      },
+      "df:9": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.7,
+         "y": -10.62,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": false
+        },
+        "handL": {
+         "x": 8,
+         "y": -9.95,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": false
+        }
+       }
+      },
+      "df:2": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -8.03,
+         "y": -12.5,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.82,
+         "y": -7.25,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:10": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.85,
+         "y": -13.33,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.64,
+         "y": -7.93,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:3": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -3.65,
+         "y": -14.53,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.6,
+         "y": -7.04,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:11": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -3.4,
+         "y": -15.28,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.85,
+         "y": -7.79,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:4": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 2.86,
+         "y": -14.67,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.5,
+         "y": -8.8,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:12": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 3.04,
+         "y": -15.35,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.67,
+         "y": -9.62,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:5": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.7,
+         "y": -12.83,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -8,
+         "y": -11.49,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:13": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.7,
+         "y": -13.48,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -8,
+         "y": -12.35,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:6": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 8.03,
+         "y": -10.1,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.82,
+         "y": -13.55,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:14": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.85,
+         "y": -10.77,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.64,
+         "y": -14.37,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:7": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 3.65,
+         "y": -8.07,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.6,
+         "y": -13.76,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
+        }
+       }
+      },
+      "df:15": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 3.4,
+         "y": -8.82,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.85,
+         "y": -14.51,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
+        }
+       }
+      }
+     }
+    },
+    "crouch_walk": {
+     "frames": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "fps": 8,
+     "directions": 8,
+     "dirStride": 4,
+     "loop": true,
+     "dirFrames": [
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 31,
+        "y": 217,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.90566
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 345,
+        "y": 217,
+        "w": 34,
+        "h": 52
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.923077
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 443,
+        "y": 217,
+        "w": 30,
+        "h": 52
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.923077
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 62,
+        "y": 217,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.548387,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 390,
+        "y": 163,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.925926
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 136,
+        "y": 164,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.943396
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 210,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 423,
+        "y": 109,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.419355,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 93,
+        "y": 217,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 170,
+        "y": 164,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 420,
+        "y": 163,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 483,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.548387,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 454,
+        "y": 109,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.516129,
+        "y": 0.925926
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 136,
+        "y": 0,
+        "w": 34,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.927273
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 514,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 240,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 124,
+        "y": 217,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 379,
+        "y": 217,
+        "w": 34,
+        "h": 52
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.923077
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 485,
+        "y": 109,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.516129,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 450,
+        "y": 163,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 516,
+        "y": 109,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.516129,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 204,
+        "y": 164,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.943396
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 155,
+        "y": 217,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 247,
+        "y": 217,
+        "w": 30,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 547,
+        "y": 109,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 238,
+        "y": 164,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 186,
+        "y": 217,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.516129,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 545,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.548387,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 270,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 170,
+        "y": 0,
+        "w": 34,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.927273
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 578,
+        "y": 109,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.925926
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 300,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.909091
+       }
+      }
+     ],
+     "frameMeta": {
+      "df:0": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -4.6,
+         "y": -7.77,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.57,
+         "y": -12.88,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:8": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -3.51,
+         "y": -8.6,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 6.48,
+         "y": -14.63,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:16": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -4.6,
+         "y": -7.77,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.57,
+         "y": -12.88,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:24": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -5.69,
+         "y": -9.52,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 8.65,
+         "y": -13.71,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:1": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -8.6,
+         "y": -10.07,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": false
+        },
+        "handL": {
+         "x": 8.6,
+         "y": -10.07,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": false
+        }
+       }
+      },
+      "df:9": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -8.6,
+         "y": -10.71,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": false
+        },
+        "handL": {
+         "x": 8.6,
+         "y": -12,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": true
+        }
+       }
+      },
+      "df:17": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -8.6,
+         "y": -10.07,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": false
+        },
+        "handL": {
+         "x": 8.6,
+         "y": -10.07,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": false
+        }
+       }
+      },
+      "df:25": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -8.6,
+         "y": -12,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": true
+        },
+        "handL": {
+         "x": 8.6,
+         "y": -10.71,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": false
+        }
+       }
+      },
+      "df:2": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.57,
+         "y": -12.88,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 4.6,
+         "y": -7.77,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:10": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -8.65,
+         "y": -13.71,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 5.69,
+         "y": -9.52,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:18": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.57,
+         "y": -12.88,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 4.6,
+         "y": -7.77,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:26": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -6.48,
+         "y": -14.63,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.51,
+         "y": -8.6,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:3": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -2.1,
+         "y": -14.56,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.1,
+         "y": -7.34,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:11": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -3.64,
+         "y": -15.85,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -0.56,
+         "y": -8.63,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:19": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -2.1,
+         "y": -14.56,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.1,
+         "y": -7.34,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:27": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -0.56,
+         "y": -15.85,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -3.64,
+         "y": -8.63,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:4": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 4.6,
+         "y": -14.13,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.57,
+         "y": -9.02,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:12": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 3.51,
+         "y": -15.88,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -6.48,
+         "y": -9.85,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:20": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 4.6,
+         "y": -14.13,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.57,
+         "y": -9.02,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:28": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 5.69,
+         "y": -14.96,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -8.65,
+         "y": -10.77,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:5": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 8.6,
+         "y": -11.83,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -8.6,
+         "y": -11.83,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:13": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 8.6,
+         "y": -13.77,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -8.6,
+         "y": -12.48,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:21": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 8.6,
+         "y": -11.83,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -8.6,
+         "y": -11.83,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:29": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 8.6,
+         "y": -12.48,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -8.6,
+         "y": -13.77,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:6": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.57,
+         "y": -9.02,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -4.6,
+         "y": -14.13,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:14": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 8.65,
+         "y": -10.77,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -5.69,
+         "y": -14.96,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:22": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.57,
+         "y": -9.02,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -4.6,
+         "y": -14.13,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:30": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 6.48,
+         "y": -9.85,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.51,
+         "y": -15.88,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:7": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 2.1,
+         "y": -7.34,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.1,
+         "y": -14.56,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
+        }
+       }
+      },
+      "df:15": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 3.64,
+         "y": -8.63,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 0.56,
+         "y": -15.85,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
+        }
+       }
+      },
+      "df:23": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 2.1,
+         "y": -7.34,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.1,
+         "y": -14.56,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
+        }
+       }
+      },
+      "df:31": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 0.56,
+         "y": -8.63,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 3.64,
+         "y": -15.85,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
         }
        }
       }
@@ -55993,6 +58033,1716 @@
         "seat": {
          "x": -0.3,
          "y": -6.14
+        }
+       }
+      }
+     }
+    },
+    "crouch_idle": {
+     "frames": [
+      0,
+      1
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 2,
+     "loop": true,
+     "dirFrames": [
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 398,
+        "y": 55,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 480,
+        "y": 163,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 0,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 30,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 204,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.516129,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 330,
+        "y": 55,
+        "w": 34,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.925926
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 429,
+        "y": 55,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.925926
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 60,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 90,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 514,
+        "y": 163,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 120,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 235,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.548387,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 576,
+        "y": 0,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 0,
+        "y": 0,
+        "w": 34,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.927273
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 266,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.927273
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 0,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.909091
+       }
+      }
+     ],
+     "frameMeta": {
+      "df:0": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -2.16,
+         "y": -8.23,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 6.79,
+         "y": -11.71,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:8": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -2.33,
+         "y": -9.05,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 6.97,
+         "y": -12.38,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:1": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -6.7,
+         "y": -9.77,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": false
+        },
+        "handL": {
+         "x": 7,
+         "y": -9.31,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": false
+        }
+       }
+      },
+      "df:9": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -6.7,
+         "y": -10.62,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": false
+        },
+        "handL": {
+         "x": 7,
+         "y": -9.95,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": false
+        }
+       }
+      },
+      "df:2": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.32,
+         "y": -12.21,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.11,
+         "y": -7.55,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:10": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.14,
+         "y": -13.03,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 2.93,
+         "y": -8.22,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:3": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -3.65,
+         "y": -14.11,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.6,
+         "y": -7.46,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:11": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -3.4,
+         "y": -14.86,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.85,
+         "y": -8.21,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:4": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 2.16,
+         "y": -14.37,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -6.79,
+         "y": -9.09,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:12": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 2.33,
+         "y": -15.05,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -6.97,
+         "y": -9.92,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:5": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 6.7,
+         "y": -12.83,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7,
+         "y": -11.49,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:13": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 6.7,
+         "y": -13.48,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7,
+         "y": -12.35,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:6": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.32,
+         "y": -10.39,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.11,
+         "y": -13.25,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:14": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.14,
+         "y": -11.07,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -2.93,
+         "y": -14.08,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:7": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 3.65,
+         "y": -8.49,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.6,
+         "y": -13.34,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
+        }
+       }
+      },
+      "df:15": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 3.4,
+         "y": -9.24,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.85,
+         "y": -14.09,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
+        }
+       }
+      }
+     }
+    },
+    "crouch_walk": {
+     "frames": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "fps": 8,
+     "directions": 8,
+     "dirStride": 4,
+     "loop": true,
+     "dirFrames": [
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 272,
+        "y": 164,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.90566
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 277,
+        "y": 217,
+        "w": 34,
+        "h": 52
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.923077
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 413,
+        "y": 217,
+        "w": 30,
+        "h": 52
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.923077
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 480,
+        "y": 216,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.548387,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 150,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.925926
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 548,
+        "y": 163,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.943396
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 30,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 460,
+        "y": 55,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.419355,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 511,
+        "y": 216,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 582,
+        "y": 163,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 180,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 297,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.548387,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 491,
+        "y": 55,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.516129,
+        "y": 0.925926
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 34,
+        "y": 0,
+        "w": 34,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.927273
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 328,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 60,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 542,
+        "y": 216,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 311,
+        "y": 217,
+        "w": 34,
+        "h": 52
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.923077
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 522,
+        "y": 55,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.516129,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 210,
+        "y": 110,
+        "w": 30,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 553,
+        "y": 55,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.516129,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 0,
+        "y": 164,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.943396
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 573,
+        "y": 216,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 217,
+        "y": 217,
+        "w": 30,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 584,
+        "y": 55,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.907407
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 34,
+        "y": 164,
+        "w": 34,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 0,
+        "y": 217,
+        "w": 31,
+        "h": 53
+       },
+       "anchor": {
+        "x": 0.516129,
+        "y": 0.924528
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 359,
+        "y": 0,
+        "w": 31,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.548387,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 90,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.533333,
+        "y": 0.909091
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 68,
+        "y": 0,
+        "w": 34,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.5,
+        "y": 0.927273
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 330,
+        "y": 109,
+        "w": 31,
+        "h": 54
+       },
+       "anchor": {
+        "x": 0.451613,
+        "y": 0.925926
+       }
+      },
+      {
+       "atlas": "cz_crouch_body_0",
+       "rect": {
+        "x": 120,
+        "y": 55,
+        "w": 30,
+        "h": 55
+       },
+       "anchor": {
+        "x": 0.433333,
+        "y": 0.909091
+       }
+      }
+     ],
+     "frameMeta": {
+      "df:0": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -3.89,
+         "y": -8.07,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 6.86,
+         "y": -12.58,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:8": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -2.8,
+         "y": -8.9,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 5.77,
+         "y": -14.33,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:16": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -3.89,
+         "y": -8.07,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 6.86,
+         "y": -12.58,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:24": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -4.98,
+         "y": -9.82,
+         "angle": 18.9,
+         "len": 0.742,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.95,
+         "y": -13.42,
+         "angle": 28.2,
+         "len": 0.88,
+         "behind": true
+        }
+       }
+      },
+      "df:1": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.6,
+         "y": -10.07,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.6,
+         "y": -10.07,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": false
+        }
+       }
+      },
+      "df:9": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.6,
+         "y": -10.71,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.6,
+         "y": -12,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": true
+        }
+       }
+      },
+      "df:17": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.6,
+         "y": -10.07,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": false
+        },
+        "handL": {
+         "x": 7.6,
+         "y": -10.07,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": false
+        }
+       }
+      },
+      "df:25": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.6,
+         "y": -12,
+         "angle": -10.3,
+         "len": 0.693,
+         "behind": true
+        },
+        "handL": {
+         "x": 7.6,
+         "y": -10.71,
+         "angle": 10.3,
+         "len": 0.693,
+         "behind": false
+        }
+       }
+      },
+      "df:2": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -6.86,
+         "y": -12.58,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.89,
+         "y": -8.07,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:10": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -7.95,
+         "y": -13.42,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 4.98,
+         "y": -9.82,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:18": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -6.86,
+         "y": -12.58,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 3.89,
+         "y": -8.07,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:26": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -5.77,
+         "y": -14.33,
+         "angle": -28.2,
+         "len": 0.88,
+         "behind": true
+        },
+        "handL": {
+         "x": 2.8,
+         "y": -8.9,
+         "angle": -18.9,
+         "len": 0.742,
+         "behind": false
+        }
+       }
+      },
+      "df:3": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -2.1,
+         "y": -14.14,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.1,
+         "y": -7.76,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:11": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -3.64,
+         "y": -15.43,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -0.56,
+         "y": -9.05,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:19": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -2.1,
+         "y": -14.14,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -2.1,
+         "y": -7.76,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:27": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": -0.56,
+         "y": -15.43,
+         "angle": -26.6,
+         "len": 1.039,
+         "behind": true
+        },
+        "handL": {
+         "x": -3.64,
+         "y": -9.05,
+         "angle": -29.4,
+         "len": 0.947,
+         "behind": false
+        }
+       }
+      },
+      "df:4": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 3.89,
+         "y": -13.83,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -6.86,
+         "y": -9.32,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:12": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 2.8,
+         "y": -15.58,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -5.77,
+         "y": -10.15,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:20": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 3.89,
+         "y": -13.83,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -6.86,
+         "y": -9.32,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:28": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 4.98,
+         "y": -14.66,
+         "angle": -12.9,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.95,
+         "y": -11.06,
+         "angle": -23,
+         "len": 1.063,
+         "behind": false
+        }
+       }
+      },
+      "df:5": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.6,
+         "y": -11.83,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.6,
+         "y": -11.83,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:13": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.6,
+         "y": -13.77,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.6,
+         "y": -12.48,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:21": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.6,
+         "y": -11.83,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.6,
+         "y": -11.83,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:29": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.6,
+         "y": -12.48,
+         "angle": 6.6,
+         "len": 1.079,
+         "behind": true
+        },
+        "handL": {
+         "x": -7.6,
+         "y": -13.77,
+         "angle": -6.6,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:6": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 6.86,
+         "y": -9.32,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.89,
+         "y": -13.83,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:14": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 7.95,
+         "y": -11.06,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -4.98,
+         "y": -14.66,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:22": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 6.86,
+         "y": -9.32,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -3.89,
+         "y": -13.83,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:30": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 5.77,
+         "y": -10.15,
+         "angle": 23,
+         "len": 1.063,
+         "behind": false
+        },
+        "handL": {
+         "x": -2.8,
+         "y": -15.58,
+         "angle": 12.9,
+         "len": 1.079,
+         "behind": true
+        }
+       }
+      },
+      "df:7": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 2.1,
+         "y": -7.76,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.1,
+         "y": -14.14,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
+        }
+       }
+      },
+      "df:15": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 3.64,
+         "y": -9.05,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 0.56,
+         "y": -15.43,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
+        }
+       }
+      },
+      "df:23": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 2.1,
+         "y": -7.76,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 2.1,
+         "y": -14.14,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
+        }
+       }
+      },
+      "df:31": {
+       "anchors": {
+        "head": {
+         "x": 0,
+         "y": -29.65
+        },
+        "handR": {
+         "x": 0.56,
+         "y": -9.05,
+         "angle": 29.4,
+         "len": 0.947,
+         "behind": false
+        },
+        "handL": {
+         "x": 3.64,
+         "y": -15.43,
+         "angle": 26.6,
+         "len": 1.039,
+         "behind": true
         }
        }
       }
