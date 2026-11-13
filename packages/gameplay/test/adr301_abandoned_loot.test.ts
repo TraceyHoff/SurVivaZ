@@ -16,6 +16,7 @@ describe("ADR-301 abandoned loot and usable furniture", () => {
   it("fills searchable storage so a player can withdraw the loot", () => {
     const w = makeWorld();
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Shed, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     const ks = keys(w, r.placed);
     const chest = r.placed.find((_, i) => ks[i] === "basic_storage_box" || ks[i] === "barrel_storage" || ks[i]?.includes("storage"));
     expect(chest).toBeDefined();
@@ -40,6 +41,7 @@ describe("ADR-301 abandoned loot and usable furniture", () => {
     const lootOf = (seed: number) => {
       const w = makeWorld({}, seed);
       const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Cottage, rot: 0, ruin: 0, tier: 1 });
+      G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
       const ks = keys(w, r.placed);
       return r.placed.flatMap((e, i) => {
         if (!(ks[i]!.includes("storage") || ks[i]!.includes("chest") || ks[i] === "barrel_storage" || ks[i]!.includes("wardrobe"))) return [];
@@ -55,6 +57,7 @@ describe("ADR-301 abandoned loot and usable furniture", () => {
   it("always keeps the workshop workbench as a usable crafting station", () => {
     const w = makeWorld();
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Workshop, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     const ks = keys(w, r.placed);
     const bench = r.placed.find((_, i) => ks[i] === "workbench");
     expect(bench).toBeDefined();
@@ -83,6 +86,7 @@ describe("ADR-301 abandoned loot and usable furniture", () => {
     for (let ox = 8; ox < 240 && !found; ox += 7) {
       const w = makeWorld();
       const r = G.stampAbandonedSite(w, ox, 8, { kind: G.AbandonedKind.Workshop, rot: 0, ruin: 0, tier: 1 });
+      G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
       const ks = keys(w, r.placed);
       const extra = r.placed.find((_, i) => ks[i] === "anvil" || ks[i] === "furnace");
       if (extra && isStation(w, extra)) found = true;

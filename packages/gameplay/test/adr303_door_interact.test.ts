@@ -8,6 +8,7 @@ describe("ADR-303 house doors and supported floors", () => {
     const w = makeWorld();
     installPermissions(w);
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Shed, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(r.skipped).toBe(false);
     const defs = G.gameplayDefs(w);
     const door = r.placed.find((e) => defs.pieces.get(w.getField(e, G.BuildPiece, "type")!)?.key === "door_wood");
@@ -39,6 +40,7 @@ describe("ADR-303 house doors and supported floors", () => {
   it("two-story floors sit one story above the ground, supported by walls on foundations", () => {
     const w = makeWorld();
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.TwoStoryCottage, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(r.skipped).toBe(false);
     const defs = G.gameplayDefs(w);
     const lh = defs.building.levelHeight;

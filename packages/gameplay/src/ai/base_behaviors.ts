@@ -1,5 +1,5 @@
 import { MOUNT_BOTS } from "../mount_defs.js";
-import { editIndex, isUnderground } from "../terrain_depth.js";
+import { isUnderground } from "../terrain_depth.js";
 import { walkerWaypoint } from "../systems/creature_nav.js";
 import { planTerrainBase } from "./terrain_base.js";
 /**
@@ -211,7 +211,7 @@ export function goTo(c: Ctx, o: { moveX: number; moveY: number; aimX: number; ai
         && c.self.y >= Math.min(near.y, far.y) - .3 && c.self.y <= Math.max(near.y, far.y) + .3;
       if (dn > 0.45 && !crossing) {
         c.bb.set("doorPhase", 0);
-        const w = worldOf(c), wp = w && editIndex(w).size ? walkerWaypoint(w, c.agent.bb.num("selfEntity") as Entity, c.self.x, c.self.y, near.x, near.y) : undefined;
+        const w = worldOf(c), wp = w ? walkerWaypoint(w, c.agent.bb.num("selfEntity") as Entity, c.self.x, c.self.y, near.x, near.y) : undefined; // ADR-382: always route (see the main path below)
         toward(o, c.self.x, c.self.y, wp?.x ?? near.x, wp?.y ?? near.y, s); return d;
       }
       if (!door.open) { stop(o); if (c.self.tick - c.bb.num("doorAt", -1e9) > 20) { o.actions.push(`door:${door.id}`); c.bb.set("doorAt", c.self.tick); } return d; }
@@ -219,7 +219,16 @@ export function goTo(c: Ctx, o: { moveX: number; moveY: number; aimX: number; ai
     }
     c.bb.set("doorPhase", 0);
   }
-  const w = worldOf(c); const wp = w && editIndex(w).size ? walkerWaypoint(w, c.agent.bb.num("selfEntity") as Entity, c.self.x, c.self.y, tx, ty) : undefined;
+  // ADR-382: always route through the pathfinder. The old gate (`editIndex(w).size ?`) only
+  // routed when some terrain had already been edited, so on a pristine map a bot walked
+  // directly at its target with no obstacle avoidance — it pushed against its own campfire
+  // (which sits between the bot and its quarry stand) and never moved, tripped stuckOn /
+  // workFail, and the travel behaviour walked it 150 tiles away; the raised pad was never
+  // dug (ADR-252). The first dig itself needs the pathfinder, so the gate was a circular
+  // dependency the pre-378 world only escaped by lucky timing. walkerWaypoint already
+  // returns the direct goal when the ray is clear (navNeeded), so the gate saved nothing
+  // but correctness.
+  const w = worldOf(c); const wp = w ? walkerWaypoint(w, c.agent.bb.num("selfEntity") as Entity, c.self.x, c.self.y, tx, ty) : undefined;
   toward(o, c.self.x, c.self.y, wp?.x ?? tx, wp?.y ?? ty, s); return d;
 }
 /** ADR-252: container work goes through the ADR-250 storage API (storageDepositActions / storageWithdrawActions): the

@@ -117,6 +117,7 @@ describe("ADR-373 abandoned variety", () => {
     for (const kind of NEW_KINDS) {
       const w = makeWorld();
       const r = G.stampAbandonedSite(w, 8, 8, { kind, rot: 0, ruin: 0, tier: 1 });
+      G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
       expect(r.skipped).toBe(false);
       expect(r.marker).toBeGreaterThan(0);
       const ks = keys(w, r.placed);
@@ -145,6 +146,7 @@ describe("ADR-373 abandoned variety", () => {
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
     const w = makeWorld();
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Shed, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(r.skipped).toBe(false);
     expect(keys(w, r.placed).filter((k) => k === "foundation").length).toBe(9);
   });
@@ -188,6 +190,7 @@ describe("ADR-373 abandoned variety", () => {
         const plan = G.planAbandonedChunk(7, cx, cy);
         if (!plan) continue;
         const r = G.stampAbandonedSite(w, plan.originX, plan.originY, { kind: plan.kind, rot: plan.rot, ruin: plan.ruin });
+        G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
         if (r.skipped || !r.marker) continue;
         const mw = w.getField(r.marker, G.AbandonedSite, "width")!;
         const mh = w.getField(r.marker, G.AbandonedSite, "height")!;
@@ -212,6 +215,7 @@ describe("ADR-373 abandoned variety", () => {
     let stamped = 0; let placed = 0;
     for (let i = 0; i < 40; i++) {
       const r = G.stampAbandonedSite(w, 8 + (i % 8) * 40, 8 + Math.floor(i / 8) * 40, { kind: (i % 28) as never, rot: 0, ruin: 0, tier: 1 });
+      G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
       if (!r.skipped) { stamped++; placed += r.placed.length; }
     }
     const t2 = performance.now();

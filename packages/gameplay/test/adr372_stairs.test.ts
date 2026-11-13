@@ -59,6 +59,7 @@ const keys = (w: World, ents: readonly Entity[]): string[] => {
 const lvlOf = (w: World, e: Entity): number => w.getField(e, G.PieceSlot, "z") ?? Math.round((w.getField(e, Transform, "z") ?? 0) / LH);
 function stampCottage(w: World, ruin = 0): { marker: Entity; placed: Entity[] } {
   const r = G.stampAbandonedSite(w, OX, OY, { kind: G.AbandonedKind.TwoStoryCottage, rot: 0, ruin, tier: 1 });
+  G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
   expect(r.skipped).toBe(false);
   steps(w, 2);
   return { marker: r.marker as Entity, placed: r.placed };
@@ -218,6 +219,7 @@ describe("ADR-372 blocked / rebuilt stairs", () => {
     expect(site).toBeDefined();
     const { ox, oy } = site!;
     const r = G.stampAbandonedSite(w, ox, oy, { kind: G.AbandonedKind.TwoStoryCottage, rot: 0, ruin: 0.8, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(r.skipped).toBe(false);
     steps(w, 2);
     // The interior flight tile (local 1, 3) has a stairwell above it but no stairs below it.

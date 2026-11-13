@@ -36,6 +36,7 @@ const stock = (r: Rig, keys: readonly string[] = ["wood", "stone", "sticks", "pl
 /** Stamp a ruin and return its marker + placed pieces. */
 function stampRuin(r: Rig, ox: number, oy: number, kind: number, ruin: number): { marker: Entity; placed: Entity[] } {
   const res = G.stampAbandonedSite(r.w, ox, oy, { kind: kind as never, rot: 0, ruin, tier: 1 });
+  G.drainAbandonedStamps(r.w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
   expect(res.skipped, `stamp at ${ox},${oy}`).toBe(false);
   return { marker: res.marker as Entity, placed: res.placed };
 }

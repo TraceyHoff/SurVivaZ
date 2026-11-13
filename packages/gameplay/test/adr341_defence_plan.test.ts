@@ -270,6 +270,7 @@ describe("ADR-341 wiring: the sensor translates the planner's target, it plans n
   it("a threatened ruin home defends through the real view (plan + target, no mem.base, no view.base)", () => {
     const r = rig({ claim: false, noBase: true }); // a ruin bot has no mem.base (ADR-337/340)
     const res = G.stampAbandonedSite(r.w, 8, 8, { kind: G.AbandonedKind.Shed, rot: 0, ruin: 0.1, tier: 1 });
+    G.drainAbandonedStamps(r.w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(res.skipped, "stamp the ruin").toBe(false);
     const marker = res.marker as Entity;
     const stub = { seen: [], home: { ...r.home }, playerName: "bot" } as unknown as G.AgentWorldView;

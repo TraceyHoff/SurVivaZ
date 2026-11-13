@@ -6,17 +6,19 @@
  */
 import { PlayerId, Transform, type Entity, type World } from "@engine/core";
 import { CHUNK_SIZE, isWaterId, parseChunkKey, waterDepthAt, WaterDepth, type ChunkKey } from "@engine/world";
-import { AbandonedSite, BuildPiece, PieceOwner, ResourceNode, Tribe } from "../components.js";
+import { AbandonedSite, BuildPiece, PieceOwner, PieceSlot, ResourceNode, Tribe } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { BuildFail } from "../events.js";
 import { addItem } from "../inventory.js";
 import { indexEntity } from "../spawn.js";
 import { TerrainRes, addChunkLoadHook } from "../world.js";
 import { AttachKind } from "../components.js";
-import { resolveAttachment } from "./links.js";
+import { resolveAttachment, unlinkPiece } from "./links.js";
+import { structures, unmarkLinked } from "./structure.js";
 import { damageStageFor, maxHpOf } from "./integrity.js";
 import { hasOwnClaim, placePiece, snapPlacement, tribeOf, validatePlacement } from "./place.js";
 import { exteriorStairsFor, STAIRS_DATA } from "./stairs.js";
+import { ABANDONED_DATA } from "./abandoned_data.js";
 
 /**
  * ADR-373: density raised 0.12 -> 0.15 per chunk (+25%): a chunk is 32x32 = 1024 tiles, so
@@ -129,6 +131,13 @@ export interface PlannedSite {
 export interface StampResult {
   marker: Entity | 0; placed: Entity[]; omitted: number; skipped: boolean;
   kind: AbandonedKindId; stories: number; garden: boolean; pen: boolean;
+  /**
+   * ADR-382: true while pieces are still queued for the time-sliced stamp. The result is a live
+   * handle: `placed` grows and `marker` is set as the pump finishes the site (see
+   * pumpAbandonedStamps / drainAbandonedStamps). Callers that need the finished site — tests,
+   * reclaim flows — must drain or step the world first. `pending` is false for skipped stamps.
+   */
+  pending: boolean;
 }
 
 const PHASE: Record<Role, number> = { deck: 0, wall: 1, opening: 2, stair: 3, furniture: 4, loot: 4, fence: 4, garden: 4, roof: 5 };
@@ -713,14 +722,20 @@ function pickLoot(rand: () => number, wardrobe: boolean): { key: string; count: 
   return { key, count: rare ? 1 : 1 + (rand() * 4 | 0) };
 }
 
+/** ADR-382: roll the loot picks for one container from `rand` without placing them. */
+function rollLootPicks(rand: () => number, wardrobe: boolean): { key: string; count: number }[] {
+  const n = 2 + (rand() * 4 | 0);
+  const picks: { key: string; count: number }[] = [];
+  for (let i = 0; i < n; i++) picks.push(pickLoot(rand, wardrobe));
+  return picks;
+}
+
 function fillLoot(world: World, piece: Entity, rand: () => number): void {
   const box = resolveAttachment(world, piece, AttachKind.Storage); if (!box) return;
   const defs = gameplayDefs(world);
   const type = world.getField(piece, BuildPiece, "type");
   const wardrobe = !!(type !== undefined && defs.pieces.get(type)?.features.wardrobe);
-  const n = 2 + (rand() * 4 | 0);
-  for (let i = 0; i < n; i++) {
-    const pick = pickLoot(rand, wardrobe);
+  for (const pick of rollLootPicks(rand, wardrobe)) {
     try { addItem(world, box, defs.itemId(pick.key), pick.count); } catch { /* item renamed */ }
   }
 }
@@ -744,33 +759,96 @@ function placeSpec(world: World, p: PlannedPiece): Entity | 0 {
   return e;
 }
 
-export function stampAbandonedSite(world: World, originX: number, originY: number, opts: AbandonedOpts = {}): StampResult {
-  const empty = (kind: AbandonedKindId = opts.kind ?? AbandonedKind.Shed): StampResult => ({ marker: 0, placed: [], omitted: 0, skipped: true, kind, stories: 1, garden: false, pen: false });
-  if (!isAuthority(world)) return empty();
-  const plan = planAbandonedSite(world.seed, originX, originY, opts);
-  if (siteExistsAt(world, plan.originX, plan.originY)) return { ...empty(plan.kind), kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen };
-  if (footprintBusy(world, plan.originX, plan.originY, plan.width, plan.height)) return { ...empty(plan.kind), kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen };
-  if (nearSpawn(plan.originX, plan.originY, plan.width, plan.height)) return { ...empty(plan.kind), kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen };
-  if (!siteTerrainOk(world, plan.originX, plan.originY, plan.width, plan.height)) return { ...empty(plan.kind), kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen };
-  const ordered = [...plan.pieces].sort((a, b) => a.level - b.level || PHASE[a.role] - PHASE[b.role]);
-  const placed: Entity[] = []; let omitted = 0;
-  const lootRand = rng(hashU32(world.seed, originX, originY, 0x1007));
-  let retry: PlannedPiece[] = [];
-  for (const spec of ordered) {
-    if (spec.omit) { omitted++; continue; }
-    const e = placeSpec(world, spec);
-    if (!e) { if (spec.role === "roof") retry.push(spec); continue; }
-    placed.push(e);
-    if (spec.role === "loot") fillLoot(world, e, lootRand);
+/**
+ * ADR-382: time-sliced abandoned stamping. A site chunk used to cost 4.5–9.2 ms inside one tick
+ * (terrain ~0.67 ms + stamp 3.7–8.4 ms, ~30–50 µs per placed piece, ~55 pieces/site average,
+ * manor 204 pieces / 10.1 ms), all of it synchronous inside ChunkManager.install → onLoad →
+ * world.step — about one hitch per ~6 chunks while moving. The stamp is now plan-now /
+ * place-N-per-tick: stampAbandonedSite plans (~0.1 ms) and enqueues, and the postSim pump
+ * (gameplay.abandonedStamps, in GAMEPLAY_SYSTEM_ORDER) places at most
+ * ABANDONED_STAMP_PIECES_PER_TICK pieces per tick, so a site appears over ~3–10 ticks
+ * instead of one long tick. The per-piece cost is the placed piece itself (placePiece +
+ * index + loot fill), so the cap is counted in placed pieces; failed placements and omitted
+ * specs cost only a validation and do not consume the budget.
+ * The cap is a data knob, `stampPiecesPerTick` in packages/gameplay/data/abandoned.json
+ * (leaf module building/abandoned_data.ts, same precedent as stairs_data.ts): 20 pieces
+ * ≈ 0.6–1.0 ms/tick at the measured 30–50 µs per placed piece — inside the 2 ms
+ * chunk-load budget (ADR-379) with room for the chunk's own terrain gen. Site kinds,
+ * weights, density (SITE_CHANCE stays 0.15), piece counts, and loot are unchanged; only
+ * the timing moves.
+ *
+ * Ordering: pieces land in the old order (level, then PHASE: deck → wall → opening → stair →
+ * furniture/loot/fence/garden → roof), so foundations/walls land first and the site keeps its
+ * shape while it builds; the roof retry passes (ADR-311) run inside the same budget once the
+ * main queue drains. The loot stream (lootRand) is consumed in placement order, so a sliced
+ * stamp fills exactly the loot a synchronous stamp would.
+ *
+ * Safety: the queue lives in a module WeakMap keyed by World (no persistence/schema impact).
+ * A second stamp for the same origin while one is pending returns the pending handle instead
+ * of double-planning. A chunk that unloads mid-stamp is rolled back on the next pump tick
+ * (placed pieces destroyed, entry dropped) so a reload re-plans and re-stamps from scratch —
+ * no leak, no duplication. A server restart mid-stamp loses the queue but keeps the placed
+ * pieces; the next stamp attempt resumes from those pieces (matchPartialStamp) instead of
+ * leaving a permanent half-ruin behind footprintBusy. The marker (AbandonedSite) is only
+ * created when the site completes, so reclaim / nearby-work / AI claim flows never see a
+ * half-built site — they see nothing until it is whole.
+ */
+export const ABANDONED_STAMP_PIECES_PER_TICK = ABANDONED_DATA.stampPiecesPerTick;
+
+interface PendingStamp {
+  key: string; originX: number; originY: number; plan: PlannedSite;
+  /** Placement order (level, PHASE); specs already placed by a resumed stamp are removed. */
+  ordered: PlannedPiece[];
+  next: number; placed: Entity[]; retry: PlannedPiece[]; retryPasses: number;
+  lootRand: () => number;
+  /** Live handle returned by stampAbandonedSite: placed grows, marker is set on completion. */
+  result: StampResult;
+}
+export interface PendingStampInfo { key: string; originX: number; originY: number; kind: AbandonedKindId; placed: number; remaining: number }
+const stampQueues = new WeakMap<World, Map<string, PendingStamp>>();
+const stampKey = (ox: number, oy: number): string => `${ox},${oy}`;
+function queueOf(world: World): Map<string, PendingStamp> {
+  let q = stampQueues.get(world);
+  if (!q) { q = new Map(); stampQueues.set(world, q); }
+  return q;
+}
+
+/** True when the chunk holding this stamp's origin is no longer resident (evicted). */
+function stampChunkGone(world: World, entry: PendingStamp): boolean {
+  const terrain = world.getResource(TerrainRes);
+  if (!terrain?.loaded) return false; // no terrain view (tests): cannot tell, keep the stamp
+  return terrain.loaded(entry.originX, entry.originY) === false;
+}
+
+/**
+ * Roll back a pending stamp: destroy what it placed so far and drop the entry. Mirrors
+ * unloadStructures (building/persist.ts): the piece MUST leave the StructureIndex before
+ * it is destroyed — pieces destroyed in the postSim pump would otherwise never be cleaned
+ * up (structureIndexSystem runs in the simulation phase, before the pump, and the removal
+ * record is cleared at the end of the step), leaving ghost decks/edges that make the
+ * re-stamp's validation fail. Attachments (storage boxes) go with their piece, unspilled:
+ * the site was never visible or claimable, so there is nothing to drop as loot.
+ */
+function rollbackStamp(world: World, entry: PendingStamp): void {
+  stampQueues.get(world)?.delete(entry.key);
+  const idx = structures(world);
+  for (const e of entry.placed) {
+    if (!world.isAlive(e)) continue;
+    for (const a of unlinkPiece(world, e)) if (world.isAlive(a)) { unmarkLinked(world, a); world.destroy(a); }
+    idx.removePiece(e);
+    if (world.isAlive(e)) world.destroy(e);
   }
-  // ADR-311: roof tiles whose wall-anchored neighbour came later in row order get another pass (bounded, no new rand)
-  for (let pass = 0; pass < 3 && retry.length; pass++) {
-    const next: PlannedPiece[] = [];
-    for (const spec of retry) { const e = placeSpec(world, spec); if (e) placed.push(e); else next.push(spec); }
-    if (next.length === retry.length) break;
-    retry = next;
-  }
-  if (placed.length === 0) return { ...empty(plan.kind), kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen, omitted };
+  entry.placed.length = 0;
+  entry.result.pending = false;
+  entry.result.skipped = true;
+}
+
+/** Finish a stamp: clear footprint nodes, then create the marker (only now is the site visible). */
+function finishStamp(world: World, entry: PendingStamp): void {
+  stampQueues.get(world)?.delete(entry.key);
+  const result = entry.result;
+  if (entry.placed.length === 0) { result.skipped = true; result.pending = false; return; }
+  const plan = entry.plan;
   if (world.isRegistered(ResourceNode)) {
     for (const e of [...world.query([ResourceNode, Transform])]) {
       const x = world.getField(e, Transform, "x")!, y = world.getField(e, Transform, "y")!;
@@ -781,8 +859,185 @@ export function stampAbandonedSite(world: World, originX: number, originY: numbe
   world.add(marker, Transform, { x: plan.originX + 0.5, y: plan.originY + 0.5, z: 0 })
     .add(marker, AbandonedSite, { originX: plan.originX, originY: plan.originY, width: plan.width, height: plan.height, kind: plan.kind, stories: plan.stories, claimed: 0, claimedBy: 0 });
   indexEntity(world, marker);
-  return { marker, placed, omitted, skipped: false, kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen };
+  result.marker = marker;
+  result.pending = false;
 }
+
+function pieceMatches(world: World, e: Entity, spec: PlannedPiece): boolean {
+  const defs = gameplayDefs(world);
+  const type = world.getField(e, BuildPiece, "type");
+  if (type === undefined || (defs.pieces.get(type)?.key ?? "") !== spec.key) return false;
+  const t = world.get(e, Transform); if (!t) return false;
+  if (Math.abs(t.x - spec.x) > 0.01 || Math.abs(t.y - spec.y) > 0.01) return false;
+  const slot = world.has(e, PieceSlot) ? world.get(e, PieceSlot) : undefined;
+  const level = slot ? slot.z : Math.round((t.z ?? 0) / defs.building.levelHeight);
+  return level === spec.level;
+}
+
+/**
+ * Resume a stamp interrupted by a server restart: the queue is gone but the placed pieces
+ * persisted. Every unowned footprint piece must match a non-omitted planned spec (same key,
+ * level, position); any owned piece (player-built) or any unowned piece that matches nothing
+ * aborts the resume and the stamp stays skipped, exactly as before ADR-382. Matched pieces
+ * are the site's own — a player-built piece always carries an owner/tribe, and another
+ * site's pieces cannot overlap this footprint (sites are chunk-contained, one per chunk).
+ * Returns the matched pieces in placement order, or undefined to skip.
+ */
+function matchPartialStamp(world: World, plan: PlannedSite): { placed: Entity[]; placedSpecs: Set<PlannedPiece>; pieceOf: Map<PlannedPiece, Entity> } | undefined {
+  const pieces: Entity[] = [];
+  for (const e of world.query([BuildPiece, Transform])) {
+    const x = world.getField(e, Transform, "x")!, y = world.getField(e, Transform, "y")!;
+    if (x < plan.originX - 0.05 || x >= plan.originX + plan.width + 0.05 || y < plan.originY - 0.05 || y >= plan.originY + plan.height + 0.05) continue;
+    pieces.push(e);
+  }
+  for (const e of pieces) {
+    const owner = world.isRegistered(PieceOwner) ? world.getField(e, PieceOwner, "player") ?? 0 : 0;
+    const tribe = world.isRegistered(Tribe) ? world.getField(e, Tribe, "id") ?? 0 : 0;
+    if (owner !== 0 || tribe !== 0) return undefined; // contested footprint: keep the old skip
+  }
+  const ordered = [...plan.pieces].sort((a, b) => a.level - b.level || PHASE[a.role] - PHASE[b.role]);
+  const used = new Set<Entity>();
+  const placed: Entity[] = []; const placedSpecs = new Set<PlannedPiece>(); const pieceOf = new Map<PlannedPiece, Entity>();
+  for (const spec of ordered) {
+    if (spec.omit) continue;
+    const found = pieces.find((e) => !used.has(e) && pieceMatches(world, e, spec));
+    if (!found) continue; // not placed yet: the queue will place it
+    used.add(found); placed.push(found); placedSpecs.add(spec); pieceOf.set(spec, found);
+  }
+  if (pieces.some((e) => !used.has(e))) return undefined; // foreign unowned piece: abort
+  if (placed.length === 0) return undefined; // nothing of this site is here (cannot happen after footprintBusy)
+  return { placed, placedSpecs, pieceOf };
+}
+
+export function stampAbandonedSite(world: World, originX: number, originY: number, opts: AbandonedOpts = {}): StampResult {
+  const empty = (kind: AbandonedKindId = opts.kind ?? AbandonedKind.Shed): StampResult => ({ marker: 0, placed: [], omitted: 0, skipped: true, kind, stories: 1, garden: false, pen: false, pending: false });
+  if (!isAuthority(world)) return empty();
+  const key = stampKey(originX, originY);
+  const pending = queueOf(world).get(key);
+  if (pending) return pending.result; // already stamping here: same live handle, no double-plan
+  const plan = planAbandonedSite(world.seed, originX, originY, opts);
+  const skipped = { ...empty(plan.kind), kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen };
+  if (siteExistsAt(world, plan.originX, plan.originY)) return skipped;
+  // ADR-382 resume: a busy footprint with no marker can be a stamp cut off by a restart.
+  let resumed: { placed: Entity[]; placedSpecs: Set<PlannedPiece>; pieceOf: Map<PlannedPiece, Entity> } | undefined;
+  if (footprintBusy(world, plan.originX, plan.originY, plan.width, plan.height)) {
+    resumed = matchPartialStamp(world, plan);
+    if (!resumed) return skipped;
+  }
+  if (nearSpawn(plan.originX, plan.originY, plan.width, plan.height)) return skipped;
+  if (!siteTerrainOk(world, plan.originX, plan.originY, plan.width, plan.height)) return skipped;
+  const ordered = [...plan.pieces].sort((a, b) => a.level - b.level || PHASE[a.role] - PHASE[b.role]);
+  const omitted = plan.pieces.filter((p) => p.omit).length;
+  const lootRand = rng(hashU32(world.seed, originX, originY, 0x1007));
+  const result: StampResult = { marker: 0, placed: [], omitted, skipped: false, kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen, pending: true };
+  const entry: PendingStamp = {
+    key, originX: plan.originX, originY: plan.originY, plan,
+    ordered: resumed ? ordered.filter((s) => !resumed!.placedSpecs.has(s)) : ordered,
+    next: 0, placed: result.placed, retry: [], retryPasses: 0, lootRand, result,
+  };
+  if (resumed) {
+    // The matched pieces are already standing, in placement order. Replaying their loot
+    // rolls against the fresh stream (without adding items — the containers were filled
+    // when the pieces were first placed) keeps the loot stream aligned with an
+    // uninterrupted stamp, so the resumed site fills exactly the same loot.
+    entry.placed.push(...resumed.placed);
+    for (const spec of ordered) {
+      if (!resumed.placedSpecs.has(spec) || spec.role !== "loot") continue;
+      const piece = resumed.pieceOf.get(spec)!;
+      const box = resolveAttachment(world, piece, AttachKind.Storage);
+      if (!box) continue; // fillLoot consumed nothing for it either
+      const type = world.getField(piece, BuildPiece, "type");
+      const wardrobe = !!(type !== undefined && gameplayDefs(world).pieces.get(type)?.features.wardrobe);
+      rollLootPicks(lootRand, wardrobe);
+    }
+  }
+  queueOf(world).set(key, entry);
+  return result;
+}
+
+/**
+ * ADR-382: advance every pending stamp by up to `maxPieces` placed pieces total (default
+ * ABANDONED_STAMP_PIECES_PER_TICK). Called once per tick by the gameplay.abandonedStamps
+ * postSim system; tests and tools can call it directly. Returns pieces placed this call.
+ * A stamp whose chunk has been evicted is rolled back instead of pumped.
+ */
+export function pumpAbandonedStamps(world: World, maxPieces: number = ABANDONED_STAMP_PIECES_PER_TICK): number {
+  const queue = stampQueues.get(world);
+  if (!queue || queue.size === 0) return 0;
+  let placedThisCall = 0;
+  let budget = Math.max(0, Math.floor(maxPieces));
+  for (const entry of [...queue.values()]) {
+    if (budget <= 0) break;
+    if (stampChunkGone(world, entry)) { rollbackStamp(world, entry); continue; }
+    while (budget > 0 && entry.next < entry.ordered.length) {
+      const spec = entry.ordered[entry.next++]!;
+      if (spec.omit) continue;
+      const e = placeSpec(world, spec);
+      if (!e) { if (spec.role === "roof") entry.retry.push(spec); continue; }
+      entry.placed.push(e);
+      if (spec.role === "loot") fillLoot(world, e, entry.lootRand);
+      placedThisCall++; budget--;
+    }
+    // ADR-311 roof retry passes, still inside this tick's budget. A pass only counts when
+    // every spec in it was attempted; a pass that makes no progress ends retries.
+    while (entry.next >= entry.ordered.length && entry.retry.length > 0 && entry.retryPasses < 3 && budget > 0) {
+      const pass = entry.retry; entry.retry = [];
+      const failed: PlannedPiece[] = [];
+      let attempted = 0;
+      for (const spec of pass) {
+        if (budget <= 0) { failed.push(spec); continue; }
+        attempted++;
+        const e = placeSpec(world, spec);
+        if (e) { entry.placed.push(e); placedThisCall++; budget--; }
+        else failed.push(spec);
+      }
+      if (attempted < pass.length) { entry.retry = failed; break; } // partial pass: resume next tick, not counted
+      if (failed.length === pass.length) { entry.retry = []; entry.retryPasses = 3; break; } // no progress: stop
+      entry.retry = failed; entry.retryPasses++;
+    }
+    if (entry.next >= entry.ordered.length && (entry.retry.length === 0 || entry.retryPasses >= 3)) finishStamp(world, entry);
+  }
+  return placedThisCall;
+}
+
+/** ADR-382: pump until no stamp is pending (tests and callers that need the site now). */
+export function drainAbandonedStamps(world: World): number {
+  let total = 0;
+  for (let i = 0; i < 100 && (stampQueues.get(world)?.size ?? 0) > 0; i++) total += pumpAbandonedStamps(world, Infinity);
+  return total;
+}
+
+/** ADR-382: summaries of the stamps still building (empty when idle). */
+export function pendingAbandonedStamps(world: World): PendingStampInfo[] {
+  const queue = stampQueues.get(world);
+  if (!queue) return [];
+  return [...queue.values()].map((e) => ({ key: e.key, originX: e.originX, originY: e.originY, kind: e.plan.kind, placed: e.placed.length, remaining: (e.ordered.length - e.next) + e.retry.length }));
+}
+
+/**
+ * ADR-382: roll back a pending stamp (destroy what it placed, drop the entry). Returns true
+ * when a stamp was pending. Tests use this to simulate a chunk unloading mid-stamp; the
+ * pump does the same automatically when it sees the chunk is gone.
+ */
+export function cancelAbandonedStamp(world: World, originX: number, originY: number): boolean {
+  const entry = stampQueues.get(world)?.get(stampKey(originX, originY));
+  if (!entry) return false;
+  rollbackStamp(world, entry);
+  return true;
+}
+
+/** Test/dev hooks (same `_internal` precedent as roads._roadsInternal). */
+export const _abandonedStampsInternal = {
+  /**
+   * Forget a pending stamp WITHOUT touching its placed pieces — simulates a process
+   * restart, where the in-memory queue is gone but the pieces persist. The next stamp
+   * attempt for that origin must resume from the standing pieces (matchPartialStamp).
+   */
+  forget(world: World, originX: number, originY: number): boolean {
+    return stampQueues.get(world)?.delete(stampKey(originX, originY)) ?? false;
+  },
+  pendingCount(world: World): number { return stampQueues.get(world)?.size ?? 0; },
+};
 
 export function planAbandonedChunk(seed: number, cx: number, cy: number): { originX: number; originY: number; kind: AbandonedKindId; rot: number; ruin: number } | undefined {
   if (hashU32(seed, cx, cy, 0xC40CE) / 4294967296 >= SITE_CHANCE) return undefined;
@@ -798,6 +1053,12 @@ export function planAbandonedChunk(seed: number, cx: number, cy: number): { orig
   return { originX: ox, originY: oy, kind, rot, ruin };
 }
 
+/**
+ * ADR-382: chunk-load entry point. Plans the chunk's site (if any) and starts the time-sliced
+ * stamp; the site completes over the next few ticks via the gameplay.abandonedStamps pump.
+ * Returns undefined when the chunk has no site, otherwise the stamp's live handle (see
+ * StampResult.pending) — a re-load while a stamp is pending returns the same handle.
+ */
 export function stampAbandonedChunk(world: World, key: ChunkKey | { cx: number; cy: number }): StampResult | undefined {
   const { cx, cy } = typeof key === "number" || typeof key === "string" ? parseChunkKey(key as ChunkKey) : key;
   const plan = planAbandonedChunk(world.seed, cx, cy); if (!plan) return undefined;
@@ -880,8 +1141,16 @@ export function catalogHas(kind: AbandonedKindId): { stories: number; garden: bo
 
 let abandonedHooked = false;
 export function installAbandonedStructures(_world: World): void {
-  if (abandonedHooked) return;
-  abandonedHooked = true;
-  addChunkLoadHook((w, key) => { if (isAuthority(w)) stampAbandonedChunk(w, key); });
+  if (!abandonedHooked) {
+    abandonedHooked = true;
+    addChunkLoadHook((w, key) => { if (isAuthority(w)) stampAbandonedChunk(w, key); });
+  }
+  // ADR-382: the time-slice pump itself is a gameplay system now — "gameplay.abandonedStamps"
+  // in GAMEPLAY_SYSTEM_ORDER (install.ts), so it runs once per tick on every world installed
+  // through installGameplay (server, singleplayer, tests). A chunk loaded by server.chunks
+  // (registered later, same phase) gets its first slice on the next tick. On a client world
+  // the queue is always empty (stamps are authority-only), so this is a single empty-map
+  // check per tick. Kept out of the hook guard above: the hook is once-per-process, the
+  // system is per-world.
 }
 

@@ -26,7 +26,7 @@ import { installDiseases } from "./diseases.js";
 import { recruitmentSystem } from "./recruitment.js";
 import { animSettleSystem } from "./systems/movement.js";
 import { installShaftHatchInput } from "./building/terrain-hatch.js";
-import { installAbandonedStructures } from "./building/abandoned.js";
+import { installAbandonedStructures, pumpAbandonedStamps } from "./building/abandoned.js";
 import { stanceSystem } from "./stance.js";
 import { installMounts, mountGateSystem, mountSystem } from "./mounts.js";
 import { ropeSystem } from "./rope.js";
@@ -99,6 +99,7 @@ export const GAMEPLAY_SYSTEM_ORDER: readonly (readonly [Phase, string, number?])
   ["postSim", "gameplay.xpTravel", 20],
   ["postSim", "gameplay.progressionMigrate"], // ADR-209 legacy / fresh Progression -> per-tree
   ...BUILDING_SYSTEMS.postSim,
+  ["postSim", "gameplay.abandonedStamps"], // ADR-382: time-sliced stamp pump (plan on chunk load, place ≤20/tick)
   ...COMBAT_SYSTEMS.postSim,
   ["postSim", "gameplay.noiseDecay"],
   ["postSim", "gameplay.pruneBuffs", 20],
@@ -145,7 +146,7 @@ export function installGameplay(world: World, options: GameplayOptions | number 
     "gameplay.spoilage": spoilageSystem, "gameplay.chunkSurface": chunkSurfaceSystem,
     "gameplay.recruitment": recruitmentSystem,
     "gameplay.clearIntents": clearIntentsSystem, "gameplay.equipmentSync": equipmentSyncSystem, "gameplay.noiseDecay": noiseDecaySystem,
-    "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.storeFill": storeFillSystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
+    "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.storeFill": storeFillSystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.abandonedStamps": (w) => { pumpAbandonedStamps(w); }, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
     "gameplay.hordes": hordeDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem, "gameplay.rope": ropeSystem, "gameplay.dung": dungSystem,
     ...installBuildingSystems(world), ...installCombatSystems(world),
   };

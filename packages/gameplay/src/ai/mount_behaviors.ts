@@ -452,14 +452,21 @@ const tripGoal = (c: Ctx, behavior: string): { x: number; y: number } | undefine
 /** Why a riding bot should get off now (undefined = keep riding). */
 export function dismountReason(c: Ctx, o: Out, behavior: string, world: World | undefined): string | undefined {
   const m = c.world.mount!; const flee = behavior === "flee"; const moving = o.moveX !== 0 || o.moveY !== 0;
+  const g = tripGoal(c, behavior);
   if (moving && world) { // doorway / low ceiling ahead (the same check movement applies to the rider)
     const len = Math.hypot(o.moveX, o.moveY) || 1; const px = c.self.x + (o.moveX / len) * B.clearanceProbeTiles, py = c.self.y + (o.moveY / len) * B.clearanceProbeTiles;
     if (rideClearanceBlocked(world, m.species, c.self.x, c.self.y, px, py, 0)) return "clearance";
+    // ADR-382: also probe toward the goal. With pathfinding (goTo routes around obstacles) the
+    // move vector is a detour around a doorway, so probing it alone never sees the doorway the
+    // rider is headed for; the goal direction is the probe direct walking used to make (the two
+    // coincide when there is no detour), so this restores the ADR-321 clearance dismount.
+    if (g) { const gl = Math.hypot(g.x - c.self.x, g.y - c.self.y) || 1; const gx = c.self.x + ((g.x - c.self.x) / gl) * B.clearanceProbeTiles, gy = c.self.y + ((g.y - c.self.y) / gl) * B.clearanceProbeTiles;
+      if (rideClearanceBlocked(world, m.species, c.self.x, c.self.y, gx, gy, 0)) return "clearance"; }
   }
   if (flee) return undefined;
   if (DISMOUNT_NOW.has(behavior)) return "task";
   if (o.actions.some((a) => FOOT_ACTIONS.test(a))) return "task";
-  const g = tripGoal(c, behavior); const gd = g ? dist(c.self.x, c.self.y, g.x, g.y) : 0;
+  const gd = g ? dist(c.self.x, c.self.y, g.x, g.y) : 0;
   const b = c.world.base; if (b && g && insideBase(b, g.x, g.y) && dist(c.self.x, c.self.y, b.x + 1, b.y + 1) < B.buildingDismountTiles + 1) return "building";
   if (DISMOUNT_TASK.has(behavior) && (!g || gd < B.taskDismountTiles)) return "task";
   if (g && gd < B.arriveTiles) return "arrived";

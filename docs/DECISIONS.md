@@ -7340,3 +7340,165 @@ the production resolve cost (real page/texture work), so the bench over-weights 
 slice/hash work relative to production. No live visual verification was possible here:
 Tracey's eyes on the live build are still the real check, including a fresh `?diag=1` after
 the fix to see the new phase split (prep vs sprites vs upload vs lights) on her A16.
+
+## ADR-382: Time-sliced abandoned stamping, redesigned — plan now, place N per tick, with the AI-visibility fixes (SurVivaZ)
+
+**Context.** ADR-378 introduced time-sliced abandoned stamping (plan ~0.1 ms on chunk load,
+place ≤20 pieces/tick via a postSim pump) and measured a real win: site-tick
+`chunks.update()` p95 18.84→10.11 ms. The gate reverted it because it deterministically
+broke 4 AI-human tests that passed before it: adr203 (campfire never built before night)
+and adr252 block 2 ×3 (bots finish the pit but not the raised pad; don't build the 2×2
+base/hearth/bed; never sleep in bed). The gate's experiments ruled out slicing spread
+(cap 20→100000 still fails), pump registration, ruins existing, claim-target, node
+clearing, placed-piece set (byte-identical), and footprint blocking — and two gate fixes
+(boot drain + drain while tick<60) fixed adr203 but not adr252. This ADR is the redesign:
+root-cause the failure first, then reintroduce the slicing with the AI-visibility fixes
+that make it safe. ADR-378's code is reintroduced (its DECISIONS.md entry was reverted
+with it, so this entry is the record); the two correctness fixes below are new.
+
+**Root cause — two distinct failure modes, both proven by intervention, not by guessing.**
+
+*Failure mode 1 — adr252 (raised pad never dug): the `editIndex`-gated pathfinder.*
+`goTo()` in `packages/gameplay/src/ai/base_behaviors.ts` used the pathfinder
+(`walkerWaypoint`) only when `editIndex(w).size > 0` — only after at least one terrain edit
+existed in the world — and otherwise walked directly at its target with no obstacle
+avoidance. (The same gate sat on the door path and in `travel.ts`'s `waterGate`.) The pad
+bot's quarry stand is directly behind its own campfire (campfire at (-131.5,-135.0) sits
+between the bot at (-130.7,-134.8) and the stand at (-134.5,-135.5)), and the campfire's
+tile is solid for the body (`bodyAxisMove`/`edgeAxisMove`/`solidCell` — the centre-point
+`movementBlocked` check returns false because it only tests the destination tile, which
+is why the gate's footprint probe missed it). Traced over 3,600 pumps, deterministic:
+in the pre-378 world the pit bot digs its pit early (~tick 600), creating the first
+`TerrainEdit`, so `editIndex` is non-empty and the pad bot's `goTo` routes around the
+campfire, reaches the stand, and the pad completes ~tick 1800. In the 378 world the
+ruin-timing shift delays the first terrain edit until ~tick 2700, so `editIndex` stays
+empty through the window when the pad bot needs the pathfinder; the pad bot walks
+directly into its campfire, cannot move for ~60 ticks, `stuckOn` fires
+(`stuckCount` 1→2, `workFail:1502`), `base_work` is suppressed (120-tick cooldown), and
+the `travel` behaviour takes over and walks the bot 150 tiles away to (-75,-279), where it
+stays — pad never dug, base/hearth/bed never built, bot never sleeps. The first dig
+itself needs the pathfinder, so the gate was a circular dependency the pre-378 world only
+escaped by lucky timing. Proof: removing the `editIndex(w).size` gate in `goTo` (one line,
+in the 378 tree) makes all 4 adr252 block-2 tests pass; restoring the gate makes the new
+`adr382_goto_routes_around_structures` regression test fail (and removing it makes it
+pass). The cap=100000 experiment did not rule out timing: even with the cap, the pump runs
+in postSim after `server.chunks`, so ruin pieces/markers still appear one tick later than
+synchronous stamping — and the gate's drain only covered boot stamps and ticks < 60.
+
+*Failure mode 2 — adr203 (campfire ~50% slower, past the 4800-tick bound): boot-stamp
+timing.* The campfire test has a tight bound (pre-378 fire at ~4741 ticks vs the 4800
+bound — 59 ticks of margin), and the 378 delay makes the bots ~2400 ticks slower
+(fire ~7141). The `goTo` fix alone does NOT fix adr203 (still 1 failed with the gate
+removed): the bots' early gather/claim/campfire decisions happen while boot-area ruins
+are still assembling, so the world state they decide against differs from the synchronous
+world. The gate's drain (drain boot stamps synchronously in `createGame` + while
+tick<60) fixed adr203 3/3. Proof in the 378 tree: `goTo` fix + boot drain → adr203 3/3
+pass. So the two fixes together are the complete set: the `goTo` fix removes the
+adr252 failure mode, the boot drain removes the adr203 failure mode.
+
+**Design.** Three parts, all in this ADR.
+
+1. *Slicing (reintroduced from ADR-378, unchanged in mechanics).* `stampAbandonedSite`
+plans (~0.1 ms) and enqueues; the postSim pump (`gameplay.abandonedStamps`, registered in
+`install.ts`) places at most `stampPiecesPerTick` (data knob in
+`packages/gameplay/data/abandoned.json`, leaf module `building/abandoned_data.ts`, default
+20 ≈ 0.6–1.0 ms/tick at the measured 30–50 µs per placed piece) per tick, so a site
+appears over ~3–10 ticks instead of one 4.5–9.2 ms hitch. Pieces land in the old order
+(level, then PHASE: deck → wall → opening → stair → furniture/loot/fence/garden → roof),
+the loot stream is consumed in placement order (a sliced stamp fills exactly the loot a
+synchronous stamp would), and the marker (`AbandonedSite`) is only created when the site
+completes (`finishStamp` clears footprint nodes, then creates the marker), so reclaim /
+nearby-work / AI claim flows never see a half-built site. A second stamp for the same
+origin while one is pending returns the pending handle; a chunk that unloads mid-stamp is
+rolled back on the next pump tick; a server restart mid-stamp resumes from the placed
+pieces (`matchPartialStamp`) instead of leaving a permanent half-ruin. The queue lives in
+a module `WeakMap` keyed by `World` (no persistence/schema impact). One known quirk,
+carried over: the sliced pump places 3 MORE pieces than synchronous stamping in two
+kinds (Manor +1 L1 floor, Inn +1 L1 floor + storage box), because `snapPlacement` reads
+the `StructureIndex`, which `structureIndexSystem` refreshes only during `world.step`'s
+sim phase — synchronous stamping validates against a stale index and drops a few
+plan-faithful pieces. The 3 extra pieces are plan-faithful, not a defect; the placed-piece
+sets were byte-identical in the gate's 558-piece comparison of the worlds that matter.
+2. *`goTo` always routes (the root-cause fix).* The `editIndex(w).size` gate is removed
+from `goTo`'s main path and door path (`base_behaviors.ts`) and from `waterGate`
+(`travel.ts`). `walkerWaypoint` already returns the direct goal when the ray is clear
+(`navNeeded`), so the gate saved nothing but correctness. This makes AI movement robust
+to any timing shift in when the world changes, not just this one.
+3. *Boot drain (the adr203 fix, now a designed part of the slice, not a gate hack).*
+`drainAbandonedStamps(world)` runs in `apps/server/src/game.ts` after the boot chunk
+drain loop (before the first tick) and in `step` while `world.tick < 60`, so stamps for
+chunks loaded before the first tick complete synchronously and the AI's early decisions
+see the same world as synchronous stamping. The boot drain is load time, not frame time;
+in-play stamps stay sliced, which is the hitch that matters for smoothness.
+
+*Consequence of part 2 — mount-policy clearance probe (ADR-321).* Always routing changed
+what `dismountReason` sees: with direct walking the rider's move vector pointed at its
+goal, so the clearance probe (1 tile ahead along the move vector) saw a doorway the horse
+could not pass and dismounted for "clearance". With pathfinding the move vector is a
+detour around the doorway, so the probe missed it, the rider rode on, and the nearby
+base-return goal (4.5 tiles away, `arriveTiles` 4) made it dismount as "arrived" instead
+— `adr321_ai_mounts` "dismounts at a doorway" failed (expected "clearance", got
+"arrived"). Fixed in `mount_behaviors.ts`: `dismountReason` now also probes toward the
+goal (`tripGoal`) as well as the move direction. With direct walking the two coincide, so
+this restores exactly the probe the old code made; with pathfinding it adds the
+goal-direction probe the detour displaced. The donkey (fits the doorway) and the
+"building" cases are unaffected (`rideClearanceBlocked` is species-aware; the building
+check is separate). Verified: `adr321_ai_mounts` 15/15 pass.
+
+**Tests.** New: `packages/gameplay/test/adr382_stamp_timeslice.test.ts` (renamed from the
+378 file — slicing mechanics: per-tick cap, identical final site + loot vs synchronous,
+drain, rollback on unload, resume after restart) and
+`packages/gameplay/test/adr382_goto_routes_around_structures.test.ts` (a campfire directly
+on the straight segment, zero terrain edits, and the bot must still reach the goal by
+routing around it — fails with the old gate, passes with the fix). The 4 AI-human tests
+are the acceptance gate and all pass with this ADR applied: adr203 3/3, adr252 block 2
+4/4. Existing abandoned tests call `drainAbandonedStamps` after `stampAbandonedSite` so
+their assertions see the completed site (11 files, one line each).
+
+**Measurements.** Temporary vitest bench, same harness as ADR-378: real server wiring
+(`ChunkManager` + `ProceduralGenerator` + `attachWorldStreaming`), vehicle speed 2.39
+chunks/s at 20 Hz, 600 ticks, seed 1234, loadRadius 2, maxLoadsPerUpdate 4; 2 bench runs
+per side (each 3 internal runs), process-CPU ms (not wall), median-of-medians. Identical
+harness both sides: 376–379 chunks loaded, 33 sites, 33 site-ticks, 0 pending at end.
+
+| metric (process-CPU ms, median of 2 runs) | before (sync stamp) | after (ADR-382) | change |
+|---|---|---|---|
+| site-tick `chunks.update()` median | 7.39 | 1.97 | −73% |
+| site-tick `chunks.update()` p95 | 15.76 | 5.00 | −68% |
+| site-tick tick-total (`update` + `world.step`) median | 10.65 | 3.65 | −66% |
+| site-tick tick-total p95 | 21.13 | 10.96 | −48% |
+| plain-tick `chunks.update()` median / p95 | 0.02 / 2.70 | 0.02 / 2.54 | unchanged |
+| plain-tick tick-total median / p95 | 1.33 / 4.69 | 1.69 / 5.25 | pump slices land here now |
+| all-tick tick-total median / p95 | 1.41 / 7.63 | 1.84 / 5.60 | hitch moved, not added |
+
+Reading the table: the stamp cost left `chunks.update()` on site ticks (median −73%, p95
+−68%) and now lands as bounded ≤~1 ms slices inside `world.step` on the following ticks
+(plain-tick total median 1.33 → 1.69 ms — the cost spread out, not added: all-tick total
+p95 actually fell 7.63 → 5.60, while the all-tick median rose 1.41 → 1.84 because the
+median tick now carries a slice). No speedup is claimed for total chunk work — the same
+chunks load and the same pieces place, spread over more ticks; that is the point. (The
+absolutes are lower than ADR-378's bench because ADR-379's 2 ms chunk-load budget is
+active in this harness, capping loads per update; the before/after delta is what is
+comparable, and it is larger here because the budget and the slicing compound.)
+
+**Not changed.** No gameplay, balance, or tuning values changed (SITE_CHANCE stays 0.15,
+piece counts and loot unchanged — only the timing moves); no graphics-quality change; no
+new art; no wire change. The boot drain is the only synchronous-stamp path, and it runs
+at load time / in the first 60 ticks, not during play.
+
+**Honest cuts.** The bench is a headless VM measure (process-CPU ms, no rendering, no
+players, no network) — its absolute ms are not phone ms; only the before/after delta on
+the identical harness is evidence, and VM noise is ±30–50% on p95s (the two before runs'
+site-tick update medians were 6.97 and 7.80; the two after runs' were 2.07 and 1.87), so
+only the large median deltas are claimable. The site-tick residual (~2 ms median in
+`update()`) is terrain + node spawning + the ~0.1 ms plan, not the stamp. No live visual
+verification was possible here: Tracey's eyes on the live build are still the real check,
+including a fresh `?diag=1` after the fix — the new-area hitch should be visibly smaller,
+and the boot split / phases line will show whether the remaining costs moved. The
+`goTo` change makes every AI `goTo` call run the pathfinder's `navNeeded` check (a ray
+cast + index query) even on pristine maps; the route search itself is still cached and
+only runs when nav is needed, and the repo bench spread was not measured for this slice
+(the 374–381 gate's spread median was 18.95 ms/tick; a re-measure at gate time would
+confirm no regression). The `dismountReason` goal-direction probe adds one
+`rideClearanceBlocked` call per mounted tick; it is the same cheap segment check the
+move-direction probe already does.

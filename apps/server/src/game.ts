@@ -8,7 +8,7 @@ import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSig
 /** Authoritative game server: world + gameplay + streaming chunks + persistence + NetServer sessions. */
 import { ChannelRegistry, CommandRejected, DEFAULT_TICK_HZ, FixedLoop, installCommandHandlers, cosmeticsHashes, type CosmeticCatalogLike, Membership, Owner, PlayerId, Season, SEASON_COUNT, TimeOfDay, Transform, World, type Entity, type PermissionsRes } from "@engine/core";
 import { CHUNK_SIZE, ChunkManager, ProceduralGenerator, computeSpawnPoints, chunkKeyOf, type BuildingGrid, type PopulationSpawner } from "@engine/world";
-import { computeAiSpawnPoints, pickAiSpawnPoint, setAiSpawnPoints, spawnPoints, addTemporarySafeSpawnPoint, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
+import { computeAiSpawnPoints, pickAiSpawnPoint, setAiSpawnPoints, spawnPoints, addTemporarySafeSpawnPoint, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, drainAbandonedStamps, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
   appearanceServerHooks, applyReplication, installStallBuyHook, installViewBonus, setHitValidator, installPvp, PVP, installBedRespawn, installCraftQueue, installExpressionCommands, installVehicleCommands, installVehicleCraftCommands, installVehicleGuard, requestEmote, CraftQueue, CraftQueuesRes, playerNames, stallListing, listingRevision, stallOf, tillOf, StallHeader, StallOwnerKind, installMapMarkerCommands, MapMarker } from "@engine/gameplay";
 import { AppearanceServer, ChatServer, NameSync, NetServer, StallResult, StallServer, TileSync, validateHit, type ClientSession, type ServerTransport, type StallHooks } from "@engine/net";
 import { createAgentStore, type AgentIdentityStore } from "./agents.js";
@@ -539,10 +539,14 @@ export function createGameServer(o: GameServerOptions): GameServer {
   // saved game -> blank light-blue world" hang: the worker/tab locked up in this loop). Those chunks install on their
   // own when the reads resolve (ChunkManager .then -> install); the tick loop's chunks.update() keeps streaming.
   for (let guard = 0; guard < 10_000; guard++) { chunks.update(); if (chunks.pendingLoads - chunks.inflightLoads <= 0) break; }
+  // ADR-382: boot-area stamps complete synchronously, before the first tick, so the AI's
+  // early gather/claim/campfire decisions see the same world as synchronous stamping
+  // (ADR-203: the campfire came ~2400 ticks late when boot ruins were still assembling).
+  drainAbandonedStamps(world);
   rearmCrafts();
 
   const tickTimes: number[] = [];
-  const step = (dt: number): void => { const t0 = performance.now(); world.step(dt); tickTimes.push(performance.now() - t0); if (tickTimes.length > 4096) tickTimes.splice(0, 2048); };
+  const step = (dt: number): void => { const t0 = performance.now(); world.step(dt); if (world.tick < 60) drainAbandonedStamps(world); tickTimes.push(performance.now() - t0); if (tickTimes.length > 4096) tickTimes.splice(0, 2048); };
   const loop = new FixedLoop({ tickHz, step });
   return {
     world, net, chunks, persist, loop, permissions, players, spawnPoints: worldSpawnPoints(world), mode: mode.mode, modeConfig: mode, population, markVirtual, setStreaming, stalls, appearance, chat, agents, step, tickTimes,

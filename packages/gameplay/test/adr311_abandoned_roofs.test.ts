@@ -73,6 +73,7 @@ describe("ADR-311 abandoned roof variety", () => {
         const w = makeWorld(); const d = G.gameplayDefs(w);
         const plan = G.planAbandonedSite(w.seed, 8, 8, { kind, rot: 1, ruin: 0, tier: 1, roof });
         const r = G.stampAbandonedSite(w, 8, 8, { kind, rot: 1, ruin: 0, tier: 1, roof });
+        G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
         expect(r.skipped).toBe(false);
         const roofs = r.placed.filter((e) => d.pieces.get(w.getField(e, G.BuildPiece, "type")!)?.roof);
         expect(roofs.length).toBeGreaterThan(0);
@@ -103,6 +104,7 @@ describe("ADR-311 abandoned roof variety", () => {
     expect(roofsOf(ruined).some((s) => s.omit)).toBe(true);
     const w = makeWorld(); const d = G.gameplayDefs(w);
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Cabin, rot: 0, ruin: 0.6, tier: 1, roof: G.RoofStyle.HipGable });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     const roof = r.placed.find((e) => ["roof_hip", "roof_gable"].includes(d.pieces.get(w.getField(e, G.BuildPiece, "type")!)!.key))!;
     expect(roof).toBeTruthy();
     const p = spawnLearned(w, { x: 9.5, y: 9.5, maxWeight: 0, clientId: 1 });

@@ -50,6 +50,7 @@ describe("ADR-300 abandoned structures", () => {
   it("stamps an enclosed furnished shed from real pieces", () => {
     const w = makeWorld();
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Shed, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(r.skipped).toBe(false);
     expect(r.marker).toBeGreaterThan(0);
     const ks = keys(w, r.placed);
@@ -64,6 +65,7 @@ describe("ADR-300 abandoned structures", () => {
   it("stamps a homestead with a fenced garden and animal pen", () => {
     const w = makeWorld();
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Homestead, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(r.skipped).toBe(false);
     expect(r.garden).toBe(true);
     expect(r.pen).toBe(true);
@@ -75,6 +77,7 @@ describe("ADR-300 abandoned structures", () => {
   it("stamps two- and three-story buildings with stairs, upper floors, and a roof at the top story", () => {
     const w = makeWorld();
     const two = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.TwoStoryCottage, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(two.skipped).toBe(false);
     expect(two.stories).toBe(2);
     const twoKeys = keys(w, two.placed);
@@ -84,6 +87,7 @@ describe("ADR-300 abandoned structures", () => {
 
     const w3 = makeWorld();
     const three = G.stampAbandonedSite(w3, 8, 8, { kind: G.AbandonedKind.Townhouse, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w3); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(three.skipped).toBe(false);
     expect(three.stories).toBe(3);
     const threeKeys = keys(w3, three.placed);
@@ -100,6 +104,7 @@ describe("ADR-300 abandoned structures", () => {
     expect(ruined.pieces.some((p) => p.omit && (p.role === "opening" || p.role === "furniture" || p.role === "loot" || p.role === "roof"))).toBe(true);
     expect(ruined.pieces.filter((p) => p.role === "deck" || p.role === "wall" || p.role === "stair").every((p) => !p.omit)).toBe(true);
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Cottage, rot: 0, ruin: 0.9, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(r.skipped).toBe(false);
     expect(r.omitted).toBeGreaterThan(0);
     expect(r.placed.some((e) => w.getField(e, G.BuildPiece, "hp")! < G.maxHpOf(w, e))).toBe(true);
@@ -108,8 +113,10 @@ describe("ADR-300 abandoned structures", () => {
   it("does not stamp the same origin twice", () => {
     const w = makeWorld();
     const first = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Shed, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     const n = first.placed.length;
     const second = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Shed, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(second.skipped).toBe(true);
     expect([...w.query([G.BuildPiece])].length).toBe(n);
   });
@@ -117,6 +124,7 @@ describe("ADR-300 abandoned structures", () => {
   it("lets a player repair a damaged site piece", () => {
     const w = makeWorld();
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Cottage, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     const damaged = r.placed.find((e) => {
       const key = keys(w, [e])[0];
       return key === "wall" || key === "foundation" || key === "wall_corner_outer";
@@ -143,6 +151,7 @@ describe("ADR-300 abandoned structures", () => {
   it("lets a player reclaim a site and blocks a second actor", () => {
     const w = makeWorld();
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Shed, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     const piece = r.placed[0]!;
     const a = spawnLearned(w, { x: 9.5, y: 9.5 });
     const b = spawnLearned(w, { x: 9.2, y: 8.8 });
@@ -165,6 +174,7 @@ describe("ADR-300 abandoned structures", () => {
   it("exposes nearby unowned sites to AI and maps reclaim actions", () => {
     const w = makeWorld();
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Cottage, rot: 0, ruin: 0.8, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     const work = G.nearbyAbandonedWork(w, 10, 10, 24);
     expect(work).toBeDefined();
     expect(work!.marker).toBe(r.marker);

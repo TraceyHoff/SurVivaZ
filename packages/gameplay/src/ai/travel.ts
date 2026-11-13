@@ -42,7 +42,6 @@ import { AbandonedSite, ClanStatus, Exposure, Health, ResourceNode, Riding, Stal
 import { GameplayConfig } from "../config.js";
 import { inWater, waterDepth } from "../systems/movement.js";
 import { walkerWaypoint } from "../systems/creature_nav.js";
-import { editIndex } from "../terrain_depth.js";
 import { WATER_WET_PER_SEC } from "../systems/environment.js";
 import { spendStamina } from "../systems/vitals.js";
 import { mountSpecies } from "../mount_defs.js";
@@ -604,7 +603,7 @@ function waterGate(c: Ctx, tr: TravelState, wp: { x: number; y: number }): boole
   const x = c.self.x, y = c.self.y;
   const clearWait = (): void => { if (tr.waterWaitSince !== undefined) { delete tr.waterWaitSince; markAiDirty(c.agent, c.self.tick); } };
   if (inWater(w, x, y) && waterDepth(w, x, y) === WaterDepth.Deep) { clearWait(); return true; } // mid-crossing: press on
-  const navWp = editIndex(w).size ? walkerWaypoint(w, e, x, y, wp.x, wp.y) : undefined;
+  const navWp = walkerWaypoint(w, e, x, y, wp.x, wp.y); // ADR-382: always route — same editIndex gate as goTo (see base_behaviors.ts)
   const target = navWp ?? wp; // the path goTo will walk (the straight segment when there is no local nav)
   const prof = legWaterProfile(w, x, y, target.x, target.y);
   if (prof.deep <= 0) { clearWait(); return true; } // a ford, or dry land

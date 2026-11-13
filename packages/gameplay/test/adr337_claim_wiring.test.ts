@@ -25,6 +25,7 @@ function rig(opts: { x?: number; y?: number; hired?: boolean } = {}): Rig {
 const viewOf = (r: Rig): G.AgentWorldView => G.buildAgentView(r.w, r.p, r.a, r.home)!.world;
 const stampRuin = (r: Rig, ox: number, oy: number, kind: number, ruin: number): Entity => {
   const res = G.stampAbandonedSite(r.w, ox, oy, { kind: kind as never, rot: 0, ruin, tier: 1 });
+  G.drainAbandonedStamps(r.w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
   expect(res.skipped, `stamp at ${ox},${oy}`).toBe(false);
   return res.marker as Entity;
 };

@@ -38,6 +38,7 @@ const viewOf = (r: Rig): G.AgentWorldView => G.buildAgentView(r.w, r.p, r.a, r.h
 /** Stamp a Shed ruin at (8,8) and return its marker. */
 const stampRuin = (r: Rig, ox = 8, oy = 8, ruin = 0.1): Entity => {
   const res = G.stampAbandonedSite(r.w, ox, oy, { kind: G.AbandonedKind.Shed, rot: 0, ruin, tier: 1 });
+  G.drainAbandonedStamps(r.w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
   expect(res.skipped, `stamp at ${ox},${oy}`).toBe(false);
   return res.marker as Entity;
 };

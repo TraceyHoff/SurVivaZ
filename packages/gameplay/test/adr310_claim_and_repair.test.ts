@@ -130,6 +130,7 @@ describe("ADR-310 repair and reclaim", () => {
   it("reclaim without a covering flag is NeedClaim, and succeeds after one is planted", () => {
     const w = makeWorld();
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Shed, rot: 0, ruin: 0, tier: 1 });
+    G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     const piece = r.placed[0]!;
     const p = spawnLearned(w, { x: 9.5, y: 9.5, maxWeight: 0, clientId: 1 });
     setPid(w, p, 1);
