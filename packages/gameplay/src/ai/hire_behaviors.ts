@@ -31,7 +31,8 @@ import { countItem, exchangeItems, readSlots } from "../inventory.js";
 import { pieceCost, tribeOf } from "../building/place.js";
 import { maxHpOf } from "../building/integrity.js";
 import { FARMING, FARM_TOOL, FarmFail, plantableBySeed, till } from "../farming.js";
-import { GOAL_CRAFTS, instantChores, stuckOn } from "./autonomy.js";
+import { GOAL_CRAFTS, banNode, instantChores, isNodeBanned, stuckOn } from "./autonomy.js";
+import { navReachable } from "../systems/creature_nav.js";
 import { crafterIdFor } from "../economy/provenance.js";
 import { containerSeq, goTo, storageTargetFor } from "./base_behaviors.js";
 import { storageWithdrawActions } from "./storage_api.js";
@@ -99,7 +100,7 @@ export function hireCraftPick(world: World, self: Entity, defs: GameDefs): numbe
  */
 /** Task 28 (was the hired-Farm sensor; now shared): harvest / water / plant / till around `anchor`. Returns
  * undefined when there is nothing to do. Unhired bots garden their own base with the same sensor. */
-export function computeFarmSensor(world: World, self: Entity, defs: GameDefs, anchor: { x: number; y: number }, bs: ReturnType<typeof scanBase>, target?: Entity): AgentWorldView["farm"] {
+export function computeFarmSensor(world: World, self: Entity, defs: GameDefs, anchor: { x: number; y: number }, bs: ReturnType<typeof scanBase>, target?: Entity, banned?: (id: number) => boolean): AgentWorldView["farm"] {
   let slots: ReturnType<typeof readSlots> | undefined; try { slots = readSlots(world, self); } catch { slots = undefined; }
   const canSlot = slots ? slots.items.findIndex((it, i) => it && slots.counts[i] && defs.items.get(it)?.key === FARM_TOOL.wateringCan) : -1;
   const seedSlot = slots ? slots.items.findIndex((it, i) => it && slots.counts[i] && plantableBySeed(defs.items.get(it)?.key ?? "") > 0) : -1;
@@ -108,7 +109,9 @@ export function computeFarmSensor(world: World, self: Entity, defs: GameDefs, an
   const seedItem = seedSlot >= 0 ? slots!.items[seedSlot]! : 0;
   const seedCount = seedItem ? countItem(world, self, seedItem) : 0;
   const cropKeys = new Set(FARMING.plantables.map((p) => p.becomes));
-  let harvest: { id: number; x: number; y: number } | undefined; let hd = Infinity;
+  // ADR-385: harvest candidates in anchor distance order (nearest first); the pick
+  // below takes the first one the bot can actually reach from where it stands.
+  const harvestCands: { id: number; x: number; y: number; d: number }[] = [];
   let water: { id: number; x: number; y: number; slot: number; kind: "water" } | undefined; let wd = Infinity;
   let soil: { id: number; x: number; y: number; slot: number; kind: "plant" } | undefined; let sd = Infinity;
   let emptySoil = 0;
@@ -117,7 +120,15 @@ export function computeFarmSensor(world: World, self: Entity, defs: GameDefs, an
     const t = world.get(e, Transform); if (!t) continue; const d = (t.x - anchor.x) ** 2 + (t.y - anchor.y) ** 2;
     if (world.has(e, ResourceNode) && (world.getField(e, ResourceNode, "amount") ?? 0) > 0) {
       const key = defs.resources.get(world.getField(e, ResourceNode, "kind")!)?.key;
-      if (key && cropKeys.has(key) && d < hd) { hd = d; harvest = { id: e, x: t.x, y: t.y }; }
+      // ADR-385: a banned harvest target (farmRun banned it after getting stuck) is never
+      // re-picked while the ban holds; the nearest few are collected for the reachability
+      // pick below instead of taking the nearest sight unseen.
+      if (key && cropKeys.has(key) && !banned?.(e)) {
+        const c = { id: e, x: t.x, y: t.y, d }; let i = harvestCands.length;
+        while (i > 0 && harvestCands[i - 1]!.d > d) i--;
+        if (i < 4) harvestCands.splice(i, 0, c);
+        if (harvestCands.length > 4) harvestCands.length = 4;
+      }
     } else if (world.has(e, Crop)) {
       const c = world.get(e, Crop)!;
       if (c.kind === 0) { emptySoil++; if (seedSlot >= 0 && d < sd) { sd = d; soil = { id: e, x: t.x, y: t.y, slot: seedSlot, kind: "plant" }; } }
@@ -133,6 +144,18 @@ export function computeFarmSensor(world: World, self: Entity, defs: GameDefs, an
       if (hoeSlot >= 0) tillTarget = { ...spot, slot: hoeSlot };
       else tillTarget = { ...spot, slot: -1, lack: { item: hoeId, count: 1 } }; // hoe is in base storage: fetch it first
     }
+  }
+  // ADR-385: harvest the nearest candidate the bot can actually reach from where it
+  // stands. The nearest bush by anchor distance may sit across a ridge the bot cannot
+  // climb (ADR-384 gate: a berry bush at +6 over the max climb of 3 froze the bot for
+  // 120 s while garden kept re-picking it) — take the next-nearest reachable one
+  // instead. No position to check from (no Transform) means take the nearest as before.
+  let harvest: { id: number; x: number; y: number } | undefined;
+  const selfT = world.get(self, Transform);
+  for (const c of harvestCands) {
+    if (selfT && !navReachable(world, self, selfT.x, selfT.y, c.x, c.y)) continue;
+    harvest = { id: c.id, x: c.x, y: c.y };
+    break;
   }
   if (harvest || water || soil || tillTarget) return { ...(harvest ? { harvest } : {}), ...(water ?? soil ? { tend: water ?? soil! } : {}), ...(tillTarget ? { till: tillTarget } : {}) };
   return undefined;
@@ -178,11 +201,14 @@ export function fillHireSensors(world: World, self: Entity, view: AgentWorldView
   if (!world.has(self, Worker)) return;
   const w = world.get(self, Worker)!;
   const cfg = world.getResource(GameplayConfig); if (!cfg) return; const defs = cfg.defs;
+  // ADR-385: the farm sensor skips harvest targets farmRun banned after getting stuck on
+  // them (no agent here — e.g. a bare sensor call — means no ban to consult).
+  const banned = agent ? (id: number): boolean => isNodeBanned(agent.bb, id, world.tick) : undefined;
   if (w.owner === 0) {
     // Task 28: unhired bots garden their own base (the same farm sensor as a hired Farm worker, anchored on
     // their own base from fillPlanSensors) — till, plant, water and harvest for winter stores and themselves.
     const base = view.base, bs = view.bs;
-    if (base && bs) { const f = computeFarmSensor(world, self, defs, base, bs); if (f) view.farm = f; else delete view.farm; }
+    if (base && bs) { const f = computeFarmSensor(world, self, defs, base, bs, undefined, banned); if (f) view.farm = f; else delete view.farm; }
     return;
   }
   const anchor = workerWorkAnchor(world, self);
@@ -224,7 +250,7 @@ export function fillHireSensors(world: World, self: Entity, view: AgentWorldView
     }
     if (best) view.defend = best;
   }
-  if (w.job === WorkerJob.Farm) { const f = hasTarget && target === undefined ? undefined : computeFarmSensor(world, self, defs, anchor, bs, target); if (f) view.farm = f; else delete view.farm; }
+  if (w.job === WorkerJob.Farm) { const f = hasTarget && target === undefined ? undefined : computeFarmSensor(world, self, defs, anchor, bs, target, banned); if (f) view.farm = f; else delete view.farm; }
   if (w.job === WorkerJob.Maintain && agent && !hasTarget) {
     // Maintain an explicitly anchored NEW shelter only. Never terraform an existing owner's floor.
     const mem = aiMemoryOf(agent);
@@ -341,7 +367,10 @@ function farmRun(c: Ctx, o: AgentOutput): boolean | void { const f = c.world.far
     if (cooled(c, "farmTillAt", 20)) { const oc = o as unknown as AgentOutputWithCommands; (oc.commands ??= []).push({ type: UseCmd.name, payload: { slot: t.slot } }); c.bb.set("farmTillAt", c.self.tick); }
     return false; }
   const target = f.harvest ?? f.tend; if (!target) return false;
-  if (goTo(c, o, target.x, target.y) > 1.2) { if (stuckOn(c, target.x, target.y)) return false; return; } stop(o);
+  // ADR-385: a harvest / tend target the bot cannot reach (or can no longer reach — a door shut,
+  // terrain edited under it) is banned like a gather node, so the farm sensor re-picks the next
+  // reachable one instead of freezing against the obstacle forever.
+  if (goTo(c, o, target.x, target.y) > 1.2) { if (stuckOn(c, target.x, target.y)) { banNode(c, target.id); return false; } return; } stop(o);
   if (f.harvest) { o.actions.push("gather"); return false; } // mature crop node: gather it like any node
   const t = f.tend!; // water a thirsty crop / plant a seed on tilled soil (Use on the slot's item)
   if (cooled(c, "farmUseAt", 20)) { const oc = o as unknown as AgentOutputWithCommands; (oc.commands ??= []).push({ type: UseCmd.name, payload: { slot: t.slot } }); c.bb.set("farmUseAt", c.self.tick); }

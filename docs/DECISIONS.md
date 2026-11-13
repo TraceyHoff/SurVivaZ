@@ -7663,3 +7663,128 @@ density is now ~0.06/chunk (~6 per 100 chunks) instead of ~0.10 — a visible re
 live game. Restoring 0.25 needs the planner/pathfinder to re-target unreachable resource
 nodes (a new ADR). The ADR-373 density test and the ADR-384 density test were updated to
 0.15 / ~15 planned per 100 chunks. The strict single-level gate itself is unchanged.
+
+## ADR-385: Planner re-targets unreachable goals — bots stop freezing on ridges and behind their own walls (SurVivaZ)
+
+Tracey asked for the real fix behind the ADR-384 gate revert: a bot that picks an
+unreachable goal must re-target instead of freezing, so SITE_CHANCE can return to 0.25
+and ruin density goes back to ~10 per 100 chunks. The gate's stated mechanism was
+incomplete — the freeze it saw was not the gather sensor. Instrumented probes of the
+seed-5 gate scenario (bot0 respawn (49.0,671.6), goal node (43.5,681.5) on a ridge at
+height 14 vs the bot at 8, rise +6, max unaided climb 3) showed the freezing behaviour
+was `garden`, not `gather`, on every sample: the unhired-bot `garden` behaviour runs
+`farmRun` on `view.farm.harvest`, a wild berry bush picked by `computeFarmSensor` as
+the nearest harvestable crop node within FARM_R (12) of the base anchor, with no
+reachability check. `farmRun`'s stuck handling was `if (stuckOn(...)) return false;` —
+no ban, no re-target — and the sensor re-reported the same bush every sense cycle, so
+the bot froze for the full 120 s (displacement exactly 0.0, stuckCount 7 -> 42, the ban
+map empty the whole time). The gather sensor has the same flaw (nearest node, no
+reachability check), and `goTo` falls back to walking directly at an unreachable target
+when `walkerWaypoint` cannot route — so the gap is in three places, all fixed here, and
+the fix deliberately does NOT rewrite the pathfinder and does NOT change `goTo`'s
+direct-walk fallback (it is transient — `waypoint()` re-plans on cache expiry — and
+long-distance walking relies on it).
+
+Design (narrow, fits existing systems): (1) a cached reachability predicate
+`navReachable(world, e, x, y, gx, gy, goalLevel?)` in `systems/creature_nav.ts`,
+right after `walkerWaypoint`: true when `navNeeded` is false (straight sight — the
+ray checks terrain via `crossOk` -> `terrainMoveBlocked(..., avoidFalls=true)` plus
+edge blockers and solid cells) or the cached route search reaches the goal tile
+(`wp?.final`, else the nav-cache state's `reached` flag). It reuses the same cached
+route `goTo` walks (cold check = one bounded A* with radius 24, maxNodes 1200,
+detour 12; warm = cache read); callers must pass the walker's own current position —
+reachability is positional. (2) Gather-node pick in `computeGoalSensors`
+(`ai/autonomy.ts`) wrapped in a bounded retry loop (3 attempts, an `unreachable` skip
+set): each attempt scans memory for the best-scoring node, checks `navReachable` from
+the bot's own position, takes it if reachable, otherwise skips it and re-picks; no
+gatherNode if none of the best 3 is reachable. New `isNodeBanned(bb, id, tick)` export
+next to `banNode`. (3) Farm sensor: `computeFarmSensor` (`ai/hire_behaviors.ts`)
+takes an optional `banned?` predicate; harvest candidates are collected (up to 4
+nearest, in anchor-distance order, skipping banned ones) instead of taking the single
+nearest, and the first candidate reachable from the bot's own position via
+`navReachable` is picked (falls back to the nearest candidate if no Transform).
+`fillHireSensors` passes the ban predicate at both `computeFarmSensor` call sites
+(unhired-garden and Farm-job), built from the agent's bb via `isNodeBanned`. The
+reachability check applies to harvest only — water/soil/till targets are base plots,
+reachable by construction. `farmRun`'s harvest/tend branch now calls
+`banNode(c, target.id)` on `stuckOn` before returning false, matching the existing
+gather pattern. No new import cycles (`hire_behaviors` -> `creature_nav` is the same
+direction as the existing `base_behaviors` -> `creature_nav` import; the autonomy <->
+hire_behaviors cycle already existed via `stuckOn`).
+
+SITE_CHANCE restored 0.15 -> 0.25 in `building/abandoned.ts`, and the two stale
+in-code comments (:734, :820) that still described the reverted state now describe
+the restored state. The ADR-373 density test is updated to 0.25 / ~25 planned per 100
+chunks (1600-chunk bounds 340-460) and the ADR-384 density test to plan rate
+(0.20, 0.30) and realised density (0.08, 0.13) (~0.10/chunk, ~10 per 100 chunks).
+
+Two further pre-existing "walk directly at the target" stalls were found and fixed
+while gating this change — both are the same class of bug (a straight-line distance
+or a direct walk used where a wall intervenes), both proven by probe before fixing:
+(4) `goTo` (`ai/base_behaviors.ts`) now returns the via-door path length, not the
+straight-line distance, while the bot and its target are on opposite sides of the
+bot's base wall (`dn + near->far + far->target`). Every caller uses `goTo`'s return as
+"am I close enough?" (withdraw / craft / build / stash all stop on it); the straight
+line understated the trip through the wall, so a bot standing inside 1.8 tiles from
+an outside box stopped and tried the container through the wall. Once across, the
+main path reports the straight line as before. (5) The `trip` behaviour's outbound
+leg (`base_behaviors.ts`) used `toward` (a direct walk) instead of `goTo`, so a trip
+that started while the bot was inside its base walked straight into the east wall and
+never left: `toward` pushed it into the wall, `stuckOn` re-randomised the target every
+120 ticks, and the trip monopolised the controller (it returns false every tick and
+re-wins the think while `bb.trip` exists), starving `base_work` — the bot idled at
+the bed withdraw forever and the ADR-252 live test failed (bot0 never built the bed).
+The return leg already used `goTo`; the outbound leg now does too, so the bot exits
+through the door and the trip can actually complete. The `goTo` return is the
+via-door length while crossing, so the `< 2` arrival test still means "arrived" once
+the bot is on the target's side.
+
+Regression found during this work (ADR-252 live, seed 11, 2 bots, starters): the bed
+step's withdraw stalled because bot0 ended up inside the base (standing at its own
+campfire) while the storage box holding the bed's 6 planks is outside, east of the
+base. On the base tree bot0 approached the bed stand from the north (outside) and the
+test passed 8/8; on the ADR-385 tree the gather re-pick changed its path/timing so it
+reached the withdraw step from inside, and the withdraw branch's straight-line
+`goTo(...) > 2.2` check short-circuited the door routing. The fix is (4) + (5)
+above — the withdraw branch itself is unchanged. Verified: adr252 live passes 8/8
+three times in a row on this tree (it failed 2/2 before the fix, and the failure
+reproduced with SITE_CHANCE temporarily back at 0.15, proving the sensor change —
+not the density change — was the trigger).
+
+Tests: new `packages/gameplay/test/adr385_unreachable_retarget.test.ts` (5 tests):
+`navReachable` unit (ridge wall at x=13, +6 via `setTerrainDig`, spanning y -20..40;
+the fixture installs a TileMap filled with tile 3 + `terrainFromTileMap`, as adr265
+does, because `makeWorld()` installs no TerrainRes); gather re-pick (nearest tree on
+the ridge top skipped, next reachable tree picked); no gather node when every
+candidate is unreachable; farm sensor harvests the nearest reachable bush, not the
+nearer ridge bush (`blueberry_bush` is a harvestable crop node); a banned harvest
+target is never re-picked while the ban holds. New
+`apps/client/test/adr385_unreachable_retarget.test.ts` (1 live test): replays the
+seed-5 gate scenario (local server, seed 5, 3 bots; kill bot0, respawn far, hand back,
+wait for route) and asserts max displacement > 8 tiles AND >= 2 distinct navGoals over
+up to 120 s (breaks early when both are seen). On the fixed tree the bot re-targets
+(navGoal changes every sample; displacement 0.0 -> 27.6 over 120 s; stuckCount stays
+5 -> 8 instead of growing). Canaries: adr331 2/2 (repeat runs), adr203 campfire 3/3,
+adr252 block-2 (gameplay file) 18/18, adr252 live 8/8 (x3).
+
+Results (full suite, this tree): gameplay 2,105 passed; client 896 passed
+(895 + 1 new live test); server 155; net 119; world 91; render 506; core 87;
+input 74; persist 60 passed, 1 failed — the known autosave bench flake (passes
+standalone with PERF=1; no ADR-385 file touches persist); assets 215; testkit 2.
+Total 4,310 passed, 1 known flake, 0 regressions (gate5 total was 4,304; +6 = the
+new tests). Typecheck EXIT 0 all 11 projects (pinned TS 5.9.3). No benches measured
+(no hot paths touched beyond the sensor pick loops); no speedup claimed, no phone ms
+claimed. No graphics change, no new art, no wire change, no gameplay/balance change
+beyond the planner fix and the SITE_CHANCE restoration.
+
+Known limits (follow-ups, not blockers): `navReachable` treats a CLOSED door as
+solid (`solidCell`: a solid piece blocks unless it is a door AND `idx.doorOpen(c)`),
+and it calls `waypoint()` directly, bypassing `goTo`'s door-aware branch (which
+opens the door when crossing the bot's base wall) — so a goal across a closed door
+reads as unreachable, and the gather/farm sensors skip it until the door opens.
+Goals beyond the A* radius-24 window also read as unreachable on a one-shot check
+(`goTo` handles far goals by walking partial routes and re-planning as the window
+moves). Both err toward "skip and re-pick", which cannot freeze the bot; a
+door-aware reachability check is a follow-up. The waterfall rule (ADR-386) is still
+queued after this: elevated and sea-level lakes connect only via a waterfall, and
+waterfalls do not exist yet.

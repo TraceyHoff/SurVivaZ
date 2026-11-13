@@ -226,7 +226,7 @@ describe("ADR-384 single-level abandoned ruins", () => {
     expect(footprintLevels(w, flatMarkers[0]!).size).toBe(1);
   });
 
-  it("SITE_CHANCE reverted to 0.15 by the gate: realised density is lower, all ruins single-level", () => {
+  it("SITE_CHANCE restored to 0.25 by ADR-385: realised density back to ~10 per 100 chunks, all ruins single-level", () => {
     // Guard for the ADR-384 density story. As delivered, the strict gate stamps
     // only the ~41% of planned sites that are already single-level, so SITE_CHANCE
     // was raised 0.15 -> 0.25 to keep the number of standing ruins about the same
@@ -234,12 +234,11 @@ describe("ADR-384 single-level abandoned ruins", () => {
     // GATE FIX (ADR-384 gate, 2026-11-13): 0.25 reshuffles the site spawn-point
     // set and deterministically broke adr331 — bot0 respawned at a site point
     // beside a terrain trap (a resource node on a ridge it cannot climb) and
-    // froze for the whole 120 s window. The strict gate alone (at 0.15) does NOT
-    // break adr331; only the 0.25 compensation does. The gate reverted to 0.15
-    // so the spawn-point set matches the pre-384 base. TRADE-OFF: realised
-    // density is now ~0.06 of chunks (~6 ruins per 100 chunks) instead of ~0.10
-    // — a visible reduction vs the live game. Restoring 0.25 needs the
-    // planner/pathfinder to re-target unreachable resource nodes (a new ADR).
+    // froze for the whole 120 s window. The gate reverted to 0.15 as a stopgap
+    // (realised density ~0.06 of chunks).
+    // ADR-385 (2026-11-13): the planner/pathfinder gap is fixed — a bot whose
+    // goal node is unreachable re-targets instead of freezing — so 0.25 is
+    // restored and the realised density is back at ~0.10 of chunks.
     // Loose bounds on a large deterministic sample (5 seeds x 441 chunks, real
     // generator terrain) so a retune or a gate change that moves the realised
     // density is caught here, not on a live world.
@@ -257,16 +256,16 @@ describe("ADR-384 single-level abandoned ruins", () => {
         if (G.siteTerrainOk(w, plan.originX, plan.originY, site.width, site.height)) flatPlans++;
       }
     }
-    const planRate = plans / chunks; // ~SITE_CHANCE (0.15)
-    expect(planRate).toBeGreaterThan(0.10);
-    expect(planRate).toBeLessThan(0.20);
+    const planRate = plans / chunks; // ~SITE_CHANCE (0.25)
+    expect(planRate).toBeGreaterThan(0.20);
+    expect(planRate).toBeLessThan(0.30);
     const flatRate = flatPlans / plans; // ~0.41 of planned sites are single-level
     expect(flatRate).toBeGreaterThan(0.35);
     expect(flatRate).toBeLessThan(0.47);
-    // Realised density: planRate x flatRate ~= 0.06 of chunks get a ruin — lower
-    // than the old gate's ~0.106 (0.15 x 0.709), all single-level (gate trade-off).
+    // Realised density: planRate x flatRate ~= 0.10 of chunks get a ruin — the
+    // old gate's ~0.106 (0.15 x 0.709), all single-level.
     const realised = planRate * flatRate;
-    expect(realised).toBeGreaterThan(0.045);
-    expect(realised).toBeLessThan(0.08);
+    expect(realised).toBeGreaterThan(0.08);
+    expect(realised).toBeLessThan(0.13);
   });
 });

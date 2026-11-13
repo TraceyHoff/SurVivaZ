@@ -205,6 +205,15 @@ export function goTo(c: Ctx, o: { moveX: number; moveY: number; aimX: number; ai
       const near = inS ? { x: b.x + DOOR_IN.x, y: b.y + DOOR_IN.y } : { x: b.x + DOOR_OUT.x, y: b.y + DOOR_OUT.y };
       const far = inS ? { x: b.x + DOOR_OUT.x, y: b.y + DOOR_OUT.y } : { x: b.x + DOOR_IN.x, y: b.y + DOOR_IN.y };
       const dn = Math.hypot(near.x - c.self.x, near.y - c.self.y);
+      // ADR-385: report the via-door path length, not the straight-line distance. Every
+      // caller uses goTo's return as "am I close enough?" (withdraw / craft / build / stash
+      // all stop on it); the straight line understates the trip through the wall, so a bot
+      // standing inside 1.8 tiles from an outside box stopped and tried the container
+      // through the wall forever instead of walking out through the door (ADR-252 live:
+      // the bed's 6 planks never got withdrawn, the bot idled at the bed step). The
+      // via-door length keeps every caller walking until it is actually on the target's
+      // side; once across, the main path below reports the straight line as before.
+      const viaDoor = dn + Math.hypot(far.x - near.x, far.y - near.y) + Math.hypot(tx - far.x, ty - far.y);
       // A cached crossing phase is valid only while actually in the doorway corridor.
       // Navigation around a pit can return us to the outside of a different wall.
       const crossing = c.bb.num("doorPhase") === 1 && Math.abs(c.self.x - near.x) < .45
@@ -212,10 +221,10 @@ export function goTo(c: Ctx, o: { moveX: number; moveY: number; aimX: number; ai
       if (dn > 0.45 && !crossing) {
         c.bb.set("doorPhase", 0);
         const w = worldOf(c), wp = w ? walkerWaypoint(w, c.agent.bb.num("selfEntity") as Entity, c.self.x, c.self.y, near.x, near.y) : undefined; // ADR-382: always route (see the main path below)
-        toward(o, c.self.x, c.self.y, wp?.x ?? near.x, wp?.y ?? near.y, s); return d;
+        toward(o, c.self.x, c.self.y, wp?.x ?? near.x, wp?.y ?? near.y, s); return viaDoor;
       }
-      if (!door.open) { stop(o); if (c.self.tick - c.bb.num("doorAt", -1e9) > 20) { o.actions.push(`door:${door.id}`); c.bb.set("doorAt", c.self.tick); } return d; }
-      c.bb.set("doorPhase", 1); c.bb.set("doorShut", 1); toward(o, c.self.x, c.self.y, far.x, far.y, 0.6); return d;
+      if (!door.open) { stop(o); if (c.self.tick - c.bb.num("doorAt", -1e9) > 20) { o.actions.push(`door:${door.id}`); c.bb.set("doorAt", c.self.tick); } return viaDoor; }
+      c.bb.set("doorPhase", 1); c.bb.set("doorShut", 1); toward(o, c.self.x, c.self.y, far.x, far.y, 0.6); return viaDoor;
     }
     c.bb.set("doorPhase", 0);
   }
@@ -418,7 +427,15 @@ export function baseBehaviors(): GameBehavior[] {
         const dh = Math.hypot(home.x - c.self.x, home.y - c.self.y); tr.max = Math.max(tr.max, dh);
         if (!tr.ret && ((c.world.chill?.body ?? 37) < 36.6 || night(c.self.phase) > 0 || c.self.hunger < 0.35 || c.self.thirst < 0.35 || (c.world.invSpaceFree ?? 1) < 0.3 || c.self.tick - tr.t0 > 3600 || !c.world.tripWanted && tr.max > 12)) tr.ret = true;
         if (tr.ret) { if (goTo(c, o, home.x, home.y, 1) < 3 || stuckOn(c, home.x, home.y, 200)) { endTrip(c, tr.max); return false; } return; }
-        if (toward(o, c.self.x, c.self.y, tr.x, tr.y, 0.9) < 2 || stuckOn(c, tr.x, tr.y, 120)) { const a = c.rng.range(-Math.PI, Math.PI); tr.x = c.self.x + Math.cos(a) * 10; tr.y = c.self.y + Math.sin(a) * 10; }
+        // ADR-385: the outbound leg used toward (a direct walk), so a trip that started while the bot was
+        // inside its base walked straight into the east wall and never left: toward pushed it into the wall,
+        // stuckOn re-randomised the target every 120 ticks, and the trip monopolised the controller (it
+        // returns false every tick and re-wins the think while bb.trip exists), starving base_work — the bot
+        // idled at the bed withdraw forever (ADR-252 live). goTo is door-aware (the return leg already uses
+        // it), so the bot exits through the door and the trip can actually complete. goTo's return is the
+        // via-door length while crossing (same as the return leg's arrival check), so the < 2 test still
+        // means "arrived" once the bot is on the target's side.
+        if (goTo(c, o, tr.x, tr.y, 0.9) < 2 || stuckOn(c, tr.x, tr.y, 120)) { const a = c.rng.range(-Math.PI, Math.PI); tr.x = c.self.x + Math.cos(a) * 10; tr.y = c.self.y + Math.sin(a) * 10; }
         return false; // re-evaluate every tick so gather / hunt take over when a wanted node or prey shows up
       } },
     { name: "refuel", inertia: 0.4, considerations: [

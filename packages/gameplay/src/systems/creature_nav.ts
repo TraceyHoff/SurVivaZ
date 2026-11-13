@@ -105,6 +105,28 @@ export function walkerWaypoint(world: World, e: Entity, x: number, y: number, gx
   return waypoint(world, structures(world), e, x, y, gx, gy, level, r,
     (tx, ty) => terrainBlocksWalker(world, tx, ty), lane, goalLevel ?? level);
 }
+/**
+ * ADR-385: true when the pathfinder can route the walker from (x, y) to (gx, gy) on its
+ * current level — the cached route search reaches the goal tile, not just the closest
+ * reachable tile. Straight sight counts as reachable. The check reuses the same cached
+ * route goTo walks (a cold check runs one bounded A*; a warm one reads the cache), so a
+ * sensor can ask it every sense cycle without a fresh search each time. A goal the
+ * search cannot reach — a resource node on a ridge above the max climb, a sealed room —
+ * returns false, so the picker can re-target instead of freezing against the obstacle.
+ * Callers must pass the walker's own current position: reachability is positional (a
+ * node unreachable from here may be reachable from the far side of the ridge).
+ */
+export function navReachable(world: World, e: Entity, x: number, y: number, gx: number, gy: number, goalLevel?: number): boolean {
+  if (!navNeeded(world, x, y, gx, gy)) return true;
+  const defs = gameplayDefs(world); const r = defs.movement.bodyRadius;
+  const t = world.get(e, Transform);
+  const level = Math.max(0, Math.round((t?.z ?? 0) / defs.building.levelHeight));
+  const lane = Math.max(LANE, Math.min(.15, .5 - r - .02));
+  const wp = waypoint(world, structures(world), e, x, y, gx, gy, level, r,
+    (tx, ty) => terrainBlocksWalker(world, tx, ty), lane, goalLevel ?? level);
+  if (wp?.final) return true; // straight sight, or standing on the route's last tile with the goal reached
+  return nav(world).get(e)?.reached ?? false; // a partial route: reached says whether it gets to the goal
+}
 
 // ---- internals -------------------------------------------------------------------------------------------------
 function waypoint(world: World, idx: StructureIndex, e: Entity, x: number, y: number, gx: number, gy: number, level: number, r: number, blocked: TileBlocked, lane = LANE, goalLevel = level): { x: number; y: number; final: boolean } | undefined {

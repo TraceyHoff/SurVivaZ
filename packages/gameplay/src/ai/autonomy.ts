@@ -18,6 +18,7 @@ import { nearWater } from "../systems/vitals.js";
 import { ToolKind, type GameDefs, type ItemDef, type PieceDef, type RecipeDef, type ResourceDef } from "../defs.js";
 import { hasOwnClaim, pieceCost, pieceUnlocked } from "../building/place.js";
 import { StructureIndexRes } from "../building/structure.js";
+import { navReachable } from "../systems/creature_nav.js";
 import { bumpStat } from "./planner.js";
 import { maxHpOf } from "../building/integrity.js";
 import { nearbyAbandonedWork } from "../building/abandoned.js";
@@ -59,6 +60,8 @@ const BAN_TICKS = 1200;
 type Ctx = AgentContext<AgentWorldView>;
 const bans = (bb: Agent["bb"]): Map<number, number> => { let m = bb.get<Map<number, number>>("nodeBan"); if (!m) { m = new Map(); bb.set("nodeBan", m); } return m; };
 export function banNode(c: Ctx, id: number): void { bans(c.bb).set(id, c.self.tick + BAN_TICKS); c.memory.items.delete(id); }
+/** ADR-385: true while the agent's node ban on `id` is still in force (read-only check for sensors that pick nodes). */
+export function isNodeBanned(bb: Agent["bb"], id: number, tick: number): boolean { const until = bans(bb).get(id); return until !== undefined && until > tick; }
 
 /** True when the agent has not closed 0.5 tiles on (tx, ty) for STUCK_TICKS while trying to move there. */
 export function stuckOn(c: Ctx, tx: number, ty: number, window = STUCK_TICKS): boolean {
@@ -180,25 +183,37 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
   const carried = new Map<number, { slot: number; tier: number }>();
   for (let i = 0; i < slots.items.length; i++) { const tl = slots.items[i] && slots.counts[i] ? defs.items.get(slots.items[i]!)?.tool : undefined; if (tl && tl.kind !== ToolKind.None && (carried.get(tl.kind)?.tier ?? -1) < tl.tier) carried.set(tl.kind, { slot: i, tier: tl.tier }); }
   let bestNeeds: { slot: number } | undefined;
-  for (const p of a.memory.items.values()) {
-    if (p.kind !== "node") continue; const until = ban.get(p.id); if (until !== undefined) { if (until > world.tick) continue; ban.delete(p.id); }
-    if (!world.isAlive(p.id) || !world.has(p.id, ResourceNode) || world.getField(p.id, ResourceNode, "amount") === 0) continue;
-    const def = defs.resources.get(world.getField(p.id, ResourceNode, "kind")!); if (!def) continue;
-    const bagTool = def.requiredTool !== ToolKind.None && !(tool.kind === def.requiredTool && tool.tier >= def.minTier) ? carried.get(def.requiredTool) : undefined;
-    const withTool = def.requiredTool === ToolKind.None || (tool.kind === def.requiredTool && tool.tier >= def.minTier) || (bagTool !== undefined && bagTool.tier >= def.minTier);
-    const bare = !withTool && bareHandsCan(defs, def);
-    if (!withTool && !bare) continue;
-    const foodNode = hungry && def.yields.some((y) => ix.foods.includes(y.item));
-    if (worker?.owner) {
-      if (jobItems && !def.yields.some((y, i) => jobItems.has(y.item) && (!bare || i === 0)) && !foodNode) continue;
-      if (worker.job !== WorkerJob.Gather && worker.job !== WorkerJob.Craft && !(worker.job === WorkerJob.Maintain && view.plan) && !foodNode && !def.yields.some((y) => saddleLeaves.has(y.item))) continue; // ADR-327: a saddle leaf is gatherable even for Defend / Farm / Follow jobs
+  // ADR-385: re-pick when the best node is unreachable from the bot's current position —
+  // a bot that picks an unreachable node walks to the closest reachable tile and freezes
+  // against the obstacle (ADR-384 gate: a ridge node at +6 over the max climb of 3, the
+  // bot's displacement stayed exactly 0.0 for 120 s). Bounded retries in score order;
+  // the nav check is cached per goal, so a repeated ask is cheap.
+  const unreachable = new Set<number>();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    best = undefined; bs = Infinity; bestNeeds = undefined;
+    for (const p of a.memory.items.values()) {
+      if (p.kind !== "node" || unreachable.has(p.id)) continue; const until = ban.get(p.id); if (until !== undefined) { if (until > world.tick) continue; ban.delete(p.id); }
+      if (!world.isAlive(p.id) || !world.has(p.id, ResourceNode) || world.getField(p.id, ResourceNode, "amount") === 0) continue;
+      const def = defs.resources.get(world.getField(p.id, ResourceNode, "kind")!); if (!def) continue;
+      const bagTool = def.requiredTool !== ToolKind.None && !(tool.kind === def.requiredTool && tool.tier >= def.minTier) ? carried.get(def.requiredTool) : undefined;
+      const withTool = def.requiredTool === ToolKind.None || (tool.kind === def.requiredTool && tool.tier >= def.minTier) || (bagTool !== undefined && bagTool.tier >= def.minTier);
+      const bare = !withTool && bareHandsCan(defs, def);
+      if (!withTool && !bare) continue;
+      const foodNode = hungry && def.yields.some((y) => ix.foods.includes(y.item));
+      if (worker?.owner) {
+        if (jobItems && !def.yields.some((y, i) => jobItems.has(y.item) && (!bare || i === 0)) && !foodNode) continue;
+        if (worker.job !== WorkerJob.Gather && worker.job !== WorkerJob.Craft && !(worker.job === WorkerJob.Maintain && view.plan) && !foodNode && !def.yields.some((y) => saddleLeaves.has(y.item))) continue; // ADR-327: a saddle leaf is gatherable even for Defend / Farm / Follow jobs
+      }
+      const wanted = def.yields.some((y) => needs.has(y.item));
+      if (!wanted && needs.size && def.yields[0] && have(def.yields[0].item) >= 8) continue; // stocked up: explore for what the goal needs
+      // ADR-217: a wanted node's pull scales with how much of the needed items one swing is worth (an axe on a tree beats
+      // picking twigs for an odd log; punching a tree only drops its first yield, at reduced rate and slower)
+      const s = Math.hypot(p.x - t.x, p.y - t.y) - (wanted ? 20 * Math.min(1, wantedYield(defs, def, needs, bare)) : 0);
+      if (s < bs || (s === bs && best && p.id < best.id)) { bs = s; best = { id: p.id, x: p.x, y: p.y, wanted }; bestNeeds = bagTool !== undefined && bagTool.tier >= def.minTier ? bagTool : undefined; }
     }
-    const wanted = def.yields.some((y) => needs.has(y.item));
-    if (!wanted && needs.size && def.yields[0] && have(def.yields[0].item) >= 8) continue; // stocked up: explore for what the goal needs
-    // ADR-217: a wanted node's pull scales with how much of the needed items one swing is worth (an axe on a tree beats
-    // picking twigs for an odd log; punching a tree only drops its first yield, at reduced rate and slower)
-    const s = Math.hypot(p.x - t.x, p.y - t.y) - (wanted ? 20 * Math.min(1, wantedYield(defs, def, needs, bare)) : 0);
-    if (s < bs || (s === bs && best && p.id < best.id)) { bs = s; best = { id: p.id, x: p.x, y: p.y, wanted }; bestNeeds = bagTool !== undefined && bagTool.tier >= def.minTier ? bagTool : undefined; }
+    if (!best) break; // no candidate left (all banned / empty / tool-locked / unreachable)
+    if (navReachable(world, self, t.x, t.y, best.x, best.y)) break; // reachable: take it
+    unreachable.add(best.id); best = undefined; // unreachable from here: try the next-best node
   }
   view.gatherScanned = true; if (best) view.gatherNode = best;
   if (bestNeeds) view.equipSlot = bestNeeds.slot; // the inventory "Equip" a player taps before chopping

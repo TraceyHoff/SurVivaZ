@@ -35,7 +35,7 @@ import { ABANDONED_DATA } from "./abandoned_data.js";
  * far region: 38.6% flat, 62.3% passed). The sites land on different chunks than
  * before (the roll is per chunk), but the density is preserved instead of halving.
  */
-export const SITE_CHANCE = 0.15;
+export const SITE_CHANCE = 0.25;
 export const ABANDONED_SCAN_RADIUS = 24;
 
 export const AbandonedKind = {
@@ -731,7 +731,10 @@ function footprintSpread(world: World, ox: number, oy: number, w: number, h: num
  * one at tick ~3261, baseline ~3941), while strict reject alone passes it. The mechanism
  * was never isolated to a single ruin (no relocated site sits near a bot base; all four
  * bots' paths diverge together after ~800 iterations), so relocation is out: the rule is
- * enforced by skipping, and SITE_CHANCE was raised 0.15 -> 0.25 to keep ruin density.
+ * enforced by skipping, and SITE_CHANCE is 0.25 (raised from 0.15) to keep ruin density:
+ * only ~41% of planned sites are already single-level, so 0.25 x ~41% ~= 10 realised
+ * ruins per 100 chunks, the pre-384 level. ADR-385 restored 0.25 after fixing the
+ * planner gap that made 0.25 break adr331 (bots froze on unreachable resource nodes).
  * Water / unbuildable / unloaded rules are unchanged; player placement keeps its own
  * maxSlope tolerance (building/place.ts) — only abandoned sites are strict.
  */
@@ -817,7 +820,9 @@ function placeSpec(world: World, p: PlannedPiece): Entity | 0 {
  * ≈ 0.6–1.0 ms/tick at the measured 30–50 µs per placed piece — inside the 2 ms
  * chunk-load budget (ADR-379) with room for the chunk's own terrain gen. Site kinds,
  * weights, piece counts, and loot are unchanged; only the timing moves. (ADR-384 later
- * raised SITE_CHANCE 0.15 -> 0.25 to keep ruin density under its strict single-level gate.)
+ * raised SITE_CHANCE 0.15 -> 0.25 to keep ruin density under its strict single-level gate;
+ * the ADR-384 gate reverted it to 0.15 because 0.25 broke adr331, and ADR-385 restored
+ * 0.25 once the planner re-targeted unreachable nodes.)
  *
  * Ordering: pieces land in the old order (level, then PHASE: deck → wall → opening → stair →
  * furniture/loot/fence/garden → roof), so foundations/walls land first and the site keeps its
