@@ -8118,3 +8118,20 @@ Keys (no seasonal twins; falls do not ice): `gt_waterfall_lip_px` / `_nx`, `gt_w
 / `_nx` (1-level, 16 px), `gt_waterfall_sheet_2_px` / `_nx` (2-level, 32 px), `gt_waterfall_pool_px`
 / `_nx`. Paint box 64×64 at 1x (32 px diamond + 32 px skirt for a 2-level face).
 
+## ADR-390: Storage container windows show the container's display name (SurVivaZ)
+
+Context: the inventory panel always titled the window "Inventory" and the container pane "Storage · N
+slots", so a player searching a crate, a log store, a death bag or a saddlebag could not see which
+container was open. Phone portrait has a narrow header; a long name must not cut off.
+
+Decision: `containerDisplayName(world, entity, player?)` resolves, in order: a `Mount` → "Saddlebag";
+a `Vehicle` → title-cased def id (`wagon_medium` → "Wagon Medium"); a `LootBag` → "Your Bag" / "Death
+Bag" / "Zombie Loot" / "Supply Crate" / "Loot Bag" (same sources as ADR-161 labels, title-cased for a
+window); a `BuildPiece` on the entity or `pieceOf` the storage attachment → title-cased piece key
+(`log_store` → "Log Store", `large_chest` → "Large Chest", `campfire` → "Campfire", ruins and
+crafting-station storage included). Fallback "Storage". `containerView` carries `name`;
+`inventoryPanelTitle` is that name when a container is in reach, else "Inventory". The inventory
+modal's h2 and aria-label use it on open and on refresh; the container section heading and aria-label
+use it too. Header CSS: `min-width:0` on the header, `flex:1; overflow:hidden; text-overflow:ellipsis;
+white-space:nowrap` on the h2, `flex-shrink:0` on the close button, so portrait does not cut off.
+No new controls (keyboard, gamepad and touch already open this panel).

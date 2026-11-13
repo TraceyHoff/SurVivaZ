@@ -17,6 +17,7 @@ import { ReadyCmd } from "../ready.js";
 import { Appearance, GroupRole, Membership, PlayerId, SEASON_NAMES, Transform, WEARABLE_SLOTS, Weather, getAppearance, slotIndex, SLOT_PALETTE, type CommandDef, type CosmeticCatalogLike, type Entity, type World } from "@engine/core";
 import { BuildPiece, CraftingStation, Dead, Container, Exposure, Health, LootBag, ClanInvitePending, ClanStatus, CraftQueue, PartyInvitePending, PartyRank, Progression, RoomHeat, SlotDye, StallHeader, Survival, Wardrobe } from "../components.js";
 import { gameplayDefs } from "../config.js";
+import { containerDisplayName } from "../container_name.js";
 import { carriedBags } from "../stance.js";
 import type { ItemCount } from "../defs.js";
 import { countItem, hasBrushInHotbar, listSlots, readSlots, slotItem, slotsWeight } from "../inventory.js";
@@ -168,7 +169,7 @@ export const STATION_NAMES: Readonly<Record<number, string>> = { 0: "By hand", 1
 /** Slots per page in the container panel (one page = the old 24-slot box). */
 export const CONTAINER_PAGE_SIZE = 24;
 export interface ContainerSlotView { slot: number; item: number; icon: string; name: string; count: number; tooltip: string; /** ADR-290 */ fill?: LiquidFill }
-export interface ContainerView { entity: Entity; slotCount: number; page: number; pages: number; first: number; slots: ContainerSlotView[]; weight: number; maxWeight: number }
+export interface ContainerView { entity: Entity; name: string; slotCount: number; page: number; pages: number; first: number; slots: ContainerSlotView[]; weight: number; maxWeight: number }
 /** The container the player has open on this replica: Container replicates only to viewers (containerViewersScope),
  *  so on a client the nearest non-player Container within reach is the open one. */
 export function openContainer(c: MenuCtx): Entity | undefined {
@@ -181,6 +182,11 @@ export function openContainer(c: MenuCtx): Entity | undefined {
   }
   return best;
 }
+/** Window title when the inventory panel is showing a container; "Inventory" when none is open. */
+export function inventoryPanelTitle(world: World, player: Entity): string {
+  const box = openContainer({ world, player } as MenuCtx);
+  return box !== undefined ? containerDisplayName(world, box, player) : "Inventory";
+}
 /** One page of a container (every slot in the page, empties included, so focus positions stay stable). `page` is clamped. */
 export function containerView(c: MenuCtx, e: Entity, page = 0, pageSize = CONTAINER_PAGE_SIZE): ContainerView | undefined {
   const w = c.world; const box = w.get(e, Container); if (!box) return undefined;
@@ -191,7 +197,7 @@ export function containerView(c: MenuCtx, e: Entity, page = 0, pageSize = CONTAI
     const fill = item ? liquidFill(w, item, v.durability(i)) : undefined;
     slots.push({ slot: i, item, count, name, icon: item ? gameplayDefs(w).items.get(item)?.spriteKey ?? "" : "", tooltip: item ? `${name} ×${count} · slot ${i + 1}/${n}` : `Empty · slot ${i + 1}/${n}`, ...(fill ? { fill } : {}) });
   }
-  return { entity: e, slotCount: n, page: pg, pages, first, slots, weight: box.weight, maxWeight: box.maxWeight };
+  return { entity: e, name: containerDisplayName(w, e, c.player), slotCount: n, page: pg, pages, first, slots, weight: box.weight, maxWeight: box.maxWeight };
 }
 /** ADR-160: withdraw every stack from an open container (server: Withdraw with item 0). */
 export const takeAllIntent = (target: Entity): MenuIntent => intent(WithdrawCmd, { target, item: 0, count: 0 }, ["target"]);

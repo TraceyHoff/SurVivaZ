@@ -57,6 +57,7 @@ export * from "./systems/lights.js";
 export * from "./vehicle_keys.js";
 export * from "./combat/pvp.js";
 export * from "./loot_labels.js";
+export * from "./container_name.js";
 export * from "./loot_despawn.js";
 export * from "./dung.js"; // ADR-352: animal dung production + dung fertilizer data
 export * from "./spawn_points.js";

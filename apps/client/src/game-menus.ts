@@ -18,7 +18,7 @@ import { GAMEPLAY_PANELS, gameplayBody, pageContainer, pageSkillCategory, type G
 import { buildGuidePanel } from "./guide-panel.js";
 import { iconImg, isIconFile } from "./game-icons.js";
 import { GUIDE_BOOK_ICON_FILE } from "./guide-art.js";
-import { closeContainerIntent, onlineTargets, openContainerIntent, openStallIntent, isPetOwner, Pet, Viewing } from "@engine/gameplay";
+import { closeContainerIntent, inventoryPanelTitle, onlineTargets, openContainerIntent, openStallIntent, isPetOwner, Pet, Viewing } from "@engine/gameplay";
 import { DEFAULT_QUALITY_PRESET, loadPreset, parsePreset, savePreset, QUALITY_PRESETS, type QualityPreset } from "@engine/render";
 
 /** `data-chan` value per @engine/net ChatChannel number (Global 0 … System 6); omitted/unknown = "system". */
@@ -50,7 +50,7 @@ const CSS = `.gm-modal{position:absolute;inset:0;z-index:30;display:flex;align-i
 padding:calc(8px + var(--sat,0px)) calc(8px + var(--sar,0px)) calc(8px + var(--sab,0px)) calc(8px + var(--sal,0px));box-sizing:border-box;pointer-events:auto;touch-action:pan-y}
 .gm-panel{background:#F6EAD2;color:#3B2433;border:3px solid #74432C;border-radius:14px;box-shadow:0 4px 0 #432C24;max-width:min(560px,94vw);max-height:100%;max-height:calc(100dvh - var(--sat,0px) - var(--sab,0px) - 16px);overflow-y:auto;-webkit-overflow-scrolling:touch;touch-action:pan-y;overscroll-behavior:contain;
 padding:12px 14px;display:flex;flex-direction:column;gap:10px;font:600 15px Fredoka,system-ui,sans-serif;box-sizing:border-box;min-width:min(300px,90vw)}
-.gm-panel header{display:flex;align-items:center;justify-content:space-between;gap:8px}.gm-panel h2{margin:0;font-size:20px;color:#74432C}
+.gm-panel header{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}.gm-panel h2{margin:0;font-size:20px;color:#74432C;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.gm-panel header [data-role=close]{flex-shrink:0}
 .gm-panel p{margin:0;font-size:14px}.gm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px}
 .gm-panel button,.gm-panel input,.gm-panel select{font:700 16px Fredoka,system-ui,sans-serif;min-height:44px;min-width:44px;border-radius:10px;box-sizing:border-box}
 .gm-panel button{color:#FFFAF0;background:#5A9A4A;border:3px solid #3B2433;box-shadow:0 3px 0 #2D5A2E;padding:6px 12px;cursor:pointer}
@@ -177,7 +177,7 @@ export class GameMenus {
       s ? [...(s.actions?.() ?? []).map(([t, fn]): [string, () => void] => [t, () => { this.nav.closeAll(); fn(); }]), [s.leaveLabel, () => { this.nav.closeAll(); s.onLeave(); }, "alt"]] : []); }
     const m = GAME_MENUS.find((d) => d.id === id); if (!m) throw new Error(`unknown menu ${id}`);
     if (id === "map" && this.o.mapBody) return this.panel(id, m.title, this.o.mapBody());
-    if (this.o.gameplay && (GAMEPLAY_PANELS as readonly string[]).includes(id)) return this.panel(id, m.title, this.gameplayNodes(id as GameplayPanel));
+    if (this.o.gameplay && (GAMEPLAY_PANELS as readonly string[]).includes(id)) return this.panel(id, this.panelTitle(id, m.title), this.gameplayNodes(id as GameplayPanel));
     return this.panel(id, m.title, [this.para(m.text)]);
   }
   private gameplayNodes(id: GameplayPanel): Node[] {
@@ -188,11 +188,25 @@ export class GameMenus {
    *  No-op when no gameplay panel is open. Returns the number of DOM mutations. */
   /** ADR-205: set the open gameplay panel's status line (e.g. a friendly server-reject text) and re-render. */
   notice(text: string): void { this.statusLine = text; this.refresh(); }
+  /** ADR-390: inventory window title is the open container's display name (or "Inventory"). */
+  private panelTitle(id: string, fallback: string): string {
+    if (id !== "inventory" || !this.o.gameplay) return fallback;
+    const c = this.o.gameplay.ctx(); if (!c) return fallback;
+    return inventoryPanelTitle(c.world, c.player);
+  }
+  private applyPanelTitle(id: string, title: string): void {
+    const p = this.o.root.querySelector<HTMLElement>(`[data-menu="${id}"] .gm-panel`); if (!p) return;
+    p.setAttribute("aria-label", title);
+    const h2 = p.querySelector("header h2"); if (h2) h2.textContent = title;
+    const close = p.querySelector<HTMLElement>('[data-role=close]'); if (close) close.setAttribute("aria-label", `Close ${title}`);
+  }
   refresh(): number {
     const id = this.nav.top; if (!id || !this.o.gameplay || !(GAMEPLAY_PANELS as readonly string[]).includes(id)) return 0;
     const body = this.o.root.querySelector<HTMLElement>(`[data-menu="${id}"] [data-role=body]`); if (!body) return 0;
     const next = body.cloneNode(false) as HTMLElement; next.append(...this.gameplayNodes(id as GameplayPanel));
-    return morph(body, next);
+    const n = morph(body, next);
+    if (id === "inventory") this.applyPanelTitle(id, this.panelTitle(id, "Inventory"));
+    return n;
   }
   /** Open the trade panel on a specific stall (interact). */
   openStall(stall: number): void { this.stallTarget = stall; this.o.gameplay?.send(openStallIntent(stall)); if (this.nav.top === "trade") this.refresh(); else this.nav.open("trade", this.build("trade")); }

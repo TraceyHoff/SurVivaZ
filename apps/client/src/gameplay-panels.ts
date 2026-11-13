@@ -401,13 +401,13 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
       } else {
         // ADR-098 paged container grid (CONTAINER_PAGE_SIZE per page) as tiles beside / below the pack. Every slot is a focusable
         // button so the D-pad / arrows walk the grid; ◀ ▶ (touch), PgUp/PgDn (keyboard) and LB/RB (gamepad) change pages.
-        const right = el("section", { "data-role": "container-side", "aria-label": "Storage" });
+        const right = el("section", { "data-role": "container-side", "aria-label": cv.name });
         const ccap = capacityView(c, cv.entity);
-        right.append(heading(`Storage · ${cv.slotCount} slots${ccap ? ` · ${ccap.slotsUsed} used · ${ccap.freeSlots} free` : ""}${cv.maxWeight > 0 ? ` · ${Math.round(cv.weight)}/${Math.round(cv.maxWeight)} kg · ${Math.round(ccap?.freeWeight ?? 0)} kg free` : ""}`));
+        right.append(heading(`${cv.name} · ${cv.slotCount} slots${ccap ? ` · ${ccap.slotsUsed} used · ${ccap.freeSlots} free` : ""}${cv.maxWeight > 0 ? ` · ${Math.round(cv.weight)}/${Math.round(cv.maxWeight)} kg · ${Math.round(ccap?.freeWeight ?? 0)} kg free` : ""}`));
         const cbar = capacityBar(c, cv.entity, "Storage"); if (cbar) right.append(cbar);
         // ADR-160: loot bags (zombie / animal / death / dropped) get a "Take all" first (focusable: click, tap, D-pad + A)
         if (c.world.isRegistered(LootBag) && c.world.has(cv.entity, LootBag) && cv.slots.some((x) => x.item)) right.append(btn("Take all", "take-all", () => send(takeAllIntent(cv.entity), "Took everything that fits."), { role: "use", title: "Move every stack into your pack" }));
-        const g = el("div", { "data-role": "container-grid", "aria-label": "Storage slots" }); g.dataset["page"] = String(cv.page);
+        const g = el("div", { "data-role": "container-grid", "aria-label": `${cv.name} slots` }); g.dataset["page"] = String(cv.page);
         for (const s of cv.slots) g.append(ctile(s));
         right.append(g);
         if (cv.pages > 1) {
