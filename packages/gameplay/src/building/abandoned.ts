@@ -4,6 +4,7 @@
  * ADR-311: the top-story roof style (flat, eaves, gable, hip-ended gable, optional chimney) is picked per site from its
  * own seeded stream, so layouts, loot, and furnishing rolls are unchanged.
  */
+import roofFormsJson from "../../data/roof_forms.json";
 import { PlayerId, Transform, type Entity, type World } from "@engine/core";
 import { CHUNK_SIZE, isWaterId, parseChunkKey, waterDepthAt, WaterDepth, type ChunkKey } from "@engine/world";
 import { AbandonedSite, BuildPiece, PieceOwner, PieceSlot, ResourceNode, Tribe } from "../components.js";
@@ -121,9 +122,16 @@ interface Spec { key: string; x: number; y: number; level: number; rot: number; 
  * Gable = rows of `roof_gable` ridges along the long axis; HipGable = the same rows with `roof_hip` caps at both ends.
  * Flat and Eaves roofs over a hearth may swap one centre tile for `roof_chimney`.
  */
-export const RoofStyle = { Flat: 0, Eaves: 1, Gable: 2, HipGable: 3 } as const;
+export const RoofStyle = { Flat: 0, Eaves: 1, Gable: 2, HipGable: 3, /** ADR-398 */ Gambrel: 4, Shed: 5, Cottage: 6 } as const;
 export type RoofStyleId = (typeof RoofStyle)[keyof typeof RoofStyle];
-export const ROOF_STYLE_KEYS: readonly string[] = ["flat", "eaves", "gable", "hip_gable"];
+export const ROOF_STYLE_KEYS: readonly string[] = ["flat", "eaves", "gable", "hip_gable", "gambrel", "shed", "cottage"];
+/** ADR-398 (data/roof_forms.json): continuous-roof forms per abandoned kind, applied only while `live` (Art's rfx pages shipped). */
+export const ROOF_FORMS: { readonly live: boolean; readonly kinds: Readonly<Record<string, string>> } = roofFormsJson as never;
+const FORM_STYLE: Readonly<Record<string, RoofStyleId>> = { roof_gambrel: 4, roof_shed: 5, roof_cottage: 6 };
+/** ADR-398: the form style a kind gets (undefined = keep its ADR-311 weighted pick). */
+export function roofFormStyle(kind: AbandonedKindId, forms: typeof ROOF_FORMS = ROOF_FORMS): RoofStyleId | undefined {
+  if (!forms.live) return undefined; const k = forms.kinds[ABANDONED_KIND_KEYS[kind] ?? ""]; return k ? FORM_STYLE[k] : undefined;
+}
 
 export interface PlannedPiece {
   key: string; x: number; y: number; level: number; rot: number; role: Role;
@@ -614,7 +622,10 @@ function styleRoof(pieces: Spec[], style: RoofStyleId, rand: () => number): bool
       s.key = "roof_gable"; s.rot = ew ? 0 : 1;
       if (style === RoofStyle.HipGable && len >= 3 && along === 0) { s.key = "roof_hip"; s.rot = ew ? 2 : 3; }
       else if (style === RoofStyle.HipGable && len >= 3 && along === len - 1) { s.key = "roof_hip"; s.rot = ew ? 0 : 1; }
-    } else { s.key = "roof_flat"; s.rot = 0; }
+    } else if (style === RoofStyle.Gambrel) { s.key = "roof_gambrel"; s.rot = ew ? 0 : 1; } // ADR-398: ridge along the long side
+    else if (style === RoofStyle.Shed) { s.key = "roof_shed"; s.rot = ew ? 0 : 1; } // one pitch, falling across the long side (S / W)
+    else if (style === RoofStyle.Cottage) { s.key = "roof_cottage"; s.rot = 0; }
+    else { s.key = "roof_flat"; s.rot = 0; }
   }
   const hearth = pieces.find((s) => s.key === "fireplace");
   if (!hearth || (style !== RoofStyle.Flat && style !== RoofStyle.Eaves) || w < 3 || h < 3 || rand() >= 0.65) return false;
@@ -640,7 +651,9 @@ export function planAbandonedSite(seed: number, originX: number, originY: number
     if (!onStair && extraRand() < ex.chance) built0.pieces.push({ key: ex.key, x: ex.x, y: ex.y, level: ex.level ?? 0, rot: 0, role: extraRole(ex.key) });
   }
   const roofRand = rng(hashU32(seed >>> 0, originX, originY, 0x2F0F0311)); // ADR-311: own stream
-  const roofStyle = opts.roof ?? pickRoofStyle(kind, roofRand);
+  const form = opts.roof === undefined ? roofFormStyle(kind) : undefined;
+  const picked = opts.roof ?? pickRoofStyle(kind, roofRand); // drawn exactly as before, so the roof stream is unchanged by ADR-398 forms
+  const roofStyle = form ?? picked;
   const chimney = styleRoof(built0.pieces, roofStyle, roofRand);
   const built = rotateBuilt(built0, rot);
   const ruin = opts.ruin ?? (0.18 + rand() * 0.62);

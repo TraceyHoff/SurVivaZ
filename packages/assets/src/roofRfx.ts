@@ -29,10 +29,11 @@ export function rfxHashU32(seed: number, a: number, b = 0, c = 0): number {
 }
 
 export interface RfxTile { x: number; y: number; /** gameplay piece key */ key: string; /** world quarter turn 0-3 */ rot: number; tier: number; /** ADR-397 material hook: the building's wall material (e.g. tier key or a wall variant) */ wallMaterial?: string }
-export interface RfxOverlay { /** key stem without tier, e.g. rfx_gab_verge_er */ key: string; row: number; zoffPx: number; /** draw order after the tile (0, 1, ...) */ order: number }
+export interface RfxOverlay { /** key stem without tier, e.g. rfx_gab_verge_er */ key: string; /** other stems for the same overlay, tried in order after `key` (Art's packed names, e.g. rfx_gab_lo_ver) */ alts: string[]; row: number; zoffPx: number; /** draw order after the tile (0, 1, ...) */ order: number }
 export interface RfxPick {
   form: RfxForm; band: number; lower: number; shape: RfxShape; row: number; seg: "lo" | "up" | "top" | "lotop" | ""; crest: boolean; variant: 0 | 1 | 2;
   /** full stem without tier: rfx_<form>_<seg>_<shape>[c][_v<n>] (flt f: rfx_flt_f[_v<n>]) */ stem: string;
+  /** other stems for the same tile, tried after `stem` (Art's packed names: rfx_flt_lo_f, gab/gam plateau up_f) */ alts: string[];
   /** lift above the piece z in px at 1x */ zoffPx: number; overlays: RfxOverlay[]; skin?: string; region: number;
 }
 
@@ -127,8 +128,8 @@ function pickRegion(region: RfxTile[], group: string, level: number, regionId: n
     let seg: RfxPick["seg"] = b === 0 ? "lo" : "up";
     const nbr = (d: number): [number, number] => [t.x + DIR_V[d]![0], t.y + DIR_V[d]![1]];
     const eqMember = (d: number): boolean => { const [x, y] = nbr(d); return bandAt(x, y) === b; };
-    let top = false;
-    if ((form === "gab" || form === "gam") && (lower & 15) === 0) { shape = "r"; row = axis; seg = "up"; }
+    let top = false, plateau = false;
+    if ((form === "gab" || form === "gam") && (lower & 15) === 0) { shape = "r"; row = axis; seg = "up"; plateau = true; }
     if (form === "flt") { seg = shape === "f" ? "" : "lo"; }
     if (form === "shd") { shape = "e"; row = downD; const [ux, uy] = nbr((downD + 2) % 4); top = !isM(ux, uy); seg = b === 0 ? (top ? "lotop" : "lo") : top ? "top" : "up"; }
     let crest = false;
@@ -139,11 +140,13 @@ function pickRegion(region: RfxTile[], group: string, level: number, regionId: n
     const stem = `rfx_${form}_${seg ? seg + "_" : ""}${shape}${crest ? "c" : ""}${variant ? `_v${variant}` : ""}`;
     const zoffPx = rfxZoff(form, b, cfg);
     const overlays: RfxOverlay[] = []; let order = 0;
-    const strips = (k: number, x: number): void => { for (let j = 0; j < k; j++) overlays.push({ key: form === "gam" ? (j === 0 ? "rfx_gam_wall_lo" : "rfx_gam_wall_up") : `rfx_${form}_wall`, row: x, zoffPx: rfxZoff(form, j, cfg), order: order++ }); };
+    const strips = (k: number, x: number): void => { for (let j = 0; j < k; j++) overlays.push({ key: form === "gam" ? (j === 0 ? "rfx_gam_wall_lo" : "rfx_gam_wall_up") : `rfx_${form}_wall`, alts: [], row: x, zoffPx: rfxZoff(form, j, cfg), order: order++ }); };
+    // Art's packed verge names carry the band seg: rfx_<form>_<lo|up>_v{el,er,r,f} (doc §4: rfx_<form>_verge_{el,er,r})
+    const vseg = seg === "lo" || seg === "lotop" ? "lo" : "up";
     const verge = (x: number, d: number, onR: boolean): void => {
-      if (onR) overlays.push({ key: `rfx_${form}_verge_r`, row: x, zoffPx, order: order++ });
-      else if (x === (d + 1) % 4) overlays.push({ key: `rfx_${form}_verge_er`, row: d, zoffPx, order: order++ });
-      else if (x === (d + 3) % 4) overlays.push({ key: `rfx_${form}_verge_el`, row: d, zoffPx, order: order++ });
+      if (onR) overlays.push({ key: `rfx_${form}_verge_r`, alts: [`rfx_${form}_${vseg}_vr`, ...(plateau ? [`rfx_${form}_up_vf`] : [])], row: x, zoffPx, order: order++ });
+      else if (x === (d + 1) % 4) overlays.push({ key: `rfx_${form}_verge_er`, alts: [`rfx_${form}_${vseg}_ver`], row: d, zoffPx, order: order++ });
+      else if (x === (d + 3) % 4) overlays.push({ key: `rfx_${form}_verge_el`, alts: [`rfx_${form}_${vseg}_vel`], row: d, zoffPx, order: order++ });
     };
     if (form === "gab" || form === "gam") {
       for (const x of axis === 0 ? [1, 3] : [0, 2]) { const [nx, ny] = nbr(x); if (isM(nx, ny)) continue; verge(x, row, shape === "r"); strips(b, x); }
@@ -151,8 +154,11 @@ function pickRegion(region: RfxTile[], group: string, level: number, regionId: n
       for (const x of [(downD + 1) % 4, (downD + 3) % 4]) { const [nx, ny] = nbr(x); if (isM(nx, ny)) continue; verge(x, downD, false); strips(b, x); }
       if (top) strips(b + 1, (downD + 2) % 4);
     }
-    if (t.key === "roof_chimney") overlays.push({ key: "rfx_chimney", row: 0, zoffPx: zoffPx + rfxRise(form, b, cfg) / 2, order: order++ });
-    out.set(rfxCell(t.x, t.y), { form, band: b, lower, shape, row, seg, crest, variant, stem, zoffPx, overlays, region: regionId, ...(rule ? { skin: rule.skin } : {}) });
+    if (t.key === "roof_chimney") overlays.push({ key: "rfx_chimney", alts: [], row: 0, zoffPx: zoffPx + rfxRise(form, b, cfg) / 2, order: order++ });
+    const vs = variant ? `_v${variant}` : "";
+    const alts = form === "flt" && shape === "f" ? [`rfx_flt_lo_f${vs}`] : plateau ? // gab/gam plateau (n = 0 past the clamp): Art also packed up_f, tried after the doc's up_r
+       [`rfx_${form}_up_f${rfxVariant(t.x, t.y, level, cfg) ? `_v${rfxVariant(t.x, t.y, level, cfg)}` : ""}`] : [];
+    out.set(rfxCell(t.x, t.y), { form, band: b, lower, shape, row, seg, crest, variant, stem, alts, zoffPx, overlays, region: regionId, ...(rule ? { skin: rule.skin } : {}) });
   }
 }
 

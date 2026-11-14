@@ -1198,7 +1198,10 @@
     "log_store": 190,
     "ore_store": 191,
     "stick_store": 192,
-    "stone_store": 193
+    "stone_store": 193,
+    "roof_cottage": 194,
+    "roof_gambrel": 195,
+    "roof_shed": 196
   },
   "zombies": {
     "zombie_brute": 1,

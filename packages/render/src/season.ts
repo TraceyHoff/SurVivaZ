@@ -15,6 +15,9 @@ import { Season, SEASON_NAMES, seasonAt, type SeasonInfo, type World } from "@en
 export const SEASON_FOLIAGE = 2048, SEASON_SNOWCAP = 4096;
 /** ADR-246: flat ground decals (roads, paths, soil) without `_fall`/`_winter` art: fallen-leaf speckle + snow dusting. */
 export const SEASON_GROUND = 8192;
+/** ADR-399: continuous-roof snow (rfx roof tiles). Coverage comes from world-space noise on the drawn iso position, so it
+ *  runs across tile seams like the roof itself, instead of the per-sprite SNOWCAP edge line that would redraw every seam. */
+export const SEASON_ROOFSNOW = 16384;
 
 const override = new WeakMap<World, SeasonInfo>();
 /** Host-supplied season (client: from the smoothed server-tick day count, since the view world's tick is not the server's). */
@@ -159,6 +162,15 @@ vec3 seasonSprite(vec3 c, int fl, vec2 uv, float seed, vec2 px) {
     c = mix(c, vec3(0.92, 0.95, 1.0) * (0.92 + 0.08 * sHash(floor(px))), smoothstep(0.15, 0.6, cover));
   }
   return c;
+}
+// ADR-399: whole-roof snow. w = drawn iso position (world px), continuous across neighbouring roof tiles; brighter (sky-
+// facing) roof faces hold more snow, darker eave / gable faces less. uSeason.z = snow cover 0..1.
+vec3 roofSnow(vec3 c, vec2 w) {
+  if (uSeason.z < 0.001) return c;
+  float lum = dot(c, vec3(0.299, 0.587, 0.114));
+  float n = sHash(floor(w / 9.0) + 5.0) * 0.6 + sHash(floor(w / 3.0) + 11.0) * 0.4;
+  float cover = smoothstep(1.0 - uSeason.z, 1.0 - uSeason.z + 0.22, n * 0.55 + smoothstep(0.2, 0.7, lum) * 0.45);
+  return mix(c, vec3(0.92, 0.95, 1.0) * (0.93 + 0.07 * sHash(floor(w))), cover);
 }`;
 
 /** CPU mirror of seasonSprite for Canvas2D (RGBA8 in place, image width w). */

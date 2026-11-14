@@ -52,11 +52,12 @@ export class RoofTiler {
   /** First existing sprite for a pick at a tier (undefined = legacy). */
   resolve(p: RfxPick, tier: number): RoofFxBinding | undefined {
     let vis: number | undefined;
-    for (const k of rfxSpriteKeys(p.stem, tier, p.skin, this.cfg)) { vis = this.sid(k); if (vis !== undefined) break; }
+    for (const st of [p.stem, ...p.alts]) { for (const k of rfxSpriteKeys(st, tier, p.skin, this.cfg)) { vis = this.sid(k); if (vis !== undefined) break; } if (vis !== undefined) break; }
     if (vis === undefined) return undefined;
     const overlays: { vis: number; row: number; liftPx: number }[] = [];
     for (const o of p.overlays) {
-      let ov: number | undefined; for (const k of rfxSpriteKeys(o.key, tier, p.skin, this.cfg)) { ov = this.sid(k); if (ov !== undefined) break; }
+      let ov: number | undefined;
+      for (const st of [o.key, ...o.alts]) { for (const k of rfxSpriteKeys(st, tier, p.skin, this.cfg)) { ov = this.sid(k); if (ov !== undefined) break; } if (ov !== undefined) break; }
       if (ov !== undefined) overlays.push({ vis: ov, row: o.row, liftPx: o.zoffPx });
     }
     return { vis, row: p.row, liftPx: p.zoffPx, overlays };

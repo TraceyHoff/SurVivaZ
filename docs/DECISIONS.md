@@ -8400,3 +8400,59 @@ Questions back to Art, as read from §4:
   corner of a ≥ 3-wide hip, because the corner's edge neighbours are band 0 too. That is implemented exactly as
   written; if only the 2×2 case was meant, the rule needs "both".
 - Overlay depth is a fixed bias after the tile; a headless check with real overlay art is still to do.
+
+## ADR-398: Cottage, gambrel and shed roof pieces; abandoned-site forms; one build-menu entry per roof form (SurVivaZ)
+
+Context: Art & Assets' continuous-roof proposal adds three forms with new gameplay pieces. The owner decided:
+- Add `roof_cottage`, `roof_gambrel` and `roof_shed`.
+- Abandoned barns, mills and stables get gambrel roofs; sheds and hunter shacks get shed roofs; cottages and
+  farmhouses get cottage roofs.
+- The build menu collapses to one roof entry per form, and placement picks slope, corner and hip shapes
+  automatically (ADR-397). It must stay gamepad, keyboard and touch navigable.
+
+Decision:
+- Pieces: `pieces.json` appends the three as tiered cell roofs (cottage / gambrel minTier 1, shed from twig;
+  costScale 1.3 / 1.3 / 1.1). They are appended, so every older piece id is unchanged; the id lock only gains 194–196.
+  The world schema hash moves with the id-lock salt (no new component).
+- Abandoned sites: `RoofStyle` gains Gambrel (ridge along the long side), Shed (one pitch, eave across the long side)
+  and Cottage. Their pieces go in place of the ADR-311 tiles, with the same count and order. The ADR-311 style is
+  still drawn from the roof stream exactly as before, so layouts, loot and chimney rolls do not move.
+  `data/roof_forms.json` maps kind → piece and is `live: false`: the new pieces have no legacy art, so a site roofed
+  with them would draw nothing until Art's `rfx_cot` / `rfx_gam` / `rfx_shd` pages ship. Flip it in the art commit.
+- Build menu (`apps/client/src/roof-menu.ts`, `GameplaySource.roofForms`):
+  - Once `rfx_hip_*` art is in the registry, `roof_corner` and `roof_hip` leave the tile list and `roof_slope` reads
+    "hip roof".
+  - `roof_gable` and `roof_flat` read "gable roof" and "flat roof" once their forms ship.
+  - Each new form appears once its own `rfx_` art ships.
+  - Only the tile list changes; the grid, focus order and pad / keyboard / touch handling are the existing build
+    window's.
+
+Validation: `packages/gameplay/test/adr398_roof_forms.test.ts` covers the appended pieces, no form while not live, the
+kind mapping when live, and that a forced form roofs the whole top story with the rest of the plan unchanged.
+`apps/client/test/adr398_roof_menu.test.ts` covers the list before art, hip art collapsing corner / hip, new forms
+appearing per form, labels, and forms read from the registry's `rfx_` keys.
+`adr229_build_icons` skips the three gated pieces only while `live: false`, and asserts that the menu hides them.
+Once live flips, it requires Art's `build_roof_{cottage,gambrel,shed}_tN` icons; the gameplay and schema counts move from 193 to 196 pieces.
+
+Alias stems (amends ADR-397): Art's work-in-progress manifest packs some names differently from §4 of its doc.
+`roofRfx` therefore resolves each tile and overlay as `[stem, ...alts]`, so either naming works:
+- verges `rfx_<form>_<lo|up>_v{el,er,r}`, plus `up_vf` on a plateau;
+- the flat field `rfx_flt_lo_f`;
+- the gable / gambrel plateau `up_f`.
+
+The first name the registry has wins, and none is invented. Missing names resolve to nothing and the legacy piece draws.
+
+## ADR-399: Whole-roof snow for continuous roofs (SurVivaZ)
+
+Context: the per-sprite `SEASON_SNOWCAP` pass whitens each sprite's top alpha edge. On continuous roofs that would
+draw a snow line on every tile, bringing the stripes back, which is why Art kept `rfx_` outside the `/^roof/` season
+rule. The owner chose an engine pass with no new art.
+
+Decision: a new instance flag `SEASON_ROOFSNOW` (16384) is set on the rfx roof surface part only (not verges, gable
+walls or the chimney, and not cutaway or ghosts). The sprite shader's `roofSnow` takes its coverage from world-space
+noise on the drawn iso position (`vScr`), which is continuous across neighbouring tiles like the roof itself, and
+weighted towards brighter, sky-facing faces. It scales with the existing snow cover `uSeason.z`. Legacy roofs keep
+their `_winter` twins or SNOWCAP as before. Canvas2D draws legacy roofs only, so it needs no mirror.
+
+Validation: `adr397_roof_draw.test.ts` pins the GLSL entry point and that the flag bit is disjoint from the other
+season and crisp bits. The headless WebGL2 boot of the built dist compiles the shader.

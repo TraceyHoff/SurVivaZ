@@ -53,7 +53,7 @@ const deposit = (w: World, p: Entity, t: Entity, k: string, n: number): void => 
 
 describe("ADR-355 storage stores: data", () => {
   it("adds five pieces (193 total) with the fixed art-slice keys, 12 slots, tier 1, furniture, never skill-gated", () => {
-    expect(d.pieces.size).toBe(193);
+    expect(d.pieces.size).toBe(196); // ADR-398: +3 continuous-roof pieces
     for (const k of STORES) {
       expect((ids.pieces as Record<string, number>)[k]).toBeGreaterThan(188); // appended after shaft_hatch 188
       const def = piece(k);

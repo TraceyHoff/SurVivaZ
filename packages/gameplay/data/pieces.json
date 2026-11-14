@@ -5438,6 +5438,9 @@
         "shaftHatch": true
       },
       "$comment": "ADR-299: ground hatch over a dug shaft; use rides between the live rim and the live bottom at any depth."
-    }
+    },
+    { "key": "roof_cottage", "placement": "cell", "layer": 0, "tiered": true, "costScale": 1.3, "hp": 250, "minLevel": 1, "roof": true, "minTier": 1, "family": "roof", "solid": false, "$comment": "ADR-398: continuous-roof form (Art rfx_cot); hidden from the build menu until its art lands" },
+    { "key": "roof_gambrel", "placement": "cell", "layer": 0, "tiered": true, "costScale": 1.3, "hp": 260, "minLevel": 1, "roof": true, "minTier": 1, "family": "roof", "solid": false, "$comment": "ADR-398: continuous-roof form (Art rfx_gam); hidden from the build menu until its art lands" },
+    { "key": "roof_shed", "placement": "cell", "layer": 0, "tiered": true, "costScale": 1.1, "hp": 250, "minLevel": 1, "roof": true, "family": "roof", "solid": false, "$comment": "ADR-398: continuous-roof form (Art rfx_shd); hidden from the build menu until its art lands" }
   ]
 }

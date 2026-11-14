@@ -89,3 +89,12 @@ describe("ADR-397 roof fx draw path", () => {
   });
   it("part budget", () => { expect(PIECE_PARTS_MAX).toBeGreaterThanOrEqual(2 + 1 + 7); expect(ROOF_OVERLAY_BIAS).toBeGreaterThan(0); });
 });
+
+describe("ADR-399 whole-roof snow", () => {
+  it("the shader samples world-space noise on the drawn iso position, behind its own flag", async () => {
+    const { SEASON_SPRITE_GLSL, SEASON_ROOFSNOW, SEASON_GROUND, SEASON_SNOWCAP, SEASON_FOLIAGE } = await import("@engine/render");
+    expect(SEASON_SPRITE_GLSL).toContain("vec3 roofSnow(vec3 c, vec2 w)");
+    expect(new Set([SEASON_ROOFSNOW, SEASON_GROUND, SEASON_SNOWCAP, SEASON_FOLIAGE, 1024]).size).toBe(5);
+    expect(SEASON_ROOFSNOW & (SEASON_GROUND | SEASON_SNOWCAP | SEASON_FOLIAGE | 1024)).toBe(0);
+  });
+});

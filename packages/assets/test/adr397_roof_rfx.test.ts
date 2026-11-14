@@ -55,9 +55,9 @@ describe("ADR-397 rfx selection (Art's ART_KEYS_ROOFS.md §4)", () => {
     expect(at(m, 1, 0)).toMatchObject({ form: "gab", band: 0, shape: "e", row: 2 });
     expect(at(m, 1, 2)).toMatchObject({ band: 0, shape: "e", row: 0 });
     expect(at(m, 1, 1)).toMatchObject({ band: 1, shape: "r", row: 0, seg: "up", stem: "rfx_gab_up_r", zoffPx: 14 });
-    expect(at(m, 0, 0).overlays).toEqual([{ key: "rfx_gab_verge_el", row: 2, zoffPx: 0, order: 0 }]);
-    expect(at(m, 3, 0).overlays).toEqual([{ key: "rfx_gab_verge_er", row: 2, zoffPx: 0, order: 0 }]);
-    expect(at(m, 0, 1).overlays).toEqual([{ key: "rfx_gab_verge_r", row: 1, zoffPx: 14, order: 0 }, { key: "rfx_gab_wall", row: 1, zoffPx: 0, order: 1 }]);
+    expect(at(m, 0, 0).overlays).toEqual([{ key: "rfx_gab_verge_el", alts: ["rfx_gab_lo_vel"], row: 2, zoffPx: 0, order: 0 }]);
+    expect(at(m, 3, 0).overlays).toEqual([{ key: "rfx_gab_verge_er", alts: ["rfx_gab_lo_ver"], row: 2, zoffPx: 0, order: 0 }]);
+    expect(at(m, 0, 1).overlays).toEqual([{ key: "rfx_gab_verge_r", alts: ["rfx_gab_up_vr"], row: 1, zoffPx: 14, order: 0 }, { key: "rfx_gab_wall", alts: [], row: 1, zoffPx: 0, order: 1 }]);
     expect(at(m, 1, 1).overlays).toEqual([]);
     const ns = rfxPickLevel(rect("roof_gable", 3, 4, 1), 1);
     expect(at(ns, 1, 1)).toMatchObject({ shape: "r", row: 1 });
@@ -77,6 +77,7 @@ describe("ADR-397 rfx selection (Art's ART_KEYS_ROOFS.md §4)", () => {
     expect(base(at(m, 1, 1).stem)).toBe("rfx_flt_f"); expect(at(m, 1, 1).zoffPx).toBe(0);
     expect(base(at(m, 1, 0).stem)).toBe("rfx_flt_lo_e"); expect(at(m, 0, 0).stem).toBe("rfx_flt_lo_o");
     expect(rfxPickLevel(rect("roof_flat", 1, 1), 1).get("0,0")!.stem).toBe("rfx_flt_lo_p");
+    expect(base(at(m, 1, 1).alts[0]!)).toBe("rfx_flt_lo_f"); // Art's packed field name
   });
   it("shed: one pitch down the majority rot, lotop / lo / top / up, side verges and walls", () => {
     const m = rfxPickLevel(rect("roof_shed", 2, 3, 0), 1); // D = S (+y)
@@ -85,6 +86,7 @@ describe("ADR-397 rfx selection (Art's ART_KEYS_ROOFS.md §4)", () => {
     expect(at(m, 0, 0)).toMatchObject({ band: 2, seg: "top", zoffPx: 18 });
     expect(base(rfxPickLevel(rect("roof_shed", 2, 1, 0), 1).get("0,0")!.stem)).toBe("rfx_shd_lotop_e");
     const ov = at(m, 0, 0).overlays.map((o) => [o.key, o.row, o.zoffPx]);
+    expect(at(m, 0, 0).overlays[0]!.alts).toEqual(["rfx_shd_up_ver"]);
     expect(ov).toEqual([["rfx_shd_verge_er", 0, 18], ["rfx_shd_wall", 1, 0], ["rfx_shd_wall", 1, 9], ["rfx_shd_wall", 2, 0], ["rfx_shd_wall", 2, 9], ["rfx_shd_wall", 2, 18]]);
   });
   it("different groups never merge; same level only is the caller's job", () => {
@@ -94,7 +96,7 @@ describe("ADR-397 rfx selection (Art's ART_KEYS_ROOFS.md §4)", () => {
   });
   it("chimney: normal member plus the rfx_chimney stack at the tile surface height", () => {
     const tiles = rect("roof_slope", 3, 3); tiles[4] = { ...tiles[4]!, key: "roof_chimney" };
-    expect(at(rfxPickLevel(tiles, 1), 1, 1).overlays).toEqual([{ key: "rfx_chimney", row: 0, zoffPx: 21, order: 0 }]);
+    expect(at(rfxPickLevel(tiles, 1), 1, 1).overlays).toEqual([{ key: "rfx_chimney", alts: [], row: 0, zoffPx: 21, order: 0 }]);
   });
   it("interior variants: hashU32(0x52F00396, tx, ty, level) & 3 -> v0 v0 v1 v2, only on lo_e / up_e / f without crest", () => {
     const seen = new Set<number>();

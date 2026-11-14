@@ -12,7 +12,7 @@
  *   split into per-column slices, each keyed by its front-most footprint tile.
  */
 import { fireAnimTime } from "./fire-anim.js";
-import { SEASON_SPRITE_GLSL, SEASON_FOLIAGE, SEASON_SNOWCAP, SEASON_GROUND, SUMMER_VISUAL, SeasonArt, type SeasonVisual } from "./season.js";
+import { SEASON_SPRITE_GLSL, SEASON_FOLIAGE, SEASON_SNOWCAP, SEASON_GROUND, SEASON_ROOFSNOW, SUMMER_VISUAL, SeasonArt, type SeasonVisual } from "./season.js";
 import { AnimState as CoreAnimState, entityIndex, lerpAngle, PrevTransform, Transform, type ComponentDef, type World } from "@engine/core";
 import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, chunkKey, floorToTerrainZ, terrainZToFloor, type BuildingGrid, type ChunkedSpatialIndex, type IsoConfig } from "@engine/world";
 import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/util.js";
@@ -391,6 +391,7 @@ void main() {
   }
   if (a < 0.35) discard;
   if ((vFlags & ${SEASON_FOLIAGE | SEASON_SNOWCAP | SEASON_GROUND}) != 0 && t.a >= 0.5) col = seasonSprite(col, vFlags, uv.xy, vSeed, vUv.xy / uTexel); // ADR-239
+  if ((vFlags & ${SEASON_ROOFSNOW}) != 0 && t.a >= 0.5) col = roofSnow(col, vScr); // ADR-399
   if (vOcc > 0.001 && uOccMode == 1) { // dithered circle cut around the focus
     float d = length((vScr - uFocusScr) * vec2(1.0, 1.15)) / uOccRadius;
     ivec2 p = ivec2(gl_FragCoord.xy) & 3;
@@ -505,10 +506,10 @@ export class SpriteBatch {
   private dynamicChunkKeys = new Set<string>();
   // per-frame scratch reused across frames (no allocations in the gather/sort hot paths)
   private pieceTmp: number[] = [];
-  private pieceParts: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean; liftPx: number; bias: number }[] = [];
+  private pieceParts: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean; liftPx: number; bias: number; snow: boolean }[] = [];
   /** ADR-381: scratch single-part object — the common case (no L-corner arms) reuses it instead of allocating one per piece per frame. */
-  private piecePartScratch: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean; liftPx: number; bias: number } = { vis: 0, rot: 0, layer: 0, x: 0, y: 0, last: true, liftPx: 0, bias: 0 };
-  private roofParts: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean; liftPx: number; bias: number }[] = [];
+  private piecePartScratch: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean; liftPx: number; bias: number; snow: boolean } = { vis: 0, rot: 0, layer: 0, x: 0, y: 0, last: true, liftPx: 0, bias: 0, snow: false };
+  private roofParts: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean; liftPx: number; bias: number; snow: boolean }[] = [];
   /** ADR-381: per-part static cache. A static piece's instances are a pure function of its signature (see PIECE_SIG_N):
    *  on a hit the slice loop, crack block and per-frame FNV hash are skipped and the chunk sum comes from the stored
    *  per-part hashes. Keyed by dense slot * 4 + part index (≤3 parts: 2 L arms + post); the signature (incl. entity
@@ -1205,16 +1206,16 @@ export class SpriteBatch {
       // ADR-211: an L corner draws its two arm walls (same tier straight wall at the arm edge pivots) then its post art
       const parts = this.pieceParts; parts.length = 0;
       { const v0 = d.visualId![k]!, r0 = d.rotation![k]!, arm = atlas.lArmOf(v0);
-        if (arm >= 0) for (const a of lCornerArmPivots(tr.data.x[ts]!, tr.data.y[ts]!, r0)) parts.push({ vis: arm, rot: a.rot | ROT_EXACT_PIVOT | ROT_DECK_LIFT, layer: 1, x: a.x, y: a.y, last: false, liftPx: 0, bias: 0 });
+        if (arm >= 0) for (const a of lCornerArmPivots(tr.data.x[ts]!, tr.data.y[ts]!, r0)) parts.push({ vis: arm, rot: a.rot | ROT_EXACT_PIVOT | ROT_DECK_LIFT, layer: 1, x: a.x, y: a.y, last: false, liftPx: 0, bias: 0, snow: false });
         // ADR-381: the common single-part case reuses one scratch object instead of allocating one per piece per frame.
-        const p0 = this.piecePartScratch; p0.vis = v0; p0.rot = r0; p0.layer = d.layer![k]!; p0.x = tr.data.x[ts]!; p0.y = tr.data.y[ts]!; p0.last = true; p0.liftPx = 0; p0.bias = 0; parts.push(p0);
+        const p0 = this.piecePartScratch; p0.vis = v0; p0.rot = r0; p0.layer = d.layer![k]!; p0.x = tr.data.x[ts]!; p0.y = tr.data.y[ts]!; p0.last = true; p0.liftPx = 0; p0.bias = 0; p0.snow = false; parts.push(p0);
         const fx = roofFx ? roofFx(e) : undefined;
         if (fx) { // ADR-397: rfx tile raised by its band, overlays right after it; legacy art until the rfx page is resident
           if (atlas.pageReady(fx.vis, PRIO_NEAR)) {
-            p0.vis = fx.vis; p0.rot = (r0 & ~3) | (fx.row & 3); p0.liftPx = fx.liftPx;
+            p0.vis = fx.vis; p0.rot = (r0 & ~3) | (fx.row & 3); p0.liftPx = fx.liftPx; p0.snow = true; // ADR-399: the roof surface takes whole-roof snow
             for (let oi = 0; oi < fx.overlays.length && parts.length < PIECE_PARTS_MAX; oi++) {
               const o = fx.overlays[oi]!; if (!atlas.pageReady(o.vis, PRIO_NEAR)) continue; // never a streaming stand-in for an overlay
-              const rp = (this.roofParts[oi] ??= { vis: 0, rot: 0, layer: 0, x: 0, y: 0, last: false, liftPx: 0, bias: 0 });
+              const rp = (this.roofParts[oi] ??= { vis: 0, rot: 0, layer: 0, x: 0, y: 0, last: false, liftPx: 0, bias: 0, snow: false });
               rp.vis = o.vis; rp.rot = (r0 & ~3) | (o.row & 3); rp.layer = p0.layer; rp.x = p0.x; rp.y = p0.y; rp.liftPx = o.liftPx; rp.bias = ROOF_OVERLAY_BIAS * (oi + 1); parts.push(rp);
             }
           }
@@ -1291,7 +1292,7 @@ export class SpriteBatch {
         const flat = flatLayer(layer, roof); // deck pieces (floors/foundations), never roofs
         // Build pieces were never crisp-sampled (only the character doll path set CRISP, and only for creatures):
         // walls at ~3x phone magnification were plain LINEAR, i.e. blurry on every preset. Same flag as the doll path.
-        const flags = (flat ? SpriteFlag.Flat : 0) | (res.flipX ? SpriteFlag.FlipX : 0) | (nightSet?.has(vis) ? 64 : 0) | (flat || cutaway ? 0 : spk.flags) | (atlas.isCrisp(res.atlas) ? CRISP : 0);
+        const flags = (flat ? SpriteFlag.Flat : 0) | (res.flipX ? SpriteFlag.FlipX : 0) | (nightSet?.has(vis) ? 64 : 0) | (flat || cutaway ? 0 : spk.flags) | (atlas.isCrisp(res.atlas) ? CRISP : 0) | (part.snow && !cutaway && ghost === 0 ? SEASON_ROOFSNOW : 0);
         // damage 1-3: Art's crack overlay sprite (building.crackOverlay = bld_crack, anim stage<N>) on top of the (baked)
         // damage frame. Where bld_crack covers the stage, no procedural shader crack at all (a not-yet-resident page just
         // shows the bare damage frame for a moment); the procedural crack is kept only for sets with no overlay declared

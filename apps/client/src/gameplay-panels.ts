@@ -8,6 +8,7 @@
  * (present = unlocked); member rows `[data-rank=member|officer|leader]`; tooltips `[data-tip]` (never `title=`).
  * Chat log lines (game-menus.ts) carry `[data-chan=global|local|party|clan|trade|whisper|system]`.
  */
+import { roofMenu, roofMenuLabel } from "./roof-menu.js";
 import { workerJobMenu, beginWorkerJob } from "./worker-job-menu.js";
 import { revealAboveFooter } from "./back-history.js";
 import { deployKitIntent, isKit } from "./vehicle-controls.js";
@@ -48,6 +49,8 @@ export interface GameplaySource {
   startPlacing?(s: BuildSelection): void;
   /** ADR-316: enter demolish mode without a hologram (the Build menu's "Demolish / Move" entry). */
   startDemolish?(): void;
+  /** ADR-398: roof forms whose rfx art ships (collapses the roof tiles to one per form). */
+  roofForms?(): ReadonlySet<string>;
   /** ADR-229: clan palette primary (0xRRGGBB) for a BuildPiece tint index (registry.clanPaletteForTint); tints the white cloth icons. */
   clanTint?(tint: number): number | undefined;
   /** Task 25: clan palette secondary (0xRRGGBB) for a BuildPiece tint index — the tint swatch's second half. */
@@ -545,7 +548,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
       // ADR-224: data-derived category tabs (LB/RB) · tier tabs for structural pieces (LT/RT) · tile grid (icon, cost, lock) ·
       // one details pane for the focused / hovered tile. Choosing a tile (click / tap / pad A / Enter) closes the window and
       // enters placement at once (nothing is spent until the placement is confirmed; B / Esc there comes back here).
-      const all = buildView(c); if (!buildSel.piece && all[0]) buildSel.piece = all[0].id;
+      const roofForms = src.roofForms?.() ?? new Set<string>(); const all = roofMenu(buildView(c), roofForms); if (!buildSel.piece && all[0]) buildSel.piece = all[0].id; // ADR-398
       // ADR-229: Art's items_build icon on the tile (::before) instead of the glyph; white cloth icons get the clan palette
       // (the selected paint, else the player's clan, else palette 1) as a multiply tint masked to the icon's alpha.
       const tintIdx = buildSel.paint || clanTintIndex(c.world.isRegistered(Membership) ? c.world.getField(c.player, Membership, "clanId") ?? 0 : 0);
@@ -616,7 +619,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
         out.push(heading("Recently Crafted"));
         const rg = grid(); rg.dataset["role"] = "recent-builds";
         for (const p of recentPieces) {
-          const t = tierOf(p); const lk = t.locked; const name = p.key.replace(/_/g, " ");
+          const t = tierOf(p); const lk = t.locked; const name = roofMenuLabel(p.key, roofForms);
           const costTxt = t.cost.map((x) => `${x.count} ${x.name}`).join(" · ") || "free";
           const b = btn("", `recent-piece-${p.id}`, () => choose(p), { role: "piece", pressed: p.id === buildSel.piece, alt: !t.affordable || lk,
             data: { padLabel: lk ? "Locked" : t.affordable ? "Place" : "Can't afford", glyph: pieceGlyph(p.key), ...(lk ? { locked: "1" } : {}), ...(!t.affordable ? { short: "1" } : {}) } });
@@ -631,7 +634,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
       }
       const g = grid(); g.dataset["role"] = "piece-grid";
       for (const p of v) {
-        const t = tierOf(p); const lk = t.locked; const name = p.key.replace(/_/g, " ");
+        const t = tierOf(p); const lk = t.locked; const name = roofMenuLabel(p.key, roofForms);
         const costTxt = t.cost.map((x) => `${x.count} ${x.name}`).join(" · ") || "free";
         const b = btn("", `piece-${p.id}`, () => choose(p), { role: "piece", pressed: p.id === buildSel.piece, alt: !t.affordable || lk,
           data: { padLabel: lk ? "Locked" : t.affordable ? "Place" : "Can't afford", glyph: pieceGlyph(p.key), ...(lk ? { locked: "1" } : {}), ...(!t.affordable ? { short: "1" } : {}) } });
@@ -646,7 +649,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
       const sel = all.find((p) => p.id === buildSel.piece);
       if (sel) {
         const t = tierOf(sel); const d = document.createElement("section"); d.dataset["role"] = "build-details";
-        const h = document.createElement("p"); h.dataset["role"] = "build-name"; h.textContent = `${sel.key.replace(/_/g, " ")}${sel.tiers.length > 1 ? ` · ${t.key}` : ""}`; d.append(h);
+        const h = document.createElement("p"); h.dataset["role"] = "build-name"; h.textContent = `${roofMenuLabel(sel.key, roofForms)}${sel.tiers.length > 1 ? ` · ${t.key}` : ""}`; d.append(h);
         const need = document.createElement("p"); need.dataset["role"] = "build-cost";
         if (!t.cost.length) need.textContent = "Free"; else for (const x of t.cost) { const sp = document.createElement("span"); sp.dataset["have"] = x.have >= x.count ? "1" : "0"; sp.textContent = `${x.name} ${x.have}/${x.count}`; need.append(sp); }
         d.append(need);

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, test } from "vitest";
 import { installPermissions, Membership, PlayerId, World } from "@engine/core";
 import * as G from "@engine/gameplay";
 import { GameMenus } from "../src/game-menus.js";
+import { roofMenu } from "../src/roof-menu.js";
 import { buildIconKey, iconKeysFromCss, isClanTintedIcon, roadIconKey, signIconKey, SIGN_TOOL_ICON } from "../src/gameplay-panels.js";
 
 const read = (p: string): string => readFileSync(resolve(__dirname, "../../..", p), "utf8");
@@ -16,6 +17,10 @@ const standalone = JSON.parse(read("packages/assets/pack/building/manifest.build
 for (const s of standalone.sprites) if (s.key.startsWith("build_")) ART.add(s.key);
 const CSS = iconKeysFromCss([read("apps/client/src/gameplay-panels.css")]);
 const PIECES = (JSON.parse(read("packages/gameplay/data/pieces.json")) as { pieces: { key: string; tiered?: boolean; minTier?: number }[] }).pieces;
+// ADR-398: cottage / gambrel / shed roofs are art-gated (roof_forms.json live:false, hidden from the build menu by
+// roofMenu until their rfx_ art ships). Art's build_roof_{cottage,gambrel,shed}_tN icons land with that art; then live flips and they are checked here.
+const ROOF_FORMS = JSON.parse(read("packages/gameplay/data/roof_forms.json")) as { live: boolean; kinds: Record<string, string> };
+const ART_GATED = new Set(ROOF_FORMS.live ? [] : Object.values(ROOF_FORMS.kinds));
 const ROADS = JSON.parse(read("packages/gameplay/data/roads.json")) as { roads: { surfaces: { key: string }[] }; signs: { key: string }[] };
 
 beforeEach(() => { document.head.innerHTML = ""; document.body.innerHTML = `<div id="game-root"><canvas id="game"></canvas></div>`; localStorage.clear(); (globalThis as { matchMedia?: unknown }).matchMedia = () => ({ matches: false }); });
@@ -25,6 +30,7 @@ describe("ADR-229 build window icons", () => {
     const has = (k: string): boolean => ART.has(k) && CSS.has(k); const missing: string[] = []; const pending: string[] = [];
     expect(PIECES.length).toBeGreaterThan(100);
     for (const p of PIECES) {
+      if (ART_GATED.has(p.key) && !has(`build_${p.key}_t4`)) { expect(roofMenu(PIECES, new Set()).map((q) => q.key), p.key).not.toContain(p.key); continue; }
       if (p.tiered) for (let t = p.minTier ?? 0; t <= 4; t++) { if (buildIconKey(p.key, t, true, has) !== `build_${p.key}_t${t}`) missing.push(`${p.key}@t${t}`); }
       else if (buildIconKey(p.key, 0, false, has) !== `build_${p.key}`) {
         // ADR-250: art-pending pieces borrow a sprite_fallbacks neighbour's tile icon (never the glyph) until Art ships theirs
