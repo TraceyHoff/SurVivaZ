@@ -242,7 +242,7 @@ export class IsoView {
     useRaidBurning(renderer.burning, registry); // ADR-242: pvp_clan raid flames when served
     const cat = noCosmetics ? undefined : registry.cosmetics;
     if (cat?.size) this.view.register(Appearance);
-    renderer.bindGameplay({ animState: VAnim, buildPiece: VPiece, wetness: VWet, bodyTemp: VTemp, lit: VFuel, burning: VBurn, pieceState: (e) => this.pieceStates.get(e), pieceSwing: (e, now) => this.doors.swing(e, now), pieceRoofFx: (e) => (e === this.ghost?.entity ? this.roofPreview?.fx : this.roofs.binding(e)), pieceSwingSprite: (e) => this.doors.swingSprite(e), pieceScale: (e) => this.pieceScales.get(e), pieceLit: (e) => this.pieceLit.get(e), pieceTints: (e) => this.pieceTintPairs.get(e), litPieces: () => this.litHearths,
+    renderer.bindGameplay({ animState: VAnim, buildPiece: VPiece, wetness: VWet, bodyTemp: VTemp, lit: VFuel, burning: VBurn, pieceState: (e) => this.pieceStates.get(e), pieceSwing: (e, now) => this.doors.swing(e, now), pieceRoofFx: (e) => (e === this.ghost?.entity ? this.roofPreview?.fx : this.roofs.binding(e)), pieceRoofPlane: (x, y, l) => this.roofs.planeOver(x, y, l), pieceSwingSprite: (e) => this.doors.swingSprite(e), pieceScale: (e) => this.pieceScales.get(e), pieceLit: (e) => this.pieceLit.get(e), pieceTints: (e) => this.pieceTintPairs.get(e), litPieces: () => this.litHearths,
       carriedSprite: (e) => this.carriedOf.get(e), bedFit: (e) => this.bedOf.get(e)?.fit, riderClip: (e) => this.riderClipOf.get(e), // ADR-244 carry socket / bed fit
       hitFlash: (e) => this.hitPoseOf.get(e)?.flash ?? 0, hitTilt: (e) => this.hitPoseOf.get(e)?.tilt ?? 0,
       animRate: (e, st) => (st === 1 && this.characters.has(e) ? this.walkRate : undefined),

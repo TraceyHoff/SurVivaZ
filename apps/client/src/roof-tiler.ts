@@ -19,6 +19,8 @@ export class RoofTiler {
   private dirty = new Set<number>();
   private fx = new Map<number, RoofFxBinding>();
   private picks = new Map<number, RfxPick>();
+  /** ADR-404: per level, packed cell -> seat px of the rfx roof drawn there (only tiles with a binding) */
+  private seats = new Map<number, Map<number, number>>();
   /** per-level cache version (bumped on every place / remove on that level) */
   readonly version = new Map<number, number>();
   private ids = new Map<string, number | null>();
@@ -87,17 +89,33 @@ export class RoofTiler {
     if (!this.dirty.size) return [];
     const changed: number[] = [];
     for (const level of this.dirty) {
-      const lv = this.levels.get(level); if (!lv) continue;
-      const picks = rfxPickLevel([...lv.values()], level, this.cfg);
+      const lv = this.levels.get(level); this.seats.delete(level); if (!lv) continue;
+      const picks = rfxPickLevel([...lv.values()], level, this.cfg); const seats = new Map<number, number>(); this.seats.set(level, seats);
       for (const c of lv.values()) {
         const p = picks.get(rfxCell(c.x, c.y)); if (!p) continue;
         this.picks.set(c.ve, p);
         const b = this.resolve(p, c.tier); const was = this.fx.get(c.ve);
+        if (b) seats.set(seatCell(c.x, c.y), rfxSeat(p.form, this.cfg));
         if (!sameFx(b, was)) { if (b) this.fx.set(c.ve, b); else this.fx.delete(c.ve); changed.push(c.ve); }
       }
     }
     this.dirty.clear();
     return changed;
+  }
+
+  /**
+   * ADR-404 render binding (SpriteBindings.pieceRoofPlane): an upright piece at level `level` whose pivot (world tiles)
+   * touches a tile with an rfx roof one level up returns that roof's plane height above the piece's floor (levelPx +
+   * seat; the largest when several touch), else undefined. The renderer discards the upright's pixels above the seated roof plane, so no wall cap or post shows
+   * past or through the roof. An edge pivot touches the two tiles beside its edge, a vertex pivot four, a centre one.
+   */
+  planeOver(wx: number, wy: number, level: number): number | undefined {
+    const lv = this.seats.get(level + 1); if (!lv || !lv.size) return undefined;
+    let best: number | undefined;
+    for (let y = Math.floor(wy - 0.05); y <= Math.floor(wy + 0.05); y++) for (let x = Math.floor(wx - 0.05); x <= Math.floor(wx + 0.05); x++) {
+      const s = lv.get(seatCell(x, y)); if (s !== undefined && (best === undefined || s > best)) best = s;
+    }
+    return best === undefined ? undefined : this.cfg.levelPx + best;
   }
 
   /** ADR-397 placement preview: the same selection with the ghost tile as a member of its level. */
@@ -109,6 +127,8 @@ export class RoofTiler {
     return { pick, fx: this.resolve(pick, t.tier) };
   }
 }
+
+const seatCell = (x: number, y: number): number => (x + 32768) * 65536 + (y + 32768);
 
 function sameFx(a: RoofFxBinding | undefined, b: RoofFxBinding | undefined): boolean {
   if (!a || !b) return a === b;

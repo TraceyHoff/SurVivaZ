@@ -31,7 +31,7 @@ import { readDayFraction, readDayNumber, readWeather, readWind } from "./env.js"
 import { VfxLayer } from "./vfx.js";
 import { WeatherFx } from "./weatherFx.js";
 import { newStats, type FrameStats } from "./gl/util.js";
-import { BED_SORT_EPS, type GameplayBindings } from "./sprites.js";
+import { BED_SORT_EPS, roofClipLine, type GameplayBindings } from "./sprites.js";
 import { DeckNeighbors, rotSideMask, deckTopPx, deckClipPolygon, deckSeamPatches, pieceTieBreak, exactTieBreak, pieceOrder, VERTEX_POST_BIAS } from "./building/deckFaces.js";
 import { lCornerArmPiece, lCornerArmPivots, ROT_EXACT_PIVOT, ROT_DECK_LIFT, ROT_VERTEX_POST } from "./building/modular.js";
 
@@ -348,7 +348,7 @@ export class Canvas2DRenderer {
   /** ADR-197: building pieces as painter items: level-major, decks under their floor's uprights, iso order, unique tie-break. */
   gatherPieces(world: World, reg: AssetRegistry, time = this.clock): C2DPiece[] {
     const bpd = this.bindings.buildPiece; if (!bpd || !world.isRegistered(bpd)) return [];
-    const iso = this.camera.iso; const hw = iso.tileW / 2, hh = iso.tileH / 2; const q = (iso.view ?? 0) & 3; const raw: { e: Entity; ax: number; ay: number; fw: number; fh: number; level: number; layer: number; z: number; vis: number; rot: number; dmg: number; ghost: boolean; deck: boolean; top: number | undefined; px: number; py: number; tint: number; lift: number; ordFrac: number }[] = [];
+    const iso = this.camera.iso; const hw = iso.tileW / 2, hh = iso.tileH / 2; const q = (iso.view ?? 0) & 3; const raw: { e: Entity; ax: number; ay: number; fw: number; fh: number; level: number; layer: number; z: number; vis: number; rot: number; dmg: number; ghost: boolean; deck: boolean; top: number | undefined; px: number; py: number; tint: number; lift: number; ordFrac: number ; roof: boolean }[] = [];
     this.decks.clear();
     for (const e of world.query([bpd, Transform])) {
       const b = world.get(e, bpd)!; const t = world.get(e, Transform)!;
@@ -359,7 +359,7 @@ export class Canvas2DRenderer {
       let sd; try { sd = reg.sprite(vis0); } catch { continue; } if (!sd.building) continue;
       const rot = rot0 & 3; const fw = rot & 1 ? sd.building.footprint.h : sd.building.footprint.w, fh = rot & 1 ? sd.building.footprint.w : sd.building.footprint.h;
       const roof = (sd.building.piece ?? sd.key).startsWith("roof"); const deck = b.layer === 0 && !roof; const top = deck ? deckTopPx(sd.key) : undefined;
-      const r = { e, ax: Math.floor(t.x), ay: Math.floor(t.y), fw, fh, level: b.level, layer: b.layer, z: floorToTerrainZ(b.level, t.z), vis: vis0, rot: rot0, dmg: b.damageStage, ghost: b.ghost > 0, deck, top, px: t.x, py: t.y, tint: (b as { tint?: number }).tint ?? 0, lift: fxOn ? fx.liftPx : 0, ordFrac: 0 };
+      const r = { e, ax: Math.floor(t.x), ay: Math.floor(t.y), fw, fh, level: b.level, layer: b.layer, z: floorToTerrainZ(b.level, t.z), vis: vis0, rot: rot0, dmg: b.damageStage, ghost: b.ghost > 0, deck, top, px: t.x, py: t.y, tint: (b as { tint?: number }).tint ?? 0, lift: fxOn ? fx.liftPx : 0, ordFrac: 0, roof };
       raw.push(r);
       if (fxOn) for (let oi = 0; oi < fx.overlays.length; oi++) { const o = fx.overlays[oi]!; if (this.spriteImageReady(reg, o.vis)) raw.push({ ...r, vis: o.vis, rot: (b.rotation & ~3) | (o.row & 3), lift: o.liftPx, ordFrac: (oi + 1) / (fx.overlays.length + 2) }); } if (deck && !r.ghost && top !== undefined) this.decks.add(r.ax, r.ay, fw, fh, r.level, top);
       // ADR-211: an L corner = its tier's straight wall on both arm edges (same pivots/flags as an edge wall) + the post art
@@ -394,8 +394,12 @@ export class Canvas2DRenderer {
       const vr = viewRect(r.ax, r.ay, r.fw, r.fh, q); const pv = toView(pvx, pvy, q);
       const mask = r.top === undefined || exact ? 0 : rotSideMask(this.decks.mask(r.ax, r.ay, r.fw, r.fh, r.level, r.top), q);
       const isoD = (exact ? pv.u + pv.v - 1 : vr.x + vr.w - 1 + vr.y + vr.h - 1) + r.layer * 0.01 + (exact ? exactTieBreak(pv.u, pv.v, r.ghost) : pieceTieBreak(vr.x, vr.y, r.ghost)) + (r.rot & ROT_VERTEX_POST ? VERTEX_POST_BIAS : 0);
+      // ADR-404: an upright under a seated rfx roof is clipped to below the roof plane, as the WebGL2 ROOF_CLIP discard
+      const plane = !r.roof && !r.deck && r.top === undefined && this.bindings.pieceRoofPlane ? this.bindings.pieceRoofPlane(pvx, pvy, r.level) : undefined;
+      const rl = plane === undefined ? undefined : roofClipLine(pv.u, pv.v, plane, lift, hh, hw, (du, dv) => { const w = fromView(pv.u + du, pv.v + dv, q); return this.bindings.pieceRoofPlane!(w.x, w.y, r.level) !== undefined; });
+      const roofClip: [number, number][] | undefined = rl && (rl.apex ? [[-256, -(rl.h0 - 128)], [0, -rl.h0], [256, -(rl.h0 - 128)], [256, 512], [-256, 512]] : [[-256, -(rl.h0 - 256 * rl.k)], [256, -(rl.h0 + 256 * rl.k)], [256, 512], [-256, 512]]);
       out.push({ e: r.e, sx: p.sx, sy: p.sy, depth: r.level * LEVEL_DEPTH + (r.deck ? DECK_DEPTH : 0) + isoD, ord: pieceOrder(r.level, r.layer, vr.x, vr.y) * 2 + (r.ghost ? 1 : 0) + r.ordFrac, img, f,
-        clip: mask ? deckClipPolygon(vr.w, vr.h, mask, r.top!, hw, hh) : undefined, seams: mask ? deckSeamPatches(vr.w, vr.h, mask, r.top!, hw, hh) : undefined, ghost: r.ghost, hearth: fire === 2 && !r.ghost && r.dmg === 0, scale: this.bindings.pieceScale?.(r.e) ?? 1 });
+        clip: mask ? deckClipPolygon(vr.w, vr.h, mask, r.top!, hw, hh) : roofClip, seams: mask ? deckSeamPatches(vr.w, vr.h, mask, r.top!, hw, hh) : undefined, ghost: r.ghost, hearth: fire === 2 && !r.ghost && r.dmg === 0, scale: this.bindings.pieceScale?.(r.e) ?? 1 });
     }
     return out;
   }

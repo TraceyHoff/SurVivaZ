@@ -14,7 +14,7 @@
 import { fireAnimTime } from "./fire-anim.js";
 import { SEASON_SPRITE_GLSL, SEASON_FOLIAGE, SEASON_SNOWCAP, SEASON_GROUND, SEASON_ROOFSNOW, SUMMER_VISUAL, SeasonArt, type SeasonVisual } from "./season.js";
 import { AnimState as CoreAnimState, entityIndex, lerpAngle, PrevTransform, Transform, type ComponentDef, type World } from "@engine/core";
-import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, chunkKey, floorToTerrainZ, terrainZToFloor, type BuildingGrid, type ChunkedSpatialIndex, type IsoConfig } from "@engine/world";
+import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, fromView, viewRect, chunkKey, floorToTerrainZ, terrainZToFloor, type BuildingGrid, type ChunkedSpatialIndex, type IsoConfig } from "@engine/world";
 import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/util.js";
 import { Sprite, Shadow, Occluder, SpriteFlag, LightSource, TintSecondary, SpriteAlpha } from "./components.js";
 import { newResolved, STREAM_MARGIN_PX, STREAM_MARGIN_ANIMAL_PX, STREAM_KEEP_FACTOR, type AtlasManager, type ResolvedFrame, type HandAnchor } from "./assets/atlasManager.js";
@@ -37,7 +37,7 @@ import { InteriorRoute, inInteriorRegion, interiorOrder, type InteriorRegion } f
 
 export const INSTANCE_FLOATS = 40;
 /** ADR-381: per-part static-cache signature fields (see gatherPieces) — every input to a static part's instances. */
-export const PIECE_SIG_N = 32;
+export const PIECE_SIG_N = 35;
 /**
  * ADR-195: Flat (deck) pieces take ground-plane depth, so two same-level neighbours have EXACTLY equal depth on
  * every pixel they share (an edge strip / thickness face of one over the other's top) and z-fight. Each Flat instance
@@ -108,6 +108,9 @@ export function occluderFade(fade: number, occT: number): number {
 export const OUTLINE_ONLY = 256;
 /** ADR-401: instance flag on rfx roof parts: un-darken the bilinear edge band (see the sprite FS). */
 export const RFX_EDGE = 32768;
+/** ADR-404 instance flag: an upright under a seated rfx roof. aF.x / aF.y / aF.z carry its clip line (px above the pivot at the
+ *  pivot column / change per screen px / 1 = V line at a far corner), and its wet / cold / heat inputs are unused (build pieces never set them). */
+export const ROOF_CLIP = 65536;
 /** ADR-269: default character-only silhouette outline (union of body + worn layers): 1 atlas texel of dark plum, a
  *  little darker / more defined than the baked line art alone. Independent of the global StyleConfig.outline (off). */
 export const CHARACTER_OUTLINE = { widthPx: 1, color: [0.08, 0.05, 0.09, 0.72] as const };
@@ -176,6 +179,10 @@ export interface GameplayBindings {
    *  BuildPiece.visualId (the legacy roof) draws as before (Art's §4 fallback; 0 for the ADR-398 forms: nothing). Canvas2D
    *  reads the same binding once the page image is loaded (ADR-400). undefined = not an rfx roof. */
   pieceRoofFx?: (entity: number) => RoofFxBinding | undefined;
+  /** ADR-404: height (1x px above the upright's floor: one level + the roof's seat) of the seated rfx roof plane one level
+   *  above an upright piece whose pivot (world tiles) touches its tile, else undefined. Both renderers drop the upright's
+   *  pixels above that plane (`roofClipLine`). */
+  pieceRoofPlane?: (x: number, y: number, level: number) => number | undefined;
   /** ADR-218 fired pieces: FireState (0 out, 1 lit, 2 lit hearth with embers/smoke); undefined = not a fired piece. Lit pieces whose
    *  sprite has a looping multi-frame `idle` anim animate it on the render clock (drawn dynamically, never baked into a static
    *  chunk); out pieces show the sprite's `unlit` anim frame when the building has no own unlit state. */
@@ -211,7 +218,7 @@ uniform highp sampler2D uFrames;
 uniform float uZPerPx, uHH, uHW, uTime, uWind, uOutline;
 uniform int uShadowPass, uShadowMode;
 uniform vec2 uShadowDir; uniform float uBlobAspect; uniform vec2 uWindVec; // screen-x wind direction, strength 0..1
-out vec4 vFx; out vec3 vUvRaw; flat out int vLayer; out float vAlpha; flat out int vFlags; flat out vec4 vRect; out vec3 vTint; flat out vec3 vMisc; out vec2 vLocal; out vec2 vScr; flat out float vOcc; flat out ivec2 vFB; flat out vec4 vTint2; flat out float vSwayPx; flat out vec4 vLT; out vec2 vDeck; flat out ivec2 vDeckM; flat out float vSeed;
+out vec4 vFx; out vec3 vUvRaw; flat out int vLayer; out float vAlpha; flat out int vFlags; flat out vec4 vRect; out vec3 vTint; flat out vec3 vMisc; out vec2 vLocal; out vec2 vScr; flat out float vOcc; flat out ivec2 vFB; flat out vec4 vTint2; flat out float vSwayPx; flat out vec4 vLT; out vec2 vDeck; flat out ivec2 vDeckM; flat out float vSeed; out vec2 vRoofClip; flat out vec2 vRoofLine;
 uniform vec2 uViewPx; // drawing-buffer size (device px): sprite pivots snap to whole device pixels (no shimmer / half-texel blur)
 vec2 snapPivot(vec2 p) {
   if (uViewPx.x <= 0.0) return p;
@@ -225,9 +232,9 @@ void main() {
   vec4 dim = texelFetch(uFrames, tc + ivec2(1, 0), 0); // w, h, layer, hasEmissive
   vec2 c = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
   float s = aA.w;
-  vFx = aF; vFlags = flags; vRect = uvr; vTint = aD.rgb; int fw = int(dim.w + 0.5); vFB = ivec2(fw & 15, fw >> 4); vMisc = vec3(aE.y, aE.z, float(fw & 1)); vAlpha = aB.w;
+  vFx = (flags & ${ROOF_CLIP}) != 0 ? vec4(0.0) : aF; vFlags = flags; vRect = uvr; vTint = aD.rgb; int fw = int(dim.w + 0.5); vFB = ivec2(fw & 15, fw >> 4); vMisc = vec3(aE.y, aE.z, float(fw & 1)); vAlpha = aB.w;
   vTint2 = aH; vSwayPx = 0.0; vLT = aI; vSeed = aB.z;
-  vLocal = c * 2.0 - 1.0; vOcc = aG.w; vScr = aA.xy; vDeck = vec2(0.0); vDeckM = ivec2(0);
+  vLocal = c * 2.0 - 1.0; vOcc = aG.w; vScr = aA.xy; vDeck = vec2(0.0); vDeckM = ivec2(0); vRoofClip = vec2(-1.0, 0.0); vRoofLine = vec2(0.0);
   if (uShadowPass == 1) {
     if (aE.x <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
     vAlpha = aE.x;
@@ -254,12 +261,13 @@ void main() {
   float flip = (flags & 1) != 0 ? -1.0 : 1.0;
   float px = (x - aC.x) * s * flip;
   float hp = (aC.y - y) * s;
+  if ((flags & ${ROOF_CLIP}) != 0) { vRoofClip = vec2(hp - aF.x, px); vRoofLine = aF.yz; } // ADR-404: height over the roof plane at the pivot column, screen px
   if (maskSway) vSwayPx = uWindVec.x * uWindVec.y * aG.x * (0.65 + 0.35 * sin(uTime * aG.y * 6.283 + aB.z * 6.283)) * flip * (uvr.z - uvr.x) / dim.x;
   else if (aG.x > 0.0) { // wind sway: weight from height above the pivot, global wind + per-instance phase
     float wgt = pow(clamp(hp / max(1.0, aC.y * s), 0.0, 1.0), 1.0 + 2.0 * clamp(aG.z, 0.0, 1.0)); // stiffness 0..1, higher = stiffer
     px += uWindVec.x * uWindVec.y * aG.x * s * wgt * (0.65 + 0.35 * sin(uTime * aG.y * 6.283 + aB.z * 6.283));
   } else if ((flags & 4) != 0) px += sin(uTime * 1.6 + aB.z * 6.283) * uWind * max(hp, 0.0) * 0.05;
-  if (aF.z > 0.5) px += sin(uTime * 52.0 + aB.z * 40.0) * (0.4 + 1.4 * aF.y) * s; // shiver
+  if (aF.z > 0.5 && (flags & ${ROOF_CLIP}) == 0) px += sin(uTime * 52.0 + aB.z * 40.0) * (0.4 + 1.4 * aF.y) * s; // shiver (aF is the ADR-404 clip line on ROOF_CLIP pieces)
   vUvRaw = vec3(mix(uvr.xy, uvr.zw, vec2(x / dim.x, y / dim.y)), dim.z); vLayer = int(dim.z + 0.5);
   vec2 off = vec2(px, -hp);
   if (aJ.x > 0.0 && aJ.y >= 0.0) off.y += (aJ.x + sin(uTime * 3.0 + aB.z * 6.283) * aJ.y) * s; // swim: sink the upper body to the waterline + bob
@@ -276,7 +284,7 @@ void main() {
 
 const FS = /* glsl */ `#version 300 es
 precision highp float; precision highp int;
-in vec4 vFx; in vec3 vUvRaw; flat in int vLayer; in float vAlpha; flat in int vFlags; flat in vec4 vRect; in vec3 vTint; flat in vec3 vMisc; in vec2 vLocal; in vec2 vScr; flat in float vOcc; flat in ivec2 vFB; flat in vec4 vTint2; flat in float vSwayPx; flat in vec4 vLT; in vec2 vDeck; flat in ivec2 vDeckM; flat in float vSeed;
+in vec4 vFx; in vec3 vUvRaw; flat in int vLayer; in float vAlpha; flat in int vFlags; flat in vec4 vRect; in vec3 vTint; flat in vec3 vMisc; in vec2 vLocal; in vec2 vScr; flat in float vOcc; flat in ivec2 vFB; flat in vec4 vTint2; flat in float vSwayPx; flat in vec4 vLT; in vec2 vDeck; flat in ivec2 vDeckM; flat in float vSeed; in vec2 vRoofClip; flat in vec2 vRoofLine;
 uniform vec3 uSeason; // ADR-239: fall, winter, snow cap
 uniform highp sampler2DArray uAtlas, uPoolTex, uEmis, uSheenM, uSwayM, uTintM; uniform highp sampler2D uTints;
 #define vUv vec3(vUvRaw.xy, float(vLayer)) // flat int array layer (no interpolated layer index)
@@ -341,6 +349,7 @@ float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); 
 void main() {
   vec2 cw = fwidth(vUvRaw.xy); // uniform control flow: crispUv's footprint (ADR-145)
   mat2 deckJu = mat2(dFdx(vUvRaw.xy), dFdy(vUvRaw.xy)), deckJd = mat2(dFdx(vDeck), dFdy(vDeck)); // ADR-210 seam remap Jacobians
+  if ((vFlags & ${ROOF_CLIP}) != 0 && vRoofClip.x > (vRoofLine.y > 0.5 ? -0.5 * abs(vRoofClip.y) : vRoofLine.x * vRoofClip.y)) discard; // ADR-404 (after the derivatives)
   if (vDeckM.x != 0) { // ADR-197: a side face/rim is drawn only toward an open side (no deck neighbour there)
     float ha = float(vDeckM.y & 15) * 0.5 + ${DECK_EDGE_EPS}, hb = float((vDeckM.y >> 4) & 15) * 0.5 + ${DECK_EDGE_EPS};
     float ea = abs(vDeck.x) - ha, eb = abs(vDeck.y) - hb; int sd = (ea > 0.0 && ea >= eb) ? (vDeck.x > 0.0 ? 1 : 4) : (eb > 0.0 ? (vDeck.y > 0.0 ? 2 : 8) : 0); // ADR-210 owning face
@@ -492,6 +501,22 @@ export const ROOF_OVERLAY_BIAS = 0.002;
  *  walls it rests on (front edge wall top key = edge +0.45 + ~61 px x uZPerPx; a vertex post +0.53 more) instead of the eave
  *  pixels (below the tile pivot, no height term) losing to them. Canvas2D gets the same result from its level-major painter order. */
 export const RFX_SEAT_BIAS = 1.1;
+/**
+ * ADR-404: the line on an upright piece's art (px above its pivot, as a function of screen px from the pivot) where the
+ * seated roof plane above it cuts it. An edge wall's art lies along its edge, so the line follows the edge's screen slope
+ * (view u edge: down-right, view v edge: down-left); posts and centre pivots get a level line.
+ */
+export function roofClipLine(pu: number, pv: number, planePx: number, liftPx: number, hh: number, hw: number,
+  roofAt?: (du: number, dv: number) => boolean): { h0: number; k: number; apex: boolean } {
+  const fu = pu - Math.floor(pu), fv = pv - Math.floor(pv), half = (f: number): boolean => Math.abs(f - 0.5) < 0.1, whole = (f: number): boolean => f < 0.1 || f > 0.9;
+  let k = half(fu) && whole(fv) ? -hh / hw : whole(fu) && half(fv) ? hh / hw : 0, apex = false;
+  if (roofAt && whole(fu) && whole(fv)) { // a vertex post: the roof boundary through it, from the roofed view cells around it
+    const b = roofAt(-0.5, -0.5), f = roofAt(0.5, 0.5), l = roofAt(-0.5, 0.5), r = roofAt(0.5, -0.5);
+    if (f && !b && !l && !r) apex = true; // the far corner of a roof: both eaves fall away from the post (V line)
+    else if (f && r && !b && !l) k = hh / hw; else if (f && l && !b && !r) k = -hh / hw; // on a far edge: that edge's line
+  }
+  return { h0: planePx - liftPx, k, apex };
+}
 
 export class SpriteBatch {
   private prog: Program;
@@ -1180,7 +1205,7 @@ export class SpriteBatch {
   }
   private gatherPieces(cx: PrepareContext, bp: ReturnType<World["store"]>, hasFocus: boolean, fwx: number, fwy: number, playerLevel: number, cut: Set<number> | null): void {
     const { world, atlas, rect } = cx; const tr = world.store(Transform);
-    const pieceLit = cx.bindings.pieceLit, pieceScale = cx.bindings.pieceScale; const roofFx = cx.bindings.pieceRoofFx; // ADR-397
+    const pieceLit = cx.bindings.pieceLit, pieceScale = cx.bindings.pieceScale; const roofFx = cx.bindings.pieceRoofFx, roofPlane = cx.bindings.pieceRoofPlane; // ADR-397, ADR-404
     const d = bp.data as Record<string, ArrayLike<number>>;
     const hw = this.iso.tileW / 2, hh = this.iso.tileH / 2, zs = this.iso.zStep, zf = this.zFactor;
     // ADR-253: footprints / cover / cutaway / decks stay in world tiles; screen pivot, occlusion rect, column slices and depth
@@ -1304,9 +1329,12 @@ export class SpriteBatch {
         const lift = (rotRaw & ROT_DECK_LIFT ? (exact ? decks.topNear(pvx, pvy, level) : decks.topOver(ax, ay, fw, fh, level)) : 0) + part.liftPx; // ADR-397: + roof band lift (1x art px = world px: tileW 64)
         const sx = (pu - pv) * hw, sy = (pu + pv) * hh - z * zs - lift;
         const flat = flatLayer(layer, roof); // deck pieces (floors/foundations), never roofs
+        // ADR-404: an upright under a seated rfx roof loses its pixels above the roof plane (no cap / post past or through the roof)
+        const planeAbove = roofPlane && !roof && !flat && !part.rfx ? roofPlane(pvx, pvy, level) : undefined;
+        const rclip = planeAbove === undefined ? undefined : roofClipLine(pu, pv, planeAbove, lift, hh, hw, (du, dv) => { const w = fromView(pu + du, pv + dv, vq); return roofPlane!(w.x, w.y, level) !== undefined; });
         // Build pieces were never crisp-sampled (only the character doll path set CRISP, and only for creatures):
         // walls at ~3x phone magnification were plain LINEAR, i.e. blurry on every preset. Same flag as the doll path.
-        const flags = (flat ? SpriteFlag.Flat : 0) | (res.flipX ? SpriteFlag.FlipX : 0) | (nightSet?.has(vis) ? 64 : 0) | (flat || cutaway ? 0 : spk.flags) | (atlas.isCrisp(res.atlas) ? CRISP : 0) | (part.snow && !cutaway && ghost === 0 ? SEASON_ROOFSNOW : 0) | (part.rfx ? RFX_EDGE : 0);
+        const flags = (flat ? SpriteFlag.Flat : 0) | (res.flipX ? SpriteFlag.FlipX : 0) | (nightSet?.has(vis) ? 64 : 0) | (flat || cutaway ? 0 : spk.flags) | (atlas.isCrisp(res.atlas) ? CRISP : 0) | (part.snow && !cutaway && ghost === 0 ? SEASON_ROOFSNOW : 0) | (part.rfx ? RFX_EDGE : 0) | (rclip ? ROOF_CLIP : 0);
         // damage 1-3: Art's crack overlay sprite (building.crackOverlay = bld_crack, anim stage<N>) on top of the (baked)
         // damage frame. Where bld_crack covers the stage, no procedural shader crack at all (a not-yet-resident page just
         // shows the bare damage frame for a moment); the procedural crack is kept only for sets with no overlay declared
@@ -1334,7 +1362,7 @@ export class SpriteBatch {
           s[14] = spk.sid; s[15] = spk.flags; s[16] = drawVis;
           s[17] = res.entry; s[18] = res.atlas; s[19] = res.ax; s[20] = res.ay; s[21] = res.flipX ? 1 : 0; s[22] = res.hasDamageFrames ? 1 : 0;
           s[23] = deckTop ?? -1; s[24] = deckMask; s[25] = lift; s[26] = crack ? 1 : 0;
-          s[27] = vq; s[28] = atlas.layoutVersion; s[29] = i; s[30] = nightSet?.has(vis) ? 1 : 0; s[31] = cx.pieceAnchor === "front" ? 1 : 0;
+          s[27] = vq; s[28] = atlas.layoutVersion; s[29] = i; s[30] = nightSet?.has(vis) ? 1 : 0; s[31] = cx.pieceAnchor === "front" ? 1 : 0; s[32] = rclip?.h0 ?? -1; s[33] = rclip?.k ?? 0; s[34] = rclip?.apex ? 1 : 0;
           if (entry) {
             cacheHit = true;
             for (let q = 0; q < PIECE_SIG_N; q++) if (s[q] !== entry.sig[q]) { cacheHit = false; break; }
@@ -1366,7 +1394,7 @@ export class SpriteBatch {
             // slice foot = screen y of the front corner of its front-most tile, relative to pivot
             const footDy = single ? 0 : (best + 2) * hh - z * zs - sy;
             const o = this.writeOne(sx, sy, key, psc, res, flags, (i * 0.618034) % 1, alpha, sliceL, sliceR, tint, footDy, 0, ghost, dmgOverlay, 0);
-            o[27] = occT;
+            o[27] = occT; if (rclip) { o[20] = rclip.h0; o[21] = rclip.k; o[22] = rclip.apex ? 1 : 0; }
             if (deckMask) { o[38] = deckMask | (vfw << 4) | (vfh << 8); o[39] = deckTop!; }
             if (sway) { o[24] = sway[0]!; o[25] = sway[1]!; o[26] = sway[2]!; } // SpriteDef.sway (+ masks.sway weights in the shader)
             if (tints?.[1]) writeTint2(o, tints[1]);

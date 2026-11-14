@@ -17,7 +17,7 @@
       ],
       "kmax": 5,
       "crest": true,
-      "seatPx": 6
+      "seatPx": 7
     },
     "flt": {
       "rise": [
@@ -25,7 +25,7 @@
       ],
       "kmax": 0,
       "crest": false,
-      "seatPx": 3
+      "seatPx": 5
     },
     "cot": {
       "rise": [
@@ -34,7 +34,7 @@
       ],
       "kmax": 3,
       "crest": true,
-      "seatPx": 8
+      "seatPx": 7
     },
     "gam": {
       "rise": [
@@ -43,7 +43,7 @@
       ],
       "kmax": 5,
       "crest": true,
-      "seatPx": 6
+      "seatPx": 7
     },
     "shd": {
       "rise": [
@@ -51,7 +51,7 @@
       ],
       "kmax": 12,
       "crest": false,
-      "seatPx": 4
+      "seatPx": 7
     }
   },
   "groups": {

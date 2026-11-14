@@ -8533,56 +8533,67 @@ forms, every shake key resolving to `*_shk_t<N>` where §8 has art (base elsewhe
 `roofWallMaterial`, the three cabin-ruin kinds picking shk, and refreshWalls. Art's `roofs_rfx.test.ts` and
 `adr397_roof_rfx.test.ts` also pass.
 
-## ADR-404: Roofs sit on the wall tops (per-form seat, rfx depth bias, eave art request)
+## ADR-403: Withdrawn: networked per-wall site tag for cabin-ruin shakes
 
-Context: owner feedback on the ADR-400 composites: the roof looked sunk inside the walls, with a strip of wall top and
-posts showing around its edge. Two separate causes:
+A `PieceSite` component that tags walls stamped inside abandoned cabin / hunter shack / fisher hut sites, so that they
+vote `site:<kind>`, was built and then reverted before it was pushed. Art's twig + wood rule (4ff07a07) already gives
+those ruins shakes through their wood walls (ADR-402), and the tag would have cost a world-schema hash change and a
+replication byte. The number is kept so the log stays contiguous.
+
+## ADR-404: Roofs sit on the wall tops (per-form seat, wall clip under roofs, rfx depth bias, eave art request)
+
+Context: owner feedback on the ADR-400 composites. The roof looked sunk inside the walls: a strip of wall caps and posts
+showed along the far edges, and the front wall posts poked up through the front eave. There were three causes:
 
 1. Height. Every rfx part was drawn with its base on the level floor (48 px above the walls' floor). The wall art is
-   taller than one level: its cap reaches 60-62 px above the pivot on every tier (twig, wood, stone, metal, bld t1-t4),
-   so the back wall caps stuck up behind the roof.
-2. Order (WebGL2 only). Eave pixels sit below the tile pivot and get no height term in the depth key, so the front
-   walls' caps and vertex posts (edge +0.45, about 61 px x 1/48, post +0.53) out-ranked the roof and drew over its front
-   edge. Canvas2D was already right: it paints level by level, so a level-1 roof always comes after the level-0 walls.
+   taller than one level: its cap reaches 60-62 px above the pivot on every tier (twig, wood, stone, metal, bld t1-t4).
+2. Overhang. The rfx art stops 1-3 px past the tile diamond. The wall cap is about 6 px thick on screen, half inside
+   the diamond and half outside it, and posts reach about 7 px past the tile corners. Raising the roof covers the far
+   caps but opens the near ones, so no single offset covers both.
+3. Order (WebGL2 only). Eave pixels sit below the tile pivot and get no height term in the depth key, so near wall caps
+   and posts out-ranked the roof. Canvas2D paints level by level, so a level-1 roof already came after level-0 walls.
 
-Decision (engine only, offsets only: no art scaling, duplication or recolour):
+Decision. Engine only, offsets and occlusion only: no art is scaled, duplicated or recoloured.
 
-- `roofRfx.json` `forms.<f>.seatPx` sets how far each form is raised. `RoofTiler.resolve` adds `rfxSeat(form)` to every
-  part's `liftPx` (the tile, its overlays and the gable/gambrel/shed wall strips, so a strip still meets its tile). Art's
-  `zoffPx` (band height, §4) is unchanged. The values are measured
-  per form against the real art, because each form's eave sits at a different depth in its tile: hip 9, cottage 8,
-  gable 6, gambrel 6, shed 4, flat 3.
-- `RFX_SEAT_BIAS = 1.1` is added to the depth key of every rfx part (WebGL2), so a seated roof wins over the caps and
-  posts of the walls it rests on. Canvas2D shares the binding and its `liftPx`, so it needs no change.
-- Known trade-off of the bias: an upright standing right against a front wall can have the roof eave drawn over the top
-  of its head, and a level-1 wall standing in front of a lower roof could lose its bottom ~30 px to that roof. The
-  local player keeps the focus silhouette through occluders.
+- Seat. `roofRfx.json` `forms.<f>.seatPx` (hip 9, cottage 7, gable 7, gambrel 7, shed 7, flat 5). `RoofTiler.resolve`
+  adds `rfxSeat(form)` to every part's `liftPx`: the tile, its overlays, and the gable/gambrel/shed end strips, so a
+  strip still meets its tile. Art's `zoffPx` (band height, §4) is unchanged. Each value is measured per form, because
+  each form's eave sits at a different depth in its tile.
+- Wall clip under roofs (both renderers). `RoofTiler.planeOver(x, y, level)` (binding `pieceRoofPlane`) returns the
+  seated roof-plane height (levelPx + seat) when an upright's pivot touches a tile with an rfx roof one level up: the
+  two tiles beside an edge, the four around a vertex post, or the tile under a centre pivot. The renderer then drops
+  the upright's pixels above that plane along its edge (`roofClipLine`: view-u edges slope down-right, view-v edges
+  down-left). A vertex post reads the roofed view cells around it: at a roof's far corner the line is a V (both eaves
+  fall away from it), on a far edge it follows that edge, and anywhere else it is level. Centre pivots are level.
+  - WebGL2: instance flag `ROOF_CLIP` (65536). aF.xy carries the line (build pieces never use the wet / cold inputs),
+    the vertex shader passes the height over the plane and the screen px as linear varyings, and the fragment shader
+    discards above the line (k x px, or -0.5 |px| for the V), after the derivatives. The static piece cache signs the
+    line (PIECE_SIG_N 35), so a roof change re-signs the walls.
+  - Canvas2D: the same line as the piece's clip polygon.
+  
+  This is occlusion: the wall top is where the roof rests, and nothing is recoloured. Where the roof art has no
+  overhang, the cut shows background instead of a wall strip.
+- Order. `RFX_SEAT_BIAS = 1.1` is added to every rfx part's WebGL2 depth key, so the roof beats the caps and posts of
+  the walls under it. Trade-off: an upright standing right against a front wall can have its head drawn under the eave.
+  The local player keeps the focus silhouette.
 
-Why not a single "wall-top height" (13 px) for every form: the wall cap is about 6 px thick on screen, half inside the
-tile diamond and half outside it, and the rfx art stops about 1-3 px past the diamond. Raising the roof covers the
-back caps but opens the front ones. At 13 px the front walls show a 3-8 px cap strip under the eave, and at 0 px the
-back caps show. Each per-form value sits in the window where both checks pass.
+Validation: `apps/client/test/adr404_roof_seat.test.ts` decodes the building and main-pack atlases. For every form (hip,
+gab, cot, gam, shd, flt) on every plain wall tier (wall_twig, wall, wall_stone, wall_metal, bld_wall_t1..t4) it lays a
+7x5 house, draws the clipped walls and then the seated roof, and checks that at least 90% of each facing's wall columns
+meet roof art directly above their visible top (no strip above the roof, no background gap under it). The E facing of
+the gable/gambrel/shed/flat houses is the end-strip side and is left to the composites. The test also checks that the
+old unseated, unclipped roof fails, the clip-line slopes, the seat range, and the depth bias. Composites (WebGL2 and
+Canvas2D, every form) are in /workspace/share/roofs_adr400/.
 
-Validation: `apps/client/test/adr404_roof_seat.test.ts` decodes the building and main-pack atlases. For every form
-(hip, gab, cot, gam, shd, flt) on every plain wall tier (wall_twig, wall, wall_stone, wall_metal, bld_wall_t1..t4) it
-lays a 7x5 house, draws walls and then the seated roof, and checks two things inside each wall's own edge span:
-
-- at least 85% of the back (N, W) wall-top pixels are under roof art; hip and cottage reach 100%, gable and gambrel on
-  twig are the lowest at 89%;
-- at most 5% of the front (S, E) wall columns have the roof stopping more than 2 px above the wall top.
-
-It also checks that seat 0 (the old sunk roof) fails the back check for every pitched form, that each seat lies between
-the floor and the wall-top height, and that `RFX_SEAT_BIAS` beats a front wall top plus a vertex post.
-
-What the engine cannot do, and what Art must paint: true eaves. Wall posts reach about 7 px past the tile corners and the
-wall caps about 3-4 px outside the edge line. No offset can cover the outer half on all four sides at once, and covering
-it by stretching or duplicating tiles would fake art. The request for Art (`rfx_<form>_*` edge tiles, every form,
-tier and skin):
+What the engine cannot do, and what Art must paint: true eaves, meaning a visible overhang past the walls rather than a
+flush edge. The request for Art (`rfx_<form>_*` eave and corner tiles, every form, tier and skin, including shk):
 
 - extend the roof surface 6 px (1x) past the tile diamond on the outer side of every eave edge;
-- extend 8 px at the outer corners (`c`/corner shapes), so corner posts are covered;
-- add a 3-4 px fascia/drip edge on the S and E (camera-facing) eaves, hanging below the eave line;
-- keep the anchor (0.647) and frame size, or grow the frame symmetrically and update the anchor in the manifest.
+- extend 8 px at the outer corner shapes, so the corner posts are covered;
+- add a 3-4 px fascia/drip edge under the S and E (camera-facing) eaves;
+- for the gable, gambrel and shed end strips (`rfx_*_wall*`), extend the strip bottom 3 px, so it overlaps the wall top
+  at every seat;
+- keep the 72x68 frame and anchor 0.647, or grow the frame symmetrically and update the anchor in the manifest.
 
-Once that art lands, re-pick the seats with the test (they should move toward 13, the wall-top height) and raise its
-thresholds to 100% covered and 0% gaps, with the 7 px corner-post span included.
+Once that art lands, re-measure the seats with the test (expect about 13, the wall-top height). Raise its threshold to
+100% with the 7 px corner-post span included, and drop the clip if the eaves cover the caps on their own.
