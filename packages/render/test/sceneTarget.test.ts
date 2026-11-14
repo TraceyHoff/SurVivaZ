@@ -30,16 +30,16 @@ describe("basic adapter detection", () => {
   it.each(["ANGLE (Microsoft, Microsoft Basic Render Driver Direct3D11 vs_5_0 ps_5_0, D3D11)",
     "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)", "llvmpipe (LLVM 15.0.7, 256 bits)"])("%s", (r) => expect(isBasicAdapter(r)).toBe(true));
   it.each(["ANGLE (NVIDIA, NVIDIA GeForce RTX 3070 Direct3D11 vs_5_0 ps_5_0, D3D11)", "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)", "Adreno (TM) 740", "ANGLE (Microsoft, SraKmd_arden (0x0000D000) Direct3D11 vs_5_0 ps_5_0, D3D11)"])("not %s", (r) => expect(isBasicAdapter(r)).toBe(false));
-  it("Xbox SraKmd: console Ultra (448 MB streamed, native res); ?gl=high after loss -> High 256 MB/1080p", () => {
+  it("Xbox SraKmd: console High (256 MB streamed, <=1080p); ?gl=high after loss is the same tier", () => {
     const P: Record<number, unknown> = { 100: "ANGLE (Microsoft, SraKmd_arden (0x0000D000) Direct3D11 vs_5_0 ps_5_0, D3D11)" };
     const gl = { MAX_VIEWPORT_DIMS: 4, FRAGMENT_SHADER: 20, VERTEX_SHADER: 21, HIGH_FLOAT: 22, getParameter: (n: number) => P[n] ?? (n === 4 ? new Int32Array([16384, 16384]) : 16),
       getExtension: (n: string) => (n === "WEBGL_debug_renderer_info" ? { UNMASKED_RENDERER_WEBGL: 100, UNMASKED_VENDOR_WEBGL: 101 } : null),
       getShaderPrecisionFormat: () => ({ precision: 23 }) } as unknown as WebGL2RenderingContext;
     const c = detectCapabilities(gl, { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141" });
-    // ADR-116: consoles start Ultra (full-res art, native res) inside a safe streamed 448 MB budget, RGBA8 targets
-    expect(c.console).toBe(true); expect(c.basicAdapter).toBe(false); expect(c.lowEnd).toBe(false); expect(c.safe).toBe(false); expect(c.textureBudgetMB).toBe(448); expect(c.maxPixels).toBe(3840 * 2160);
-    expect(c.device.klass).toBe("console"); expect(c.device.start).toBe(3); expect(c.formats.scene).toBe("RGBA8");
-    // after a context loss gl-recovery passes ?gl=high: High (pre-ADR-116 256 MB / 1080p), not lowend
+    // ADR-407: consoles start High (256 MB / 1080p) — ultra's 448 MB atlas + 4K targets do not fit the 1 GB UWP app cap
+    expect(c.console).toBe(true); expect(c.basicAdapter).toBe(false); expect(c.lowEnd).toBe(false); expect(c.safe).toBe(false); expect(c.textureBudgetMB).toBe(256); expect(c.maxPixels).toBe(1920 * 1080);
+    expect(c.device.klass).toBe("console"); expect(c.device.start).toBe(2); expect(c.device.ceiling).toBe(2); expect(c.formats.scene).toBe("RGBA8");
+    // after a context loss gl-recovery passes ?gl=high: same High tier (it used to be the recovery tier; now it is the default)
     const h = detectCapabilities(gl, { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/141", flags: ["high"] });
     expect(h.lowEnd).toBe(false); expect(h.device.start).toBe(2); expect(h.device.ceiling).toBe(2); expect(h.textureBudgetMB).toBe(256); expect(h.maxPixels).toBe(1920 * 1080);
   });

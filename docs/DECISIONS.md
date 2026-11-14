@@ -8735,3 +8735,76 @@ index says), while the deployed `.gz` contains the minified form (9,188,794 B, s
 the loader verifies `sha`/`bytes`, so this is harmless — but any future shard-integrity check must account
 for the minification. The delayed retries run only for 404s, not for network errors (a network error still
 throws immediately and is retried once by `assetJsonGz`'s bypass-cache retry, the ADR-405 behaviour).
+
+## ADR-407: Consoles run at the high tier, not ultra — the Xbox boot must fit the 1 GB UWP app cap (SurVivaZ)
+
+Context: Tracey, on a browser on Xbox Series X, reports "Error code: SBOX_FATAL_MEMORY_EXCEEDED happens
+when starting to load the game assets on console browsers". SBOX_FATAL_MEMORY_EXCEEDED is the Chromium
+sandbox error for a tab/renderer process that asked for more memory than its sandbox allows; on desktop the
+limits scale with physical memory (4–16 GB) and exceeding them usually means a leak, but on Xbox the browser
+runs as a UWP app and Microsoft caps foreground UWP apps at 1 GB (games get 5 GB; Microsoft Learn, "System
+resources for UWP apps and games on Xbox One", which states the cap applies to Xbox One and Xbox Series X|S
+and that exceeding it causes memory allocation failures). Edge on Xbox is a UWP app, so the whole tab — JS
+heap + GPU set + Edge's own overhead — must fit ~1 GB. The code's old frame ("the ~512 MB the browser GPU
+process is assumed to get", capabilities.ts) was the wrong frame and is corrected here: the cap is per app,
+not per GPU process, and the ~512 MB figure was unverified. No "SBOX" string exists anywhere in the tree;
+there is no handling of it. The error cannot be reproduced without a real Xbox sandbox — everything below
+is proven at code level + emulation, and the live re-probe + Tracey's real-Xbox retest after the push are
+the real check.
+
+Mechanism (measured, not guessed). Consoles were locked to ultra: `classifyDevice` returned start 3,
+ceiling 3 for the SraKmd adapter / Xbox UA, so a console got a 448 MB atlas budget and 4K render targets
+(~116 MB: scene + emissive RGBA8, DEPTH_COMPONENT24 depth, half-res lightmap, two half-res bloom targets —
+see `renderTargetBytes`) ≈ 564 MB GPU-side before the JS heap. ADR-212 already budgets the console JS heap
+at 384 MB soft (desktop 1024, mobile 256); the live manifest set decodes to ~39 MB of JSON text whose parsed
+object graph retains ~91 MB of JS heap (measured in Node V8 on the real live files: heap 97.5 MB after the
+parallel parse of the 10 customization shards alone, 34.9 MB of shard text). Emulation (Hatch Chromium over
+CDP, live build, SraKmd renderer stub + Xbox UA + 8 cores / 8 GB, probe `xbox407-probe.mjs`): console ultra
+boots to vram total 341.3 MB (budget 448, resident 128, reserved 213.3) with JS heap 326 MB at spawn and
+344 MB after 30 s, Chrome RSS 2,383 MB (SwiftShader-inflated, not Xbox-comparable). At 4K output the GPU set
+is ~457 MB (341.3 atlas + ~116 targets); 457 + 344 ≈ 800 MB before Edge's own overhead — against a 1 GB app
+cap, that is why the tab dies exactly when assets start loading. The JS heap has no distinct parse spike
+above its plateau (polled every 500 ms through boot: monotonic rise to ~344 MB); the cost is retained, not
+transient. A second measured fact matters: fitBudget already cannot fit the resident set + pool reserves in
+448 MB, so console ultra renders its resident art at 0.25x downscale — ultra was never delivering full-res
+art on Xbox in the first place.
+
+Decision: consoles start at high (start 2, ceiling 2) — 256 MB atlas budget, <=1080p targets (~29 MB), a
+~285 MB GPU set at 4K output. The same emulation at the high tier (`?gl=high`, which exercises the exact
+code path this makes default): vram total 193.3 MB (budget 256, resident 80, reserved 113.3), JS heap
+349 MB at spawn, at the SAME 0.25x atlas downscale — the art is no blurrier, and the building pools are
+even at a higher scale (1 vs 0.5 at ultra, because the smaller reserve leaves more room for resident art).
+Total: ~222 MB GPU + ~344 MB heap ≈ 566 MB, inside the 1 GB cap with ~450 MB for Edge's overhead. Two
+guard rails make the tier stick. (1) The device ceiling binds: a console that once remembered ultra is
+clamped back to high by `startLevel`, and the frame-time bench can demote a console but never promote it
+(`benchAdjust` only promotes desktop-unknown/desktop-dgpu). (2) The default Full preset can no longer
+re-open native-res targets on a console: `QualityController.fullResolution` is false when the detected
+device class is console. This second hole mattered: Full is the default preset on every device (Task 26),
+and without it Full would have bypassed the 1080p pixel cap and rebuilt 4K targets (~141 MB with the
+ultra tier's full-res lightmap) on a fresh-install Xbox. Desktop and mobile are untouched: their tiers,
+budgets and Full-preset behaviour are asserted unchanged in the new tests, and the Full bypass still works
+on desktop (ceiling 3). `renderTargetBytes(w, h, lightDownscale = 2)` is a new pure helper in
+capabilities.ts (14 B/px at the high tier) so the budget invariant is testable: console atlas budget +
+targets at maxPixels must fit the 512 MB design budget (256 + ~29 = ~285 MB), leaving the rest of the
+1 GB cap for the heap and Edge.
+
+Honest costs, stated plainly. Xbox renders at <=1080p instead of 4K, and character paper-doll pools use
+the KTX2 compressed tail at 256 MB instead of lossless PNG (`losslessCharPools(256)` is false; ADR-220
+measured ~10% of a paper-doll sheet's texels >32 off, which read as smeared, blotchy clothes/faces). The
+probe's close-ups show no visible smearing at play zoom (both configs render the player cleanly), but the
+real-Xbox severity needs Tracey's eyes — a game that runs at 1080p beats a game that crashes at boot.
+What is NOT claimed: no real-Xbox fix is proven here; the sandbox limit itself is unverifiable from the VM
+(the documented 1 GB UWP app cap is the best public figure, and the retail Edge tab's effective limit may
+differ — the fix's ~450 MB of headroom is the margin against that unknown). The ~91 MB retained manifest
+graph is a quantified follow-up, not part of this ADR: dropping it after the registry builds would buy
+further headroom, but it needs its own change and gate. ADR-405/406 loader behaviour is unchanged
+(the delayed no-store + cache-busting retries still apply to the same shard fetches).
+
+Verification: new tests `adr407_console_memory_budget.test.ts` (7 tests) written first — 5 failed / 1 passed
+on pre-change code in the repro run, 6 failed / 1 passed in the scratch-worktree revert check (the 7th is
+the budget invariant, which fails pre-change because `renderTargetBytes` does not exist there); all 7 pass
+with the fix. Existing expectations updated (not weakened): `device_tier.test.ts` Xbox Edge ultra→high,
+`sceneTarget.test.ts` console Ultra→High (the `?gl=high` recovery half is unchanged — it is now the
+default, so the recovery path is a no-op for consoles), one comment in `frametable_rows.test.ts`. Typecheck
+EXIT 0 all 11 (TS 5.9.3); full suites serialized total 4,552 passed, 9 skipped, 1 known persist autosave
+bench flake (p95 59.9989 vs 50, re-run PERF=1 1/1 passed); canaries 34/34.

@@ -2,7 +2,8 @@
  * Adaptive quality: fixed tiers + a frame-time governor (target 60 fps, floor 30 fps, hysteresis) and the user-facing
  * Settings preset (Auto / Low / Medium / High / Ultra / Full, persisted; ADR-116). Auto runs the governor; fixed presets pin a tier.
  * Full pins the Ultra tier AND bypasses the soft DPR / pixel-budget caps in IsoRenderer.resize() (hard GPU limits
- * still apply), so it renders at the device's native DPR. Task 26: Full is now the DEFAULT on every device
+ * still apply), so it renders at the device's native DPR. ADR-407: on consoles Full does NOT bypass the caps
+ * (the 1 GB UWP app cap cannot afford 4K targets) — see fullResolution. Task 26: Full is now the DEFAULT on every device
  * (reversing the Task 1 decision that kept Auto as the safe default) — the user explicitly requires it.
  * Auto / Low / Medium / High / Ultra stay selectable, and a stored choice is always kept (only the
  * default for fresh installs changes). Trade-off, stated plainly: low-end phones render at native DPR
@@ -80,8 +81,10 @@ export class QualityController {
     if (bench && !d.remembered) { this.bench = []; this.benchSkip = 30; this.benchAdjust = bench; }
   }
   get level(): number { return this.preset === "auto" ? this.governor.level : PRESET_TIER[this.preset]; }
-  /** True only for the explicit Full preset: native DPR with soft DPR / pixel caps bypassed (see IsoRenderer.resize). */
-  get fullResolution(): boolean { return this.preset === "full"; }
+  /** True only for the explicit Full preset: native DPR with soft DPR / pixel caps bypassed (see IsoRenderer.resize).
+   *  ADR-407: never on a console — Full is the default preset, and the bypass would re-open the 4K targets the
+   *  high tier caps at 1080p; the console's 1 GB UWP app cap cannot afford them. Desktop/mobile Full is untouched. */
+  get fullResolution(): boolean { return this.preset === "full" && this.detected?.klass !== "console"; }
   get tier(): QualityTier { return QUALITY_TIERS[this.level]!; }
   get current(): QualityTier { return this.tier; }
   setPreset(p: QualityPreset): void { this.preset = p; savePreset(p); }

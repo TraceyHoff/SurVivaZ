@@ -19,7 +19,7 @@ import { classifyDevice, type DeviceTier } from "../deviceTier.js";
 export type GlFlag = "lowend" | "mediump" | "nofloat" | "lowmem" | "safe" | "high";
 
 export interface RenderCapabilities {
-  renderer: string; vendor: string; mobile: boolean; lowEnd: boolean; /** software / basic / remote adapter (auto lowend) */ basicAdapter: boolean; /** console browser (Xbox): full art, 448 MB atlas budget at ultra (256 MB below ultra), native res at ultra (<=1080p below) */ console: boolean; flags: GlFlag[];
+  renderer: string; vendor: string; mobile: boolean; lowEnd: boolean; /** software / basic / remote adapter (auto lowend) */ basicAdapter: boolean; /** console browser (Xbox): full art at the high tier (ADR-407) — 256 MB atlas budget, <=1080p targets, inside the 1 GB UWP app cap */ console: boolean; flags: GlFlag[];
   /** GPU-compressed texture families (KTX2 transcode targets); all false = PNG/RGBA8 path. */
   compressed: CompressedTextureSupport;
   ext: { colorBufferFloat: boolean; colorBufferHalfFloat: boolean; floatLinear: boolean; debugRendererInfo: boolean };
@@ -125,12 +125,16 @@ export function detectCapabilities(gl: WebGL2RenderingContext, opts: { flags?: G
   // Mobile: 128 MB of atlas + streaming pools keeps the whole GPU set (plus ~30 MB of native-DPR render targets)
   // under ~160 MB. Memory comes from cold tiers + eviction, not from blurring visible art (see AtlasManager.fitBudget).
   const console_ = isConsole(renderer, ua) && !basic;
-  // console: the atlas budget alone is 448 MB at ultra against the ~512 MB the browser GPU process is
-  // assumed to get (unverified on real hardware), and the 4K render targets (~116 MB: scene + emissive +
-  // depth + lightmap + bloom) sit on top of it — vram.withinBudget counts atlas bytes only, so the total
-  // can exceed the assumption. ADR-405 names this rather than changing the budget without evidence.
-  // ADR-116: probe-based tier. Ultra (desktop dGPU / console) gets full-res @2x pages + larger streamed budgets; ?gl=high
-  // (gl-recovery after a context loss on ultra) keeps the pre-ADR-116 budgets (desktop 768, console 256 MB / 1080p).
+  // ADR-407: console runs at HIGH, not ultra. Edge on Xbox is a UWP app: Microsoft caps foreground apps at
+  // 1 GB (games get 5 GB), so the whole tab — JS heap + GPU set + Edge's own overhead — must fit ~1 GB.
+  // Ultra was 448 MB of atlas + ~116 MB of 4K render targets (renderTargetBytes) ≈ 564 MB before the JS
+  // heap (ADR-212 budgets the console heap at 384 MB soft; measured 326 MB at spawn, 344 MB after 30 s in
+  // emulation) — the boot peak tripped the sandbox limit (SBOX_FATAL_MEMORY_EXCEEDED). High is 256 MB
+  // atlas + ~29 MB of 1080p targets ≈ 285 MB GPU-side (measured vram total 341.3 -> 193.3 MB in emulation
+  // at the same 0.25x atlas downscale, so the art is no blurrier). ?gl=high used to be the post-context-loss
+  // recovery tier; it is now the console default, and the recovery path is a no-op for consoles.
+  // ADR-116: probe-based tier. Ultra (desktop dGPU) gets full-res @2x pages + larger streamed budgets; ?gl=high
+  // (gl-recovery after a context loss) keeps the pre-ADR-116 budgets (desktop 768, console 256 MB / 1080p).
   const nav = typeof navigator !== "undefined" ? navigator as Navigator & { deviceMemory?: number } : undefined;
   const device = classifyDevice({ renderer, userAgent: ua, maxTextureSize: limits.maxTextureSize, cores: opts.cores ?? nav?.hardwareConcurrency ?? 0, memoryGB: opts.memoryGB ?? nav?.deviceMemory ?? 0, touchPoints: nav?.maxTouchPoints ?? 0 });
   const capHigh = flags.includes("high") || lowEnd;
@@ -141,8 +145,8 @@ export function detectCapabilities(gl: WebGL2RenderingContext, opts: { flags?: G
   // screenshot -- visible art magnified 2x from a halved page. Smaller / unknown devices keep 128 MB,
   // and the upload OOM path still halves on a real out-of-memory, so this is a budget, not a promise.
   const capableMobile = mobile && (opts.memoryGB ?? nav?.deviceMemory ?? 0) >= 4 && (opts.cores ?? nav?.hardwareConcurrency ?? 0) >= 6;
-  const textureBudgetMB = lowmem || flags.includes("safe") ? 160 : mobile ? (capableMobile ? 256 : 128) : console_ ? (ultra ? 448 : 256) : ultra ? 1024 : 768;
-  if (console_) fallbacks.push(`console GPU (${renderer.slice(0, 40)}): atlas budget ${textureBudgetMB} MB (streamed), RGBA8 targets, ${ultra ? "native res" : "<=1080p"}`);
+  const textureBudgetMB = lowmem || flags.includes("safe") ? 160 : mobile ? (capableMobile ? 256 : 128) : console_ ? 256 : ultra ? 1024 : 768;
+  if (console_) fallbacks.push(`console GPU (${renderer.slice(0, 40)}): atlas budget ${textureBudgetMB} MB (streamed), RGBA8 targets, <=1080p (ADR-407: 1 GB UWP app cap)`);
   if (flags.includes("safe")) fallbacks.push("safe mode (?gl=safe): no float targets, bloom or LUT; direct composite");
   if (lowmem || mobile) fallbacks.push(`atlas texture budget ${textureBudgetMB} MB${mobile ? " (mobile)" : ""}`);
   // Mobile renders at the native DPR (a 2.625 phone backed at 2x is upscaled 1.31x by the compositor = blurry); the pixel
@@ -157,6 +161,23 @@ export function detectCapabilities(gl: WebGL2RenderingContext, opts: { flags?: G
     precision: { fragmentHighp, fragment: fragmentHighp ? "highp" : "mediump", vertex: vp && vp.precision >= 23 ? "highp" : "mediump", fragmentHighpBits },
     limits, atlasLayerSize, textureBudgetMB, maxDpr, maxPixels, fallbacks, problems, safe: flags.includes("safe"), device,
   };
+}
+
+/**
+ * ADR-407: bytes of the scene render-target set at w x h — scene + emissive RGBA8 (4 B/px each),
+ * DEPTH_COMPONENT24 depth (3 B/px), lightmap RGBA8 at 1/`lightDownscale` (half-res at the high tier,
+ * full-res at ultra) and the two half-res bloom RGBA8 targets (2 B/px) = 14 B/px at the high tier.
+ * At 3840x2160 with the high-tier half-res lightmap this is ~116.1 MB (the figure the old console
+ * comment cited); at 1920x1080 it is ~29.0 MB. The depth figure is the accounting one (drivers may
+ * pad 24-bit depth to 4 B/px, which only makes the real total larger — the console budget invariant
+ * in adr407_console_memory_budget.test.ts still holds with margin). Used by the console boot-budget
+ * invariant: the console GPU set (atlas budget + this) must fit the 512 MB design budget, leaving
+ * the rest of the 1 GB UWP app cap for the JS heap (ADR-212: 384 MB soft) and Edge itself.
+ */
+export function renderTargetBytes(w: number, h: number, lightDownscale = 2): number {
+  const px = Math.max(0, w) * Math.max(0, h);
+  const lw = Math.max(1, Math.ceil(w / Math.max(1, lightDownscale))), lh = Math.max(1, Math.ceil(h / Math.max(1, lightDownscale)));
+  return px * (4 + 4 + 3) + lw * lh * 4 + 2 * Math.max(1, w >> 1) * Math.max(1, h >> 1) * 4;
 }
 
 /** Rewrite a fragment shader for mediump-only GPUs (or the forced `?gl=mediump` path). */

@@ -21,7 +21,7 @@ describe("ADR-154 page-in sync checks", () => {
   it("only small (mobile) budgets pay a glGetError per page-in", () => {
     expect((new AtlasManager(gl, { registerLoader: () => {} } as never, { textureBudgetMB: 160 }) as any).syncChecks).toBe(true);
     expect((new AtlasManager(gl, { registerLoader: () => {} } as never, { textureBudgetMB: 768 }) as any).syncChecks).toBe(false);
-    // ADR-187: console budgets (256 / 448 ultra) skip the per-page getError drain
+    // ADR-187: console budgets (256, ADR-407: consoles run at high) skip the per-page getError drain
     expect((new AtlasManager(gl, { registerLoader: () => {} } as never, { textureBudgetMB: 256 }) as any).syncChecks).toBe(false);
   });
 });

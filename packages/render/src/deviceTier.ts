@@ -1,6 +1,8 @@
 /**
- * ADR-116 device tiering: probe-based Auto start tier (not UA-only). Powerful devices (desktop dGPU, consoles) start MAXED
- * (ultra); integrated GPUs start high; phones / weak devices keep the conservative starts; software adapters start low.
+ * ADR-116 device tiering: probe-based Auto start tier (not UA-only). Powerful devices (desktop dGPU) start MAXED
+ * (ultra); consoles start high (ADR-407: the 1 GB UWP app cap leaves no room for ultra — 448 MB atlas + 4K
+ * targets ≈ 564 MB before the JS heap); integrated GPUs start high; phones / weak devices keep the conservative
+ * starts; software adapters start low.
  * Inputs: renderer string, MAX_TEXTURE_SIZE, hardwareConcurrency, deviceMemory, RGBA8 FBO check, plus first-seconds frame
  * timing (see QualityController bench). A tier that ran well is remembered per device (localStorage) unless a context loss
  * happened on it.
@@ -34,7 +36,12 @@ export function classifyDevice(p: DeviceProbe): DeviceTier {
   const mk = (klass: DeviceClass, start: number, ceiling: number): DeviceTier => ({ klass, start, ceiling, name: TIER_NAMES[start]!, reasons });
   if (isBasicAdapter(r)) { reasons.push(`software/basic adapter (${r.slice(0, 40)})`); return mk("software", 0, 1); }
   if (p.fboOk === false) { reasons.push("RGBA8 scene FBO incomplete"); return mk("software", 0, 1); }
-  if (isConsole(r, ua)) { reasons.push("console browser: full art, RGBA8 targets, safe VRAM budget"); return mk("console", 3, 3); }
+  // ADR-407: consoles start HIGH, not ultra. Edge on Xbox is a UWP app capped at 1 GB foreground memory
+  // (Microsoft Learn: UWP system resources on Xbox); ultra's 448 MB atlas + ~116 MB of 4K targets is
+  // ~564 MB before the ~344 MB JS heap and Edge's own overhead — the boot peak trips the sandbox limit
+  // (SBOX_FATAL_MEMORY_EXCEEDED). High is 256 MB atlas + ~29 MB of 1080p targets (~285 MB GPU set),
+  // inside the cap with room; the art is no blurrier (same 0.25x atlas downscale in emulation).
+  if (isConsole(r, ua)) { reasons.push("console browser: high tier — 1 GB UWP app memory cap leaves no room for ultra (448 MB atlas + 4K targets)"); return mk("console", 2, 2); }
   const mobile = MOBILE_GPU.test(r) && !APPLE_M.test(r) || MOBILE_UA.test(ua) || (/macintosh/i.test(ua) && (p.touchPoints ?? 0) > 1);
   if (mobile) {
     if (HIGH_MOBILE.test(r) || /iphone|ipad/i.test(ua)) { reasons.push("high-end phone/tablet GPU: conservative high start"); return mk("mobile-high", 2, 2); }

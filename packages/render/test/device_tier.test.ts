@@ -11,7 +11,7 @@ const M: Record<string, [DeviceProbe, string, string, string]> = {
   "desktop iGPU": [{ renderer: "ANGLE (Intel, Intel(R) UHD Graphics 620 Direct3D11 vs_5_0 ps_5_0, D3D11)", userAgent: WIN, maxTextureSize: 16384, cores: 8, memoryGB: 8 }, "desktop-igpu", "high", "high"],
   "dGPU on weak CPU": [{ renderer: "ANGLE (NVIDIA, NVIDIA GeForce GTX 1050)", userAgent: WIN, maxTextureSize: 16384, cores: 2, memoryGB: 4 }, "desktop-dgpu", "high", "ultra"],
   "masked desktop": [{ renderer: "WebKit WebGL", userAgent: WIN, maxTextureSize: 16384, cores: 8 }, "desktop-unknown", "high", "ultra"],
-  "Xbox Edge": [{ renderer: "ANGLE (Microsoft, SraKmd, D3D11)", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; Xbox; Xbox Series X) Edg/130", maxTextureSize: 16384, cores: 8, memoryGB: 8 }, "console", "ultra", "ultra"],
+  "Xbox Edge": [{ renderer: "ANGLE (Microsoft, SraKmd, D3D11)", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; Xbox; Xbox Series X) Edg/130", maxTextureSize: 16384, cores: 8, memoryGB: 8 }, "console", "high", "high"],
   "Android Mali": [{ renderer: "Mali-G57 MC2", userAgent: "Mozilla/5.0 (Linux; Android 13; SM-A136B) Chrome/130 Mobile", maxTextureSize: 8192, cores: 8, memoryGB: 4 }, "mobile", "medium", "high"],
   "iPhone": [{ renderer: "Apple GPU", userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148 Safari/604.1", maxTextureSize: 16384, cores: 6 }, "mobile-high", "high", "high"],
   "software": [{ renderer: "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)", userAgent: WIN, maxTextureSize: 8192, cores: 4 }, "software", "low", "medium"],

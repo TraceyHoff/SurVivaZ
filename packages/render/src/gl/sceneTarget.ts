@@ -42,7 +42,8 @@ export const BASIC_ADAPTER = /swiftshader|llvmpipe|softpipe|lavapipe|microsoft b
 export function isBasicAdapter(renderer: string): boolean { return BASIC_ADAPTER.test(renderer); }
 
 /** Console browsers (Xbox Edge: ANGLE D3D11 on the "SraKmd" adapter): a real mid-tier GPU with a shared, capped memory
- *  pool. Full sprite art, but a limited atlas budget (KTX2 + downscale) and a capped backbuffer instead of lowend. */
+ *  pool. Full sprite art at the high tier (ADR-407: 256 MB atlas, <=1080p backbuffer — the 1 GB UWP app cap leaves
+ *  no room for ultra), never the lowend path. */
 export const CONSOLE_ADAPTER = /srakmd/i;
 export const CONSOLE_UA = /xbox|playstation|nintendo/i;
 export function isConsole(renderer: string, ua: string): boolean { return CONSOLE_ADAPTER.test(renderer) || CONSOLE_UA.test(ua); }
