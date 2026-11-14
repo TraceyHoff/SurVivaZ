@@ -10,7 +10,7 @@ def art(kind, d, mat=""):
             p = R.Piece(d["form"], d["seg"], d["shape"], d["row"], d["var"], d["crest"]); _cache[key] = R.render_piece(p, d["tier"], mat=mat)
         elif kind == "verge": _cache[key] = R.render_verge(d["form"], d["seg"], d["kind"], d["row"], d["tier"], mat=mat)
         elif kind == "wall": _cache[key] = R.render_wall(d["form"], d["which"], d["row"], d["tier"], mat=mat)
-        else: _cache[key] = R.render_chimney(d["tier"])
+        else: _cache[key] = R.render_chimney(d["tier"], mat=mat if (d["tier"], mat) in R.CHIMNEY_EXTRA else "")
     return _cache[key]
 
 def walls(can, cells, ox, oy, H=40, col=(196, 160, 120)):

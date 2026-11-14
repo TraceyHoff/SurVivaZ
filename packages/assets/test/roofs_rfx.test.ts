@@ -38,8 +38,8 @@ describe("rfx seamless roofs", () => {
       n++;
     }
     for (const t of [1, 2, 3, 4]) expect(byKey.get(`rfx_chimney_t${t}`)?.attach?.smoke).toBeDefined();
-    expect(n).toBe(man.sprites.filter((s: Spr) => /^rfx_(?!chimney)/.test(s.key)).length);
-    for (const a of man.atlases.filter((a: { key: string }) => a.key.startsWith("rfx_"))) {
+    expect(n).toBe(man.sprites.filter((s: Spr) => /^rfx_(?!chimney)/.test(s.key) && !/_shk_t\d$/.test(s.key)).length);
+    for (const a of man.atlases.filter((a: { key: string }) => a.key.startsWith("rfx_t"))) {
       expect(a.frameW).toBe(72); expect(a.frameH).toBe(68); expect(a.residency).toBe("stream");
       expect(Math.max(a.columns * 72, a.rows * 68)).toBeLessThanOrEqual(2048);
       expect(statSync(root + "building/" + a.image).size).toBeLessThan(64 * 1024);
@@ -50,5 +50,25 @@ describe("rfx seamless roofs", () => {
     for (const k of ["bld_roof_flat_t1", "bld_roof_gable_t2", "bld_roof_hip_t3", "bld_roof_corner_t4", "bld_roof_chimney"]) expect(byKey.has(k)).toBe(true);
     for (const [form, tiers] of Object.entries(TIERS)) for (const t of tiers)
       expect(items.sprites.find((s: { key: string }) => s.key === `${ICON[form]}_t${t}`)?.atlas).toBe("items_build_rfx");
+  });
+  it("ships the shk split-log shake skin on log-cabin tiers with the same piece grammar (§8)", () => {
+    const SHK: Record<string, number[]> = { hip: [0, 1], gab: [1], shd: [0, 1], cot: [1] };
+    let n = 0;
+    for (const [form, tiers] of Object.entries(SHK)) for (const t of tiers) for (const part of PARTS[form]!) {
+      const key = `rfx_${form}_${part}_shk_t${t}`; const s = byKey.get(key);
+      expect(s, key).toBeDefined(); expect(byKey.has(`rfx_${form}_${part}_t${t}`), key).toBe(true);   // base twin = fallback
+      expect(s!.atlas).toBe(`rfx_shk_t${t}`); expect(s!.anchor).toEqual({ x: 0.5, y: 44 / 68 });
+      expect(s!.building!.piece).toBe(`${BASE[form]}@${key}`); expect(s!.building!.crackOverlay).toBe("bld_crack");
+      expect(lock.sprites[key]).toBeTypeOf("number"); n++;
+    }
+    expect(byKey.get("rfx_chimney_shk_t1")?.attach?.smoke).toBeDefined();
+    expect(n + 1).toBe(man.sprites.filter((s: Spr) => /_shk_t\d$/.test(s.key)).length);
+    for (const t of [0, 1]) {
+      const a = man.atlases.find((x: { key: string }) => x.key === `rfx_shk_t${t}`);
+      expect(a.frameW).toBe(72); expect(a.frameH).toBe(68); expect(a.residency).toBe("stream");
+      expect(statSync(root + "building/" + a.image).size).toBeLessThan(64 * 1024);
+      expect(statSync(root + "building/" + a.ktx2).size).toBeLessThan(200 * 1024);
+    }
+    expect(man.atlases.filter((x: { key: string }) => x.key.startsWith("rfx_shk_")).length).toBe(2);
   });
 });

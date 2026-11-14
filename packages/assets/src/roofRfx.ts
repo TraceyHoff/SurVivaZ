@@ -115,9 +115,16 @@ function pickRegion(region: RfxTile[], group: string, level: number, regionId: n
   }
   const bandAt = (x: number, y: number): number | undefined => band.get(rfxCell(x, y));
   // ADR-397 material hook: one wall material per region (majority of the tiles that report one; interior tiles have no wall)
-  const wm = new Map<string, number>(); for (const t of region) if (t.wallMaterial !== undefined) wm.set(t.wallMaterial, (wm.get(t.wallMaterial) ?? 0) + 1);
-  let wall: string | undefined, wn = 0; for (const [k, n] of [...wm].sort((a, b) => (a[0] < b[0] ? -1 : 1))) if (n > wn) { wall = k; wn = n; }
-  const rule = wall !== undefined ? cfg.materials.rules.find((r) => r.wall === wall && (!r.forms || r.forms.includes(form))) : undefined;
+  // Art §8: every tile that reports a supporting wall votes for the skin its wall maps to ("" = base, no rule); the
+  // strict majority wins, a tie goes to base.
+  const votes = new Map<string, number>(); const ruleOf = new Map<string, RfxMaterialRule>();
+  for (const t of region) {
+    if (t.wallMaterial === undefined) continue;
+    const r = cfg.materials.rules.find((q) => q.wall === t.wallMaterial && (!q.forms || q.forms.includes(form)));
+    const k = r ? r.skin : ""; if (r) ruleOf.set(k, r); votes.set(k, (votes.get(k) ?? 0) + 1);
+  }
+  let best = "", bn = 0, tie = false; for (const [k, n] of votes) { if (n > bn) { best = k; bn = n; tie = false; } else if (n === bn) tie = true; }
+  const rule = !tie && best ? ruleOf.get(best) : undefined;
   const perp = axis === 0 ? M_N | M_S : M_E | M_W;
   for (const t of region) {
     const b = band.get(rfxCell(t.x, t.y))!;

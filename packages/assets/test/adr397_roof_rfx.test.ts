@@ -118,6 +118,18 @@ describe("ADR-397 rfx selection (Art's ART_KEYS_ROOFS.md §4)", () => {
     const tiles = rect("roof_gable", 3, 3).map((t, i) => (i < 3 ? { ...t, wallMaterial: "wood:log" } : t));
     for (const p of rfxPickLevel(tiles, 1, cfg).values()) expect(p.skin).toBe("shake"); // region-wide
     for (const p of rfxPickLevel(rect("roof_flat", 2, 2).map((t) => ({ ...t, wallMaterial: "wood:log" })), 1, cfg).values()) expect(p.skin).toBeUndefined(); // form not listed
-    expect(RFX.materials.rules).toEqual([]); // no skin until Art ships one
+    expect(RFX.materials.rules.every((r) => r.skin === "shk")).toBe(true); // Art's split-log shake skin (§8)
+  });
+  it("shk rule: log (twig) walls vote shakes, plank walls vote base, majority wins, a tie goes to base", () => {
+    const withWalls = (mats: (string | undefined)[]): RfxTile[] => rect("roof_slope", 4, 3).map((t, i) => ({ ...t, ...(mats[i] !== undefined ? { wallMaterial: mats[i] } : {}) }));
+    const skinOf = (mats: (string | undefined)[]) => [...rfxPickLevel(withWalls(mats), 1).values()].map((p) => p.skin);
+    expect(new Set(skinOf(Array(12).fill("twig")))).toEqual(new Set(["shk"]));
+    expect(new Set(skinOf(Array(12).fill("wood")))).toEqual(new Set([undefined]));
+    expect(new Set(skinOf(["twig", "twig", "twig", "wood", "wood"]))).toEqual(new Set(["shk"]));         // 3 log : 2 plank
+    expect(new Set(skinOf(["twig", "twig", "wood", "wood"]))).toEqual(new Set([undefined]));             // tie -> base
+    expect(new Set(skinOf(["site:cabin", "wood", "site:cabin"]))).toEqual(new Set(["shk"]));            // cabin ruin
+    expect(rfxSpriteKeys("rfx_hip_lo_e_v1", 1, "shk")).toEqual(["rfx_hip_lo_e_v1_shk_t1", "rfx_hip_lo_e_v1_t1", "rfx_hip_lo_e_shk_t1", "rfx_hip_lo_e_t1"]);
+    const flat = rfxPickLevel(rect("roof_flat", 2, 2).map((t) => ({ ...t, wallMaterial: "twig" })), 1);
+    for (const p of flat.values()) expect(p.skin).toBeUndefined();                                        // no flat shakes
   });
 });

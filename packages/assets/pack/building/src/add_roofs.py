@@ -68,7 +68,7 @@ def render_spec(kind, p, row, tier, mat=""):
         return R.render_piece(pc, tier, mat=mat)
     if kind == "verge": return R.render_verge(p["form"], p["seg"], p["kind"], row, tier, mat=mat)
     if kind == "wall": return R.render_wall(p["form"], p["which"], row, tier, mat=mat)
-    return R.render_chimney(tier)
+    return R.render_chimney(tier, mat=mat)
 
 def build_page(name, specs_by_form, tier, mat=""):
     cells, index, sprites = [], {}, []
@@ -108,12 +108,13 @@ def main(mat=""):
     forms_tiers = R.MATERIAL_SETS[mat] if mat else None
     new_atlases, new_sprites = [], []
     for tier in range(5):
-        for half, forms in PAGES.items():
+        for half, forms in (PAGES.items() if not mat else [("", [f for fs_ in PAGES.values() for f in fs_])]):   # a skin: one page per tier
             fs = [f for f in forms if (forms_tiers or R.TIERS_OF).get(f) and tier in (forms_tiers or R.TIERS_OF)[f]]
             if not fs: continue
             specs = [(f, sprite_specs(f, tier, mat)) for f in fs]
             if half == "a" and tier >= 1 and not mat: specs.append(("chimney", [(f"rfx_chimney_t{tier}", "chimney", {}, [0, 0, 0, 0])]))
-            name = f"rfx_{mat}_t{tier}_{half}" if mat else f"rfx_t{tier}_{half}"
+            if mat and (tier, mat) in R.CHIMNEY_EXTRA: specs.append(("chimney", [(f"rfx_chimney_{mat}_t{tier}", "chimney", {}, [0, 0, 0, 0])]))
+            name = f"rfx_{mat}_t{tier}" if mat else f"rfx_t{tier}_{half}"
             page, atlas, sprites = build_page(name, specs, tier, mat)
             page.save(BLD / atlas["image"]); new_atlases.append(atlas); new_sprites += sprites
             print(name, page.size, len(sprites), "sprites", atlas["rows"] * COLS, "slots")

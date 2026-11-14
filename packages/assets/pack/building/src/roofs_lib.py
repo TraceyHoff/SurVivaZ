@@ -179,6 +179,23 @@ def pattern(style, P, X, Y, v, fac, seed):
             g = (ihash(col % (2 * M), np.floor(dd * 3).astype(np.int64) % (3 * N), seed) % 6 == 0)
             uu = (a + 0.5) * M + wob - col
             code[g & (np.abs(uu - 0.5) < 0.1)] = 1
+    elif style == "shake":   # split-log shakes: ragged widths, thick dark butts, staggered drops, split grain
+        row = np.floor(dd).astype(np.int64); fr = dd - row
+        colf = (a + 0.5) * M + 0.5 * (row % 2) + 0.23 * (ihash(row % (2 * N), 7, seed) % 3)
+        col = np.floor(colf).astype(np.int64); u = colf - col
+        hs = ihash(row % (4 * N), col % (4 * M), seed + 11)
+        split = 0.3 + 0.4 * ((hs >> 3) % 5) / 4.0                 # most shakes are split in two, at a random point
+        half = (u >= split) & (hs % 3 != 0)
+        sid = col * 2 + half                                       # shake id within the course
+        hb = ihash(row % (4 * N), sid % (8 * M), seed + 5)
+        butt = 0.16 + 0.12 * (hb % 4) / 3.0                        # thick butt end, length varies per shake
+        drop = (hb >> 4) % 4 == 0                                  # an odd shake hangs a little lower
+        deep = (fr < butt) | (drop & (fr > 0.9))
+        ln = (row != up(row)) | ((sid != left(sid)) & (row == left(row)))
+        grain = ((ihash(row % (4 * N), np.floor(colf * 4).astype(np.int64) % (16 * M), seed + 9) % 5 == 0)
+                 & (fr > butt + 0.12) & (fr < 0.86) & (np.floor(colf * 4) != np.floor(left(colf) * 4)))
+        hl = (~ln) & (~deep) & (fr >= butt) & (fr < butt + 0.1)
+        code[hl] = 2; code[grain] = 1; code[deep] = 3; code[ln] = 1
     elif style == "diamond":
         u = (a + 0.5) * M
         i1 = np.floor(u + dd).astype(np.int64); i2 = np.floor(u - dd).astype(np.int64)
@@ -259,6 +276,18 @@ TIERS_OF = {"hip": [0, 1, 2, 3, 4], "gab": [1, 2, 3, 4], "flt": [0, 1, 2, 3, 4],
 
 MATERIAL_SETS = {}       # extra material skins: name -> {form: [tiers]}
 MATS_EXTRA = {}          # (form, tier, name) -> material dict
+# ---- `shk` split-log shakes for log-wall cabins (docs/ART_KEYS_ROOFS.md §8). Own ramps, own pattern, log gable ends.
+RAMPS["shake_split"] = ["#d6c49c", "#a8916c", "#7a6650", "#4f4038"]   # t0: weathered silver-brown split logs
+RAMPS["shake_cedar"] = ["#e8a070", "#c0704a", "#8e4c3a", "#5e3230"]   # t1: hand-split red cedar
+MATERIAL_SETS["shk"] = {"hip": [0, 1], "gab": [1], "shd": [0, 1], "cot": [1]}
+MATS_EXTRA.update({
+ ("hip", 0, "shk"): dict(style="shake", rp="shake_split", trim="bark", wall="bark", wstyle="logs", N=2, M=3, moss="grass_deep"),
+ ("shd", 0, "shk"): dict(style="shake", rp="shake_split", trim="wood_dark", wall="wood_dark", wstyle="logs", N=2, M=2, moss="grass"),
+ ("hip", 1, "shk"): dict(style="shake", rp="shake_cedar", trim="wood_dark", wall="wood", wstyle="logs", N=4, M=4, moss="grass_deep"),
+ ("gab", 1, "shk"): dict(style="shake", rp="shake_cedar", trim="bark", wall="wood", wstyle="logs", N=4, M=3, moss="grass_deep"),
+ ("cot", 1, "shk"): dict(style="shake", rp="shake_cedar", trim="wood_dark", wall="wood", wstyle="logs", N=6, M=5, moss="leaf"),
+ ("shd", 1, "shk"): dict(style="shake", rp="shake_cedar", trim="bark", wall="wood", wstyle="logs", N=2, M=3, moss="grass_deep"),
+})
 def mat_for(form, tier, mat=""):
     return MATS_EXTRA[(form, tier, mat)] if mat else MAT[(form, tier)]
 
@@ -465,8 +494,9 @@ def render_wall(form, which, row, tier, seed=0, mat=""):
 
 CHIMNEY = {1: ("brick", "box"), 2: ("cobble", "box"), 3: ("iron", "pipe"), 4: ("slate", "box")}
 CHIMNEY_TOP = 24
-def render_chimney(tier, seed=0):
-    rp, kind = CHIMNEY[tier]; c = C(rp); img = np.zeros((CH, CW, 4), np.float32)
+CHIMNEY_EXTRA = {(1, "shk"): ("stone", "field")}   # log-cabin fieldstone stack
+def render_chimney(tier, seed=0, mat=""):
+    rp, kind = CHIMNEY_EXTRA[(tier, mat)] if mat else CHIMNEY[tier]; c = C(rp); img = np.zeros((CH, CW, 4), np.float32)
     py, px = np.mgrid[0:CH, 0:CW].astype(np.float64); sx = px + 0.5 - PX; sy = py + 0.5 - PY
     alpha = np.zeros(sx.shape, bool)
     def box(h, z0, z1, rpb, pat=True):
@@ -476,7 +506,15 @@ def render_chimney(tier, seed=0):
             else: t = h - sx / 32; zz = (h + t) * 16 - sy
             m = (np.abs(t) <= h) & (zz >= z0) & (zz <= z1)
             img[m, :3] = col
-            if pat:
+            if pat == "field":   # irregular fieldstones: uneven courses, random joints, a few pale stones
+                row = np.floor((zz - z0) / 4.0).astype(np.int64)
+                colf = (t + h) / (2 * h) * 3 + 0.37 * (ihash(row, 3, 17) % 3)
+                col_ = np.floor(colf).astype(np.int64)
+                ln = m & ((row != up(row)) | (col_ != left(col_)))
+                pale = m & ~ln & (ihash(row, col_, 29) % 4 == 0)
+                img[pale, :3] = cc[0] if face == S_ else cc[1]
+                img[ln, :3] = cc[3]
+            elif pat:
                 row = np.floor((zz - z0) / 3.0).astype(np.int64)
                 col_ = np.floor((t + h) / (2 * h) * 2 + 0.5 * (row % 2)).astype(np.int64)
                 ln = m & ((row != up(row)) | (col_ != left(col_)))
@@ -485,7 +523,11 @@ def render_chimney(tier, seed=0):
         s = (sy + z1) / 16.0; x = (s + sx / 32) / 2; y = (s - sx / 32) / 2
         tp = (np.abs(x) <= h) & (np.abs(y) <= h); img[tp, :3] = cc[0]; alpha[...] |= tp
         return x, y, tp
-    if kind == "box":
+    if kind == "field":
+        box(0.17, -8, CHIMNEY_TOP - 4, rp, pat="field")
+        x, y, tp = box(0.2, CHIMNEY_TOP - 4, CHIMNEY_TOP, "slate", pat=False)
+        hole = tp & (np.abs(x) < 0.12) & (np.abs(y) < 0.12); img[hole, :3] = INK
+    elif kind == "box":
         box(0.15, -8, CHIMNEY_TOP - 3, rp)
         x, y, tp = box(0.19, CHIMNEY_TOP - 3, CHIMNEY_TOP, "iron" if tier == 4 else rp, pat=False)
         hole = tp & (np.abs(x) < 0.11) & (np.abs(y) < 0.11); img[hole, :3] = INK
