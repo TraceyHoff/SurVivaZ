@@ -64,6 +64,12 @@ export function spriteIsDirectional(reg: AssetRegistry, sid: number): boolean {
   let s; try { s = reg.sprite(sid); } catch { return false; } if (s.building) return true;
   for (const a of s.animList) if (a && (a.directions > 1 || (a.rotations?.length ?? 0) > 1)) return true; return false;
 }
+/** ADR-405: cap on decoded atlas/mask images held by Canvas2DRenderer (was unbounded: every atlas ever touched
+ *  stayed decoded for the session). 256 covers the resident set (~237 atlas pages on a console-tier boot) with
+ *  headroom; streamed one-off pages (ride/crouch doll pages, vehicle previews) evict LRU and reload from the
+ *  cached PNG on next use, the same tradeoff as the WebGL2 cold-page eviction. */
+export const CANVAS2D_IMAGES_MAX = 256;
+
 export class Canvas2DRenderer {
   /** ADR-263 (Task 36): 0..1 underground darkness around the camera focus. */
   underground = 0;
@@ -123,20 +129,38 @@ export class Canvas2DRenderer {
   diagReport(): string { return `renderer: Canvas2D sprites (WebGL2 unavailable); images ${[...this.images.values()].filter(Boolean).length}/${this.images.size}; draws ${this.stats.drawCalls}`; }
   dispose(): void {}
 
+  /** ADR-405: store a loaded image (LRU: refresh recency, then evict the oldest LOADED images past the cap;
+   *  in-flight null placeholders never count toward the cap and are never evicted — their load re-sets the
+   *  entry on completion. `imagesLoaded` tracks the loaded count so a hit never scans the map. */
+  private imagesLoaded = 0;
+  private putImage(key: string, img: HTMLImageElement | ImageBitmap): void {
+    const prev = this.images.get(key);
+    this.images.delete(key); this.images.set(key, img);
+    if (!prev) this.imagesLoaded++;
+    while (this.imagesLoaded > CANVAS2D_IMAGES_MAX) {
+      let victim: string | undefined;
+      for (const [k, v] of this.images) if (v && k !== key) { victim = k; break; }
+      if (victim === undefined) break;
+      this.images.delete(victim); this.imagesLoaded--;
+    }
+  }
+
   /** Atlas image for an atlas key (PNG at scale 1), loaded on first use; null while loading / failed. */
   /** ADR-401: the sprite's atlas image is loaded (starts the load when not). */
   private spriteImageReady(reg: AssetRegistry, vis: number): boolean { let a; try { a = reg.sprite(vis).atlas; } catch { return false; } return this.image(a.key) !== null; }
   image(atlasKey: string): HTMLImageElement | ImageBitmap | null {
-    if (this.images.has(atlasKey)) return this.images.get(atlasKey)!;
+    const hit = this.images.get(atlasKey);
+    if (hit !== undefined) { if (hit) this.putImage(atlasKey, hit); return hit; }
     this.images.set(atlasKey, null);
-    const src = this.sources.get(atlasKey); if (src) this.loadImage(src.url).then((i) => this.images.set(atlasKey, i), (e: unknown) => reportRenderError(`canvas2d atlas load ${src.url}`, e));
+    const src = this.sources.get(atlasKey); if (src) this.loadImage(src.url).then((i) => this.putImage(atlasKey, i), (e: unknown) => reportRenderError(`canvas2d atlas load ${src.url}`, e));
     return null;
   }
 
   /** Image by URL (tint masks), loaded on first use; null while loading / failed. */
   private urlImage(url: string): HTMLImageElement | ImageBitmap | null {
-    const k = `url:${url}`; if (this.images.has(k)) return this.images.get(k)!;
-    this.images.set(k, null); this.loadImage(url).then((i) => this.images.set(k, i), (e: unknown) => reportRenderError(`canvas2d image load ${url}`, e)); return null;
+    const k = `url:${url}`; const hit = this.images.get(k);
+    if (hit !== undefined) { if (hit) this.putImage(k, hit); return hit; }
+    this.images.set(k, null); this.loadImage(url).then((i) => this.putImage(k, i), (e: unknown) => reportRenderError(`canvas2d image load ${url}`, e)); return null;
   }
   private tinted = new Map<string, CanvasImageSource>();
   private tintedPieces = new Map<string, HTMLCanvasElement>();

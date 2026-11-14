@@ -19,7 +19,7 @@ import { classifyDevice, type DeviceTier } from "../deviceTier.js";
 export type GlFlag = "lowend" | "mediump" | "nofloat" | "lowmem" | "safe" | "high";
 
 export interface RenderCapabilities {
-  renderer: string; vendor: string; mobile: boolean; lowEnd: boolean; /** software / basic / remote adapter (auto lowend) */ basicAdapter: boolean; /** console browser (Xbox): full art, 256 MB atlas budget, <=1080p */ console: boolean; flags: GlFlag[];
+  renderer: string; vendor: string; mobile: boolean; lowEnd: boolean; /** software / basic / remote adapter (auto lowend) */ basicAdapter: boolean; /** console browser (Xbox): full art, 448 MB atlas budget at ultra (256 MB below ultra), native res at ultra (<=1080p below) */ console: boolean; flags: GlFlag[];
   /** GPU-compressed texture families (KTX2 transcode targets); all false = PNG/RGBA8 path. */
   compressed: CompressedTextureSupport;
   ext: { colorBufferFloat: boolean; colorBufferHalfFloat: boolean; floatLinear: boolean; debugRendererInfo: boolean };
@@ -74,8 +74,9 @@ export function detectCapabilities(gl: WebGL2RenderingContext, opts: { flags?: G
   const renderer = String((dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)) ?? "");
   const vendor = String((dbg ? gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL) : gl.getParameter(gl.VENDOR)) ?? "");
   const ua = opts.userAgent ?? (typeof navigator !== "undefined" ? navigator.userAgent : "");
-  // software / basic / remote adapters (SwiftShader, llvmpipe, Microsoft Basic Render, SraKmd, WARP): small or shared
+  // software / basic / remote adapters (SwiftShader, llvmpipe, Microsoft Basic Render, WARP): small or shared
   // VRAM and partial format support -> start on the low-end path (lowmem budget, DPR 1) unless ?gl= already chose
+  // (SraKmd is NOT basic: it is the Xbox console adapter, handled by isConsole below.)
   const basic = isBasicAdapter(renderer);
   if (basic && !flags.includes("lowend") && !flags.includes("safe")) flags.push("lowend");
   const mobile = MOBILE_GPU.test(renderer) || MOBILE_UA.test(ua) || (/macintosh/i.test(ua) && typeof navigator !== "undefined" && (navigator.maxTouchPoints ?? 0) > 1);
@@ -124,7 +125,10 @@ export function detectCapabilities(gl: WebGL2RenderingContext, opts: { flags?: G
   // Mobile: 128 MB of atlas + streaming pools keeps the whole GPU set (plus ~30 MB of native-DPR render targets)
   // under ~160 MB. Memory comes from cold tiers + eviction, not from blurring visible art (see AtlasManager.fitBudget).
   const console_ = isConsole(renderer, ua) && !basic;
-  // console: ~half of the ~512 MB the browser GPU process gets; atlases fit by KTX2 + cold-tier downscale, never dropped
+  // console: the atlas budget alone is 448 MB at ultra against the ~512 MB the browser GPU process is
+  // assumed to get (unverified on real hardware), and the 4K render targets (~116 MB: scene + emissive +
+  // depth + lightmap + bloom) sit on top of it — vram.withinBudget counts atlas bytes only, so the total
+  // can exceed the assumption. ADR-405 names this rather than changing the budget without evidence.
   // ADR-116: probe-based tier. Ultra (desktop dGPU / console) gets full-res @2x pages + larger streamed budgets; ?gl=high
   // (gl-recovery after a context loss on ultra) keeps the pre-ADR-116 budgets (desktop 768, console 256 MB / 1080p).
   const nav = typeof navigator !== "undefined" ? navigator as Navigator & { deviceMemory?: number } : undefined;

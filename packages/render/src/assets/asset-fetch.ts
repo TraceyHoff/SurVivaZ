@@ -38,6 +38,12 @@ async function cacheStore(): Promise<Cache | null> {
   try { return await caches.open(assetCacheName()); } catch { return null; }
 }
 
+/** ADR-405: evict one entry from this deploy's asset cache (a poisoned manifest entry must not survive). */
+export async function dropAssetCacheEntry(url: string): Promise<void> {
+  const cache = await cacheStore();
+  try { await cache?.delete(url); } catch { /* private mode */ }
+}
+
 async function doFetch(url: string, init?: RequestInit): Promise<Response> {
   const cache = await cacheStore();
   try { const hit = cache ? await cache.match(url) : undefined; if (hit) return hit; } catch { /* ignore */ }
@@ -55,21 +61,38 @@ export async function assetFetch(url: string, init?: RequestInit): Promise<Respo
   if (!p) {
     p = doFetch(url, init);
     inflight.set(url, p);
-    void p.finally(() => { if (inflight.get(url) === p) inflight.delete(url); });
+    // `.then(cleanup, cleanup)`, not `.finally(cleanup)`: a finally-derived promise re-rejects when `p`
+    // rejects, which would surface as an unhandled rejection (ADR-405: gzText now throws on real failures).
+    void p.then(() => { if (inflight.get(url) === p) inflight.delete(url); }, () => { if (inflight.get(url) === p) inflight.delete(url); });
   }
   return (await p).clone();
 }
 
 const inflightText = new Map<string, Promise<string | undefined>>();
-async function gzText(url: string): Promise<string | undefined> {
+/**
+ * ADR-405: the decoded text of `<url>.gz` (or undefined when the file is genuinely missing).
+ * A fetch/gunzip failure THROWS (it used to return undefined, so every failure — a 503, a cut
+ * connection, a corrupt gzip — was reported downstream as "manifest shard missing" with no
+ * cause). Only a 404 on every attempt (including one cache-bypassing `reload` fetch, so a stale
+ * cached 404 cannot fake a missing file) returns undefined. `bypassCache` skips the Cache
+ * Storage read and fetches with `cache: "reload"`, so a poisoned entry cannot survive a retry.
+ */
+async function gzText(url: string, opts?: { bypassCache?: boolean }): Promise<string | undefined> {
   const cache = await cacheStore();
-  try { const hit = cache ? await cache.match(url) : undefined; if (hit) return await hit.text(); } catch { /* ignore */ }
-  let res: Response;
-  try { res = await fetch(url + ".gz", { cache: "force-cache" }); if (!res.ok) throw new Error(String(res.status)); }
-  catch { try { res = await fetch(url + ".gz"); } catch { return undefined; } }
-  if (!res.ok) return undefined;
+  if (cache && !opts?.bypassCache) { try { const hit = await cache.match(url); if (hit) return await hit.text(); } catch { /* ignore */ } }
+  const tryFetch = async (init?: RequestInit): Promise<Response | undefined> => { try { return await fetch(url + ".gz", init); } catch { return undefined; } };
+  let res = await tryFetch(opts?.bypassCache ? { cache: "reload" } : { cache: "force-cache" });
+  if (!res || !res.ok) res = await tryFetch();
+  if (res && res.status === 404 && !opts?.bypassCache) res = await tryFetch({ cache: "reload" });
+  if (!res) throw new Error(`manifest fetch failed: network error: ${url}.gz`);
+  if (!res.ok) {
+    if (res.status === 404) return undefined;
+    throw new Error(`manifest fetch failed: HTTP ${res.status}: ${url}.gz`);
+  }
   const b = new Uint8Array(await res.arrayBuffer());
-  const text = isGzip(b) ? await gunzipText(b) : new TextDecoder().decode(b); // a host may have decoded it already
+  let text: string;
+  try { text = isGzip(b) ? await gunzipText(b) : new TextDecoder().decode(b); } // a host may have decoded it already
+  catch (e) { throw new Error(`manifest gunzip failed: ${url}.gz`, { cause: e }); }
   if (cache) void cache.put(url, new Response(text, { headers: { "Content-Type": "application/json" } })).catch(() => { /* quota / private mode */ });
   return text;
 }
@@ -78,11 +101,39 @@ async function gzText(url: string): Promise<string | undefined> {
  * boot downloads the gzip (~17x smaller) and decodes it once; the decoded text is kept in this deploy's Cache
  * Storage under `url`, so a repeat boot reads the plain JSON exactly as before ADR-394 (no decompression).
  * Returns undefined when the file is missing (optional fragments).
+ * ADR-405: a cached entry that is not JSON is a poisoned cache (one bad write used to fail every boot with
+ * "manifest shard missing" and no cause): evict it and retry once from the network, bypassing both caches,
+ * so a single bad write heals on the next load instead of bricking the deploy. A fetch/gunzip failure is
+ * retried once the same way, then the real error surfaces (never undefined).
  */
 export async function assetJsonGz(url: string): Promise<unknown> {
+  let text: string | undefined;
+  try { text = await readGzText(url); }
+  catch {
+    try { text = await gzText(url, { bypassCache: true }); }
+    catch (e2) { throw new Error(`manifest load failed: ${url}`, { cause: e2 instanceof Error ? e2 : new Error(String(e2)) }); }
+  }
+  if (text === undefined) return undefined;
+  try { return JSON.parse(text); }
+  catch {
+    await dropAssetCacheEntry(url);
+    const retry = await gzText(url, { bypassCache: true });
+    if (retry === undefined) return undefined;
+    try { return JSON.parse(retry); }
+    catch (e2) { throw new Error(`manifest JSON parse failed: ${url} (cached entry evicted, network retry also failed)`, { cause: e2 }); }
+  }
+}
+
+/** Deduped `gzText` read (concurrent readers share one in-flight fetch + decode). */
+async function readGzText(url: string): Promise<string | undefined> {
   let p = inflightText.get(url);
-  if (!p) { p = gzText(url); inflightText.set(url, p); void p.finally(() => { if (inflightText.get(url) === p) inflightText.delete(url); }); }
-  const t = await p; return t === undefined ? undefined : JSON.parse(t);
+  if (!p) {
+    p = gzText(url); inflightText.set(url, p);
+    // `.then(cleanup, cleanup)`, not `.finally(cleanup)`: a finally-derived promise re-rejects when `p`
+    // rejects, which would surface as an unhandled rejection (ADR-405: gzText now throws on real failures).
+    void p.then(() => { if (inflightText.get(url) === p) inflightText.delete(url); }, () => { if (inflightText.get(url) === p) inflightText.delete(url); });
+  }
+  return p;
 }
 
 export async function assetBytes(url: string): Promise<ArrayBuffer> {

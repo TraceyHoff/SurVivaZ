@@ -1181,7 +1181,12 @@ async function loadMergedManifest(art: string): Promise<ReturnType<typeof loadMa
   const get = async (u: string): Promise<unknown> => { try { const r = await assetFetch(u); return r.ok ? await r.json() : undefined; } catch { return undefined; } };
   const idx = (await get(art + "manifests.index.json")) as { fragments?: ManifestFragmentRef[]; gz?: boolean } | undefined;
   // ADR-394: a built dist ships the fragments, shards and ids.lock as `.json.gz` (the dev server serves plain JSON)
-  const getManifest = idx?.gz ? (u: string): Promise<unknown> => assetJsonGz(u).catch(() => undefined) : get;
+  // ADR-405: no `.catch(() => undefined)` here: assetJsonGz returns undefined ONLY for a genuinely missing file
+  // (a 404 on every attempt); a fetch/gunzip/parse failure throws with its cause, so the boot error names the
+  // real failure instead of every failure surfacing as "manifest shard missing". Optional fragments still skip
+  // when missing; a real failure fails the boot (and the safe-retry reload) loudly rather than silently booting
+  // without the fragment. Prefetch (prefetch-art.ts) keeps its best-effort catch.
+  const getManifest = idx?.gz ? assetJsonGz : get;
   const charArt = parseCharArt(new URLSearchParams(globalThis.location?.search ?? "").get("charArt"), (() => { try { return globalThis.localStorage?.getItem("charArt"); } catch { return null; } })());
   const list = withCharArtFragment(idx?.fragments?.length ? idx.fragments : MANIFEST_INDEX, charArt); // ADR-240: v2 sample only with charArt
   // ADR-248: shared with the dedicated server (@engine/assets loadMergedManifestWith); atlas paths become absolute per

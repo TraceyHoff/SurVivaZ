@@ -8599,3 +8599,60 @@ flush edge. The request for Art (`rfx_<form>_*` eave and corner tiles, every for
 
 Once that art lands, re-measure the seats with the test (expect about 13, the wall-top height). Raise its threshold to
 100% with the 7 px corner-post span included, and drop the clip if the eaves cover the caps on their own.
+
+## ADR-405: A poisoned manifest cache entry heals instead of bricking every boot; real manifest failures name their cause (SurVivaZ)
+
+Context: after ADR-394 the live game (c203cbec) failed on Tracey's phone with "3D renderer unavailable —
+showing debug view [E-1AC6]. manifest shard missing: manifest.customization.hat.json", deterministically on
+every reload. The same failure puts the game in the debug view (flat tile grid, no terrain height, no custom
+water tiles, no indoor zoom) — exactly the Xbox Series X symptoms 1, 3 and 4 reported the same morning. The
+live `.json.gz` files are all valid (gunzipped + parsed with zlib; the pure-TS inflate fallback agrees
+byte-for-byte on all 10 customization shards), and a clean desktop-Chrome boot of the live build loads fine,
+with and without DecompressionStream. The failure reproduces exactly in Chrome when Cache Storage holds one
+garbage entry under the hat shard's plain URL: the overlay text, the E-1AC6 code, the debug renderer, and the
+persistence across a reload are byte-identical to the phone report. The mechanism is in `gzText`
+(asset-fetch.ts): it trusted a Cache Storage hit blindly — `hit.text()` straight into `JSON.parse` — and
+`assetJsonGz` + view.ts swallowed every failure into `undefined`, so a single bad write (a 200 with an error
+body, a deploy-window flap, a carrier middlebox) failed every boot forever with no cause. Which write poisoned
+Tracey's phone cannot be proven from here (the live files are valid now); the fix does not depend on it.
+
+Decision: `assetJsonGz` now distinguishes missing from failed. `gzText` returns undefined ONLY for a 404 on
+every attempt — including one cache-bypassing `reload` fetch, so a stale cached 404 cannot fake a missing
+file. A non-404 HTTP status, a network error on both attempts, or a gunzip failure throws with the URL and
+status. `assetJsonGz` parses the text; on a parse failure it evicts the cache entry (`dropAssetCacheEntry`)
+and retries once from the network bypassing both caches, so one bad write heals on the next load (usually
+within the same boot) instead of bricking the deploy; if the retry also fails to parse it throws
+`manifest JSON parse failed: <url>` with the cause. A fetch/gunzip failure is retried once the same way,
+then the real error surfaces. view.ts no longer `.catch(() => undefined)`s the gz loader: a real failure
+fails the boot (and the safe-retry reload) loudly with its cause, while a genuinely missing optional fragment
+still skips silently. Prefetch keeps its best-effort catch. Two latent unhandled rejections fixed along the
+way: the in-flight dedupe used `void p.finally(cleanup)`, whose derived promise re-rejects — now
+`.then(cleanup, cleanup)` in both `assetFetch` and `readGzText`. Pushing a new build also heals a poisoned
+phone by itself (the cache is keyed by BUILD_HASH and old caches are dropped), but the retry is the durable
+protection: it heals a poisoned entry in the CURRENT build without a new deploy.
+
+Xbox memory thread (separate, not proven to be this bug): the console ultra tier budgets 448 MB of atlases
+against the ~512 MB the browser GPU process is assumed to get, and the 4K render targets (~116 MB) sit on top
+of it — `vram.withinBudget` counts atlas bytes only. The arithmetic in the old comments was wrong (448 is
+87% of 512, not "~half"); the comments now state the real accounting and that the ~512 MB assumption is
+unverified on real hardware. No budget is changed without evidence, and no graphics quality is lowered.
+Canvas2DRenderer's decoded-image cache was unbounded (every atlas ever touched stayed decoded); it is now an
+LRU capped at 256 loaded images (the resident set is ~237 pages), with in-flight loads never evicted. That
+bounds a proven leak; it is NOT claimed to be the Xbox memory cause, which was not reproduced. Stale comments
+that listed SraKmd among the basic/software adapters are corrected (it is the Xbox console adapter).
+
+Validation: `packages/render/test/adr405_manifest_cache_recovery.test.ts` (8 tests: poisoned entry heals and
+the cache holds valid JSON, poison + 404 -> undefined, poison + garbage -> throws with the URL, fetch
+failures retried once via `reload`, 503 on every attempt throws, stale cached 404 heals via `reload`,
+genuine 404 stays undefined, `dropAssetCacheEntry` removes one entry) and
+`packages/render/test/adr405_canvas2d_images_lru.test.ts` (3 tests: 256-image cap with oldest-first
+eviction, hit refreshes recency, in-flight placeholders never evicted). All 11 fail against the pre-change
+code (reverted in a scratch copy, exports stubbed). `packages/assets/test/manifest_shards.test.ts` gains one
+test: a loader failure propagates with its cause, not as "missing". The phone failure was reproduced in the
+probe before the fix (configs D/E/F: clean boot loads, no-DecompressionStream boot loads, poisoned cache
+reproduces the exact [E-1AC6] overlay on load #1 and again after reload); the fix is proven at the code
+level by the recovery tests — a live re-probe after the push is still the confirmation that a poisoned
+phone heals in the real browser.
+
+Result: one bad cache write can no longer brick a deploy; the next manifest failure will name its cause
+(HTTP status, gunzip, or parse) in the overlay and the error log instead of "manifest shard missing".

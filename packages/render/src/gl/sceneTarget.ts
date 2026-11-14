@@ -1,8 +1,9 @@
 /**
  * Scene render target (colour + emissive RGBA8, optional depth) with a completeness ladder.
- * ANGLE/D3D11 on basic/virtual adapters (Microsoft Basic Render, SraKmd, WARP) can report FRAMEBUFFER_UNSUPPORTED for
+ * ANGLE/D3D11 on basic/virtual adapters (Microsoft Basic Render, WARP) can report FRAMEBUFFER_UNSUPPORTED for
  * some depth formats: try DEPTH_COMPONENT24 -> DEPTH_COMPONENT16 -> DEPTH24_STENCIL8 -> no depth (sprites are
  * painter-sorted, so the world still draws) before giving up. Every combination is verified with checkFramebufferStatus.
+ * (SraKmd is not a basic adapter: it is the Xbox console adapter; it takes the console path, not lowend.)
  */
 export type SceneDepth = "DEPTH_COMPONENT24" | "DEPTH_COMPONENT16" | "DEPTH24_STENCIL8" | "none";
 export interface SceneTarget { fbo: WebGLFramebuffer; depthRb: WebGLRenderbuffer | null; depth: SceneDepth; status: number; tried: string[] }

@@ -53,4 +53,10 @@ describe("mergeShards", () => {
     expect(() => mergeShards([{ file: "a", manifest: frag({ requiredSlots: ["face"] }) }, { file: "b", manifest: frag({ requiredSlots: ["face"] }) }])).toThrow(ShardMergeError);
   });
   it("missing shard rejects", async () => { await expect(resolveManifestShards({ version: 2, shards: [{ category: "x", file: "x.json", bytes: 0, sha: "" }] }, async () => undefined)).rejects.toThrow(/missing/); });
+  // ADR-405: a loader FAILURE is not a missing shard — the real error must propagate so the boot
+  // overlay names the cause (HTTP 503, gunzip, parse) instead of every failure reading as "missing".
+  it("loader failure propagates with its cause, not as 'missing'", async () => {
+    await expect(resolveManifestShards({ version: 2, shards: [{ category: "hat", file: "manifest.customization.hat.json", bytes: 0, sha: "" }] },
+      async () => { throw new Error("manifest fetch failed: HTTP 503: manifest.customization.hat.json.gz"); })).rejects.toThrow(/HTTP 503/);
+  });
 });
