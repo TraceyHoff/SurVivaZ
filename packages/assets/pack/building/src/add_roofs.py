@@ -3,7 +3,7 @@
 Run from repo root:  python3 packages/assets/pack/building/src/add_roofs.py [--material shk]
 Then: oxipng the new pages, python3 assets/tools/ktx2.py packages/assets/pack/building/manifest.building.json
 packages/assets/pack/items/manifest.items.json, pnpm --filter @engine/assets lock:ids:pack.
-Owns only atlases `rfx_*`, sprites `rfx_*` and the `build_rfx_*` icons; never touches build.py output, never renumbers
+Owns only atlases `rfx_*`, sprites `rfx_*` and the roof-form build icons (`build_rfx_*`, `build_roof_{cottage,gambrel,shed}_*`); never touches build.py output, never renumbers
 other sprites. Re-running rewrites its own pages/records in place."""
 import json, sys, math, hashlib
 from pathlib import Path
@@ -130,6 +130,10 @@ ICON_CELLS = {"hip": ([(x, y) for x in range(2) for y in range(2)], {}), "gab": 
               "cot": ([(x, y) for x in range(2) for y in range(2)], {}), "gam": ([(x, y) for x in range(2) for y in range(2)], {"axis": "EW"}),
               "shd": ([(x, y) for x in range(2) for y in range(2)], {"D": S_}), "flt": ([(x, y) for x in range(2) for y in range(2)], {})}
 
+# new forms use the gameplay piece's own menu icon key (build_<pieceKey>_t<N>, ADR-398 icon lookup); hip/gab/flt can't
+# reuse build_roof_{slope,gable,flat}_t<N> (legacy icons on items_build), so they stay build_rfx_<form>_t<N>.
+ICON_KEY = {"cot": "build_roof_cottage", "gam": "build_roof_gambrel", "shd": "build_roof_shed"}
+
 def icon_for(form, tier, mat=""):
     import roofs_preview as RP
     from cel import snap
@@ -164,7 +168,7 @@ def icons(mat=""):
     for i, (f, t) in enumerate(want):
         ic = icon_for(f, t, mat)
         p1.paste(ic[32], (i % cols * 32, i // cols * 32)); p2.paste(ic[64], (i % cols * 64, i // cols * 64))
-        sprites.append({"key": f"build_rfx_{f}{ms}_t{t}", "category": "ui", "atlas": name, "anchor": {"x": .5, "y": .5},
+        sprites.append({"key": f"{ICON_KEY.get(f, 'build_rfx_' + f)}{ms}_t{t}", "category": "ui", "atlas": name, "anchor": {"x": .5, "y": .5},
                         "animations": {"idle": {"frames": [i], "fps": 1}}})
     p1.save(ITEM / f"atlases/{name}.png"); p2.save(ITEM / f"atlases/{name}@2x.png")
     atlas = {"key": name, "image": f"atlases/{name}.png", "frameW": 32, "frameH": 32, "columns": cols, "rows": rows_n,

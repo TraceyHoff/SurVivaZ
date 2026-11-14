@@ -17,6 +17,7 @@ const PARTS: Record<string, string[]> = {
   shd: ["lo_e", "up_e", "top_e", "lotop_e", "lo_e_v1", "lo_e_v2", "up_e_v1", "up_e_v2", "lo_vel", "lo_ver", "up_vel", "up_ver", "wall"],
   flt: ["lo_e", "lo_o", "lo_i", "lo_r", "lo_h", "lo_p", "f", "f_v1", "f_v2"],
 };
+const ICON: Record<string, string> = { hip: "build_rfx_hip", gab: "build_rfx_gab", flt: "build_rfx_flt", cot: "build_roof_cottage", gam: "build_roof_gambrel", shd: "build_roof_shed" };
 const BASE: Record<string, string> = { hip: "roof_slope", cot: "roof_slope", shd: "roof_slope", gab: "roof_gable", gam: "roof_gable", flt: "roof_flat" };
 const page = (form: string, t: number) => `rfx_t${t}_${["hip", "gab", "flt"].includes(form) ? "a" : "b"}`;
 
@@ -48,6 +49,6 @@ describe("rfx seamless roofs", () => {
   it("keeps the legacy roof keys as fallbacks and adds one build icon per form per tier", () => {
     for (const k of ["bld_roof_flat_t1", "bld_roof_gable_t2", "bld_roof_hip_t3", "bld_roof_corner_t4", "bld_roof_chimney"]) expect(byKey.has(k)).toBe(true);
     for (const [form, tiers] of Object.entries(TIERS)) for (const t of tiers)
-      expect(items.sprites.find((s: { key: string }) => s.key === `build_rfx_${form}_t${t}`)?.atlas).toBe("items_build_rfx");
+      expect(items.sprites.find((s: { key: string }) => s.key === `${ICON[form]}_t${t}`)?.atlas).toBe("items_build_rfx");
   });
 });

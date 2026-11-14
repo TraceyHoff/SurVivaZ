@@ -11,7 +11,7 @@ import { buildIconKey, iconKeysFromCss, isClanTintedIcon, roadIconKey, signIconK
 
 const read = (p: string): string => readFileSync(resolve(__dirname, "../../..", p), "utf8");
 const manifest = JSON.parse(read("packages/assets/pack/items/manifest.items.json")) as { sprites: { key: string; atlas?: string }[] };
-const ART = new Set(manifest.sprites.filter((s) => s.atlas === "items_build").map((s) => s.key));
+const ART = new Set(manifest.sprites.filter((s) => s.atlas === "items_build" || s.atlas === "items_build_rfx").map((s) => s.key));
 // Original standalone art may register dedicated build icons outside the legacy items_build sheet.
 const standalone = JSON.parse(read("packages/assets/pack/building/manifest.building.json")) as { sprites: { key: string }[] };
 for (const s of standalone.sprites) if (s.key.startsWith("build_")) ART.add(s.key);

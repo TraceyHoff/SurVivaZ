@@ -17918,7 +17918,7 @@
    }
   },
   {
-   "key": "build_rfx_cot_t1",
+   "key": "build_roof_cottage_t1",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -17935,7 +17935,7 @@
    }
   },
   {
-   "key": "build_rfx_cot_t2",
+   "key": "build_roof_cottage_t2",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -17952,7 +17952,7 @@
    }
   },
   {
-   "key": "build_rfx_cot_t3",
+   "key": "build_roof_cottage_t3",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -17969,7 +17969,7 @@
    }
   },
   {
-   "key": "build_rfx_cot_t4",
+   "key": "build_roof_cottage_t4",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -17986,7 +17986,7 @@
    }
   },
   {
-   "key": "build_rfx_gam_t1",
+   "key": "build_roof_gambrel_t1",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -18003,7 +18003,7 @@
    }
   },
   {
-   "key": "build_rfx_gam_t2",
+   "key": "build_roof_gambrel_t2",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -18020,7 +18020,7 @@
    }
   },
   {
-   "key": "build_rfx_gam_t3",
+   "key": "build_roof_gambrel_t3",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -18037,7 +18037,7 @@
    }
   },
   {
-   "key": "build_rfx_gam_t4",
+   "key": "build_roof_gambrel_t4",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -18054,7 +18054,7 @@
    }
   },
   {
-   "key": "build_rfx_shd_t0",
+   "key": "build_roof_shed_t0",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -18071,7 +18071,7 @@
    }
   },
   {
-   "key": "build_rfx_shd_t1",
+   "key": "build_roof_shed_t1",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -18088,7 +18088,7 @@
    }
   },
   {
-   "key": "build_rfx_shd_t2",
+   "key": "build_roof_shed_t2",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -18105,7 +18105,7 @@
    }
   },
   {
-   "key": "build_rfx_shd_t3",
+   "key": "build_roof_shed_t3",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
@@ -18122,7 +18122,7 @@
    }
   },
   {
-   "key": "build_rfx_shd_t4",
+   "key": "build_roof_shed_t4",
    "category": "ui",
    "atlas": "items_build_rfx",
    "anchor": {
