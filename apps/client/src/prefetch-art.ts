@@ -1,5 +1,5 @@
 /** ADR-307: start warming resident atlas images as soon as the page opens, in parallel with the main bundle. */
-import { assetFetch, collectPrefetchUrls, collectWarmupPrefetchUrls, setAssetCacheVersion, warmAssetCache } from "../../../packages/render/src/assets/asset-fetch.js";
+import { assetFetch, assetJsonGz, collectPrefetchUrls, collectWarmupPrefetchUrls, setAssetCacheVersion, warmAssetCache } from "../../../packages/render/src/assets/asset-fetch.js";
 
 declare const __BUILD_HASH__: string | undefined;
 setAssetCacheVersion((typeof __BUILD_HASH__ !== "undefined" && __BUILD_HASH__) || "dev");
@@ -11,13 +11,15 @@ const get = async (u: string): Promise<unknown> => {
 
 void (async () => {
   try {
-    const idx = await get(`${art}manifests.index.json`) as { fragments?: { url: string; stream?: boolean }[] } | undefined;
+    const idx = await get(`${art}manifests.index.json`) as { fragments?: { url: string; stream?: boolean }[]; gz?: boolean } | undefined;
+    // ADR-394: same cached `.json.gz` read view.ts makes, so its manifest load joins this one / hits the cache
+    const getManifest = idx?.gz ? (u: string): Promise<unknown> => assetJsonGz(u).catch(() => undefined) : get;
     const frags = idx?.fragments?.length ? idx.fragments : [{ url: "pack/manifest.json" }];
     const urls: string[] = []; const warmUrls: string[] = [];
     await Promise.all(frags.map(async (f) => {
       if (f.stream) return;
       const url = new URL(f.url, art).href;
-      const m = await get(url);
+      const m = await getManifest(url);
       if (m) { urls.push(...collectPrefetchUrls(m, url)); warmUrls.push(...collectWarmupPrefetchUrls(m, url)); }
     }));
     await warmAssetCache(urls);

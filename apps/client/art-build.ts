@@ -1,13 +1,13 @@
-// Build-time plan for dist/art (ADR-392 / 393): which mounted files ship and which shipped JSON is rewritten.
-// Everything is derived from the same merged manifest + `sourcesFromManifest` resolution the client runs at
-// boot, so a file the client can request is never dropped.
+// Build-time plan for dist/art (ADR-392 / 393 / 394): which mounted files ship, which shipped JSON is rewritten
+// and which manifests are gzipped. Everything is derived from the same merged manifest + `sourcesFromManifest`
+// resolution the client runs at boot, so a file the client can request is never dropped.
 // Workspace packages are imported lazily: vite.config.ts registers tsx before calling planArt.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
 export interface ArtMount { prefix: string; dir: string; ok: (rel: string) => boolean }
-export interface ArtPlanFile { url: string; src: string; bytes: number; /** shipped JSON value (minified at write) */ json?: unknown; }
+export interface ArtPlanFile { url: string; src: string; bytes: number; /** shipped JSON value (minified at write) */ json?: unknown; /** written as `<url>.gz` only (ADR-394) */ gz?: boolean }
 export interface ArtDrop { url: string; bytes: number; why: string }
 export interface ArtPlan {
   files: ArtPlanFile[]; dropped: ArtDrop[];
@@ -15,7 +15,7 @@ export interface ArtPlan {
   ktx2Stripped: string[];
   /** duplicate tint mask url -> canonical url (byte-identical files, ADR-393) */
   aliases: Map<string, string>;
-  index: { fragments: unknown[] };
+  index: { fragments: unknown[]; gz?: true };
   /** art urls the client resolves (manifest sources, prefetch lists) */
   refs: Set<string>;
 }
@@ -24,6 +24,8 @@ export interface ArtPlanOptions {
   codeRoots: string[];
   /** BRANDING.bg resolved by vite.config ("parallax" | "flat" | "") */
   brandingBg: string;
+  /** ADR-394: write the merged-manifest JSON (fragments, shards, ids.lock) as `.json.gz` only */
+  gzipManifests?: boolean;
 }
 
 /** Atlas directories the ADR-392 reference rule applies to (pack sub-packs, Art's top-level stalls / PvP drops). */
@@ -159,6 +161,6 @@ export async function planArt(mounts: readonly ArtMount[], opts: ArtPlanOptions)
   }
 
   const files: ArtPlanFile[] = [...all].sort(([a], [b]) => (a < b ? -1 : 1)).map(([url, src]) => ({ url, src, bytes: statSync(src).size,
-    ...(shippedJson.has(url) ? { json: shippedJson.get(url) } : {}) }));
-  return { files, dropped, ktx2Stripped: [...stripKeys].sort(), aliases, index, refs: new Set([...used].map((u) => aliases.get(u) ?? u)) };
+    ...(shippedJson.has(url) ? { json: shippedJson.get(url) } : {}), ...(opts.gzipManifests && manifests.has(url) ? { gz: true } : {}) }));
+  return { files, dropped, ktx2Stripped: [...stripKeys].sort(), aliases, index: { ...index, ...(opts.gzipManifests ? { gz: true as const } : {}) }, refs: new Set([...used].map((u) => aliases.get(u) ?? u)) };
 }

@@ -8233,3 +8233,46 @@ the alias substitution and the KTX2 strip.
 Result: 35 tint masks (1,291,815 B before oxipng); Vite assets/ PNGs 50 → 10 (−3.1 MB). Honest cut:
 gather-fx.ts keeps its `new URL()` imports; nine of its ten files are under 4 KiB and inlined into the JS
 (no request at boot); only `nature_adr128_fx@2x.png` (6.9 KB) still ships twice.
+
+## ADR-394: Merged-manifest JSON ships gzipped; decoded once, then cached plain (SurVivaZ)
+
+Context: the 26 JSON files the client fetches through `loadMergedManifestWith` (15 fragments, the v2
+customization / nature shards, `pack/ids.lock.json`) are 40.9 MB minified, mostly `dirFrames` that are all
+used. They gzip 17× (2.4 MB). GitHub Pages does not compress responses this large on the fly, so a phone's
+first boot downloaded all 40.9 MB before the world could build.
+
+Decision: `planArt` marks exactly the files the client replay fetched; the build writes them as
+`<name>.json.gz` only (zlib level 9, deterministic) and `manifests.index.json` (still plain) gains
+`"gz": true`. view.ts and prefetch-art.ts read those through `assetJsonGz(url)` (asset-fetch.ts): a Cache
+Storage hit under the plain `url` returns the cached JSON text; a miss fetches `url + ".gz"`, decodes it once
+(`gunzipText`: `DecompressionStream("gzip")`, or the pure-TS `inflate.ts` on browsers without it, i.e. Safari
+< 16.4; a body without the 1f 8b magic is taken as already decoded, in case a host sends Content-Encoding),
+stores the decoded text in this deploy's cache under `url`, and parses. Concurrent readers (prefetch-art and
+view) share one in-flight decode; each gets its own parsed copy. The dev server and `vite preview` keep
+serving plain JSON (no `gz` in their index).
+
+Boot cost, measured in headless Chrome 156 on this box with the real `assetFetch` / `assetJsonGz` code and
+`loadMergedManifestWith` (fetch + decode + parse + merge of all 26 files; median; old = plain JSON dist,
+new = this dist; cold = empty Cache Storage and HTTP cache, warm = second boot of the same deploy):
+
+| profile | cold old → new | warm old → new |
+|---|---|---|
+| desktop CPU, localhost | 680 → 601 ms | 430 → 373 ms |
+| 4× CPU throttle (phone estimate), localhost | 2,527 → 2,421 ms | 1,591 → 1,449 ms |
+| 6× CPU throttle, localhost | 3,918 → 3,646 ms | 2,253 → 2,221 ms |
+| 4× CPU, 20 Mbit/s 40 ms RTT | 18,396 → 3,668 ms | 1,529 → 1,446 ms |
+
+No profile is slower. Rejected: decompressing on every boot (cache the `.gz` bytes): warm boot +373 ms at
+4× CPU (DecompressionStream of 40.9 MB is not free); the plain-text cache makes a repeat boot the same work
+as before this change. The inflate fallback costs about +15 % over DecompressionStream at 4× CPU and only
+runs where DecompressionStream is missing.
+
+Validation: `packages/render/test/adr394_gzip_json.test.ts` checks inflate against zlib (stored, fixed,
+dynamic, Huffman-only, RLE, long matches, a real manifest), truncated / non-gzip rejection,
+DecompressionStream and fallback agreement, plain bodies, and `assetJsonGz` (one `.gz` fetch shared by
+concurrent readers, the plain text cached under `url`, a warm boot served from the cache with no network,
+missing optional fragments). A headless-Chrome boot of the built dist (desktop, Android A16 user agent with
+its KTX2 pools, `gl=safe`, `ktx2=0`, `renderer=canvas`) made no art request that 404s and logged no page
+errors; requested art matched the pre-change dist apart from randomly dressed NPCs.
+
+Result: 40,948,947 → 2,403,582 B (−38,545,365).

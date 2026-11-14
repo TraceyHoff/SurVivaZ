@@ -3,6 +3,7 @@ import { cpSync, createReadStream, existsSync, readFileSync, mkdirSync, readdirS
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
+import { gzipSync } from "node:zlib";
 import { register as registerTsx } from "tsx/esm/api";
 import { optimizeDistPngs } from "../../scripts/oxipng.mjs";
 import type { ArtMount } from "./art-build.js";
@@ -91,13 +92,16 @@ function art(): Plugin {
     configurePreviewServer(s) { s.middlewares.use(serve); },
     async closeBundle() {
       if (!building) return;
-      // ADR-392: ship what the client resolves; KTX2 fields of always-resident atlases stripped
+      // ADR-392 / 393: ship what the client resolves, once; ADR-394: merged-manifest JSON as .json.gz
       const { planArt } = await import("./art-build.js");
-      const plan = await planArt(artMounts(), { codeRoots: artCodeRoots(), brandingBg: BRANDING.bg });
+      const plan = await planArt(artMounts(), { codeRoots: artCodeRoots(), brandingBg: BRANDING.bg, gzipManifests: true });
+      let gzIn = 0, gzOut = 0;
       for (const f of plan.files) {
         const dst = join(outDir, "art", f.url); mkdirSync(join(dst, ".."), { recursive: true });
-        if (f.json !== undefined) writeFileSync(dst, JSON.stringify(f.json)); else copyArtFile(f.src, dst);
+        if (f.gz) { const t = Buffer.from(JSON.stringify(f.json !== undefined ? f.json : JSON.parse(readFileSync(f.src, "utf8")))); const z = gzipSync(t, { level: 9 }); writeFileSync(dst + ".gz", z); gzIn += t.length; gzOut += z.length; }
+        else if (f.json !== undefined) writeFileSync(dst, JSON.stringify(f.json)); else copyArtFile(f.src, dst);
       }
+      console.log(`[art] ${plan.files.filter((f) => f.gz).length} manifests gzipped: ${gzIn} -> ${gzOut} B`);
       writeFileSync(join(outDir, "art", "manifests.index.json"), JSON.stringify(plan.index, null, 1));
       const by = new Map<string, [number, number]>(); for (const d of plan.dropped) { const e = by.get(d.why) ?? [0, 0]; e[0]++; e[1] += d.bytes; by.set(d.why, e); }
       console.log(`[art] ${plan.files.length} files shipped; ${plan.ktx2Stripped.length} resident atlases lose KTX2 fields; dropped ${[...by].map(([w, [n, b]]) => `${w}: ${n} (${b} B)`).join("; ")}`);
@@ -136,7 +140,7 @@ const BR = join(root, "assets/ui/branding");
 const brandingJson = ((): { title?: string; tagline?: string } => { try { return JSON.parse(readFileSync(join(BR, "branding.json"), "utf8")) as { title?: string; tagline?: string }; } catch { return {}; } })();
 /** {app.title}: the game's name. Art's logo is used only once it is drawn for this title (branding.json title matches). */
 const APP_TITLE = "SurVivaZ";
-const BRANDING = {
+export const BRANDING = {
   title: APP_TITLE, tagline: brandingJson.tagline ?? "a cozy survival camp-out",
   logo: brandingJson.title === APP_TITLE ? ["logo/logo_1024.png", "logo/logo_512.png", "logo.png"].find((f) => existsSync(join(BR, f))) ?? "" : "",
   bg: existsSync(join(BR, "background/parallax/menu_bg_sky.png")) ? "parallax" : existsSync(join(BR, "background/menu_bg_1920x1080.png")) ? "flat" : "",

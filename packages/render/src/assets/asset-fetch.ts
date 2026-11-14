@@ -3,6 +3,7 @@
  * bucket (so a new deploy does not show stale sprites), and limits how many transfers run at once.
  */
 import { isWarmupCandidate } from "./warmup.js";
+import { gunzipText, isGzip } from "./gzip-json.js";
 
 export const ASSET_CACHE_PREFIX = "survivaz-art-";
 export const ASSET_FETCH_CONCURRENCY = 8;
@@ -17,7 +18,7 @@ export function assetCacheName(ver = version): string { return ASSET_CACHE_PREFI
 export function setAssetCacheVersion(v: string): Promise<void> { version = v || "dev"; return dropOldAssetCaches(); }
 export function setAssetFetchConcurrency(n: number): void { limit = Math.max(1, n | 0); }
 export function resetAssetFetchForTests(): void {
-  version = "dev"; limit = ASSET_FETCH_CONCURRENCY; active = 0; waiters.length = 0; inflight.clear();
+  version = "dev"; limit = ASSET_FETCH_CONCURRENCY; active = 0; waiters.length = 0; inflight.clear(); inflightText.clear();
 }
 
 async function dropOldAssetCaches(): Promise<void> {
@@ -57,6 +58,31 @@ export async function assetFetch(url: string, init?: RequestInit): Promise<Respo
     void p.finally(() => { if (inflight.get(url) === p) inflight.delete(url); });
   }
   return (await p).clone();
+}
+
+const inflightText = new Map<string, Promise<string | undefined>>();
+async function gzText(url: string): Promise<string | undefined> {
+  const cache = await cacheStore();
+  try { const hit = cache ? await cache.match(url) : undefined; if (hit) return await hit.text(); } catch { /* ignore */ }
+  let res: Response;
+  try { res = await fetch(url + ".gz", { cache: "force-cache" }); if (!res.ok) throw new Error(String(res.status)); }
+  catch { try { res = await fetch(url + ".gz"); } catch { return undefined; } }
+  if (!res.ok) return undefined;
+  const b = new Uint8Array(await res.arrayBuffer());
+  const text = isGzip(b) ? await gunzipText(b) : new TextDecoder().decode(b); // a host may have decoded it already
+  if (cache) void cache.put(url, new Response(text, { headers: { "Content-Type": "application/json" } })).catch(() => { /* quota / private mode */ });
+  return text;
+}
+/**
+ * ADR-394: JSON the build ships only as `<url>.gz` (merged-manifest fragments, shards, ids.lock). The first
+ * boot downloads the gzip (~17x smaller) and decodes it once; the decoded text is kept in this deploy's Cache
+ * Storage under `url`, so a repeat boot reads the plain JSON exactly as before ADR-394 (no decompression).
+ * Returns undefined when the file is missing (optional fragments).
+ */
+export async function assetJsonGz(url: string): Promise<unknown> {
+  let p = inflightText.get(url);
+  if (!p) { p = gzText(url); inflightText.set(url, p); void p.finally(() => { if (inflightText.get(url) === p) inflightText.delete(url); }); }
+  const t = await p; return t === undefined ? undefined : JSON.parse(t);
 }
 
 export async function assetBytes(url: string): Promise<ArrayBuffer> {

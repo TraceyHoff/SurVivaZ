@@ -18,7 +18,7 @@ import { showRenderError, glInfo, BlackFrameCheck } from "./glcheck.js";
 import { CorrectionSampler, type CorrectionSource } from "./correction-sampler.js";
 import { World, Transform, PrevTransform, TimeOfDay, Weather, Appearance, PlayerId, defineComponent, slotIndex, type WearableSlot, entityIndex, type Entity, seasonAtDays, type SeasonInfo } from "@engine/core";
 import { CHUNK_SIZE, tileToChunk, tileToLocal, renderTileHeight, type TileMap } from "@engine/world";
-import { assetFetch, setDayFraction, setSeasonState, resolveOffHandSprite, CharArtMapper, parseCharArt, type CharArt } from "@engine/render";
+import { assetFetch, assetJsonGz, setDayFraction, setSeasonState, resolveOffHandSprite, CharArtMapper, parseCharArt, type CharArt } from "@engine/render";
 import { dayCount, sunFraction } from "./day-clock.js";
 import { clanPieceTint, clanPieceTintPair } from "./clan-tint.js";
 import { pieceVariantOpts } from "./piece-variant.js";
@@ -1153,12 +1153,14 @@ interface Spec {
 /** `<art>/manifests.index.json` (written by vite.config.ts with only the served fragments) or MANIFEST_INDEX (manifest-index.ts). */
 async function loadMergedManifest(art: string): Promise<ReturnType<typeof loadManifest>> {
   const get = async (u: string): Promise<unknown> => { try { const r = await assetFetch(u); return r.ok ? await r.json() : undefined; } catch { return undefined; } };
-  const idx = (await get(art + "manifests.index.json")) as { fragments?: ManifestFragmentRef[] } | undefined;
+  const idx = (await get(art + "manifests.index.json")) as { fragments?: ManifestFragmentRef[]; gz?: boolean } | undefined;
+  // ADR-394: a built dist ships the fragments, shards and ids.lock as `.json.gz` (the dev server serves plain JSON)
+  const getManifest = idx?.gz ? (u: string): Promise<unknown> => assetJsonGz(u).catch(() => undefined) : get;
   const charArt = parseCharArt(new URLSearchParams(globalThis.location?.search ?? "").get("charArt"), (() => { try { return globalThis.localStorage?.getItem("charArt"); } catch { return null; } })());
   const list = withCharArtFragment(idx?.fragments?.length ? idx.fragments : MANIFEST_INDEX, charArt); // ADR-240: v2 sample only with charArt
   // ADR-248: shared with the dedicated server (@engine/assets loadMergedManifestWith); atlas paths become absolute per
   // fragment, so sourcesFromManifest (pack base) loads each PNG from its one source
-  const { result, collisions, warnings } = await loadMergedManifestWith(list, { get, artUrl: new URL(art, location.href).href });
+  const { result, collisions, warnings } = await loadMergedManifestWith(list, { get: getManifest, artUrl: new URL(art, location.href).href });
   if (collisions.length) console.info(`[view] manifest: ${collisions.length} duplicate keys kept from the first fragment (${collisions.slice(0, 5).map((c) => `${c.section}.${c.key}`).join(", ")}...)`);
   for (const w of warnings) if (!/ defined in /.test(w)) console.warn(`[view] manifest: ${w}`);
   return result;
