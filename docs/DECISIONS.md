@@ -8276,3 +8276,25 @@ its KTX2 pools, `gl=safe`, `ktx2=0`, `renderer=canvas`) made no art request that
 errors; requested art matched the pre-change dist apart from randomly dressed NPCs.
 
 Result: 40,948,947 → 2,403,582 B (−38,545,365).
+
+## ADR-395: Dist size guard and built-dist replay in CI and Pages (SurVivaZ)
+
+Context: ADR-391–394 took the built client from 963.8 MB to 732.6 MB. Each cut can regress without any
+existing test noticing: a new art drop with stray files, an `.ogg` back in the MOUNTS regex, a manifest
+shipped plain, an unoptimized PNG set when the oxipng download fails, or pack art bundled into `assets/`
+again by a new `new URL()` / CSS `url()`.
+
+Decision: `scripts/check-dist-size.mjs [distDir]` runs after the build in both workflows. It fails when
+the dist is over `DIST_BUDGET` (800,000,000 B, about 67 MB of headroom for new art before someone has
+to look), when any `.ogg` ships, when `manifests.index.json` lacks `gz: true`, a fragment ships plain or
+its `.json.gz` / `ids.lock.json.gz` is missing, when large pack art reappears in `assets/`, or (with
+`SURVIVAZ_OXIPNG=required`) when the oxipng run's stats do not cover every dist PNG. It prints bytes per
+file type. `apps/client/test/adr395_dist.test.ts` runs in the same step with `SURVIVAZ_DIST` set (skipped
+in `pnpm check`, which runs before the build). It replays the client over the built files, decoding each
+`.json.gz` with both zlib and the ADR-394 inflate fallback. It pins that the shipped art set is exactly
+the plan, that every resolved file is present, that the resolved sources equal the plan's, and that every
+non-PNG file (KTX2, m4a, fonts, JSON) is byte- or parse-identical to its source.
+
+Result: on the final build the guard reports 5,081 files, 732,608,668 B (PNG 372.4 MB / 2,299, KTX2
+330.8 MB / 1,960, m4a 20.5 MB / 706, JS 4.3 MB, `.json.gz` 2.4 MB / 26). The pre-change dist fails it
+on budget, ogg, plain manifests and duplicated pack art.
