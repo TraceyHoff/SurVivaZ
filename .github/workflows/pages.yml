@@ -21,11 +21,18 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: oxipng cache (ADR-391)
+        uses: actions/cache@v4
+        with:
+          path: .cache/oxipng
+          key: oxipng-9.1.5-o2-${{ hashFiles('packages/assets/pack/**/*.png', 'assets/**/*.png', 'apps/client/src/**/*.png') }}
+          restore-keys: oxipng-9.1.5-o2-
       - name: Build client (offline mode, Pages base)
         working-directory: apps/client
         env:
           BASE: /SurVivaZ/
           VITE_DEFAULT_OFFLINE: "1"
+          SURVIVAZ_OXIPNG: required
         run: pnpm exec vite build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

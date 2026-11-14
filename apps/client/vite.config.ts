@@ -4,6 +4,7 @@ import { extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { register as registerTsx } from "tsx/esm/api";
+import { optimizeDistPngs } from "../../scripts/oxipng.mjs";
 
 // ADR-249: Vite 5 bundles this config with esbuild but leaves workspace packages external, and since ADR-248
 // `@engine/assets` (TS sources, `.js` specifiers) is imported here — Node 24 cannot load it bare. Register tsx's
@@ -91,6 +92,8 @@ function art(): Plugin {
         const dst = join(outDir, "art", p, rel); mkdirSync(join(dst, ".."), { recursive: true }); copyArtFile(join(dir, rel), dst);
       }
       writeFileSync(join(outDir, "art", "manifests.index.json"), manifestIndexJson());
+      // ADR-391: lossless PNG recompression of everything shipped (art/ and Vite's assets/), cached by file hash
+      optimizeDistPngs(outDir, { cacheDir: join(root, ".cache/oxipng/png"), toolDir: join(root, ".cache/oxipng/tools") });
     },
   };
 }

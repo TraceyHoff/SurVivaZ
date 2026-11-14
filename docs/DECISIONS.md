@@ -8135,3 +8135,29 @@ modal's h2 and aria-label use it on open and on refresh; the container section h
 use it too. Header CSS: `min-width:0` on the header, `flex:1; overflow:hidden; text-overflow:ellipsis;
 white-space:nowrap` on the h2, `flex-shrink:0` on the close button, so portrait does not cut off.
 No new controls (keyboard, gamepad and touch already open this panel).
+
+## ADR-391: Lossless oxipng pass over every shipped PNG, pinned and cached by file hash (SurVivaZ)
+
+Context: the built dist was 963.8 MB, 539.8 MB of it 2,725 PNGs written by Art's tools with default zlib
+settings. The git pack is already 5.55 GiB, so re-encoding the PNGs in the repo (a second copy of every
+image in history) is not an option. The phone downloads and caches all of this on first play.
+
+Decision: `vite build` runs `optimizeDistPngs` (scripts/oxipng.mjs) at the end of the art copy step,
+over the whole dist (art/ and Vite's assets/). Each PNG is looked up by sha256(tool tag + source bytes)
+in `.cache/oxipng/png/`; misses are recompressed with oxipng 9.1.5 `-o 2` (no `--strip`, no `--alpha`)
+and stored; a cached result replaces the dist file only when smaller; entries this build did not use are
+pruned. The binary is pinned: on linux-x64 the 9.1.5 musl release tarball is downloaded once into
+`.cache/oxipng/tools/` and its sha256 checked (`571e69fc…a472e2`); elsewhere an `oxipng 9.1.5` on PATH or
+`OXIPNG_BIN` is used. `SURVIVAZ_OXIPNG=off` copies PNGs verbatim; the default warns and skips when the
+binary is unavailable; CI and Pages set `required`, so a deploy never silently ships unoptimized PNGs.
+Both workflows restore `.cache/oxipng` with actions/cache (key: tool version + hash of the PNG sources).
+
+oxipng only changes the zlib stream, filters and colour type (RGBA → palette / grey where exact):
+decoded RGBA, fully transparent texels' RGB and every ancillary chunk are unchanged. Verified on the full
+dist: 2,725 / 2,725 PNGs decode to identical RGBA with identical chunk sets; no 16-bit or interlaced
+files. `apps/client/test/adr391_oxipng.test.ts` pins mode off, decode identity (palette reduction with
+transparent coloured texels) and cache hit / prune behaviour when the pinned binary is present.
+
+Result: PNG 539,795,816 → 407,407,325 B (−132,388,491). Cold run 2 m 25 s on 8 cores (about 5 min on
+a 4-vCPU runner), cached rebuilds re-run only changed PNGs. Rejected: `-o 4` (+0.8 %, 4× time), Zopfli
+(+1.1 %, 26× time).
