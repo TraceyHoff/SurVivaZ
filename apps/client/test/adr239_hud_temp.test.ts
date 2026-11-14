@@ -39,6 +39,12 @@ describe("ADR-239 HUD temperature gauge", () => {
       expect(document.querySelector<HTMLImageElement>("#hud [data-hud=season] img")!.getAttribute("src")).toBe(ICON_DATA[["ic_sun.png", "ic_leaf.png", "ic_snowflake.png"][season]!]); // ADR-396: embedded icon, not an icons/ fetch
       const air = document.querySelector<HTMLElement>("#hud .row[data-stat=temp] .air")!; expect(parseFloat(air.style.left)).toBeGreaterThan(0);
     }
+    { // spring has its own unique icon (no ic_sun reuse)
+      h?.destroy(); document.head.innerHTML = ""; document.body.innerHTML = `<div id="game-root"></div>`;
+      h = mountHud(() => w, () => undefined, { hours: 14, season: 3, weather: 0, unit: "C" });
+      expect(document.querySelector<HTMLImageElement>("#hud [data-hud=season] img")!.getAttribute("src")).toBe(ICON_DATA["ic_blossom.png"]);
+      expect(ICON_DATA["ic_blossom.png"]).not.toBe(ICON_DATA["ic_sun.png"]);
+    }
     expect(temps[0]!).toBeGreaterThan(temps[1]!); expect(temps[1]!).toBeGreaterThan(temps[2]!);
   });
   test("layout: compact readout never wraps, panel width unchanged, short-viewport (phone landscape) rules, XP chip stacks below", () => {

@@ -129,12 +129,14 @@ function pickRegion(region: RfxTile[], group: string, level: number, regionId: n
     const nbr = (d: number): [number, number] => [t.x + DIR_V[d]![0], t.y + DIR_V[d]![1]];
     const eqMember = (d: number): boolean => { const [x, y] = nbr(d); return bandAt(x, y) === b; };
     let top = false, plateau = false;
-    if ((form === "gab" || form === "gam") && (lower & 15) === 0) { shape = "r"; row = axis; seg = "up"; plateau = true; }
+    // Band == kmax on a pitched form is the flat crown (Art: a sloped piece there would climb above the plateau and leave a pit).
+    const crown = (form === "hip" || form === "cot" || form === "gab" || form === "gam") && fc.kmax > 0 && b === fc.kmax;
+    if (crown) { shape = "f"; row = 0; seg = "up"; }
+    else if ((form === "gab" || form === "gam") && (lower & 15) === 0) { shape = "r"; row = axis; seg = "up"; plateau = true; }
     if (form === "flt") { seg = shape === "f" ? "" : "lo"; }
     if (form === "shd") { shape = "e"; row = downD; const [ux, uy] = nbr((downD + 2) % 4); top = !isM(ux, uy); seg = b === 0 ? (top ? "lotop" : "lo") : top ? "top" : "up"; }
     let crest = false;
-    if (fc.crest && shape === "e") crest = eqMember((row + 2) % 4);
-    else if (fc.crest && shape === "o") crest = eqMember((row + 1) % 4) || eqMember((row + 2) % 4);
+    if (fc.crest && shape === "e") crest = eqMember((row + 2) % 4); // e only: Art ships no o-crest (an o corner already meets its neighbours' ridge)
     const varOk = !crest && ((shape === "e" && (seg === "lo" || seg === "up")) || shape === "f");
     const variant = varOk ? rfxVariant(t.x, t.y, level, cfg) : 0;
     const stem = `rfx_${form}_${seg ? seg + "_" : ""}${shape}${crest ? "c" : ""}${variant ? `_v${variant}` : ""}`;
@@ -144,7 +146,8 @@ function pickRegion(region: RfxTile[], group: string, level: number, regionId: n
     // Art's packed verge names carry the band seg: rfx_<form>_<lo|up>_v{el,er,r,f} (doc §4: rfx_<form>_verge_{el,er,r})
     const vseg = seg === "lo" || seg === "lotop" ? "lo" : "up";
     const verge = (x: number, d: number, onR: boolean): void => {
-      if (onR) overlays.push({ key: `rfx_${form}_verge_r`, alts: [`rfx_${form}_${vseg}_vr`, ...(plateau ? [`rfx_${form}_up_vf`] : [])], row: x, zoffPx, order: order++ });
+      if (shape === "f") overlays.push({ key: `rfx_${form}_verge_f`, alts: [`rfx_${form}_up_vf`], row: x, zoffPx, order: order++ }); // crown end
+      else if (onR) overlays.push({ key: `rfx_${form}_verge_r`, alts: [`rfx_${form}_${vseg}_vr`, ...(plateau ? [`rfx_${form}_up_vf`] : [])], row: x, zoffPx, order: order++ });
       else if (x === (d + 1) % 4) overlays.push({ key: `rfx_${form}_verge_er`, alts: [`rfx_${form}_${vseg}_ver`], row: d, zoffPx, order: order++ });
       else if (x === (d + 3) % 4) overlays.push({ key: `rfx_${form}_verge_el`, alts: [`rfx_${form}_${vseg}_vel`], row: d, zoffPx, order: order++ });
     };

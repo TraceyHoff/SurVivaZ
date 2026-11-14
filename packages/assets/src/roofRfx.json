@@ -8,7 +8,7 @@
     "flt": { "rise": [0], "kmax": 0, "crest": false },
     "cot": { "rise": [10, 16], "kmax": 3, "crest": true },
     "gam": { "rise": [22, 8], "kmax": 5, "crest": true },
-    "shd": { "rise": [9], "kmax": 3, "crest": false }
+    "shd": { "rise": [9], "kmax": 64, "crest": false }
   },
   "groups": {
     "roof_flat": "legacy", "roof_slope": "legacy", "roof_corner": "legacy", "roof_hip": "legacy", "roof_gable": "legacy", "roof_chimney": "legacy",

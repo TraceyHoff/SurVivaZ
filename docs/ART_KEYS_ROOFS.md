@@ -134,9 +134,9 @@ slope/corner/hip, else `gab` if any gable, else `flt` (chimney-only → `hip`). 
 `roof_gambrel`, `roof_shed` (still to be added by EA) each form their own group. Missing / disrepaired tiles are
 non-members (holes get eave lips). Shape comes from the region; art tier from each tile's own tier.
 
-**Band**, KMAX = 3:
-- `hip`, `cot`: Chebyshev distance to the nearest non-member − 1, capped at KMAX.
-- `gab`, `gam`: one ridge axis per region (majority rot; else the long axis). band = min(runA, runB) capped at KMAX,
+**Band** (kmax per form in `packages/assets/src/roofRfx.json`: hip/cot 3, gab/gam 5, shd 64 = unclamped, flt 0):
+- `hip`, `cot`: Chebyshev distance to the nearest non-member − 1, capped at kmax.
+- `gab`, `gam`: one ridge axis per region (majority rot; else the long axis). band = min(runA, runB) capped at kmax,
   runA/runB = consecutive members perpendicular to the ridge.
 - `shd`: downhill dir D (majority rot). band = members downhill of the tile (**uncapped**). `top` = uphill neighbour
   is a non-member.
@@ -146,15 +146,16 @@ non-members (holes get eave lips). Shape comes from the region; art tier from ea
 
 | form | rise per band (px) |
 |---|---|
-| `hip`, `gab` | 14, 14, 14 |
-| `cot` | 10 (flared), 16, 16 |
-| `gam` | 22, 8, 8 |
+| `hip`, `gab` | 14 per band |
+| `cot` | 10 (flared), then 16 |
+| `gam` | 22, then 8 |
 | `shd` | 9 per band |
 | `flt` | 0 |
 
 **Lower mask** L: bit set if that neighbour is a non-member or has a lower band. `gab`/`gam`: only the two
 perpendicular-to-ridge cardinal bits (no diagonals). `shd`: unused. `flt`: non-membership only (cardinals + diagonals).
-For `hip`/`cot`/`gab`/`gam` at band == KMAX, force L = 0 → `up_f`.
+**Crown:** on `hip`/`cot`/`gab`/`gam`, a tile at band == kmax is always `up_f` (flat crown at zoff(kmax)); a
+sloped piece there would climb above the plateau and leave a pit.
 
 **Shape from n = L & 15:**
 
@@ -167,7 +168,7 @@ For `hip`/`cot`/`gab`/`gam` at band == KMAX, force L = 0 → `up_f`.
 | 15 | `p` | 0 |
 | 0 | `i` if a diagonal bit is set (first of SE→0, SW→1, NW→2, NE→3), else `f` | |
 
-`seg = lo` if band 0 else `up`. Exceptions: `gab`/`gam` with n = 0 below KMAX → `up_r` (row by axis); `flt` parapet pieces
+`seg = lo` if band 0 else `up`. Exceptions: `gab`/`gam` with n = 0 below kmax → `up_r` (row by axis); `flt` parapet pieces
 are `lo`, the field has no seg (`rfx_flt_f[_v<n>]`); `shd` is always `e` row D with seg `lotop`/`lo` (band 0) or `top`/`up`.
 
 **Crest** (`e` only, not `shd`): neighbour at (row+2)%4 is a member with equal band → append `c`.
@@ -177,7 +178,7 @@ hash): 0–1 → v0, 2 → `_v1`, 3 → `_v2`.
 
 **Overlays** (extra instances on the same tile, depth-biased just after it):
 - `gab`/`gam` verge at ridge-axis end side x when that neighbour is a non-member: `e` tile row d → `ver` if
-  x == (d+1)%4, `vel` if x == (d+3)%4, drawn with row d; `r` tile → `vr` row x; `f` tile → `vf` row x. Under a band-k
+  x == (d+1)%4, `vel` if x == (d+3)%4, drawn with row d; `r` tile → `vr` row x; crown `f` tile → `up_vf` row x. Under a band-k
   end tile, stack k gable-wall strips facing x, strip j at zoff(j) (`gam`: `wall_lo` for j = 0, `wall_up` above).
 - `shd`: side non-member at (D+1)%4 → `ver`, (D+3)%4 → `vel` (row D) + k wall strips facing it; `top`/`lotop`
   tiles get k+1 wall strips facing (D+2)%4. All use `rfx_shd_wall_t<N>`.
@@ -224,16 +225,12 @@ Preview: `/workspace/assets/preview/roofs.png`. Test: `packages/assets/test/roof
 2. Engine: per-tile band z offset, per-level region flood (invalidate on `StructureIndex.version`), overlay instances
    with depth bias, whole-region cutaway, whole-roof snow pass, `bld` pool regex.
 
-3. **ADR-397 alignment** (engine landed from the phase-1 draft; these are the deltas to the shipped art, all in
-   `roofRfx.json` / `roofRfx.ts`):
-   - Verge keys: `rfx_<form>_<seg>_{vel,ver,vr,vf}` (seg = the tile's `lo`/`up`; the verge triangle height follows
-     that band's rise, e.g. gam 22 vs 8 px), not `rfx_<form>_verge_{el,er,r}`. An `f` tile at a ridge end gets `vf`.
-   - Band == kmax on `hip`/`cot`/`gab`/`gam`: force lower = 0 → `up_f` (a sloped `e` at kmax would climb above
-     the plateau). `gab`/`gam` kmax 3 as previewed (5 also works with this rule; up rises are uniform).
-   - `shd`: no band clamp (kmax ≥ 64); shed `up_e` is band-agnostic, a clamp makes deep sheds step.
-   - Crest only on `e` (no `oc` art; with `crest` on `o` every perimeter corner of a ≥ 3-wide hip would crest —
-     EA's own question — and `rfxSpriteKeys` already falls back to `o`).
-   - `isStreamedBuildingAtlas` / `bld` pool: `/^rfx_/` pages (today they page through the generic stream pool).
-   - Verge / flat-field / plateau names: already resolved by ADR-398 alias stems; the flat field now ships as
-     `rfx_flt_f[_v<n>]` (the doc stem), so that alias is no longer needed.
-   - `roof_forms.json` `live`: art for cot/gam/shd + icons is in; flipping it needs EA's ADR-311/398 test updates.
+3. **ADR-397 alignment — done** (Art patch to `roofRfx.ts/json` + `adr397_roof_rfx.test.ts`, checked by compositing
+   EA's selection with the packed art): crown rule at kmax (fixed the pit in ≥ 9-wide hips), shed band unclamped
+   (fixed the stepped deep sheds), crest on `e` only (there is no `oc` art; an `o` corner already meets its
+   neighbours' ridge, so 2×2 / perimeter corners are correct as plain `o`), crown gable ends get `up_vf`.
+   Engine resolves Art's names directly or via the ADR-398 alias stems: verges `rfx_<form>_<lo|up>_v{el,er,r,f}`,
+   flat field `rfx_flt_f[_v<n>]`, crown `up_f`. Verge kinds are letters (`vel`, `ver`, `vr`, `vf`) and are overlay-only;
+   interior variants are always `_v<digit>` on surface pieces, so `rfxSpriteKeys`' `/_v\d$/` never confuses them.
+4. Open: `isStreamedBuildingAtlas` / `bld` pool for `/^rfx_/` (today the pages use the generic stream pool);
+   flip `roof_forms.json` `live` (needs EA's ADR-311/398 test updates).

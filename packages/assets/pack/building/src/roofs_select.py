@@ -4,6 +4,7 @@ import roofs_lib as R
 from roofs_lib import S_, W_, N_, E_, KMAX
 DV = {S_: (0, 1), W_: (-1, 0), N_: (0, -1), E_: (1, 0)}
 BIT = {N_: 1, E_: 2, S_: 4, W_: 8}
+KMAX_OF = {"hip": KMAX, "cot": KMAX, "gab": 5, "gam": 5}   # = packages/assets/src/roofRfx.json
 DIAG = {16: (1, -1), 32: (1, 1), 64: (-1, 1), 128: (-1, -1)}
 
 def hashU32(seed, a, b=0, c=0):
@@ -23,7 +24,7 @@ def bands(cells, form, axis=None, D=None):
             px, py = (0, 1) if axis == "EW" else (1, 0); a = b = 0
             while (x - px * (a + 1), y - py * (a + 1)) in m: a += 1
             while (x + px * (b + 1), y + py * (b + 1)) in m: b += 1
-            band[(x, y)] = min(a, b, KMAX)
+            band[(x, y)] = min(a, b, KMAX_OF[form])
         elif form == "shd":
             dx, dy = DV[D]; n = 0
             while (x + dx * (n + 1), y + dy * (n + 1)) in m: n += 1
@@ -53,7 +54,7 @@ def select(cells, form, tiers=None, axis="EW", D=S_, level=0, chimneys=()):
             for b, (dx, dy) in DIAG.items():
                 if (x + dx, y + dy) not in m: L |= b
         n = L & 15
-        if form in ("hip", "cot", "gab", "gam") and k == KMAX: n = 0; L = 0
+        if form in ("hip", "cot", "gab", "gam") and k == KMAX_OF[form]: n = 0; L = 0   # crown
         seg = "lo" if k == 0 else "up"
         if form == "shd":
             top = (x - DV[D][0], y - DV[D][1]) not in m
@@ -66,7 +67,7 @@ def select(cells, form, tiers=None, axis="EW", D=S_, level=0, chimneys=()):
                 shape, row = "f", 0
                 for b, r in ((32, 0), (64, 1), (128, 2), (16, 3)):
                     if L & b: shape, row = "i", r; break
-                if form in ("gab", "gam") and shape == "f" and k < KMAX: shape, row = "r", 0 if axis == "EW" else 1
+                if form in ("gab", "gam") and shape == "f" and k < KMAX_OF[form]: shape, row = "r", 0 if axis == "EW" else 1
             else: shape, row = T
         crest = False
         if shape == "e" and form != "shd":

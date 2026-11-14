@@ -21,7 +21,7 @@ const STATS = [
   { key: "thirst", color: "#5CC6DC", icon: "ic_thirst.png" }, { key: "stamina", color: "#FFD45A", icon: "ic_stamina.png" },
 ] as const;
 /** Task 25: custom pixel-art icons (embedded data URIs, game-icons-data.ts — never a public/icons/ fetch) for the season glyph. */
-const SEASON_ICON = ["ic_sun.png", "ic_leaf.png", "ic_snowflake.png"] as const;
+const SEASON_ICON = ["ic_sun.png", "ic_leaf.png", "ic_snowflake.png", "ic_blossom.png"] as const; // SeasonId order: summer, fall, winter, spring (Art: dedicated spring blossom)
 
 /**
  * ADR-312: HUD shelter state from the replicated Exposure.sheltered percent (0..100). Hidden below 10%; 100% is

@@ -32,16 +32,19 @@ describe("ADR-397 rfx selection (Art's ART_KEYS_ROOFS.md §4)", () => {
     expect(at(m, 2, 2)).toMatchObject({ shape: "o", row: 0 }); // S+E
     expect(at(m, 0, 0)).toMatchObject({ shape: "o", row: 2 }); // N+W
   });
-  it("hip 2x2: every tile an outer corner with a crest (equal-band uphill neighbour)", () => {
+  it("hip 2x2: every tile an outer corner (no o-crest: Art ships none)", () => {
     const m = rfxPickLevel(rect("roof_slope", 2, 2), 1);
-    expect(at(m, 0, 0).stem).toBe("rfx_hip_lo_oc"); expect(at(m, 1, 1)).toMatchObject({ shape: "o", row: 0, crest: true });
+    expect(at(m, 0, 0).stem).toBe("rfx_hip_lo_o"); expect(at(m, 1, 1)).toMatchObject({ shape: "o", row: 0, crest: false });
   });
   it("hip 4x3: crest on edge tiles whose uphill neighbour has the same band; KMAX clamps wide roofs", () => {
     const m = rfxPickLevel(rect("roof_slope", 4, 4), 1);
-    expect(at(m, 1, 1)).toMatchObject({ band: 1, shape: "o", row: 2, crest: true, stem: "rfx_hip_up_oc" });
+    expect(at(m, 1, 1)).toMatchObject({ band: 1, shape: "o", row: 2, crest: false, stem: "rfx_hip_up_o" });
     const wide = rfxPickLevel(rect("roof_slope", 11, 11), 1);
     expect(at(wide, 5, 5)).toMatchObject({ band: 3, shape: "f", seg: "up", zoffPx: 42 });
     expect(base(at(wide, 5, 5).stem)).toBe("rfx_hip_up_f");
+    // the whole band-kmax ring is the flat crown (no sloped e climbing above it)
+    expect(at(wide, 3, 5)).toMatchObject({ band: 3, shape: "f", seg: "up", zoffPx: 42 }); expect(at(wide, 2, 5)).toMatchObject({ band: 2, shape: "e", row: 1 });
+    const shed = rfxPickLevel(rect("roof_shed", 2, 7, 0), 1); expect(at(shed, 0, 0)).toMatchObject({ band: 6, zoffPx: 54 }); // sheds are not clamped
   });
   it("concave L: the inner corner gets an i tile, holes close their own eaves", () => {
     const tiles = [...rect("roof_slope", 5, 5)].filter((t) => !(t.x >= 3 && t.y <= 1)); // notch NE
