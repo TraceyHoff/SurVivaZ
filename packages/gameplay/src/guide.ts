@@ -166,6 +166,7 @@ const FACT_ICONS: Readonly<Record<string, GuideRowIcon>> = {
   "seasons.summer.heatWaveRange": file("ic_sun.png"),
   "seasons.fall.tempRange": file("ic_leaf.png"),
   "seasons.winter.tempRange": file("ic_snowflake.png"),
+  "seasons.spring.tempRange": file("ic_blossom.png"), // ADR-400: Art's dedicated spring icon (5f1ccfa1)
 };
 
 /** The icon for one fact row, or undefined when the row describes no thing with art. */

@@ -8456,3 +8456,133 @@ their `_winter` twins or SNOWCAP as before. Canvas2D draws legacy roofs only, so
 
 Validation: `adr397_roof_draw.test.ts` pins the GLSL entry point and that the flag bit is disjoint from the other
 season and crisp bits. The headless WebGL2 boot of the built dist compiles the shader.
+
+## ADR-400: Art's rfx roof art is live: every requested key resolves, aliases removed, forms on, roof pages stream (SurVivaZ)
+
+Context: Art shipped the rfx base set (4a5ac969, 7d72fa87), the crown rule and the spring icon (5f1ccfa1) and the
+split-log shake skin (5793d0e9, 4ff07a07). The engine had to stop guessing names and use exactly what is packed.
+
+Decision:
+- Keys: `adr400_roof_art.test.ts` enumerates every stem and overlay the ADR-397 selection can name (all forms, bands,
+  masks, variants, crests, tiers, the shake skin) and requires each to resolve to a packed sprite with no fallback
+  except Art's documented ones (crest / variant dropped, shk → base where §8 has no shake art). Art's final names match
+  §4, so the ADR-398 alias stems (`RfxPick.alts`, `RfxOverlay.alts`) are removed.
+- Crown rule (Art 5f1ccfa1): the flat crown replaces the peak / ridge only on a region clamped at `kmax`; an unclamped
+  hip keeps its peak, so no pit opens in the middle of a small roof. Shed `kmax` is 12 (a 12-deep shed corner carries
+  3 × 12 + 3 overlays, so `PIECE_PARTS_MAX` is 48).
+- `roof_forms.json` is `live: true`; abandoned barns / mills / stables, sheds / hunter shacks and cottages / farmhouses
+  get their forms. An rfx-only piece (cottage / gambrel / shed) standing alone draws `rfxStandIn`: the rfx sprite the
+  selection picks for it as a one-tile region, at its tier, so it has a view entity, a ghost and a Canvas2D picture
+  before its neighbours arrive.
+- Streaming: `isStreamedBuildingAtlas` covers `rfx_t<N>_<a|b>` and `rfx_shk_t<N>` (`/^rfx_(?:[a-z]+_)?t\d+(?:_[a-z])?$/`),
+  in their own `bld` group (6 slots desktop, 4 low-memory) sized to the 2016 px roof pages, so they never take a tier
+  page's slot. `items_build_rfx` is a UI sheet (the build window's CSS), not streamed.
+- Build menu: the hip / gable / flat tiles show Art's form icons (`build_rfx_hip|gab|flt_tN`) once that form draws
+  continuously. The guide's spring row uses `ic_blossom`.
+
+Validation: `adr400_roof_art.test.ts`, `adr397_roof_rfx.test.ts`, `adr311_abandoned_roofs.test.ts`,
+`adr398_roof_forms.test.ts`, `adr387_guide_icons.test.ts` (65 rows with icons); headless WebGL2 / Canvas2D composites.
+
+## ADR-401: Seamless rfx joints in WebGL2; Canvas2D draws continuous roofs (SurVivaZ)
+
+Context: the headless composites showed a dark line on every rfx tile joint. Straight-alpha pages sampled bilinearly
+mix the transparent (0,0,0,0) texels into the edge colour, and SRC_ALPHA blending darkens that band again.
+
+Decision: instance flag `RFX_EDGE` (32768) on rfx roof parts (surface and overlays). For those the sprite FS discards
+below a = 0.5, divides the filtered colour by the filtered alpha (the alpha-weighted average of the art's own opaque
+texels) and draws opaque. Neighbours overlap by about 1.5 px, so the joint closes without a hairline of the wall below.
+0.2 / 0.35 drew the edge texels' course lines over the neighbour as a dotted seam; above 0.5 the joints reopened. Other
+sprites are untouched. Canvas2D reads the same `pieceRoofFx` binding once a page image is loaded (tile lifted by its band,
+overlays after it), else the legacy art, as WebGL2 does; it has no shader, so its joints are the art's own edges.
+
+Validation: `adr397_roof_draw.test.ts` (flag bit, shader text, Canvas2D binding / lift / overlays / fallback); the
+composites in both renderers.
+
+## ADR-402: Split-log shakes: Art's §8 vote, one compact rule, wall variant names (SurVivaZ)
+
+Context: Art replaced the ADR-397 material pick with a vote (5793d0e9) and then made wood walls log walls too, an owner
+decision (4ff07a07). The engine was asked to keep the log-wall tier set one data entry and to let the clan palisade
+count once the wall exposes its variant name.
+
+Review of Art's rule (`pickRegion`): every roof tile with a supporting wall votes for the skin its wall maps to, or
+for base (""). The largest count wins and a tie goes to base. With one skin this is the strict majority §8 describes
+(shk needs more votes than base). With two or more skins it would be a plurality with a tie for first going to base;
+that is noted, not changed, since only `shk` exists. Interior tiles (no wall one level down) do not vote. A region mixing
+a log cabin and a stone annex follows the majority of its walls. Only hip / gab / shd / cot take the skin; flt and gam,
+and every t2+ tile, fall back to base keys through `rfxSpriteKeys`. That is correct: there is no art for them.
+
+Decision:
+- `materials.rules` is one rule: `{ skin: "shk", forms: [hip, gab, shd, cot], wallTiers: ["twig", "wood"],
+  wallVariants: ["clan_palisade"], sites: ["cabin", "hunter_shack", "fisher_hut"] }`. `rfxRuleMatches` matches exactly
+  what Art's nine entries did: `wallTiers` only for the plain look (bare `<tier>`), `wallVariants` at any tier,
+  `sites` against `site:<kind>`. The log-wall tier set is the single `wallTiers` entry.
+- `wall` gains `variantNames: ["plain", "clan_wood", "clan_stone", "clan_palisade"]`. Variant 0 still reports the bare
+  tier. The art is unchanged: there are no `wall@<name>` sprites, so the name lookup falls through to the tier sprite as
+  the index did, placed pieces keep their numeric `VPiece.variant` for the clan variant groups, and ghosts already
+  used variant 0. The build menu's variant picker now reads the names instead of "Variant 2..4".
+- Cabin ruins: abandoned cabins, hunter shacks and fisher huts are stamped with wood (plank) walls, so with Art's
+  twig + wood rule their roofs take shakes with no extra wiring. The `site:<kind>` entries stay in the rule for a client
+  that reports them; none does (a networked per-wall site tag would cost a world-schema change and a replication mask
+  bit for no visible difference now).
+- `RoofTiler.refreshWalls` re-reads the wall material under up to 64 roof tiles per frame, round robin (4 edge lookups
+  each), and re-picks a level only when a material changed. A wall placed, upgraded or demolished after the roof above
+  it now reaches the roof; before, the material was read once when the roof tile arrived.
+
+Validation: `apps/client/test/adr402_shake_walls.test.ts` covers the rule shape, the match table, vote / tie / unlisted
+forms, every shake key resolving to `*_shk_t<N>` where §8 has art (base elsewhere), palisade and plain walls through
+`roofWallMaterial`, the three cabin-ruin kinds picking shk, and refreshWalls. Art's `roofs_rfx.test.ts` and
+`adr397_roof_rfx.test.ts` also pass.
+
+## ADR-404: Roofs sit on the wall tops (per-form seat, rfx depth bias, eave art request)
+
+Context: owner feedback on the ADR-400 composites: the roof looked sunk inside the walls, with a strip of wall top and
+posts showing around its edge. Two separate causes:
+
+1. Height. Every rfx part was drawn with its base on the level floor (48 px above the walls' floor). The wall art is
+   taller than one level: its cap reaches 60-62 px above the pivot on every tier (twig, wood, stone, metal, bld t1-t4),
+   so the back wall caps stuck up behind the roof.
+2. Order (WebGL2 only). Eave pixels sit below the tile pivot and get no height term in the depth key, so the front
+   walls' caps and vertex posts (edge +0.45, about 61 px x 1/48, post +0.53) out-ranked the roof and drew over its front
+   edge. Canvas2D was already right: it paints level by level, so a level-1 roof always comes after the level-0 walls.
+
+Decision (engine only, offsets only: no art scaling, duplication or recolour):
+
+- `roofRfx.json` `forms.<f>.seatPx` sets how far each form is raised. `RoofTiler.resolve` adds `rfxSeat(form)` to every
+  part's `liftPx` (the tile, its overlays and the gable/gambrel/shed wall strips, so a strip still meets its tile). Art's
+  `zoffPx` (band height, §4) is unchanged. The values are measured
+  per form against the real art, because each form's eave sits at a different depth in its tile: hip 9, cottage 8,
+  gable 6, gambrel 6, shed 4, flat 3.
+- `RFX_SEAT_BIAS = 1.1` is added to the depth key of every rfx part (WebGL2), so a seated roof wins over the caps and
+  posts of the walls it rests on. Canvas2D shares the binding and its `liftPx`, so it needs no change.
+- Known trade-off of the bias: an upright standing right against a front wall can have the roof eave drawn over the top
+  of its head, and a level-1 wall standing in front of a lower roof could lose its bottom ~30 px to that roof. The
+  local player keeps the focus silhouette through occluders.
+
+Why not a single "wall-top height" (13 px) for every form: the wall cap is about 6 px thick on screen, half inside the
+tile diamond and half outside it, and the rfx art stops about 1-3 px past the diamond. Raising the roof covers the
+back caps but opens the front ones. At 13 px the front walls show a 3-8 px cap strip under the eave, and at 0 px the
+back caps show. Each per-form value sits in the window where both checks pass.
+
+Validation: `apps/client/test/adr404_roof_seat.test.ts` decodes the building and main-pack atlases. For every form
+(hip, gab, cot, gam, shd, flt) on every plain wall tier (wall_twig, wall, wall_stone, wall_metal, bld_wall_t1..t4) it
+lays a 7x5 house, draws walls and then the seated roof, and checks two things inside each wall's own edge span:
+
+- at least 85% of the back (N, W) wall-top pixels are under roof art; hip and cottage reach 100%, gable and gambrel on
+  twig are the lowest at 89%;
+- at most 5% of the front (S, E) wall columns have the roof stopping more than 2 px above the wall top.
+
+It also checks that seat 0 (the old sunk roof) fails the back check for every pitched form, that each seat lies between
+the floor and the wall-top height, and that `RFX_SEAT_BIAS` beats a front wall top plus a vertex post.
+
+What the engine cannot do, and what Art must paint: true eaves. Wall posts reach about 7 px past the tile corners and the
+wall caps about 3-4 px outside the edge line. No offset can cover the outer half on all four sides at once, and covering
+it by stretching or duplicating tiles would fake art. The request for Art (`rfx_<form>_*` edge tiles, every form,
+tier and skin):
+
+- extend the roof surface 6 px (1x) past the tile diamond on the outer side of every eave edge;
+- extend 8 px at the outer corners (`c`/corner shapes), so corner posts are covered;
+- add a 3-4 px fascia/drip edge on the S and E (camera-facing) eaves, hanging below the eave line;
+- keep the anchor (0.647) and frame size, or grow the frame symmetrically and update the anchor in the manifest.
+
+Once that art lands, re-pick the seats with the test (they should move toward 13, the wall-top height) and raise its
+thresholds to 100% covered and 0% gaps, with the 7 px corner-post span included.

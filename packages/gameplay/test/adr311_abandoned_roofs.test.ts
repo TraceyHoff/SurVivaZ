@@ -5,7 +5,7 @@ import { makeWorld, plantClaim, spawnLearned } from "./helpers.js";
 
 /** Eave direction per rot from the roof art (assets/tools/buildings2.py roof_d): S, W, N, E. */
 const EAVE: readonly (readonly [number, number])[] = [[0, 1], [-1, 0], [0, -1], [1, 0]];
-const ROOF_KEYS = ["roof_flat", "roof_slope", "roof_corner", "roof_gable", "roof_hip", "roof_chimney"];
+const ROOF_KEYS = ["roof_flat", "roof_slope", "roof_corner", "roof_gable", "roof_hip", "roof_chimney", "roof_gambrel", "roof_shed", "roof_cottage"]; // ADR-400: + the live ADR-398 forms
 const ALL_KINDS = Object.values(G.AbandonedKind) as G.AbandonedKindId[];
 
 function roofsOf(p: G.PlannedSite) { return p.pieces.filter((s) => s.role === "roof"); }
@@ -23,7 +23,7 @@ describe("ADR-311 abandoned roof variety", () => {
       styles.add(p.roofStyle);
       for (const s of roofsOf(p)) keys.add(s.key);
     }
-    expect(styles.size).toBe(4);
+    expect(styles.size).toBe(7); // ADR-311 flat / slope / gable / hip + ADR-398 gambrel / shed / cottage (live since ADR-400)
     for (const k of keys) expect(ROOF_KEYS).toContain(k);
     for (const k of ROOF_KEYS) expect(keys.has(k)).toBe(true);
   });

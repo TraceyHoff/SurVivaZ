@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import { loadManifest, mergeManifests, type ManifestJson } from "@engine/assets";
 import { readManifestJson } from "@engine/assets/node";
 import { World, defineComponent, PrevTransform, Transform } from "@engine/core";
-import { AtlasManager, DEFAULT_STYLE, LightSource, Occluder, PIECE_PARTS_MAX, ROOF_OVERLAY_BIAS, Shadow, Sprite, SpriteBatch, type RoofFxBinding } from "@engine/render";
+import { AtlasManager, DEFAULT_STYLE, LightSource, Occluder, PIECE_PARTS_MAX, RFX_EDGE, ROOF_OVERLAY_BIAS, Shadow, Sprite, SpriteBatch, type RoofFxBinding } from "@engine/render";
 import { DEFAULT_ISO } from "@engine/world";
 import { MANIFEST_INDEX } from "../src/manifest-index.js";
 
@@ -67,7 +67,7 @@ function scene(fx: RoofFxBinding | undefined, resident = true) {
   const rect = { x0: -1000, y0: -1000, x1: 2000, y1: 2000 };
   batch.prepare({ world: w, alpha: 1, rect, atlas: am, depthMin: -100, depthRange: 200, tickHz: 20, style: DEFAULT_STYLE, bindings: { buildPiece: VP, pieceRoofFx: () => fx }, now: 0 });
   const cache = (batch as unknown as { pieceCache: Map<number, { tmp: Float32Array; len: number; sig: Float64Array }> }).pieceCache;
-  return [...cache.entries()].sort((a, b) => a[0] - b[0]).map(([key, en]) => ({ key, vis: en.sig[0]!, rot: en.sig[2]!, lift: en.sig[25]!, y: en.tmp[1]!, depth: en.tmp[2]!, n: en.len }));
+  return [...cache.entries()].sort((a, b) => a[0] - b[0]).map(([key, en]) => ({ key, vis: en.sig[0]!, rot: en.sig[2]!, lift: en.sig[25]!, y: en.tmp[1]!, depth: en.tmp[2]!, flags: en.tmp[5]!, n: en.len }));
 }
 
 describe("ADR-397 roof fx draw path", () => {
@@ -87,7 +87,7 @@ describe("ADR-397 roof fx draw path", () => {
     const p = scene({ vis: RFXV, row: 2, liftPx: 14, overlays: [{ vis: OVL, row: 1, liftPx: 0 }] }, false);
     expect(p.length).toBe(1); expect(p[0]!.vis).toBe(LEGACY); expect(p[0]!.lift).toBe(0);
   });
-  it("part budget", () => { expect(PIECE_PARTS_MAX).toBeGreaterThanOrEqual(2 + 1 + 7); expect(ROOF_OVERLAY_BIAS).toBeGreaterThan(0); });
+  it("part budget: L arms + tile + a 12-deep shed corner's 3 x 12 + 3 walls / verges (ADR-400)", () => { expect(PIECE_PARTS_MAX).toBeGreaterThanOrEqual(2 + 1 + 3 * 12 + 3); expect(ROOF_OVERLAY_BIAS).toBeGreaterThan(0); });
 });
 
 describe("ADR-399 whole-roof snow", () => {
@@ -96,5 +96,54 @@ describe("ADR-399 whole-roof snow", () => {
     expect(SEASON_SPRITE_GLSL).toContain("vec3 roofSnow(vec3 c, vec2 w)");
     expect(new Set([SEASON_ROOFSNOW, SEASON_GROUND, SEASON_SNOWCAP, SEASON_FOLIAGE, 1024]).size).toBe(5);
     expect(SEASON_ROOFSNOW & (SEASON_GROUND | SEASON_SNOWCAP | SEASON_FOLIAGE | 1024)).toBe(0);
+  });
+});
+
+describe("ADR-401 seamless rfx joints", () => {
+  it("every rfx part (tile and overlays) carries RFX_EDGE; the legacy sprite does not", () => {
+    const p = scene({ vis: RFXV, row: 2, liftPx: 14, overlays: [{ vis: OVL, row: 1, liftPx: 0 }] });
+    expect(p.map((x) => (x.flags & RFX_EDGE) !== 0)).toEqual([true, true]);
+    expect(scene(undefined)[0]!.flags & RFX_EDGE).toBe(0);
+    expect(scene({ vis: RFXV, row: 2, liftPx: 14, overlays: [] }, false)[0]!.flags & RFX_EDGE).toBe(0); // page streaming in: legacy art, untouched
+  });
+  it("the FS un-darkens the bilinear edge band (rgb / a) and makes coverage solid from the art edge, only behind the flag", () => {
+    expect(readFileSync(resolve(root, "packages/render/src/sprites.ts"), "utf8")).toContain("if ((vFlags & ${RFX_EDGE}) != 0) { if (t.a < 0.5) discard; t.rgb = min(t.rgb / t.a, vec3(1.0)); t.a = 1.0; }");
+    expect(RFX_EDGE & (1024 | 2048 | 4096 | 8192 | 16384 | 256 | 512 | 16 | 64)).toBe(0);
+  });
+  it("visualId 0 (an rfx-only form before its page is resident) draws nothing instead of sprite 0", () => {
+    const p = scene({ vis: RFXV, row: 0, liftPx: 0, overlays: [] }, false); expect(p.every((x) => x.vis !== 0)).toBe(true);
+  });
+});
+
+describe("ADR-401 Canvas2D draws continuous roofs (same binding as WebGL2)", () => {
+  const id = (k: string) => registry.ids.sprites.id(k);
+  async function c2d(fx: RoofFxBinding | undefined, visualId: number, loaded: (atlasKey: string) => boolean) {
+    const { World: W, defineComponent: dc, Transform: T } = await import("@engine/core");
+    const { Canvas2DRenderer } = await import("@engine/render");
+    const VP = dc("ViewBuildPieceT400", { visualId: "u16", variant: "u8", tint: "u32", damageStage: "u8", rotation: "u8", level: "u8", layer: "u8", ghost: "u8" });
+    const w = new W({ seed: 1 }); w.register(T); w.register(VP);
+    const e = w.create(); w.add(e, T, { x: 2, y: 2, z: 0 }).add(e, VP, { visualId, level: 1, layer: 0 });
+    const canvas = { width: 320, height: 240, getContext: () => ({}) } as unknown as HTMLCanvasElement;
+    const r = new Canvas2DRenderer(canvas, {} as unknown as CanvasRenderingContext2D) as unknown as { bindGameplay(b: unknown): void; image(k: string): unknown; gatherPieces(w: unknown, reg: unknown, t: number): { f: { x: number; y: number }; sy: number; ord: number; depth: number }[] };
+    r.image = (k: string) => (loaded(k) ? {} : null);
+    r.bindGameplay({ buildPiece: VP, pieceRoofFx: () => fx });
+    return r.gatherPieces(w, registry, 0);
+  }
+  const TILE = id("rfx_hip_up_e_t1"), VERGE = id("rfx_gab_up_vr_t1"), LEG = id("bld_roof_slope_t1");
+  const fx: RoofFxBinding = { vis: TILE, row: 2, liftPx: 14, overlays: [{ vis: VERGE, row: 1, liftPx: 14 }] };
+  it("page image loaded: the rfx tile at its row, 14 px up, its overlay right after it", async () => {
+    const base = (await c2d(undefined, LEG, () => true))[0]!;
+    const p = await c2d(fx, LEG, () => true);
+    expect(p.length).toBe(2);
+    const f = registry.buildingFrame(TILE, 2, 0, -1); expect([p[0]!.f.x, p[0]!.f.y]).toEqual([f.x, f.y]);
+    expect(base.sy - p[0]!.sy).toBeCloseTo(14, 3);
+    expect(p[1]!.depth).toBe(p[0]!.depth); expect(p[1]!.ord).toBeGreaterThan(p[0]!.ord); expect(p[1]!.ord).toBeLessThan(p[0]!.ord + 1);
+  });
+  it("rfx page image still loading: the legacy sprite, no lift, no overlay; an rfx-only form (visualId 0) draws nothing", async () => {
+    const notRfx = (k: string) => !k.startsWith("rfx_");
+    const p = await c2d(fx, LEG, notRfx); expect(p.length).toBe(1);
+    const f = registry.buildingFrame(LEG, 0, 0, -1); expect([p[0]!.f.x, p[0]!.f.y]).toEqual([f.x, f.y]);
+    expect(await c2d(fx, 0, notRfx)).toEqual([]);
+    expect((await c2d(fx, 0, () => true)).length).toBe(2);
   });
 });

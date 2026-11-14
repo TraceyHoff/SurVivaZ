@@ -1,4 +1,4 @@
-import { rfxCell, rfxPickLevel, rfxSpriteKeys, RFX, type RfxConfig, type RfxPick, type RfxTile } from "@engine/assets";
+import { rfxCell, rfxPickLevel, rfxSeat, rfxSpriteKeys, RFX, type RfxConfig, type RfxPick, type RfxTile } from "@engine/assets";
 import type { RoofFxBinding } from "@engine/render";
 import { BuildPiece, StructureIndex, StructureIndexRes, gameplayDefs } from "@engine/gameplay";
 import type { World } from "@engine/core";
@@ -52,15 +52,34 @@ export class RoofTiler {
   /** First existing sprite for a pick at a tier (undefined = legacy). */
   resolve(p: RfxPick, tier: number): RoofFxBinding | undefined {
     let vis: number | undefined;
-    for (const st of [p.stem, ...p.alts]) { for (const k of rfxSpriteKeys(st, tier, p.skin, this.cfg)) { vis = this.sid(k); if (vis !== undefined) break; } if (vis !== undefined) break; }
+    for (const k of rfxSpriteKeys(p.stem, tier, p.skin, this.cfg)) { vis = this.sid(k); if (vis !== undefined) break; }
     if (vis === undefined) return undefined;
+    const seat = rfxSeat(p.form, this.cfg); // ADR-404: the roof rests on the wall tops
     const overlays: { vis: number; row: number; liftPx: number }[] = [];
     for (const o of p.overlays) {
       let ov: number | undefined;
-      for (const st of [o.key, ...o.alts]) { for (const k of rfxSpriteKeys(st, tier, p.skin, this.cfg)) { ov = this.sid(k); if (ov !== undefined) break; } if (ov !== undefined) break; }
-      if (ov !== undefined) overlays.push({ vis: ov, row: o.row, liftPx: o.zoffPx });
+      for (const k of rfxSpriteKeys(o.key, tier, p.skin, this.cfg)) { ov = this.sid(k); if (ov !== undefined) break; }
+      if (ov !== undefined) overlays.push({ vis: ov, row: o.row, liftPx: o.zoffPx + seat });
     }
-    return { vis, row: p.row, liftPx: p.zoffPx, overlays };
+    return { vis, row: p.row, liftPx: p.zoffPx + seat, overlays };
+  }
+
+  private wallCursor: Iterator<RoofCell> | undefined;
+  /**
+   * ADR-402: re-read the wall material under up to `budget` roof tiles (round robin), re-picking a level whose material
+   * changed (a wall placed, upgraded or demolished after the roof arrived). Bounded per
+   * frame: `budget` tiles x 4 edge lookups.
+   */
+  refreshWalls(read: (x: number, y: number, wallLevel: number) => string | undefined, budget = 64): number {
+    let n = 0, changed = 0;
+    while (n < budget && this.byVe.size) {
+      let it = this.wallCursor?.next();
+      if (!it || it.done) { this.wallCursor = this.byVe.values(); it = this.wallCursor.next(); if (it.done) break; }
+      const c = it.value; n++;
+      const wm = read(c.x, c.y, c.level - 1);
+      if (wm !== c.wallMaterial) { if (wm === undefined) delete c.wallMaterial; else c.wallMaterial = wm; this.touch(c.level); changed++; }
+    }
+    return changed;
   }
 
   /** Re-pick dirty levels. Returns the view entities whose binding changed (their static chunk re-signs on its own). */
@@ -100,7 +119,7 @@ function sameFx(a: RoofFxBinding | undefined, b: RoofFxBinding | undefined): boo
 
 /**
  * ADR-397 material hook: the wall material under a roof tile, `<tier key>` or `<tier key>:<wall variant name>` (e.g.
- * "wood", "wood:log"), read from any wall on the tile's four edges one level down. RfxConfig.materials.rules map it to
+ * "wood", "twig:clan_palisade"), read from any wall on the tile's four edges one level down. RfxConfig.materials.rules map it to
  * a skin (Art's split-log shakes for log-wall cabins); a region uses its tiles' majority. undefined = no wall found.
  */
 export function roofWallMaterial(net: World, x: number, y: number, wallLevel: number): string | undefined {
@@ -113,8 +132,25 @@ export function roofWallMaterial(net: World, x: number, y: number, wallLevel: nu
     const bp = net.get(e, BuildPiece); if (!bp) continue;
     const def = defs.pieces.get(bp.type); if (!def || def.family !== "wall") continue;
     const tierKey = defs.tiers[bp.tier]?.key ?? String(bp.tier);
-    const vn = def.variantNames[bp.variant];
+    const vn = bp.variant ? def.variantNames[bp.variant] : undefined; // variant 0 = the plain look: the bare tier
     return vn ? `${tierKey}:${vn}` : tierKey;
+  }
+  return undefined;
+}
+
+/**
+ * ADR-400: the piece art for a roof piece with no legacy sprite (the ADR-398 forms cottage / gambrel / shed). It is the
+ * rfx sprite the ADR-397 selection picks for that piece standing alone, at its tier (Art's own art for that form, not
+ * borrowed), so that piece still gets a view entity, a ghost and a Canvas2D / streaming-time picture. Once placed next to
+ * others, the continuous-roof binding takes over as for every rfx roof. `art(spriteKey)` returns the sprite's
+ * `building.piece` (`<base>@<variant>`) or undefined. undefined when the key has a legacy sprite or is not an rfx-only form.
+ */
+export function rfxStandIn(key: string, rot: number, tier: number, art: (spriteKey: string) => string | undefined, cfg: RfxConfig = RFX): { pieceKey: string; variant: string; row: number } | undefined {
+  const g = cfg.groups[key]; if (g === undefined || g === "legacy") return undefined;
+  const p = rfxPickLevel([{ x: 0, y: 0, key, rot: rot & 3, tier }], 0, cfg).get(rfxCell(0, 0)); if (!p) return undefined;
+  for (let t = tier; t <= 4; t++) for (const k of rfxSpriteKeys(p.stem, t, undefined, cfg)) { // below the form's lowest tier: its nearest tier's art
+    const piece = art(k); const at = piece?.indexOf("@") ?? -1;
+    if (piece && at > 0) return { pieceKey: piece.slice(0, at), variant: piece.slice(at + 1), row: p.row };
   }
   return undefined;
 }

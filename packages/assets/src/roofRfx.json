@@ -1,5 +1,5 @@
 {
-  "$doc": "ADR-397: continuous-roof selection (Art & Assets docs/ART_KEYS_ROOFS.md \u00a74). rise = px per band at 1x (1 level = 48 px); kmax = band clamp. groups: piece key -> membership group (pieces of different groups never merge). materials: ADR-397 skin hook (rules matched against the building's wall material; empty until Art ships a skin).",
+  "$doc": "ADR-397: continuous-roof selection (Art & Assets docs/ART_KEYS_ROOFS.md \u00a74). rise = px per band at 1x (1 level = 48 px); kmax = band clamp. seatPx (ADR-404) = px every part of the form is raised so it rests on the wall tops (adr404_roof_seat test). groups: piece key -> membership group (pieces of different groups never merge). materials: ADR-397 skin hook (rules matched against the building's wall material; empty until Art ships a skin).",
   "seed": 1391461270,
   "levelPx": 48,
   "forms": {
@@ -8,21 +8,24 @@
         14
       ],
       "kmax": 3,
-      "crest": true
+      "crest": true,
+      "seatPx": 9
     },
     "gab": {
       "rise": [
         14
       ],
       "kmax": 5,
-      "crest": true
+      "crest": true,
+      "seatPx": 6
     },
     "flt": {
       "rise": [
         0
       ],
       "kmax": 0,
-      "crest": false
+      "crest": false,
+      "seatPx": 3
     },
     "cot": {
       "rise": [
@@ -30,7 +33,8 @@
         16
       ],
       "kmax": 3,
-      "crest": true
+      "crest": true,
+      "seatPx": 8
     },
     "gam": {
       "rise": [
@@ -38,14 +42,16 @@
         8
       ],
       "kmax": 5,
-      "crest": true
+      "crest": true,
+      "seatPx": 6
     },
     "shd": {
       "rise": [
         9
       ],
-      "kmax": 64,
-      "crest": false
+      "kmax": 12,
+      "crest": false,
+      "seatPx": 4
     }
   },
   "groups": {
@@ -62,107 +68,8 @@
   "materials": {
     "skinKey": "{base}_{skin}{tier}",
     "rules": [
-      {
-        "wall": "twig",
-        "skin": "shk",
-        "forms": [
-          "hip",
-          "gab",
-          "shd",
-          "cot"
-        ]
-      },
-      {
-        "wall": "wood",
-        "skin": "shk",
-        "forms": [
-          "hip",
-          "gab",
-          "shd",
-          "cot"
-        ]
-      },
-      {
-        "wall": "twig:clan_palisade",
-        "skin": "shk",
-        "forms": [
-          "hip",
-          "gab",
-          "shd",
-          "cot"
-        ]
-      },
-      {
-        "wall": "wood:clan_palisade",
-        "skin": "shk",
-        "forms": [
-          "hip",
-          "gab",
-          "shd",
-          "cot"
-        ]
-      },
-      {
-        "wall": "stone:clan_palisade",
-        "skin": "shk",
-        "forms": [
-          "hip",
-          "gab",
-          "shd",
-          "cot"
-        ]
-      },
-      {
-        "wall": "metal:clan_palisade",
-        "skin": "shk",
-        "forms": [
-          "hip",
-          "gab",
-          "shd",
-          "cot"
-        ]
-      },
-      {
-        "wall": "reinforced:clan_palisade",
-        "skin": "shk",
-        "forms": [
-          "hip",
-          "gab",
-          "shd",
-          "cot"
-        ]
-      },
-      {
-        "wall": "site:cabin",
-        "skin": "shk",
-        "forms": [
-          "hip",
-          "gab",
-          "shd",
-          "cot"
-        ]
-      },
-      {
-        "wall": "site:hunter_shack",
-        "skin": "shk",
-        "forms": [
-          "hip",
-          "gab",
-          "shd",
-          "cot"
-        ]
-      },
-      {
-        "wall": "site:fisher_hut",
-        "skin": "shk",
-        "forms": [
-          "hip",
-          "gab",
-          "shd",
-          "cot"
-        ]
-      }
+      { "skin": "shk", "forms": ["hip", "gab", "shd", "cot"], "wallTiers": ["twig", "wood"], "wallVariants": ["clan_palisade"], "sites": ["cabin", "hunter_shack", "fisher_hut"] }
     ],
-    "$doc": "Art docs/ART_KEYS_ROOFS.md \u00a78: split-log shakes (shk) on log-wall buildings. log walls = twig and wood tier walls (owner: shakes on wood-wall cabins too). '<tier>:clan_palisade' activates once the wall piece gets variantNames; 'site:<kind>' is what the client reports for walls of an abandoned cabin / hunter_shack / fisher_hut site (EA wiring). Region skin = strict majority of the walls' votes, tie -> base. Art exists for hip/shd at t0 and hip/gab/shd/cot at t1; elsewhere rfxSpriteKeys falls back to the base key."
+    "$doc": "Art docs/ART_KEYS_ROOFS.md \u00a78: split-log shakes (shk) on log-wall buildings. log walls = twig and wood tier walls (owner: shakes on wood-wall cabins too). ADR-402 compact rule: wallTiers = the log-wall tier set, ONE entry (plain-look walls of those tiers); wallVariants = named wall variants at any tier (wall variantNames[3] clan_palisade); sites = Art's 'site:<kind>' entries, kept for a client that reports them (cabin ruins already get shakes from their wood walls). Region skin = strict majority of the walls' votes, tie -> base. Art exists for hip/shd at t0 and hip/gab/shd/cot at t1; elsewhere rfxSpriteKeys falls back to the base key."
   }
 }

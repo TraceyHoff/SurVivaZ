@@ -26,3 +26,10 @@ export function roofMenu<T extends { key: string }>(all: readonly T[], forms: Re
 export function roofMenuLabel(key: string, forms: ReadonlySet<string>): string {
   const f = ROOF_FORM_OF[key]; return f && forms.has(f) && LABEL[key] ? LABEL[key] : key.replace(/_/g, " ");
 }
+
+/** ADR-400: the piece key whose `build_<key>_tN` icon a roof tile shows: Art's dedicated form icons (items_build_rfx:
+ *  build_rfx_hip / _gab / _flt) once that form draws continuously; the new forms already use their own piece icons. */
+const FORM_ICON: Readonly<Record<string, string>> = { roof_slope: "rfx_hip", roof_gable: "rfx_gab", roof_flat: "rfx_flt" };
+export function roofMenuIconKey(key: string, forms: ReadonlySet<string>): string {
+  const f = ROOF_FORM_OF[key]; return f && forms.has(f) && FORM_ICON[key] ? FORM_ICON[key] : key;
+}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { hashU32 } from "@engine/gameplay";
-import { rfxHashU32 } from "@engine/assets";
+import { rfxHashU32, rfxSeat } from "@engine/assets";
+const G = rfxSeat("gab");
 import { RoofTiler, type RoofCell } from "../src/roof-tiler.js";
 
 const tiler = (keys: string[]) => { const ids = new Map(keys.map((k, i) => [k, i + 100])); let probes = 0; return { ids, get probes() { return probes; }, t: new RoofTiler({ roofSpriteId: (k) => { probes++; return ids.get(k); } }) }; };
@@ -16,12 +17,12 @@ describe("ADR-397 RoofTiler (client)", () => {
     expect(t.pick(5)?.form).toBe("hip"); // the selection itself still ran
   });
   it("resolves Art's keys with tier, lift and overlays; re-picks the level on place / remove only", () => {
-    const k = tiler(["rfx_gab_lo_e_t1", "rfx_gab_up_r_t1", "rfx_gab_verge_r_t1", "rfx_gab_wall_t1"]);
+    const k = tiler(["rfx_gab_lo_e_t1", "rfx_gab_up_r_t1", "rfx_gab_up_vr_t1", "rfx_gab_wall_t1"]);
     for (const c of cells("roof_gable", 4, 3)) k.t.add(c);
     const changed = k.t.flush(); expect(changed.length).toBe(12);
     const mid = k.t.binding(5)!; // (0,1): up_r with a verge and one wall strip
-    expect(mid).toEqual({ vis: k.ids.get("rfx_gab_up_r_t1"), row: 0, liftPx: 14, overlays: [{ vis: k.ids.get("rfx_gab_verge_r_t1"), row: 1, liftPx: 14 }, { vis: k.ids.get("rfx_gab_wall_t1"), row: 1, liftPx: 0 }] });
-    expect(k.t.binding(1)!.vis).toBe(k.ids.get("rfx_gab_lo_e_t1")); // verge_el art missing -> no overlay
+    expect(mid).toEqual({ vis: k.ids.get("rfx_gab_up_r_t1"), row: 0, liftPx: 14 + G, overlays: [{ vis: k.ids.get("rfx_gab_up_vr_t1"), row: 1, liftPx: 14 + G }, { vis: k.ids.get("rfx_gab_wall_t1"), row: 1, liftPx: G }] }); // ADR-404: + the gable seat
+    expect(k.t.binding(1)!.vis).toBe(k.ids.get("rfx_gab_lo_e_t1")); // lo_vel art missing -> no overlay
     expect(k.t.binding(1)!.overlays).toEqual([]);
     const probes = k.probes; expect(k.t.flush()).toEqual([]); expect(k.probes).toBe(probes); // steady frame: no work
     const v0 = k.t.version.get(1); k.t.remove(9); expect(k.t.version.get(1)).toBe(v0! + 1);
@@ -39,7 +40,7 @@ describe("ADR-397 RoofTiler (client)", () => {
     const k = tiler(["rfx_hip_up_p_t1", "rfx_hip_lo_e_t1"]);
     for (const c of cells("roof_slope", 3, 3)) if (!(c.x === 1 && c.y === 1)) k.t.add(c);
     const p = k.t.preview({ x: 1, y: 1, key: "roof_slope", rot: 0, tier: 1 }, 1)!;
-    expect(p.pick).toMatchObject({ band: 1, shape: "p" }); expect(p.fx).toMatchObject({ vis: k.ids.get("rfx_hip_up_p_t1"), liftPx: 14 });
+    expect(p.pick).toMatchObject({ band: 1, shape: "p" }); expect(p.fx).toMatchObject({ vis: k.ids.get("rfx_hip_up_p_t1"), liftPx: 14 + rfxSeat("hip") }); // ADR-404 seat
     expect(k.t.preview({ x: 0, y: 0, key: "wall", rot: 0, tier: 1 }, 1)).toBeUndefined();
   });
 });

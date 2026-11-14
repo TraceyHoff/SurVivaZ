@@ -161,7 +161,8 @@
       "hp": 250,
       "blocksPath": true,
       "variants": 4,
-      "$variants": "0 plain, 1 wall_clan_wood, 2 wall_clan_stone, 3 wall_clan_palisade (art only; stats per material tier)",
+      "variantNames": ["plain", "clan_wood", "clan_stone", "clan_palisade"],
+      "$variants": "0 plain, 1 wall_clan_wood, 2 wall_clan_stone, 3 wall_clan_palisade (art only; stats per material tier). ADR-402: variantNames expose the look to the roof skin rule (<tier>:clan_palisade); the art still resolves by index (no wall@<name> sprites), so drawing is unchanged.",
       "family": "wall"
     },
     {

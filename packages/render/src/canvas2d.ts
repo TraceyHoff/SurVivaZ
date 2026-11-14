@@ -124,6 +124,8 @@ export class Canvas2DRenderer {
   dispose(): void {}
 
   /** Atlas image for an atlas key (PNG at scale 1), loaded on first use; null while loading / failed. */
+  /** ADR-401: the sprite's atlas image is loaded (starts the load when not). */
+  private spriteImageReady(reg: AssetRegistry, vis: number): boolean { let a; try { a = reg.sprite(vis).atlas; } catch { return false; } return this.image(a.key) !== null; }
   image(atlasKey: string): HTMLImageElement | ImageBitmap | null {
     if (this.images.has(atlasKey)) return this.images.get(atlasKey)!;
     this.images.set(atlasKey, null);
@@ -346,20 +348,26 @@ export class Canvas2DRenderer {
   /** ADR-197: building pieces as painter items: level-major, decks under their floor's uprights, iso order, unique tie-break. */
   gatherPieces(world: World, reg: AssetRegistry, time = this.clock): C2DPiece[] {
     const bpd = this.bindings.buildPiece; if (!bpd || !world.isRegistered(bpd)) return [];
-    const iso = this.camera.iso; const hw = iso.tileW / 2, hh = iso.tileH / 2; const q = (iso.view ?? 0) & 3; const raw: { e: Entity; ax: number; ay: number; fw: number; fh: number; level: number; layer: number; z: number; vis: number; rot: number; dmg: number; ghost: boolean; deck: boolean; top: number | undefined; px: number; py: number; tint: number }[] = [];
+    const iso = this.camera.iso; const hw = iso.tileW / 2, hh = iso.tileH / 2; const q = (iso.view ?? 0) & 3; const raw: { e: Entity; ax: number; ay: number; fw: number; fh: number; level: number; layer: number; z: number; vis: number; rot: number; dmg: number; ghost: boolean; deck: boolean; top: number | undefined; px: number; py: number; tint: number; lift: number; ordFrac: number }[] = [];
     this.decks.clear();
     for (const e of world.query([bpd, Transform])) {
-      const b = world.get(e, bpd)!; const t = world.get(e, Transform)!; let sd; try { sd = reg.sprite(b.visualId); } catch { continue; } if (!sd.building) continue;
-      const rot = b.rotation & 3; const fw = rot & 1 ? sd.building.footprint.h : sd.building.footprint.w, fh = rot & 1 ? sd.building.footprint.w : sd.building.footprint.h;
+      const b = world.get(e, bpd)!; const t = world.get(e, Transform)!;
+      // ADR-401: continuous roof (same binding and fallback as WebGL2): the rfx tile raised by its band once its page image is
+      // loaded, its overlays right after it; else the legacy piece art. ADR-398 forms have no legacy art (visualId 0).
+      const fx = this.bindings.pieceRoofFx?.(e); const fxOn = fx !== undefined && this.spriteImageReady(reg, fx.vis);
+      const vis0 = fxOn ? fx.vis : b.visualId, rot0 = fxOn ? (b.rotation & ~3) | (fx.row & 3) : b.rotation;
+      let sd; try { sd = reg.sprite(vis0); } catch { continue; } if (!sd.building) continue;
+      const rot = rot0 & 3; const fw = rot & 1 ? sd.building.footprint.h : sd.building.footprint.w, fh = rot & 1 ? sd.building.footprint.w : sd.building.footprint.h;
       const roof = (sd.building.piece ?? sd.key).startsWith("roof"); const deck = b.layer === 0 && !roof; const top = deck ? deckTopPx(sd.key) : undefined;
-      const r = { e, ax: Math.floor(t.x), ay: Math.floor(t.y), fw, fh, level: b.level, layer: b.layer, z: floorToTerrainZ(b.level, t.z), vis: b.visualId, rot: b.rotation, dmg: b.damageStage, ghost: b.ghost > 0, deck, top, px: t.x, py: t.y, tint: (b as { tint?: number }).tint ?? 0 };
-      raw.push(r); if (deck && !r.ghost && top !== undefined) this.decks.add(r.ax, r.ay, fw, fh, r.level, top);
+      const r = { e, ax: Math.floor(t.x), ay: Math.floor(t.y), fw, fh, level: b.level, layer: b.layer, z: floorToTerrainZ(b.level, t.z), vis: vis0, rot: rot0, dmg: b.damageStage, ghost: b.ghost > 0, deck, top, px: t.x, py: t.y, tint: (b as { tint?: number }).tint ?? 0, lift: fxOn ? fx.liftPx : 0, ordFrac: 0 };
+      raw.push(r);
+      if (fxOn) for (let oi = 0; oi < fx.overlays.length; oi++) { const o = fx.overlays[oi]!; if (this.spriteImageReady(reg, o.vis)) raw.push({ ...r, vis: o.vis, rot: (b.rotation & ~3) | (o.row & 3), lift: o.liftPx, ordFrac: (oi + 1) / (fx.overlays.length + 2) }); } if (deck && !r.ghost && top !== undefined) this.decks.add(r.ax, r.ay, fw, fh, r.level, top);
       // ADR-211: an L corner = its tier's straight wall on both arm edges (same pivots/flags as an edge wall) + the post art
       const armKey = lCornerArmPiece(sd.building.piece); const arm = armKey ? reg.spriteForPiece(armKey) : undefined;
       if (arm !== undefined) { let ad; try { ad = reg.sprite(arm); } catch { ad = undefined; }
         if (ad?.building) for (const a of lCornerArmPivots(t.x, t.y, b.rotation)) {
           const afw = a.rot & 1 ? ad.building.footprint.h : ad.building.footprint.w, afh = a.rot & 1 ? ad.building.footprint.w : ad.building.footprint.h;
-          raw.push({ ...r, ax: Math.floor(a.x), ay: Math.floor(a.y), fw: afw, fh: afh, layer: 1, vis: arm, rot: a.rot | ROT_EXACT_PIVOT | ROT_DECK_LIFT, deck: false, top: undefined, px: a.x, py: a.y });
+          raw.push({ ...r, ax: Math.floor(a.x), ay: Math.floor(a.y), fw: afw, fh: afh, layer: 1, vis: arm, rot: a.rot | ROT_EXACT_PIVOT | ROT_DECK_LIFT, deck: false, top: undefined, px: a.x, py: a.y, lift: 0, ordFrac: 0 });
         } }
     }
     const out: C2DPiece[] = [];
@@ -380,13 +388,13 @@ export class Canvas2DRenderer {
       if (spk.flags) { const sc = this.seasonFrame(img, { ...f, atlas: f0.atlas, x: f.x, y: f.y }, spk.flags, entityIndex(r.e), tintSalt ? `${f0.x},${f0.y}|${tintSalt}` : ""); if (sc) { img = sc; f = { ...f, x: 0, y: 0 }; } }
       // ADR-210: exact pivot (edge midpoint / vertex / tri centroid) and deck-top lift, mirroring the WebGL2 path
       const exact = (r.rot & ROT_EXACT_PIVOT) !== 0; const pvx = exact ? r.px : r.ax + r.fw / 2, pvy = exact ? r.py : r.ay + r.fh / 2;
-      const lift = r.rot & ROT_DECK_LIFT ? (exact ? this.decks.topNear(pvx, pvy, r.level) : this.decks.topOver(r.ax, r.ay, r.fw, r.fh, r.level)) : 0;
+      const lift = (r.rot & ROT_DECK_LIFT ? (exact ? this.decks.topNear(pvx, pvy, r.level) : this.decks.topOver(r.ax, r.ay, r.fw, r.fh, r.level)) : 0) + r.lift; // + ADR-401 roof band lift
       const p0 = worldToScreen(pvx, pvy, r.z, iso); const p = { sx: p0.sx, sy: p0.sy - lift };
       // ADR-253: depth / tie-breaks / deck sides from the VIEW footprint and pivot (decks.mask stays in world tiles)
       const vr = viewRect(r.ax, r.ay, r.fw, r.fh, q); const pv = toView(pvx, pvy, q);
       const mask = r.top === undefined || exact ? 0 : rotSideMask(this.decks.mask(r.ax, r.ay, r.fw, r.fh, r.level, r.top), q);
       const isoD = (exact ? pv.u + pv.v - 1 : vr.x + vr.w - 1 + vr.y + vr.h - 1) + r.layer * 0.01 + (exact ? exactTieBreak(pv.u, pv.v, r.ghost) : pieceTieBreak(vr.x, vr.y, r.ghost)) + (r.rot & ROT_VERTEX_POST ? VERTEX_POST_BIAS : 0);
-      out.push({ e: r.e, sx: p.sx, sy: p.sy, depth: r.level * LEVEL_DEPTH + (r.deck ? DECK_DEPTH : 0) + isoD, ord: pieceOrder(r.level, r.layer, vr.x, vr.y) * 2 + (r.ghost ? 1 : 0), img, f,
+      out.push({ e: r.e, sx: p.sx, sy: p.sy, depth: r.level * LEVEL_DEPTH + (r.deck ? DECK_DEPTH : 0) + isoD, ord: pieceOrder(r.level, r.layer, vr.x, vr.y) * 2 + (r.ghost ? 1 : 0) + r.ordFrac, img, f,
         clip: mask ? deckClipPolygon(vr.w, vr.h, mask, r.top!, hw, hh) : undefined, seams: mask ? deckSeamPatches(vr.w, vr.h, mask, r.top!, hw, hh) : undefined, ghost: r.ghost, hearth: fire === 2 && !r.ghost && r.dmg === 0, scale: this.bindings.pieceScale?.(r.e) ?? 1 });
     }
     return out;

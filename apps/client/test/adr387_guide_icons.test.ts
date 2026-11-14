@@ -102,7 +102,7 @@ describe("ADR-387 guide fact-row icons in the panel", () => {
         }
       });
     }
-    expect(checked).toBe(64);
+    expect(checked).toBe(65); // ADR-400: + the spring temperatures row (ic_blossom)
     // the broken-leg listing specifically: the broken-leg status icon before "Broken Leg"
     sectionButton(el, "diseases").click();
     const detail = el.querySelector("[data-role=guide-detail]")!;

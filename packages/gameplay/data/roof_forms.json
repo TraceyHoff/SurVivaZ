@@ -1,6 +1,6 @@
 {
-  "$doc": "ADR-398: continuous-roof forms on abandoned sites. live=false until Art & Assets' rfx_cot / rfx_gam / rfx_shd pages land (the new pieces have no legacy art, so a site roof of them would draw nothing). kinds: abandoned kind key -> piece key that replaces the ADR-311 style on that kind's top-story roof.",
-  "live": false,
+  "$doc": "ADR-398: continuous-roof forms on abandoned sites. live: ADR-400 flipped it on with Art's rfx_cot / rfx_gam / rfx_shd pages (4a5ac969; the new pieces have no legacy art, so turn it off if those pages are ever removed). kinds: abandoned kind key -> piece key that replaces the ADR-311 style on that kind's top-story roof.",
+  "live": true,
   "kinds": {
     "barn": "roof_gambrel", "mill": "roof_gambrel", "stable": "roof_gambrel",
     "shed": "roof_shed", "hunter_shack": "roof_shed",

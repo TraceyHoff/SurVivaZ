@@ -8,7 +8,7 @@
  * (present = unlocked); member rows `[data-rank=member|officer|leader]`; tooltips `[data-tip]` (never `title=`).
  * Chat log lines (game-menus.ts) carry `[data-chan=global|local|party|clan|trade|whisper|system]`.
  */
-import { roofMenu, roofMenuLabel } from "./roof-menu.js";
+import { roofMenu, roofMenuIconKey, roofMenuLabel } from "./roof-menu.js";
 import { workerJobMenu, beginWorkerJob } from "./worker-job-menu.js";
 import { revealAboveFooter } from "./back-history.js";
 import { deployKitIntent, isKit } from "./vehicle-controls.js";
@@ -623,7 +623,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
           const costTxt = t.cost.map((x) => `${x.count} ${x.name}`).join(" · ") || "free";
           const b = btn("", `recent-piece-${p.id}`, () => choose(p), { role: "piece", pressed: p.id === buildSel.piece, alt: !t.affordable || lk,
             data: { padLabel: lk ? "Locked" : t.affordable ? "Place" : "Can't afford", glyph: pieceGlyph(p.key), ...(lk ? { locked: "1" } : {}), ...(!t.affordable ? { short: "1" } : {}) } });
-          iconize(b, buildIconKey(p.key, t.tier, p.tiers.length > 1), isClanTintedIcon(p.key));
+          iconize(b, buildIconKey(roofMenuIconKey(p.key, roofForms), t.tier, p.tiers.length > 1), isClanTintedIcon(p.key));
           const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = name;
           const ct = document.createElement("span"); ct.className = "ct"; ct.textContent = lk ? "Locked" : costTxt;
           b.append(nm, ct); b.setAttribute("aria-label", `${name}, ${lk ? (t.requirement ?? "locked") : t.affordable ? costTxt : `need ${costTxt}`}`);
@@ -638,7 +638,7 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
         const costTxt = t.cost.map((x) => `${x.count} ${x.name}`).join(" · ") || "free";
         const b = btn("", `piece-${p.id}`, () => choose(p), { role: "piece", pressed: p.id === buildSel.piece, alt: !t.affordable || lk,
           data: { padLabel: lk ? "Locked" : t.affordable ? "Place" : "Can't afford", glyph: pieceGlyph(p.key), ...(lk ? { locked: "1" } : {}), ...(!t.affordable ? { short: "1" } : {}) } });
-        iconize(b, buildIconKey(p.key, t.tier, p.tiers.length > 1), isClanTintedIcon(p.key));
+        iconize(b, buildIconKey(roofMenuIconKey(p.key, roofForms), t.tier, p.tiers.length > 1), isClanTintedIcon(p.key));
         const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = name;
         const ct = document.createElement("span"); ct.className = "ct"; ct.textContent = lk ? "Locked" : costTxt;
         b.append(nm, ct); b.setAttribute("aria-label", `${name}, ${lk ? (t.requirement ?? "locked") : t.affordable ? costTxt : `need ${costTxt}`}`);

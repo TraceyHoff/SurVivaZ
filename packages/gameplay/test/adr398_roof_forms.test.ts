@@ -8,10 +8,15 @@ describe("ADR-398 continuous-roof forms on abandoned sites", () => {
     expect(keys.slice(-3)).toEqual(["roof_cottage", "roof_gambrel", "roof_shed"]);
     for (const k of ["roof_cottage", "roof_gambrel", "roof_shed"]) { const p = d.pieces.get(d.pieceId(k))!; expect(p.roof).toBe(true); expect(p.tiered).toBe(true); }
   });
-  it("stays off until Art's rfx pages ship: every kind keeps its ADR-311 pick", () => {
-    expect(ROOF_FORMS.live).toBe(false);
-    for (const k of Object.values(AbandonedKind)) expect(roofFormStyle(k)).toBeUndefined();
-    for (let s = 0; s < 40; s++) for (const p of planAbandonedSite(s, 0, 0, { kind: AbandonedKind.Barn }).pieces) expect(["roof_gambrel", "roof_shed", "roof_cottage"]).not.toContain(p.key);
+  it("ADR-400: live with Art's rfx pages; mapped kinds get their form, the others keep their ADR-311 pick", () => {
+    expect(ROOF_FORMS.live).toBe(true);
+    for (let s = 0; s < 40; s++) {
+      const roofs = planAbandonedSite(s, 0, 0, { kind: AbandonedKind.Barn }).pieces.filter((p) => p.role === "roof" && p.key !== "roof_chimney");
+      expect(roofs.length).toBeGreaterThan(0); expect(roofs.some((p) => p.key === "roof_gambrel")).toBe(true);
+      for (const p of planAbandonedSite(s, 0, 0, { kind: AbandonedKind.Manor }).pieces) expect(["roof_gambrel", "roof_shed", "roof_cottage"]).not.toContain(p.key);
+    }
+    const off = { ...ROOF_FORMS, live: false };
+    for (const k of Object.values(AbandonedKind)) expect(roofFormStyle(k, off)).toBeUndefined();
   });
   it("when live: barn / mill / stable -> gambrel, shed / hunter shack -> shed, cottage / farmhouse -> cottage", () => {
     const live = { ...ROOF_FORMS, live: true };

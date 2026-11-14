@@ -64,6 +64,7 @@ const EXPECTED_MAP: Readonly<Record<string, GuideRowIcon>> = {
   "combat.fireSpreadRadiusTiles": file("ic_fire.png"),
   "seasons.summer.tempRange": file("ic_sun.png"),
   "seasons.summer.heatWaveRange": file("ic_sun.png"),
+  "seasons.spring.tempRange": file("ic_blossom.png"),
   "seasons.fall.tempRange": file("ic_leaf.png"),
   "seasons.winter.tempRange": file("ic_snowflake.png"),
 };
@@ -71,7 +72,7 @@ const EXPECTED_MAP: Readonly<Record<string, GuideRowIcon>> = {
 /** The ic_ files the derivation may name (existence in ICON_DATA is pinned by the ADR-387 client test). */
 const KNOWN_FILES = new Set([
   "ic_backpack.png", "ic_snowflake.png", "ic_temp.png", "ic_fire.png",
-  "ic_plant.png", "ic_sun.png", "ic_leaf.png",
+  "ic_plant.png", "ic_sun.png", "ic_leaf.png", "ic_blossom.png",
 ]);
 
 /** Every fact row in the shipped guide, with its resolved icon (raw and resolved stay in order). */
@@ -137,7 +138,7 @@ describe("ADR-387 guide fact-row icons", () => {
       expect(row, fact).toBeDefined();
       expect(guideFactIcon(fact, row.format)).toEqual(icon);
     }
-    expect(Object.keys(EXPECTED_MAP).length).toBe(40);
+    expect(Object.keys(EXPECTED_MAP).length).toBe(41); // ADR-400: + spring (ic_blossom)
   });
 
   it("every icon the derivation returns resolves (guide keys in their defs tables, files known)", () => {
@@ -157,17 +158,17 @@ describe("ADR-387 guide fact-row icons", () => {
     }
   });
 
-  it("pins the coverage: 133 fact rows, 64 with icons (18 file, 15 condition, 31 guide)", () => {
+  it("pins the coverage: 133 fact rows, 65 with icons (19 file, 15 condition, 31 guide)", () => {
     const rows = allFactRows();
     expect(rows.length).toBe(133);
     const withIcon = rows.filter((r) => r.icon);
-    expect(withIcon.length).toBe(64);
-    expect(withIcon.filter((r) => r.icon!.kind === "file").length).toBe(18);
+    expect(withIcon.length).toBe(65);
+    expect(withIcon.filter((r) => r.icon!.kind === "file").length).toBe(19);
     expect(withIcon.filter((r) => r.icon!.kind === "condition").length).toBe(15);
     expect(withIcon.filter((r) => r.icon!.kind === "guide").length).toBe(31);
     // rows without an icon describe a number, not a thing — spot-check the shape of the gap list
     const noIcon = rows.filter((r) => !r.icon).map((r) => r.label);
-    expect(noIcon).toContain("Spring temperatures"); // no HUD season icon for spring
+    expect(noIcon).not.toContain("Spring temperatures"); // ADR-400: spring has ic_blossom now
     expect(noIcon).toContain("Zombies expected each minute at night, per player"); // no zombie icon
     expect(noIcon).toContain("Tiers that can catch fire");
   });

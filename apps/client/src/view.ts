@@ -85,7 +85,7 @@ import { task361AtlasSources, installVehicleMenuIcons, TASK361_ATLAS_KEYS } from
 import { installGuideArt } from "./task364-art.js";
 import { installGuideMenuIcon } from "./guide-art.js";
 import { stumpKeys } from "./stumps.js";
-import { RoofTiler, roofWallMaterial } from "./roof-tiler.js";
+import { RoofTiler, rfxStandIn, roofWallMaterial } from "./roof-tiler.js";
 /** `?cam=animal`: debug camera that follows the first ambient animal instead of the player. */
 const CAM_ANIMAL = typeof location !== "undefined" && new URLSearchParams(location.search).get("cam") === "animal";
 /** Max bytes for the sprite texture array (mips included) before customization layers are dropped. */
@@ -485,9 +485,15 @@ export class IsoView {
     // ADR-268: the visible hologram is the exact snapped request that Build confirms.
     // Easing between cells showed a different location from the authoritative preview.
     const gx = p.x, gy = p.y;
-    this.ghost.sync({ pieceKey: this.pk(p.pieceKey) ?? p.pieceKey, x: gx, y: gy, rot: p.rot, valid: p.valid }, { z: baseZ, level: p.level, tier: p.tier, rotSteps: p.rotSteps, rotFlags: pieceRotFlags(def), ...(names[p.variant] ? { variant: names[p.variant]! } : { variant: p.variant }) });
+    const si = def?.roof && this.registry.spriteForPiece(this.pk(p.pieceKey) ?? p.pieceKey) === undefined ? this.roofStandIn(def.key, quarterTurn(p.rot, p.rotSteps), p.tier ?? 0) : undefined; // ADR-400
+    if (si) this.ghost.sync({ pieceKey: si.pieceKey, x: gx, y: gy, rot: si.row, valid: p.valid }, { z: baseZ, level: p.level, rotFlags: pieceRotFlags(def), variant: si.variant });
+    else this.ghost.sync({ pieceKey: this.pk(p.pieceKey) ?? p.pieceKey, x: gx, y: gy, rot: p.rot, valid: p.valid }, { z: baseZ, level: p.level, tier: p.tier, rotSteps: p.rotSteps, rotFlags: pieceRotFlags(def), ...(names[p.variant] ? { variant: names[p.variant]! } : { variant: p.variant }) });
     this.previewRoof(p, def, net);
     { const ge = this.ghost.entity, sc = this.pieceArtScale(p.pieceKey); if (ge !== null) { if (sc !== 1) this.pieceScales.set(ge, sc); else this.pieceScales.delete(ge); } } // ADR-227
+  }
+  /** ADR-400: see rfxStandIn (roof-tiler.ts). */
+  private roofStandIn(key: string, rot: number, tier: number): ReturnType<typeof rfxStandIn> {
+    return rfxStandIn(key, rot, tier, (k) => { const id = this.sid(k); return id === undefined ? undefined : this.registry.sprite(id).building?.piece; });
   }
   /** ADR-397: the placement preview runs the same continuous-roof selection, with the ghost tile as a member (memoised per level version). */
   private previewRoof(p: import("@engine/gameplay").BuildPreview, def: ReturnType<ReturnType<typeof gameplayDefs>["pieces"]["get"]>, net: World): void {
@@ -747,6 +753,7 @@ export class IsoView {
     if (r.vfx) this.raid.step(this.registry, r.vfx, this.raidPieces, performance.now() / 1000); this.raidPieces.length = 0; // ADR-242 (Canvas2D: no vfx layer)
     for (const [ne, ve] of this.map) if (!seen.has(ne)) { this.roofs.remove(ve); if (ve === this.focusVe) { r.setFocusEntity(-1); this.focusVe = -1; } v.destroy(ve); this.map.delete(ne); this.corrSampler.forget(ne); this.lastFace.delete(ne); this.characters.delete(ve); this.movingVe.delete(ve); this.driverVe.delete(ve); this.bedOf.delete(ve); this.carriedOf.delete(ve); this.lightOf.delete(ne); this.dropHeldLight(ve); this.pieceStates.delete(ve); this.doors.forget(ve); this.pieceScales.delete(ve); this.pieceLit.delete(ve); this.litHearths.delete(ve); this.pieceTintPairs.delete(ve); this.pieceTintIdx.delete(ve); this.nodeAmt.delete(ne); this.nodeHit.delete(ne); this.animalHp.delete(ne); this.animalPrev.delete(ne); this.scales.delete(ve); this.hitSeen.delete(ne); this.hitPoseOf.delete(ve); this.gearOf.delete(ve); }
 
+    this.roofs.refreshWalls((x, y, l) => roofWallMaterial(net, x, y, l)); // ADR-402: wall material changes reach the roof
     this.roofs.flush(); // ADR-397: re-picks only levels where a roof was placed / removed
     this.syncTerrainLadders(net, tiles);
     this.syncHatchBottoms(net, tiles);
@@ -1135,7 +1142,9 @@ export class IsoView {
     }
     if (net.has(e, GPiece) && defs) {
       const p = net.get(e, GPiece)!; const def = defs.pieces.get(p.type);
-      const vis = buildPieceVisual(this.registry, { type: p.type, ...pieceArt(net, p.type, p.rot), tint: p.tint, paint: p.paint, damageStage: p.damageStage }, { tier: p.tier, pieceKey: (t) => this.pk(defs.pieces.get(t)?.key), ...pieceVariantOpts(def?.variantNames, p.variant) });
+      let vis = buildPieceVisual(this.registry, { type: p.type, ...pieceArt(net, p.type, p.rot), tint: p.tint, paint: p.paint, damageStage: p.damageStage }, { tier: p.tier, pieceKey: (t) => this.pk(defs.pieces.get(t)?.key), ...pieceVariantOpts(def?.variantNames, p.variant) });
+      const si = !vis.visualId && def?.roof ? this.roofStandIn(def.key, quarterTurn(p.rot), p.tier) : undefined; // ADR-400: rfx-only roof forms
+      if (si) vis = buildPieceVisual(this.registry, { type: p.type, rot: si.row, tint: p.tint, paint: p.paint, damageStage: p.damageStage }, { pieceKey: () => si.pieceKey, variant: si.variant });
       if (!vis.visualId) return undefined;
       const lh = (defs as unknown as { building?: { levelHeight?: number } }).building?.levelHeight ?? 1;
       const z = net.get(e, Transform)!.z; const level = Math.max(0, Math.round(z / (lh || 1)));
