@@ -1,6 +1,8 @@
-// Build-time plan for dist/art (ADR-392): which mounted files ship and which shipped JSON is rewritten. Everything is derived from the same merged manifest + `sourcesFromManifest`
-// resolution the client runs at boot, so a file the client can request is never dropped.
+// Build-time plan for dist/art (ADR-392 / 393): which mounted files ship and which shipped JSON is rewritten.
+// Everything is derived from the same merged manifest + `sourcesFromManifest` resolution the client runs at
+// boot, so a file the client can request is never dropped.
 // Workspace packages are imported lazily: vite.config.ts registers tsx before calling planArt.
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 
@@ -11,6 +13,8 @@ export interface ArtPlan {
   files: ArtPlanFile[]; dropped: ArtDrop[];
   /** atlas keys whose ktx2 / masksKtx2 fields were stripped (KTX2 never read on any device path) */
   ktx2Stripped: string[];
+  /** duplicate tint mask url -> canonical url (byte-identical files, ADR-393) */
+  aliases: Map<string, string>;
   index: { fragments: unknown[] };
   /** art urls the client resolves (manifest sources, prefetch lists) */
   refs: Set<string>;
@@ -24,6 +28,8 @@ export interface ArtPlanOptions {
 
 /** Atlas directories the ADR-392 reference rule applies to (pack sub-packs, Art's top-level stalls / PvP drops). */
 export const ATLAS_DIR_RE = /^(?:pack\/(?:[\w-]+\/)*atlases|pvp_clan\/atlases|stalls\/atlases)\/[^/]+$/;
+/** ADR-393: customization tint masks aliased when byte-identical (colour pages stay unique). */
+export const TINT_ALIAS_RE = /^pack\/customization\/atlases\/[^/]+\.tintmask(?:@2x)?\.(?:png|ktx2)$/;
 /** ADR-392: UI files no runtime path loads (Art's engine-pack copies, branding mocks, the flat menu bg behind parallax). */
 export function uiDropReason(url: string, brandingBg: string): string | undefined {
   if (/^ui\/(?:input|hooks)\/atlas\/engine\//.test(url)) return "ui engine-pack copy";
@@ -49,6 +55,7 @@ function codeCorpus(roots: string[]): string {
   for (const r of roots) visit(r);
   return parts.join("\n");
 }
+const sha = (f: string): string => createHash("sha256").update(readFileSync(f)).digest("hex");
 
 type Atlasish = { key?: unknown; ktx2?: unknown; masksKtx2?: unknown; pages?: unknown };
 /** ADR-392: drop the KTX2 twins of `keys` from one manifest JSON (fragments and shards); returns whether it changed. */
@@ -63,6 +70,18 @@ export function stripKtx2Fields(json: unknown, keys: ReadonlySet<string>): boole
   }
   return changed;
 }
+/** ADR-393: point every manifest path naming a duplicate tint mask at its canonical file (same directory). */
+export function rewriteAliases(json: unknown, byBase: ReadonlyMap<string, string>): boolean {
+  let changed = false;
+  const visit = (v: unknown): unknown => {
+    if (typeof v === "string") { const b = v.replace(/^.*\//, ""); const c = byBase.get(b); if (c) { changed = true; return v.slice(0, v.length - b.length) + c; } return v; }
+    if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) v[i] = visit(v[i]); return v; }
+    if (v && typeof v === "object") { for (const k of Object.keys(v)) (v as Record<string, unknown>)[k] = visit((v as Record<string, unknown>)[k]); return v; }
+    return v;
+  };
+  visit(json); return changed;
+}
+
 /** Fake origin the build replays the client's art URLs against. */
 const ART = "https://art.invalid/art/";
 // merged fragments resolve atlas paths origin-relative ("/art/pack/..."), the pack base absolute
@@ -129,8 +148,17 @@ export async function planArt(mounts: readonly ArtMount[], opts: ArtPlanOptions)
     drop(u, strippedTwin ? "KTX2 of an always-resident atlas" : "not resolved by the client");
   }
 
+  // ADR-393: byte-identical customization tint masks share one file
+  const aliases = new Map<string, string>(); const groups = new Map<string, string[]>();
+  for (const u of [...all.keys()].filter((x) => TINT_ALIAS_RE.test(x)).sort()) { const h = sha(all.get(u)!); (groups.get(h) ?? groups.set(h, []).get(h)!).push(u); }
+  for (const g of groups.values()) for (const d of g.slice(1)) aliases.set(d, g[0]!);
+  if (aliases.size) {
+    const byBase = new Map([...aliases].map(([d, c]) => [basename(d), basename(c)]));
+    for (const u of manifests) if (u.startsWith("pack/customization/")) { const j = shippedJson.get(u) ?? structuredClone(read(u)); if (rewriteAliases(j, byBase)) shippedJson.set(u, j); }
+    for (const d of aliases.keys()) drop(d, "duplicate tint mask (aliased)");
+  }
 
   const files: ArtPlanFile[] = [...all].sort(([a], [b]) => (a < b ? -1 : 1)).map(([url, src]) => ({ url, src, bytes: statSync(src).size,
     ...(shippedJson.has(url) ? { json: shippedJson.get(url) } : {}) }));
-  return { files, dropped, ktx2Stripped: [...stripKeys].sort(), index, refs: used };
+  return { files, dropped, ktx2Stripped: [...stripKeys].sort(), aliases, index, refs: new Set([...used].map((u) => aliases.get(u) ?? u)) };
 }

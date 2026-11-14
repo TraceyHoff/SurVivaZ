@@ -46,7 +46,8 @@ const esc = (s: string): string => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt
 
 export function stepText(t: StepText, d: TutDevice): string { return typeof t === "string" ? t : t[d] ?? t.all ?? ""; }
 const glyphFrames = new Map(Object.values(glyphAtlas.frames).map((f) => [f.meta.id, f.frame]));
-const glyphAtlasUrl = new URL("../../../../assets/ui/input/atlas/input_glyphs.png", import.meta.url).href;
+// ADR-393: the shipped art/ui copy (a Vite import bundled a second copy into assets/)
+const glyphAtlasUrl = `${import.meta.env.BASE_URL}art/ui/input/atlas/input_glyphs.png`;
 /** The art atlas is shared by every input device; keep the text alongside it for rebinding and accessibility. */
 function chipIcon(glyph: string, icon?: string): string {
   if (icon && isIconFile(icon)) return `<img src="${esc(iconUrl(icon))}" alt="" width="18" height="18">`;

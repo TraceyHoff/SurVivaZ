@@ -1,6 +1,6 @@
-import { defineConfig, type Plugin, type Connect } from "vite";
+import { createLogger, defineConfig, type Plugin, type Connect } from "vite";
 import { cpSync, createReadStream, existsSync, readFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { extname, join, normalize, resolve } from "node:path";
+import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 import { register as registerTsx } from "tsx/esm/api";
@@ -107,6 +107,30 @@ function art(): Plugin {
   };
 }
 
+/** ADR-393: CSS `url()`s of pack art by source path (`../../../packages/assets/pack/...`) point at the shipped
+ *  `<base>art/pack/` copy instead of Vite bundling a second copy into assets/. Files Vite would inline as data
+ *  URIs (<= assetsInlineLimit) stay inlined, so no request is added. */
+const PACK_CSS_URL = /url\((["']?)((?:\.\.\/)+packages\/assets\/pack\/([^"')?#]+))\1\)/g;
+export function rewritePackCssUrls(code: string, cssFile: string, base: string, inlineLimit = 4096): string {
+  const pack = join(root, "packages/assets/pack") + "/";
+  return code.replace(PACK_CSS_URL, (m, _q: string, path: string, rel: string) => {
+    const f = resolve(dirname(cssFile), path);
+    return f === join(pack, rel) && artServed(`pack/${rel}`) && statSync(f).size > inlineLimit ? `url("${base}art/pack/${rel}")` : m;
+  });
+}
+function artUrls(): Plugin {
+  let base = "/", limit = 4096;
+  return {
+    name: "client-art-urls", enforce: "pre",
+    configResolved(c) { base = c.base; const l = c.build.assetsInlineLimit; limit = typeof l === "number" ? l : 4096; },
+    transform(code, id) { const f = id.split("?")[0]!; return f.endsWith(".css") && f.startsWith(join(root, "apps/client/src")) ? rewritePackCssUrls(code, f, base, limit) : null; },
+  };
+}
+/** Vite warns once per runtime-resolved url(); the ADR-393 art/pack urls are meant to resolve at runtime. */
+const logger = createLogger();
+const runtimeArt = (m: string): boolean => /\/art\/pack\/\S+ referenced in .* didn't resolve at build time/.test(m);
+{ const warn = logger.warn.bind(logger), once = logger.warnOnce.bind(logger); logger.warn = (m, o) => { if (!runtimeArt(m)) warn(m, o); }; logger.warnOnce = (m, o) => { if (!runtimeArt(m)) once(m, o); }; }
+
 /** Art's branding (assets/ui/branding/, branding.json title = {app.title}), resolved at build time so the client never probes missing files (no 404s). */
 const BR = join(root, "assets/ui/branding");
 const brandingJson = ((): { title?: string; tagline?: string } => { try { return JSON.parse(readFileSync(join(BR, "branding.json"), "utf8")) as { title?: string; tagline?: string }; } catch { return {}; } })();
@@ -127,6 +151,7 @@ function buildHash(): string { const e = process.env["GITHUB_SHA"]; if (e) retur
 export default defineConfig({
   define: { __BRANDING__: JSON.stringify(BRANDING), __BUILD_HASH__: JSON.stringify(buildHash()) },
   base: process.env["BASE"] ?? "/",
-  plugins: [art()],
+  plugins: [artUrls(), art()],
+  customLogger: logger,
   build: { target: "es2022" },
 });

@@ -33,8 +33,10 @@ describe("ADR-392 dist art plan", () => {
     const after = await replayClient((u) => { const f = shipped.get(u); return f ? (f.json !== undefined ? f.json : readSrc(u)) : undefined; }, plan.index);
     expect([...after.sources.keys()].sort()).toEqual([...before.sources.keys()].sort());
     const stripped = new Set(plan.ktx2Stripped); let changed = 0;
-    for (const [k, s] of before.sources) {
-      const a = after.sources.get(k)!;
+    // ADR-393: byte-identical tint masks resolve to their canonical file
+    const alias = (s: unknown): unknown => JSON.parse(JSON.stringify(s).replace(/"\/art\/([^"]+)"/g, (m, u: string) => (plan.aliases.has(u) ? `"/art/${plan.aliases.get(u)}"` : m)));
+    for (const [k, s0] of before.sources) {
+      const a = after.sources.get(k)!; const s = alias(s0);
       if (stripped.has(k)) { expect(a).toEqual(stripKtx2(s)); changed++; } else expect(a, k).toEqual(s);
     }
     expect(changed).toBe(stripped.size);

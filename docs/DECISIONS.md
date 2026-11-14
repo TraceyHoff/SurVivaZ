@@ -8201,3 +8201,35 @@ the listed UI copies, and no `.ogg` ships. So the A16's ASTC / ETC2 KTX2 pools, 
 
 Result (source bytes): 470 unreferenced atlas-dir files (32.4 MB), 173 KTX2 twins of 103 resident atlases
 (21.4 MB), 87 UI files (10.8 MB), 26 ogg (0.46 MB).
+
+## ADR-393: No art ships twice: shared byte-identical tint masks, runtime art URLs for CSS / tutorial art (SurVivaZ)
+
+Context: after ADR-392 two kinds of duplicate bytes were left. (1) Art's customization gear families
+(bone / bronze / iron / steel / composite cuirass, gauntlets, boots, greaves …) reuse one tint mask
+shape: 35 `*.tintmask.png` / `*.tintmask@2x.png` / `*.tintmask.ktx2` files are byte-identical to another
+file of the family. The colour pages are all different and stay unique. (2) Pack atlases named by source
+path in `gameplay-panels.css` (`url("../../../packages/assets/pack/...")`, icons / build / skills / mount
+art) and the tutorial's `new URL(".../input_glyphs.png", import.meta.url)` were bundled by Vite into
+`assets/` as a second copy of files `art/` already ships.
+
+Decision: (1) `planArt` groups served `pack/customization/atlases/*.tintmask(@2x).(png|ktx2)` by sha256;
+the first name of each group (sorted) is canonical, every manifest path naming another member (masks,
+masksKtx2, pages[].masksKtx2; customization fragment and shards) is rewritten to the canonical file name
+in the same directory, and the duplicates are not copied. Sharing a URL is safe: page-ins fetch and decode
+per call (`defaultImageLoader`, `loadKtx2Rgba`), `AssetManager` reference-counts by URL, Canvas2D caches
+by URL, and the bytes are identical. (2) A pre plugin (`rewritePackCssUrls`) points those CSS urls at
+`<base>art/pack/<path>` when the file is served and larger than `assetsInlineLimit` (4 KiB); smaller ones
+stay for Vite to inline as data URIs, so no request is added. Vite's "didn't resolve at build time"
+notice for these runtime urls is filtered from the log. The tutorial glyph atlas loads
+`${BASE_URL}art/ui/input/atlas/input_glyphs.png`. The Cozy Camp `ui/kit/css/` frames stay Vite-bundled
+from the CSS (ADR-392 stopped copying them to art/), so they too ship once.
+
+Validation: `apps/client/test/adr393_dedupe.test.ts` pins that aliases are byte-identical tint masks in one
+directory onto a shipped canonical, that no shipped manifest names a dropped duplicate, that CSS urls
+above the inline limit are rewritten (and their files ship) while small ones are not, and the glyph url;
+`adr392_art_plan` replays the client and checks the resolved sources equal the unplanned ones with only
+the alias substitution and the KTX2 strip.
+
+Result: 35 tint masks (1,291,815 B before oxipng); Vite assets/ PNGs 50 → 10 (−3.1 MB). Honest cut:
+gather-fx.ts keeps its `new URL()` imports; nine of its ten files are under 4 KiB and inlined into the JS
+(no request at boot); only `nature_adr128_fx@2x.png` (6.9 KB) still ships twice.
