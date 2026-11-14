@@ -776,17 +776,10 @@ export class AtlasManager {
       return [null, undefined];
     };
     const list: AtlasRT[] = []; const lazyList: AtlasRT[] = [];
-    const lazyKeys = this.streamWearables ? wearableOnlyAtlases(registry) : new Set<string>();
-    const legacy = this.streamVehicles ? legacyDirFrameAtlases(registry) : new Set<string>();
-    const vehKeys = new Set<string>(); if (this.streamVehicles) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && !lazyKeys.has(a.key) && !legacy.has(a.key) && isStreamedVehicleAtlas(a.key, src.url)) vehKeys.add(a.key); }
-    const bldKeys = new Set<string>(); if (this.streamBuildingTiers) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && !lazyKeys.has(a.key) && !vehKeys.has(a.key) && isStreamedBuildingAtlas(a.key, src.url)) bldKeys.add(a.key); }
-    // bodies (page geometry from the manifest: columns x rows x frame size per page, any number of pages) go compressed when KTX2 is available: KTX2 colour + tint mask KTX2
-    // (@2x: pages[].ktx2 + pages[].masksKtx2.tintmask) at the scale poolScales picks; paged in eagerly at rebuild, never evicted
-    const bodyPages0 = bodyAtlasKeys(registry); // ADR-240: body sheets (v2 sample ships them "stream") stay in the character pools
-    const streamKeys = new Set<string>(); if (this.streamSheets) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && a.residency === "stream" && !lazyKeys.has(a.key) && !bodyPages0.has(a.key) && !vehKeys.has(a.key) && !bldKeys.has(a.key) && !legacy.has(a.key) && !(this.residentCreatures && (RESIDENT_CREATURE_RE.test(a.key) || RESIDENT_GROUND_RE.test(a.key))) && !/^(blob|data):/.test(src.url)) streamKeys.add(a.key); }
+    const { lazyKeys, legacy, vehKeys, bldKeys, streamKeys, bodyKeys, bodyPages } = atlasPoolSets(registry, sources, { streamWearables: this.streamWearables, streamVehicles: this.streamVehicles,
+      streamBuildingTiers: this.streamBuildingTiers, streamSheets: this.streamSheets, residentCreatures: this.residentCreatures, ktx2: !!this.ktx2Target });
     this.placeholderCache.clear();
-    const bodyPages = bodyAtlasKeys(registry); this.bodyPageKeys = bodyPages;
-    const bodyKeys = new Set<string>(); if (this.ktx2Target && this.streamWearables) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src?.ktx2 && bodyPages.has(a.key) && !lazyKeys.has(a.key) && !vehKeys.has(a.key) && !bldKeys.has(a.key) && !streamKeys.has(a.key) && !/^(blob|data):/.test(src.url)) bodyKeys.add(a.key); }
+    this.bodyPageKeys = bodyPages;
     const ldT0 = now();
     await Promise.all([...registry.atlases.values()].map(async (a) => {
       const src = sources.get(a.key); if (!src) throw new Error(`no image source for atlas "${a.key}"`);
@@ -2089,6 +2082,35 @@ export function buildSpriteTables(registry: AssetRegistry, list: AtlasRT[]): (Sp
   }
   return sprites;
 }
+
+/** Streaming flags `AtlasManager.rebuild` sorts atlases by (ADR-392 replays them at build time). */
+export interface AtlasPoolFlags { streamWearables: boolean; streamVehicles: boolean; streamBuildingTiers: boolean; streamSheets: boolean; residentCreatures: boolean; ktx2: boolean }
+/**
+ * The lazy pool sets `AtlasManager.rebuild` uses: an atlas in none of lazy/legacy/veh/bld/body/stream is resident
+ * (its PNG page loads at rebuild; its KTX2 twins are never read). Pure, so the build can replay it (ADR-392).
+ */
+export function atlasPoolSets(registry: AssetRegistry, sources: ReadonlyMap<string, AtlasSource>, f: AtlasPoolFlags): { lazyKeys: Set<string>; legacy: Set<string>; vehKeys: Set<string>; bldKeys: Set<string>; streamKeys: Set<string>; bodyKeys: Set<string>; bodyPages: Set<string> } {
+  const lazyKeys = f.streamWearables ? wearableOnlyAtlases(registry) : new Set<string>();
+  const legacy = f.streamVehicles ? legacyDirFrameAtlases(registry) : new Set<string>();
+  const vehKeys = new Set<string>(); if (f.streamVehicles) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && !lazyKeys.has(a.key) && !legacy.has(a.key) && isStreamedVehicleAtlas(a.key, src.url)) vehKeys.add(a.key); }
+  const bldKeys = new Set<string>(); if (f.streamBuildingTiers) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && !lazyKeys.has(a.key) && !vehKeys.has(a.key) && isStreamedBuildingAtlas(a.key, src.url)) bldKeys.add(a.key); }
+  // bodies (page geometry from the manifest: columns x rows x frame size per page, any number of pages) go compressed when KTX2 is available: KTX2 colour + tint mask KTX2
+  // (@2x: pages[].ktx2 + pages[].masksKtx2.tintmask) at the scale poolScales picks; paged in eagerly at rebuild, never evicted
+  const bodyPages0 = bodyAtlasKeys(registry); // ADR-240: body sheets (v2 sample ships them "stream") stay in the character pools
+  const streamKeys = new Set<string>(); if (f.streamSheets) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && a.residency === "stream" && !lazyKeys.has(a.key) && !bodyPages0.has(a.key) && !vehKeys.has(a.key) && !bldKeys.has(a.key) && !legacy.has(a.key) && !(f.residentCreatures && (RESIDENT_CREATURE_RE.test(a.key) || RESIDENT_GROUND_RE.test(a.key))) && !/^(blob|data):/.test(src.url)) streamKeys.add(a.key); }
+  const bodyPages = bodyAtlasKeys(registry);
+  const bodyKeys = new Set<string>(); if (f.ktx2 && f.streamWearables) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src?.ktx2 && bodyPages.has(a.key) && !lazyKeys.has(a.key) && !vehKeys.has(a.key) && !bldKeys.has(a.key) && !streamKeys.has(a.key) && !/^(blob|data):/.test(src.url)) bodyKeys.add(a.key); }
+  return { lazyKeys, legacy, vehKeys, bldKeys, streamKeys, bodyKeys, bodyPages };
+}
+/** ADR-392: atlases resident under every streaming configuration, so no device path ever reads their KTX2 twins
+ *  (all flags on, low-budget residency: pets / critters / ground stay streamed, hence keep their KTX2). */
+export function ktx2UnreadAtlases(registry: AssetRegistry, sources: ReadonlyMap<string, AtlasSource>): Set<string> {
+  const p = atlasPoolSets(registry, sources, { streamWearables: true, streamVehicles: true, streamBuildingTiers: true, streamSheets: true, residentCreatures: false, ktx2: true });
+  const out = new Set<string>();
+  for (const a of registry.atlases.values()) if (sources.has(a.key) && ![p.lazyKeys, p.legacy, p.vehKeys, p.bldKeys, p.streamKeys, p.bodyKeys].some((x) => x.has(a.key))) out.add(a.key);
+  return out;
+}
+
 /** Atlases only the legacy full-size layout of facing-split sprites (anims with dirFrames) uses: sprite.atlas of such
  *  sprites, unless a sprite without dirFrames or any dirFrames entry also uses it. Art may delete these pages. */
 export function legacyDirFrameAtlases(registry: AssetRegistry): Set<string> {

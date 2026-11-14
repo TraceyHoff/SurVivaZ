@@ -8161,3 +8161,43 @@ transparent coloured texels) and cache hit / prune behaviour when the pinned bin
 Result: PNG 539,795,816 → 407,407,325 B (−132,388,491). Cold run 2 m 25 s on 8 cores (about 5 min on
 a 4-vCPU runner), cached rebuilds re-run only changed PNGs. Rejected: `-o 4` (+0.8 %, 4× time), Zopfli
 (+1.1 %, 26× time).
+
+## ADR-392: Ship only the art the client resolves; resident atlases lose their unread KTX2 twins (SurVivaZ)
+
+Context: the art copy shipped every file that matched the MOUNTS regexes. The size audit replayed the
+client's real resolution (merged manifest → `sourcesFromManifest` → `AtlasManager.rebuild` pools) and
+found files nothing can request: the 15 stalls / pvp_clan atlases that lose the first-wins merge to the
+pack's copies, `@2x` tint / sway / emissive mask PNGs (only 1x masks load, `fitToPage` scales them),
+emissive KTX2 (the emissive layer is PNG only), atlas layout JSON (frames live in the manifests), the KTX2
+twins of atlases that are resident on every device path (resident atlases always load PNG pages; KTX2 is
+read only by the lazy wear / veh / bld / body / stream pools), Art's engine-pack copies under
+`ui/{input,hooks}/atlas/engine/`, branding mocks, the flat menu backgrounds (parallax ships), the
+`ui/kit/css/` frames (Vite bundles them from the CSS) and the 26 legacy `.ogg` files ADR-334 left
+behind (read only by `pack/audio/manifest.json`, which no client code loads).
+
+Decision: `vite build` plans dist/art with `planArt` (apps/client/art-build.ts) instead of copying every
+mounted file. The planner replays the client at build time: `servedManifestIndex` →
+`loadMergedManifestWith` (fragments, v2 shards, ids.lock) → `sourcesFromManifest(..., {probeSiblings:
+false})` exactly as view.ts does, plus prefetch-art.ts's `collectPrefetchUrls` /
+`collectWarmupPrefetchUrls`. A file under an atlas directory (`pack/**/atlases/`, `stalls/atlases/`,
+`pvp_clan/atlases/`) ships when a resolved source names it (url, emissive, every mask candidate, ktx2,
+masksKtx2, every page and its KTX2 twins), when it is a `*.hands.json`, or when its file name appears
+literally in client / package source or in a shipped non-manifest JSON (name tags, gather fx, CSS).
+`AtlasManager.rebuild`'s pool sorting moved into the pure `atlasPoolSets` (rebuild calls it; no behaviour
+change) so the build uses the same code: `ktx2UnreadAtlases` is the set that is in no lazy pool with
+every streaming flag on and low-budget residency (budget < 128 MB streams pets / critters / ground), and
+those atlases' `ktx2` / `masksKtx2` / `pages[].ktx2` / `pages[].masksKtx2` fields are deleted from the
+shipped manifest JSON (shards included); their files then drop under the same rule. The 74 pets /
+critters / ground atlases that stream on low-memory devices keep their KTX2. The legacy `.ogg` names
+left the MOUNTS regex. The dev server is unchanged and serves every mounted file.
+
+Pixel and sound identity: `apps/client/test/adr392_art_plan.test.ts` replays the client against the
+planned output and pins that (1) every resolved file that exists in the mounts ships, (2) the resolved
+sources equal the unplanned ones except the stripped KTX2 fields, (3) every stripped atlas is resident
+under all 64 combinations of the six streaming flags, (4) the low-memory streamed pets / critters /
+ground keep KTX2, (5) drops are only atlas-dir files nothing resolves or names, resident KTX2 twins and
+the listed UI copies, and no `.ogg` ships. So the A16's ASTC / ETC2 KTX2 pools, desktop's lossless pools,
+`gl=safe` / `?ktx2=0` PNG pools and Canvas2D's 1x PNGs request the same bytes as before.
+
+Result (source bytes): 470 unreferenced atlas-dir files (32.4 MB), 173 KTX2 twins of 103 resident atlases
+(21.4 MB), 87 UI files (10.8 MB), 26 ogg (0.46 MB).
