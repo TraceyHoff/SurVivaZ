@@ -11843,7 +11843,7 @@ Ruled out on the way: no reduced-resolution cutaway / see-through target, no sca
 
 **Owner ask.** "Can we make all the base building pieces sizes scale correctly with the player and the world?"
 
-**Measured (1x px above the pivot, from the art the client resolves — `tools/measure-building-scale.py` — and confirmed in WebGL2 renders with the player doll beside each piece).** Player doll: 52.8 px (ADR-319: 1.75 m). Floor: 3 terrain levels = 48 px. Walls of every tier and kind (wall, window, doorway, arched, corner posts): 55–57 px (48 face + 8 cap) = 1.05x the player — head height. Doorway clear opening: 31 px = 0.59x the player (the doll is 1.7x taller than the hole it walks through). Door leaves 41 px, arched crown 22–23 px, window opening sill 24 / head 30. Pillar 59, fortified 65, stairs 64 (one 48 px rise) and every tier draws `stairs_twig`. Furniture already assumes a taller room (wardrobe 91, cupboard 84, bookcase 81, chandelier 82, fireplace 99), the clan hall door opening is 64 px, and gameplay's own clearances say doorway 2.0 m / deck ceiling 2.4 m (ADR-319) — the base walls are the outlier. Tier-to-tier and piece-to-piece the base set is consistent (≤ 2 px spread), footprints sit on the grid, pivots are the edge midpoint / tile centre / vertex as specified (ADR-210), abandoned structures use the same pieces, and roofs seat on the 56 px wall top (ADR-404/405) — none of that changes here.
+**Measured (1x px above the pivot, from the art the client resolves — `tools/measure-building-scale.py` — and confirmed in WebGL2 renders with the player doll beside each piece).** Player doll: 52.8 px (ADR-319: 1.75 m). Floor: 3 terrain levels = 48 px. Walls of every tier and kind (wall, window, doorway, arched, corner posts): 55–57 px (48 face + 8 cap) = 1.05x the player — head height. Doorway clear opening: 31 px = 0.59x the player (the doll is 1.7x taller than the hole it walks through). Door leaves 41 px, arched crown 22–23 px, window opening sill 24 / head 30. Pillar 59, fortified 65, stairs 64 (one 48 px rise) and every tier draws `stairs_twig`. Furniture already assumes a taller room (wardrobe 91, cupboard 84, bookcase 81, chandelier 82, fireplace 99), the clan hall door opening is 64 px, and gameplay's own clearances say doorway 2.0 m / deck ceiling 2.4 m (ADR-319) — the base walls are the outlier. Tier-to-tier and piece-to-piece the base set is consistent (≤ 2 px spread), footprints sit on the grid, pivots are the edge midpoint / tile centre / vertex as specified (ADR-210), abandoned structures use the same pieces, and roofs seat on the 56 px wall top (ADR-404/509) — none of that changes here.
 
 **Why not an engine scale.** A uniform scale on the building sprites breaks the 64 px tile grid (a wall would span 1.5 tiles); a vertical-only scale stretches the art (owner rule: dedicated art, no stretching, no faking); stacking a low wall on a wall reuses art. Shrinking the player would break every other calibrated thing (mounts, animals, vehicles, trees). The fix is taller dedicated art plus a floor-height flip, so this slice makes the floor one data metric and gates the art.
 
@@ -11903,3 +11903,32 @@ Ruled out on the way: no reduced-resolution cutaway / see-through target, no sca
 - **Unverified on hardware:** all numbers are SwiftShader with phone emulation, not the Galaxy A16 itself.
 
 **Full gate (2026-11-21).** `pnpm check`: pinned TypeScript 5.9.3 typecheck clean; vitest 5,441 passed / 0 failed / 9 skipped across 804 files.
+
+## ADR-509: Roof seats and clip modes after Art's eave pass, as data (SurVivaZ)
+
+(Written on 2026-11-14 as a local "ADR-405" that never reached main; main's ADR-405 is the manifest cache fix, so this is renumbered and ported onto main.)
+
+**Context.** Art's eave pass (c203cbec, `docs/ART_KEYS_ROOFS.md` §9) repainted every rfx form, tier and the shk skin: 96×80 cells with the same pivot (48,44; anchor 0.5, 0.55 — no engine change for the frame), 6 px outer overhang, 8 px flared outer corners, a 4 px S/E fascia, an 11 px flat parapet, rake strips on every verge, end strips 3 px lower. Owner rule: roofs sit ON TOP of the walls and overhang them; no wall strip, cap or post shows on any side.
+
+**Decision.** Seat and clip are per-form data in `packages/assets/src/roofRfx.json` (`forms.<f>.seatPx`, `forms.<f>.clip`).
+- `clip` is `"all"` (default), `"ends"`, `"posts"` or `"none"`. `rfxClipsAt(pick, dx, dy)` decides per upright: an inner upright (tile centre) is always cut; `"posts"` cuts only vertex posts (wall panels stay whole, post tops never poke through the eave); `"ends"` cuts only the pick's end sides (`RfxPick.ends`, a DIR_V mask the selection sets on gable/gambrel ends, shed side ends and the shed high side; a corner counts when either side does).
+- `RoofTiler.planeOver` applies the rule; both renderers (WebGL2, Canvas2D) are unchanged.
+- Values (measured with the new art by `apps/client/test/adr404_roof_seat.test.ts`):
+
+  | form | seat px | clip |
+  |---|---|---|
+  | hip | 13 | posts |
+  | cot | 13 | posts |
+  | gab | 7 | all |
+  | gam | 8 | all |
+  | shd | 7 | all |
+  | flt | 9 | all |
+
+  At seat 13 the gab/gam/shd end walls show a gap under the 3 px end strips (E facing 10–13% met), so those forms stay low (7–8). The first port left their eave sides unclipped (`"ends"`), as planned for seat 13; the WebGL2 render of the shake cabin then showed the far eave's wall caps as a strip above the roof and the near eave's post tops poking through (wall tops are 12–14 px above the floor, ~6 px above a seat-7 eave). So every form seated below the wall top clips all sides; `"ends"` stays as a data mode for when the longer end strips allow seat 13. Flat keeps the full clip under its parapet.
+- Guard (adr404 test): a form may use a clip other than `"all"` only if its `seatPx` reaches the lowest plain-wall top (measured from the art relative to `levelPx`) minus 1 px. Art has not (as of 22f2f3a0) pushed the ~8 px end strips / moved gable end plane offered in §9.
+
+**Follow-ups (data only).**
+- When Art's longer end strips and outer gable end plane land: set gab/gam/shd/flt `seatPx` ≈ 13 and `clip` to `"posts"` (or `"ends"`), re-run the test and the renders.
+- ADR-504 floor flip (48 → 80 px): `levelPx` follows the floor metric (adr504 test pins `roofRfx.json` levelPx = floorPx) and seats are measured above `levelPx` against the wall top (cap), so the flip changes `levelPx` and re-measures the seats with this test — no code change.
+
+**Validation.** Every form on every plain wall tier meets the roof on ≥ 90% of each facing's edge columns (all four facings, end sides included) and ≥ 85% on N/W/S with the corner posts (±23 px). Visual check: WebGL2 + Canvas2D renders of a shake cabin, hip10, barn, shed, cottage and flat in `/workspace/share/roofs_eaves/`.

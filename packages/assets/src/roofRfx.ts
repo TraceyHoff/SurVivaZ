@@ -10,7 +10,9 @@ import cfgJson from "./roofRfx.json";
  */
 export type RfxForm = "hip" | "gab" | "flt" | "cot" | "gam" | "shd";
 export type RfxShape = "e" | "o" | "i" | "r" | "h" | "p" | "f";
-export interface RfxFormCfg { rise: number[]; kmax: number; crest: boolean; /** ADR-404: px (1x) the whole form is raised above the level floor so it sits on the wall tops (measured per form, adr404 test) */ seatPx?: number }
+export interface RfxFormCfg { rise: number[]; kmax: number; crest: boolean; /** ADR-404: px (1x) the whole form is raised above the level floor so it sits on the wall tops (measured per form, adr404 test) */ seatPx?: number;
+  /** ADR-509: which uprights under this form are cut at its plane: "all" (default), "ends" (only walls on its end sides: gable / gambrel / shed ends), "posts" (only vertex posts: wall panels stay whole, post tops never poke through the eave), "none" */ clip?: RfxClip }
+export type RfxClip = "all" | "ends" | "posts" | "none";
 /**
  * ADR-402: one skin rule, matched against RfxTile.wallMaterial (`<tier>`, `<tier>:<wallVariant>` or `site:<kind>`):
  * `wall` exact; `wallTiers` a bare tier key (the plain wall look, e.g. the log set ["twig"]: ONE data entry to widen);
@@ -46,6 +48,7 @@ export interface RfxPick {
   form: RfxForm; band: number; lower: number; shape: RfxShape; row: number; seg: "lo" | "up" | "top" | "lotop" | ""; crest: boolean; variant: 0 | 1 | 2;
   /** full stem without tier: rfx_<form>_<seg>_<shape>[c][_v<n>] (flt f: rfx_flt_f[_v<n>]) */ stem: string;
   /** lift above the piece z in px at 1x */ zoffPx: number; overlays: RfxOverlay[]; skin?: string; region: number;
+  /** ADR-509: DIR_V sides (bit d = side d, S W N E) that are this tile's outer end sides (gable / gambrel / shed ends, shed high side) */ ends: number;
 }
 
 export const rfxCell = (x: number, y: number): string => `${x},${y}`;
@@ -53,6 +56,20 @@ export function rfxGroupOf(key: string, cfg: RfxConfig = RFX): string | undefine
 export function rfxRise(form: RfxForm, band: number, cfg: RfxConfig = RFX): number { const r = cfg.forms[form].rise; return r[Math.min(band, r.length - 1)] ?? 0; }
 /** ADR-404: px the whole form is raised so it rests on the wall tops; added on top of every part's zoffPx when drawn. */
 export function rfxSeat(form: RfxForm, cfg: RfxConfig = RFX): number { return cfg.forms[form].seatPx ?? 0; }
+/**
+ * ADR-509: is an upright whose pivot sits at (dx, dy) from the centre of a tile with this pick cut at the roof plane?
+ * The tile centre (an inner upright) always is; a side or corner pivot follows the form's `clip` ("ends": only on the
+ * pick's end sides; a corner counts when either of its sides does).
+ */
+export function rfxClipsAt(p: RfxPick, dx: number, dy: number, cfg: RfxConfig = RFX): boolean {
+  const mode = cfg.forms[p.form].clip ?? "all";
+  if (Math.abs(dx) < 0.25 && Math.abs(dy) < 0.25) return true;
+  if (mode === "posts") return Math.abs(dx) > 0.25 && Math.abs(dy) > 0.25; // vertex = both offsets off-centre
+  if (mode !== "ends") return mode === "all";
+  let m = 0; // DIR_V: S (0,1) W (-1,0) N (0,-1) E (1,0)
+  if (dy > 0.25) m |= 1; if (dx < -0.25) m |= 2; if (dy < -0.25) m |= 4; if (dx > 0.25) m |= 8;
+  return (p.ends & m) !== 0;
+}
 export function rfxZoff(form: RfxForm, band: number, cfg: RfxConfig = RFX): number { let z = 0; for (let j = 0; j < band; j++) z += rfxRise(form, j, cfg); return z; }
 
 /** Region form: legacy -> hip if any slope/corner/hip (or chimney-only), else gab if any gable, else flt; new groups are their own form. */
@@ -162,7 +179,7 @@ function pickRegion(region: RfxTile[], group: string, level: number, regionId: n
     const variant = varOk ? rfxVariant(t.x, t.y, level, cfg) : 0;
     const stem = `rfx_${form}_${seg ? seg + "_" : ""}${shape}${crest ? "c" : ""}${variant ? `_v${variant}` : ""}`;
     const zoffPx = rfxZoff(form, b, cfg);
-    const overlays: RfxOverlay[] = []; let order = 0;
+    const overlays: RfxOverlay[] = []; let order = 0, ends = 0;
     const strips = (k: number, x: number): void => { for (let j = 0; j < k; j++) overlays.push({ key: form === "gam" ? (j === 0 ? "rfx_gam_wall_lo" : "rfx_gam_wall_up") : `rfx_${form}_wall`, row: x, zoffPx: rfxZoff(form, j, cfg), order: order++ }); };
     // verges carry the band seg: rfx_<form>_<lo|up>_{vel,ver,vr,vf} (vf: the gable end of a flat crown)
     const vseg = seg === "lo" || seg === "lotop" ? "lo" : "up";
@@ -173,13 +190,13 @@ function pickRegion(region: RfxTile[], group: string, level: number, regionId: n
       else if (x === (d + 3) % 4) overlays.push({ key: `rfx_${form}_${vseg}_vel`, row: d, zoffPx, order: order++ });
     };
     if (form === "gab" || form === "gam") {
-      for (const x of axis === 0 ? [1, 3] : [0, 2]) { const [nx, ny] = nbr(x); if (isM(nx, ny)) continue; verge(x, row, shape === "r"); strips(b, x); }
+      for (const x of axis === 0 ? [1, 3] : [0, 2]) { const [nx, ny] = nbr(x); if (isM(nx, ny)) continue; ends |= 1 << x; verge(x, row, shape === "r"); strips(b, x); }
     } else if (form === "shd") {
-      for (const x of [(downD + 1) % 4, (downD + 3) % 4]) { const [nx, ny] = nbr(x); if (isM(nx, ny)) continue; verge(x, downD, false); strips(b, x); }
-      if (top) strips(b + 1, (downD + 2) % 4);
+      for (const x of [(downD + 1) % 4, (downD + 3) % 4]) { const [nx, ny] = nbr(x); if (isM(nx, ny)) continue; ends |= 1 << x; verge(x, downD, false); strips(b, x); }
+      if (top) { ends |= 1 << ((downD + 2) % 4); strips(b + 1, (downD + 2) % 4); }
     }
     if (t.key === "roof_chimney") overlays.push({ key: "rfx_chimney", row: 0, zoffPx: zoffPx + rfxRise(form, b, cfg) / 2, order: order++ });
-    out.set(rfxCell(t.x, t.y), { form, band: b, lower, shape, row, seg, crest, variant, stem, zoffPx, overlays, region: regionId, ...(rule ? { skin: rule.skin } : {}) });
+    out.set(rfxCell(t.x, t.y), { form, band: b, lower, shape, row, seg, crest, variant, stem, zoffPx, overlays, region: regionId, ends, ...(rule ? { skin: rule.skin } : {}) });
   }
 }
 

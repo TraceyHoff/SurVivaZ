@@ -1,4 +1,4 @@
-import { rfxCell, rfxPickLevel, rfxSeat, rfxSpriteKeys, RFX, type RfxConfig, type RfxPick, type RfxTile } from "@engine/assets";
+import { rfxCell, rfxClipsAt, rfxPickLevel, rfxSeat, rfxSpriteKeys, RFX, type RfxConfig, type RfxPick, type RfxTile } from "@engine/assets";
 import type { RoofFxBinding } from "@engine/render";
 import { BuildPiece, StructureIndex, StructureIndexRes, gameplayDefs } from "@engine/gameplay";
 import type { World } from "@engine/core";
@@ -19,8 +19,8 @@ export class RoofTiler {
   private dirty = new Set<number>();
   private fx = new Map<number, RoofFxBinding>();
   private picks = new Map<number, RfxPick>();
-  /** ADR-404: per level, packed cell -> seat px of the rfx roof drawn there (only tiles with a binding) */
-  private seats = new Map<number, Map<number, number>>();
+  /** ADR-404/509: per level, packed cell -> pick of the rfx roof drawn there (only tiles with a binding) */
+  private seats = new Map<number, Map<number, RfxPick>>();
   /** per-level cache version (bumped on every place / remove on that level) */
   readonly version = new Map<number, number>();
   private ids = new Map<string, number | null>();
@@ -90,12 +90,12 @@ export class RoofTiler {
     const changed: number[] = [];
     for (const level of this.dirty) {
       const lv = this.levels.get(level); this.seats.delete(level); if (!lv) continue;
-      const picks = rfxPickLevel([...lv.values()], level, this.cfg); const seats = new Map<number, number>(); this.seats.set(level, seats);
+      const picks = rfxPickLevel([...lv.values()], level, this.cfg); const seats = new Map<number, RfxPick>(); this.seats.set(level, seats);
       for (const c of lv.values()) {
         const p = picks.get(rfxCell(c.x, c.y)); if (!p) continue;
         this.picks.set(c.ve, p);
         const b = this.resolve(p, c.tier); const was = this.fx.get(c.ve);
-        if (b) seats.set(seatCell(c.x, c.y), rfxSeat(p.form, this.cfg));
+        if (b) seats.set(seatCell(c.x, c.y), p);
         if (!sameFx(b, was)) { if (b) this.fx.set(c.ve, b); else this.fx.delete(c.ve); changed.push(c.ve); }
       }
     }
@@ -113,7 +113,8 @@ export class RoofTiler {
     const lv = this.seats.get(level + 1); if (!lv || !lv.size) return undefined;
     let best: number | undefined;
     for (let y = Math.floor(wy - 0.05); y <= Math.floor(wy + 0.05); y++) for (let x = Math.floor(wx - 0.05); x <= Math.floor(wx + 0.05); x++) {
-      const s = lv.get(seatCell(x, y)); if (s !== undefined && (best === undefined || s > best)) best = s;
+      const p = lv.get(seatCell(x, y)); if (!p || !rfxClipsAt(p, wx - x - 0.5, wy - y - 0.5, this.cfg)) continue; // ADR-509 per-form clip
+      const s = rfxSeat(p.form, this.cfg); if (best === undefined || s > best) best = s;
     }
     return best === undefined ? undefined : this.cfg.levelPx + best;
   }
