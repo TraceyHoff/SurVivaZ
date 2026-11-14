@@ -8656,3 +8656,82 @@ phone heals in the real browser.
 
 Result: one bad cache write can no longer brick a deploy; the next manifest failure will name its cause
 (HTTP status, gunzip, or parse) in the overlay and the error log instead of "manifest shard missing".
+
+## ADR-406: A stale 404 for a manifest shard must not brick a boot; required shards throw with the cause (SurVivaZ)
+
+Context: after ADR-405 shipped (76e4b165), Tracey's phone still shows "3D renderer unavailable — showing
+debug view", now with a different shard and code: "[E-5B80] / manifest shard missing:
+manifest.customization.top.json". The hat shard no longer errors. The failure is deterministic across reloads
+("it's still happening") and happens on both Wi-Fi and mobile data. Error codes are per-message hashes
+(error-log.ts), so E-5B80 vs E-1AC6 just means a different file, not a different failure type. Ruled out with
+evidence: deploy propagation (the Pages run for 76e4b165 completed 09:09:08 CST, a full 11 minutes before the
+09:20 failing screenshot; CI completed 09:18:38 CST, both success); the file itself (top.json.gz → 200,
+590,702 B, valid gzip, decodes to 9,188,794 B, parses as JSON; the customization index is a v2 index listing
+10 shards and the live manifests.index.json says "gz": true); a service worker (none exists anywhere); an old
+poisoned Cache Storage entry (the cache bucket is build-hash-keyed and old buckets are dropped, and the only
+two `cache.put` sites cannot write a 404 page under the plain URL). The mechanism is in ADR-405's `gzText`
+(asset-fetch.ts): it makes three back-to-back attempts against the SAME cache key in the same millisecond
+window (`force-cache`, default, `reload`). A 404 stuck in the browser HTTP cache and/or the nearby CDN edge
+defeats all three identically: Pages 404s carry an ETag and no Cache-Control and are cached heuristically
+(verified live: a 404 is served `X-Cache: HIT` with `Age` in the hundreds of seconds), so a `reload` fetch
+revalidates into a 304 and serves the stale 404 again. The 404 was most likely first cached during the deploy
+window (09:06–09:09, when the new file did not yet exist at that cache) or an earlier flap — Pages had already
+been observed flapping 503/404 on large manifest URLs, and the top shard is the largest (590 KB gz / 9.2 MB
+decoded). A user reload repeats the identical sequence against the identical stuck entries, which is why the
+failure is deterministic; switching networks does not help because the browser HTTP cache is on the device and
+both networks can reach the same nearby edge. Which layer holds the stale 404 (browser cache, edge, or both
+reinforcing each other) cannot be distinguished from the VM and is stated as the one honest unknown — the fix
+defeats a stuck cache at every layer, so the distinction changes nothing.
+
+Decision: `gzText` keeps ADR-405's three instant attempts unchanged (healthy path identical), then adds
+delayed retries that run only while the file is still 404ing: after 600 ms a plain `cache: "no-store"` fetch
+(no validators, no cache read or write), and after a further 1,800 ms a `cache: "no-store"` fetch against a
+cache-busting URL (`<url>.gz?v=<unique-token>`, `cacheBustUrl()` — a URL never requested before has no entry
+in any cache, so it must be served from origin; verified live, `top.json.gz?v=…` → 200, 590,702 B, because
+GitHub Pages ignores the query string for static files). The decoded text is cached in Cache Storage under
+the plain URL, so the next boot reads it from there. Worst case for a genuinely missing file: 5 attempts over
+~2.4 s, then undefined (optional) or a throw (required). A fetch that throws never overwrites an earlier
+response's evidence: the retry loop only reassigns the response when one actually arrived. `assetJsonGz`
+gains `opts.required`: for index-listed shards (and required fragments) a 404 on every attempt now throws
+`manifest load failed: <url>: HTTP 404 on every fetch attempt (instant, delayed, and cache-busting retries
+included)` instead of returning undefined, so a genuinely missing file reads as a 404 after a cache-busting
+retry, never as "manifest shard missing"; undefined stays reserved for genuinely optional fragments.
+`loadMergedManifestWith` takes an optional `io.getRequired` (required fragments and every shard of a v2 index
+load through it; without it — the dedicated server's file-based loader — `io.get` is used and behaviour is
+unchanged). view.ts passes `getRequired: (u) => assetJsonGz(u, { required: true })` when the index says gz,
+and gives the `manifests.index.json` load one cache-busting retry before falling back to MANIFEST_INDEX (the
+index is a single point of failure: if it 404s, the loader falls back to plain-JSON fragment loads and every
+gz-only fragment 404s). Deliberately not done: no boot-level retry of the whole manifest phase (the
+loader-level schedule already covers the transient window, including a full cache-key change); no `no-store`
+on the first attempts (the HTTP-cache fast path is kept for the healthy case); no graphics-quality or budget
+change. The user is not asked to clear site data (that could wipe her save) — the fix heals the stuck cache
+inside the boot itself. The ADR-405 poison-heal behaviour is unchanged.
+
+Validation: new `packages/render/test/adr406_manifest_stale_404.test.ts` (8 tests: healthy path unchanged,
+stale 404 clearing after the instant attempts heals via the delayed retry, stale 404 that never clears for
+the plain key heals via the cache-busting retry with the healed text cached under the plain URL, genuinely
+missing shard throws with cause for a required load with all 5 attempts run, genuinely missing shard still
+undefined for an optional load, poisoned cache entry still heals, 503 on every attempt still throws,
+`cacheBustUrl` appends a fresh `?v=` key and is unique per call) and
+`packages/assets/test/adr406_required_manifest_load.test.ts` (4 tests: required shard load throws with the
+cause, missing shard without `getRequired` still throws "manifest shard missing", optional fragment still
+skipped, required fragment uses `getRequired`). The new tests were written first and run against the
+pre-change code: 6 failed / 6 passed (the 6 passes are behaviour guards that already held); all 12 pass
+with the fix. One ADR-405 test's expectation was updated to the new 5-attempt fetch sequence
+(`["force-cache", undefined, "reload", "no-store", "no-store"]`); no ADR-405 behaviour changed. Full
+suites, serialized: total 4,545 passed, 9 skipped, 1 failed — the 1 failure is the known persist autosave
+bench flake (re-run standalone with `PERF=1`: 1/1 passed). Typecheck EXIT 0, all 11 projects (TS 5.9.3).
+Canaries 34/34 (adr203 3/3, adr252 18/18, adr331 8/8, adr385 5/5). The fix is proven at the code level by
+the mock-fetch repro and the new tests; browser-level proof needs the pushed build and Tracey's reload, plus
+a live re-probe of the poison config against the pushed build.
+
+Result: a transient or stuck 404 can no longer brick a boot — the loader waits, then changes the cache key,
+and heals inside the boot; a file genuinely missing from the deploy now names itself (URL, HTTP 404, the
+retries that ran) in the overlay and the error log instead of "manifest shard missing".
+
+Non-blocking observations: the customization index's `bytes`/`sha` per shard describe the on-disk
+(pretty-printed) source files (verified: on-disk `top.json` is 18,776,681 B, sha `832ab784…`, exactly as the
+index says), while the deployed `.gz` contains the minified form (9,188,794 B, sha `c95229d6…`). Nothing in
+the loader verifies `sha`/`bytes`, so this is harmless — but any future shard-integrity check must account
+for the minification. The delayed retries run only for 404s, not for network errors (a network error still
+throws immediately and is retried once by `assetJsonGz`'s bypass-cache retry, the ADR-405 behaviour).

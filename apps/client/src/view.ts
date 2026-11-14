@@ -18,7 +18,7 @@ import { showRenderError, glInfo, BlackFrameCheck } from "./glcheck.js";
 import { CorrectionSampler, type CorrectionSource } from "./correction-sampler.js";
 import { World, Transform, PrevTransform, TimeOfDay, Weather, Appearance, PlayerId, defineComponent, slotIndex, type WearableSlot, entityIndex, type Entity, seasonAtDays, type SeasonInfo } from "@engine/core";
 import { CHUNK_SIZE, tileToChunk, tileToLocal, renderTileHeight, type TileMap } from "@engine/world";
-import { assetFetch, assetJsonGz, setDayFraction, setSeasonState, resolveOffHandSprite, CharArtMapper, parseCharArt, type CharArt } from "@engine/render";
+import { assetFetch, assetJsonGz, cacheBustUrl, setDayFraction, setSeasonState, resolveOffHandSprite, CharArtMapper, parseCharArt, type CharArt } from "@engine/render";
 import { dayCount, sunFraction } from "./day-clock.js";
 import { clanPieceTint, clanPieceTintPair } from "./clan-tint.js";
 import { pieceVariantOpts } from "./piece-variant.js";
@@ -1179,7 +1179,13 @@ interface Spec {
 /** `<art>/manifests.index.json` (written by vite.config.ts with only the served fragments) or MANIFEST_INDEX (manifest-index.ts). */
 async function loadMergedManifest(art: string): Promise<ReturnType<typeof loadManifest>> {
   const get = async (u: string): Promise<unknown> => { try { const r = await assetFetch(u); return r.ok ? await r.json() : undefined; } catch { return undefined; } };
-  const idx = (await get(art + "manifests.index.json")) as { fragments?: ManifestFragmentRef[]; gz?: boolean } | undefined;
+  let idx = (await get(art + "manifests.index.json")) as { fragments?: ManifestFragmentRef[]; gz?: boolean } | undefined;
+  // ADR-406: the index is a single point of failure for the whole manifest load — if it 404s (a stale
+  // 404 in the browser HTTP cache / CDN edge, the same stuck-cache class as the top shard), the loader
+  // falls back to plain-JSON fragment loads and every gz-only fragment 404s. One retry against a
+  // cache-busting URL (a fresh key at every layer) before falling back to MANIFEST_INDEX; if the index
+  // genuinely does not exist the busted fetch 404s too and the fallback proceeds exactly as before.
+  idx ??= (await get(cacheBustUrl(art + "manifests.index.json"))) as { fragments?: ManifestFragmentRef[]; gz?: boolean } | undefined;
   // ADR-394: a built dist ships the fragments, shards and ids.lock as `.json.gz` (the dev server serves plain JSON)
   // ADR-405: no `.catch(() => undefined)` here: assetJsonGz returns undefined ONLY for a genuinely missing file
   // (a 404 on every attempt); a fetch/gunzip/parse failure throws with its cause, so the boot error names the
@@ -1187,11 +1193,15 @@ async function loadMergedManifest(art: string): Promise<ReturnType<typeof loadMa
   // when missing; a real failure fails the boot (and the safe-retry reload) loudly rather than silently booting
   // without the fragment. Prefetch (prefetch-art.ts) keeps its best-effort catch.
   const getManifest = idx?.gz ? assetJsonGz : get;
+  // ADR-406: shards of a v2 index (and required fragments) are REQUIRED — load them through a loader that
+  // throws with the cause (URL, HTTP 404, attempts) instead of returning undefined, so a genuinely missing
+  // shard reads as a 404 after a cache-busting retry, never as "manifest shard missing".
+  const getManifestRequired = idx?.gz ? (u: string) => assetJsonGz(u, { required: true }) : undefined;
   const charArt = parseCharArt(new URLSearchParams(globalThis.location?.search ?? "").get("charArt"), (() => { try { return globalThis.localStorage?.getItem("charArt"); } catch { return null; } })());
   const list = withCharArtFragment(idx?.fragments?.length ? idx.fragments : MANIFEST_INDEX, charArt); // ADR-240: v2 sample only with charArt
   // ADR-248: shared with the dedicated server (@engine/assets loadMergedManifestWith); atlas paths become absolute per
   // fragment, so sourcesFromManifest (pack base) loads each PNG from its one source
-  const { result, collisions, warnings } = await loadMergedManifestWith(list, { get: getManifest, artUrl: new URL(art, location.href).href });
+  const { result, collisions, warnings } = await loadMergedManifestWith(list, { get: getManifest, getRequired: getManifestRequired, artUrl: new URL(art, location.href).href });
   if (collisions.length) console.info(`[view] manifest: ${collisions.length} duplicate keys kept from the first fragment (${collisions.slice(0, 5).map((c) => `${c.section}.${c.key}`).join(", ")}...)`);
   for (const w of warnings) if (!/ defined in /.test(w)) console.warn(`[view] manifest: ${w}`);
   return result;

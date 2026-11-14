@@ -40,7 +40,7 @@ describe("ADR-405 manifest cache recovery", () => {
   it("poisoned cache entry + network 404 on retry -> undefined (genuinely missing, not a crash)", async () => {
     stubCache([[URL, "garbage"]]);
     vi.stubGlobal("fetch", async () => new Response("", { status: 404 }));
-    expect(await assetJsonGz(URL)).toBeUndefined();
+    expect(await assetJsonGz(URL, { retryDelays: [0, 0] })).toBeUndefined();
   });
 
   it("poisoned cache entry + network garbage -> throws with the URL, not undefined", async () => {
@@ -78,12 +78,13 @@ describe("ADR-405 manifest cache recovery", () => {
     expect(seen).toEqual(["force-cache", undefined, "reload"]);
   });
 
-  it("a genuine 404 on every attempt (including reload) is still undefined", async () => {
+  it("a genuine 404 on every attempt (including reload, delayed and cache-busting retries) is still undefined", async () => {
     stubCache();
     const seen: (string | undefined)[] = [];
     vi.stubGlobal("fetch", async (_u: string, init?: RequestInit) => { seen.push(init?.cache); return new Response("", { status: 404 }); });
-    expect(await assetJsonGz(URL)).toBeUndefined();
-    expect(seen).toEqual(["force-cache", undefined, "reload"]);
+    expect(await assetJsonGz(URL, { retryDelays: [0, 0] })).toBeUndefined();
+    // ADR-406: the schedule is now force-cache, default, reload, delayed no-store, cache-busting no-store
+    expect(seen).toEqual(["force-cache", undefined, "reload", "no-store", "no-store"]);
   });
 
   it("dropAssetCacheEntry removes one entry and leaves the rest", async () => {

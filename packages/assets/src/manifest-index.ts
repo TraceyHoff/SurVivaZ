@@ -65,6 +65,13 @@ export const servedManifestIndex = (served: (url: string) => boolean): { fragmen
  */
 export async function loadMergedManifestWith(list: readonly ManifestFragmentRef[], io: {
   get: (url: string) => Promise<unknown>;
+  /** ADR-406: loader for REQUIRED manifest files — fragments that are not optional, and every shard of
+   * a v2 index (a shard index lists files the merge cannot proceed without). When absent, `get` is
+   * used (the dedicated server's file-based loader). A required loader must THROW with the cause
+   * instead of returning undefined for a missing file, so the boot error names the real failure
+   * (URL, HTTP status, attempts) rather than every failure reading as "manifest shard missing".
+   * The `| undefined` keeps explicit `undefined` assignable under `exactOptionalPropertyTypes`. */
+  getRequired?: ((url: string) => Promise<unknown>) | undefined;
   /** Absolute url of the art root (ends with "/"), e.g. `new URL(art, location.href).href` or a `file:` url. */
   artUrl: string;
   /** Atlas path rewrite for a fragment-relative image path (client: absolute pathname). Default: `new URL(p, base).pathname`. */
@@ -72,10 +79,15 @@ export async function loadMergedManifestWith(list: readonly ManifestFragmentRef[
 }): Promise<{ result: ReturnType<typeof loadManifest>; collisions: ManifestCollision[]; warnings: string[]; fragments: string[] }> {
   const frags: ManifestFragment[] = []; const dirOf = new Map<string, string>();
   for (const f of list) {
-    const url = new URL(f.url, io.artUrl).href; let m = await io.get(url);
+    const url = new URL(f.url, io.artUrl).href;
+    // ADR-406: required fragments load through `getRequired` (which throws with cause when missing);
+    // optional fragments keep `get` and skip when it returns undefined.
+    const loadFrag = f.optional ? io.get : (io.getRequired ?? io.get);
+    let m = await loadFrag(url);
     if (m === undefined) { if (f.optional) continue; throw new Error(`manifest fetch failed: ${url}`); }
-    // ADR-138: a v2 shard index fetches its shards in parallel and merges them (duplicate keys across shards throw)
-    m = await resolveManifestShards(m, async (file) => io.get(new URL(file, url).href));
+    // ADR-138: a v2 shard index fetches its shards in parallel and merges them (duplicate keys across shards throw).
+    // ADR-406: shards are required by definition, so they load through `getRequired` too.
+    m = await resolveManifestShards(m, async (file) => (io.getRequired ?? io.get)(new URL(file, url).href));
     frags.push({ name: f.name, manifest: applyFragmentFlags(f, m) as ManifestJson }); dirOf.set(f.name, fragmentBase(f, url, io.artUrl)); // ADR-242 root/stream
   }
   const img = io.resolveImage ?? ((p: string, base: string) => new URL(p, base).pathname);

@@ -69,6 +69,33 @@ export async function assetFetch(url: string, init?: RequestInit): Promise<Respo
 }
 
 const inflightText = new Map<string, Promise<string | undefined>>();
+/** ADR-406: a cache-busting query key for a manifest `.gz` URL. A URL never requested before has no
+ * entry in any cache — browser HTTP cache, CDN edge, or proxy — so it must be served from origin.
+ * GitHub Pages ignores the query string for static files, so `?v=<token>` still serves the file.
+ * The token is unique per call, so a busted fetch can never itself be served a stale entry. */
+let bustCounter = 0;
+export function cacheBustUrl(url: string, token?: string): string {
+  const t = token ?? `${Date.now().toString(36)}-${(bustCounter++).toString(36)}`;
+  return `${url}${url.includes("?") ? "&" : "?"}v=${t}`;
+}
+
+/** Options for `assetJsonGz` (and the `gzText` it reads through). */
+export interface AssetJsonGzOptions {
+  /** ADR-406: the file is listed in a manifest index, so it is REQUIRED — a 404 on every attempt
+   * throws with the cause instead of returning undefined (undefined stays reserved for genuinely
+   * optional fragments, which still skip when missing). */
+  required?: boolean;
+  /** Delays (ms) before the delayed retries. Tests pass [0, 0] so the schedule runs instantly. */
+  retryDelays?: readonly number[];
+  /** Fixed token for the cache-busting retry (tests); production generates a unique one per call. */
+  bustToken?: string;
+  /** Skip the Cache Storage read and fetch with `cache: "reload"` (the ADR-405 heal retry). */
+  bypassCache?: boolean;
+}
+/** ADR-406: delays before the delayed retries (the instant attempts run back-to-back, as before). */
+export const GZ_TEXT_RETRY_DELAYS: readonly number[] = [600, 1800];
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
 /**
  * ADR-405: the decoded text of `<url>.gz` (or undefined when the file is genuinely missing).
  * A fetch/gunzip failure THROWS (it used to return undefined, so every failure — a 503, a cut
@@ -76,14 +103,37 @@ const inflightText = new Map<string, Promise<string | undefined>>();
  * cause). Only a 404 on every attempt (including one cache-bypassing `reload` fetch, so a stale
  * cached 404 cannot fake a missing file) returns undefined. `bypassCache` skips the Cache
  * Storage read and fetches with `cache: "reload"`, so a poisoned entry cannot survive a retry.
+ * ADR-406: the instant attempts all hit the SAME cache key in the same millisecond window — a 404
+ * stuck in the browser HTTP cache and/or the nearby CDN edge (Pages 404s carry an ETag and are
+ * cached heuristically; a reload revalidates into a 304 and serves the stale 404 again) defeats
+ * all three identically, and a user reload repeats the identical sequence (proven live: the top
+ * shard 404s deterministically on both Wi-Fi and mobile data, 11+ minutes after the deploy
+ * finished). So a 404 now also gets delayed retries: a plain `no-store` fetch (no validators, no
+ * cache read or write) and, last, a fetch against a cache-busting URL (a fresh key at every layer).
+ * A flap that clears, or a stuck cache, heals inside this boot instead of bricking it.
  */
-async function gzText(url: string, opts?: { bypassCache?: boolean }): Promise<string | undefined> {
+async function gzText(url: string, opts?: AssetJsonGzOptions): Promise<string | undefined> {
   const cache = await cacheStore();
   if (cache && !opts?.bypassCache) { try { const hit = await cache.match(url); if (hit) return await hit.text(); } catch { /* ignore */ } }
-  const tryFetch = async (init?: RequestInit): Promise<Response | undefined> => { try { return await fetch(url + ".gz", init); } catch { return undefined; } };
+  const delays = opts?.retryDelays ?? GZ_TEXT_RETRY_DELAYS;
+  const tryFetch = async (init?: RequestInit, bust = false): Promise<Response | undefined> => {
+    try { return await fetch(bust ? cacheBustUrl(url + ".gz", opts?.bustToken) : url + ".gz", init); } catch { return undefined; }
+  };
+  // A fetch that throws (network error) returns undefined here; the caller reassigns `res` only when
+  // a response actually arrived, so a transient blip on one attempt never overwrites an earlier
+  // response's evidence (a 404 stays a 404; a missing response stays missing and throws below).
   let res = await tryFetch(opts?.bypassCache ? { cache: "reload" } : { cache: "force-cache" });
-  if (!res || !res.ok) res = await tryFetch();
-  if (res && res.status === 404 && !opts?.bypassCache) res = await tryFetch({ cache: "reload" });
+  if (!res || !res.ok) { const r2 = await tryFetch(); if (r2) res = r2; }
+  if (res && res.status === 404 && !opts?.bypassCache) { const r3 = await tryFetch({ cache: "reload" }); if (r3) res = r3; }
+  // ADR-406: delayed retries, only while the file is still 404ing after the instant attempts.
+  if (res?.status === 404) {
+    await sleep(delays[0] ?? 0);
+    const r4 = await tryFetch({ cache: "no-store" }); if (r4) res = r4;
+    if (res?.status === 404) {
+      await sleep(delays[1] ?? 0);
+      const r5 = await tryFetch({ cache: "no-store" }, true); if (r5) res = r5;
+    }
+  }
   if (!res) throw new Error(`manifest fetch failed: network error: ${url}.gz`);
   if (!res.ok) {
     if (res.status === 404) return undefined;
@@ -105,30 +155,40 @@ async function gzText(url: string, opts?: { bypassCache?: boolean }): Promise<st
  * "manifest shard missing" and no cause): evict it and retry once from the network, bypassing both caches,
  * so a single bad write heals on the next load instead of bricking the deploy. A fetch/gunzip failure is
  * retried once the same way, then the real error surfaces (never undefined).
+ * ADR-406: `opts.required` (index-listed shards and required fragments) — a 404 on every attempt now
+ * THROWS with the cause (URL, HTTP 404, and the retries that ran, including the cache-busting one)
+ * instead of returning undefined, so the boot error names the real failure: a file genuinely missing
+ * from the deploy reads as a 404 after a cache-busting retry, never as "manifest shard missing".
  */
-export async function assetJsonGz(url: string): Promise<unknown> {
+export async function assetJsonGz(url: string, opts?: AssetJsonGzOptions): Promise<unknown> {
   let text: string | undefined;
-  try { text = await readGzText(url); }
+  try { text = await readGzText(url, opts); }
   catch {
-    try { text = await gzText(url, { bypassCache: true }); }
+    try { text = await gzText(url, { ...opts, bypassCache: true }); }
     catch (e2) { throw new Error(`manifest load failed: ${url}`, { cause: e2 instanceof Error ? e2 : new Error(String(e2)) }); }
   }
-  if (text === undefined) return undefined;
+  if (text === undefined) {
+    if (opts?.required) throw new Error(`manifest load failed: ${url}: HTTP 404 on every fetch attempt (instant, delayed, and cache-busting retries included)`);
+    return undefined;
+  }
   try { return JSON.parse(text); }
   catch {
     await dropAssetCacheEntry(url);
-    const retry = await gzText(url, { bypassCache: true });
-    if (retry === undefined) return undefined;
+    const retry = await gzText(url, { ...opts, bypassCache: true });
+    if (retry === undefined) {
+      if (opts?.required) throw new Error(`manifest load failed: ${url}: HTTP 404 on every fetch attempt (instant, delayed, and cache-busting retries included)`);
+      return undefined;
+    }
     try { return JSON.parse(retry); }
     catch (e2) { throw new Error(`manifest JSON parse failed: ${url} (cached entry evicted, network retry also failed)`, { cause: e2 }); }
   }
 }
 
 /** Deduped `gzText` read (concurrent readers share one in-flight fetch + decode). */
-async function readGzText(url: string): Promise<string | undefined> {
+async function readGzText(url: string, opts?: AssetJsonGzOptions): Promise<string | undefined> {
   let p = inflightText.get(url);
   if (!p) {
-    p = gzText(url); inflightText.set(url, p);
+    p = gzText(url, opts); inflightText.set(url, p);
     // `.then(cleanup, cleanup)`, not `.finally(cleanup)`: a finally-derived promise re-rejects when `p`
     // rejects, which would surface as an unhandled rejection (ADR-405: gzText now throws on real failures).
     void p.then(() => { if (inflightText.get(url) === p) inflightText.delete(url); }, () => { if (inflightText.get(url) === p) inflightText.delete(url); });
