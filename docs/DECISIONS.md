@@ -8565,6 +8565,8 @@ Decision. Engine only, offsets and occlusion only: no art is scaled, duplicated 
   the upright's pixels above that plane along its edge (`roofClipLine`: view-u edges slope down-right, view-v edges
   down-left). A vertex post reads the roofed view cells around it: at a roof's far corner the line is a V (both eaves
   fall away from it), on a far edge it follows that edge, and anywhere else it is level. Centre pivots are level.
+  An edge wall whose end is a roof's far corner bends its line down past that end (min of its own line and that
+  corner's V), so its end post never peeks above the far eave.
   - WebGL2: instance flag `ROOF_CLIP` (65536). aF.xy carries the line (build pieces never use the wet / cold inputs),
     the vertex shader passes the height over the plane and the screen px as linear varyings, and the fragment shader
     discards above the line (k x px, or -0.5 |px| for the V), after the derivatives. The static piece cache signs the

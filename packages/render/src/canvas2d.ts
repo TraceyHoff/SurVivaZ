@@ -31,7 +31,7 @@ import { readDayFraction, readDayNumber, readWeather, readWind } from "./env.js"
 import { VfxLayer } from "./vfx.js";
 import { WeatherFx } from "./weatherFx.js";
 import { newStats, type FrameStats } from "./gl/util.js";
-import { BED_SORT_EPS, roofClipLine, type GameplayBindings } from "./sprites.js";
+import { BED_SORT_EPS, roofClipAt, roofClipLine, type GameplayBindings } from "./sprites.js";
 import { DeckNeighbors, rotSideMask, deckTopPx, deckClipPolygon, deckSeamPatches, pieceTieBreak, exactTieBreak, pieceOrder, VERTEX_POST_BIAS } from "./building/deckFaces.js";
 import { lCornerArmPiece, lCornerArmPivots, ROT_EXACT_PIVOT, ROT_DECK_LIFT, ROT_VERTEX_POST } from "./building/modular.js";
 
@@ -397,7 +397,7 @@ export class Canvas2DRenderer {
       // ADR-404: an upright under a seated rfx roof is clipped to below the roof plane, as the WebGL2 ROOF_CLIP discard
       const plane = !r.roof && !r.deck && r.top === undefined && this.bindings.pieceRoofPlane ? this.bindings.pieceRoofPlane(pvx, pvy, r.level) : undefined;
       const rl = plane === undefined ? undefined : roofClipLine(pv.u, pv.v, plane, lift, hh, hw, (du, dv) => { const w = fromView(pv.u + du, pv.v + dv, q); return this.bindings.pieceRoofPlane!(w.x, w.y, r.level) !== undefined; });
-      const roofClip: [number, number][] | undefined = rl && (rl.apex ? [[-256, -(rl.h0 - 128)], [0, -rl.h0], [256, -(rl.h0 - 128)], [256, 512], [-256, 512]] : [[-256, -(rl.h0 - 256 * rl.k)], [256, -(rl.h0 + 256 * rl.k)], [256, 512], [-256, 512]]);
+      const roofClip: [number, number][] | undefined = rl && [...[-256, ...(rl.apex ? [rl.c] : []), 256].map((x): [number, number] => [x, -(rl.h0 + roofClipAt(rl, x, hh, hw))]), [256, 512], [-256, 512]];
       out.push({ e: r.e, sx: p.sx, sy: p.sy, depth: r.level * LEVEL_DEPTH + (r.deck ? DECK_DEPTH : 0) + isoD, ord: pieceOrder(r.level, r.layer, vr.x, vr.y) * 2 + (r.ghost ? 1 : 0) + r.ordFrac, img, f,
         clip: mask ? deckClipPolygon(vr.w, vr.h, mask, r.top!, hw, hh) : roofClip, seams: mask ? deckSeamPatches(vr.w, vr.h, mask, r.top!, hw, hh) : undefined, ghost: r.ghost, hearth: fire === 2 && !r.ghost && r.dmg === 0, scale: this.bindings.pieceScale?.(r.e) ?? 1 });
     }

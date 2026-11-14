@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { RFX, rfxPickLevel, rfxSeat, rfxSpriteKeys, type RfxForm, type RfxTile } from "@engine/assets";
-import { RFX_SEAT_BIAS, roofClipLine } from "@engine/render";
+import { RFX_SEAT_BIAS, roofClipAt, roofClipLine } from "@engine/render";
 import { decodeRgba } from "./png-rgba.js";
 
 const ROOT = resolve(__dirname, "../../..");
@@ -65,15 +65,19 @@ const frac = (m: { ok: number; n: number }): number => m.ok / Math.max(1, m.n);
 
 describe("ADR-404 roof seat", () => {
   it("clip line follows the edge: view-u edges slope down-right, view-v edges down-left, posts / centres level", () => {
-    expect(roofClipLine(3.5, 2, 57, 0, 16, 32)).toEqual({ h0: 57, k: -0.5, apex: false });
-    expect(roofClipLine(3, 2.5, 57, 4, 16, 32)).toEqual({ h0: 53, k: 0.5, apex: false });
+    expect(roofClipLine(3.5, 2, 57, 0, 16, 32)).toEqual({ h0: 57, k: -0.5, apex: false, c: 0 });
+    expect(roofClipLine(3, 2.5, 57, 4, 16, 32)).toEqual({ h0: 53, k: 0.5, apex: false, c: 0 });
     expect(roofClipLine(3, 2, 57, 0, 16, 32).k).toBe(0); expect(roofClipLine(3.5, 2.5, 57, 0, 16, 32).k).toBe(0);
     // vertex posts: roofed view cells around the post pick the line (far corner = V, far edge = that edge, else level)
     const at = (cells: string[]) => (du: number, dv: number): boolean => cells.includes(`${du},${dv}`);
-    expect(roofClipLine(3, 2, 57, 0, 16, 32, at(["0.5,0.5"]))).toEqual({ h0: 57, k: 0, apex: true });
-    expect(roofClipLine(3, 2, 57, 0, 16, 32, at(["0.5,0.5", "0.5,-0.5"]))).toEqual({ h0: 57, k: 0.5, apex: false });
-    expect(roofClipLine(3, 2, 57, 0, 16, 32, at(["0.5,0.5", "-0.5,0.5"]))).toEqual({ h0: 57, k: -0.5, apex: false });
-    expect(roofClipLine(3, 2, 57, 0, 16, 32, at(["-0.5,-0.5"]))).toEqual({ h0: 57, k: 0, apex: false });
+    expect(roofClipLine(3, 2, 57, 0, 16, 32, at(["0.5,0.5"]))).toEqual({ h0: 57, k: 0, apex: true, c: 0 });
+    expect(roofClipLine(3, 2, 57, 0, 16, 32, at(["0.5,0.5", "0.5,-0.5"]))).toEqual({ h0: 57, k: 0.5, apex: false, c: 0 });
+    expect(roofClipLine(3, 2, 57, 0, 16, 32, at(["0.5,0.5", "-0.5,0.5"]))).toEqual({ h0: 57, k: -0.5, apex: false, c: 0 });
+    expect(roofClipLine(3, 2, 57, 0, 16, 32, at(["-0.5,-0.5"]))).toEqual({ h0: 57, k: 0, apex: false, c: 0 });
+    // a far wall ending at the roof's far corner: past that end its post follows the other eave down
+    const w = roofClipLine(3.5, 2, 57, 0, 16, 32, at(["0,0.5"])); // view-u wall (3.5, 2); far corner at its -u end (3, 2)
+    expect(w).toEqual({ h0: 57, k: -0.5, apex: true, c: -16 });
+    expect(roofClipAt(w, 0)).toBeCloseTo(0); expect(roofClipAt(w, -16)).toBe(8); expect(roofClipAt(w, -24)).toBe(4);
   });
   it("seats lie between the floor and the wall-top height of the plain wall art", () => {
     const tops = PLAIN_WALLS.flatMap((k) => [0, 1].map((r) => -top(k, r) - RFX.levelPx));

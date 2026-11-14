@@ -108,8 +108,8 @@ export function occluderFade(fade: number, occT: number): number {
 export const OUTLINE_ONLY = 256;
 /** ADR-401: instance flag on rfx roof parts: un-darken the bilinear edge band (see the sprite FS). */
 export const RFX_EDGE = 32768;
-/** ADR-404 instance flag: an upright under a seated rfx roof. aF.x / aF.y / aF.z carry its clip line (px above the pivot at the
- *  pivot column / change per screen px / 1 = V line at a far corner), and its wet / cold / heat inputs are unused (build pieces never set them). */
+/** ADR-404 instance flag: an upright under a seated rfx roof. aF carries its clip line: x = px above the pivot at the pivot column, y = change per
+ *  screen px, z = 1 when a far roof corner bends it down (V), w = that corner's screen px, and its wet / cold / heat inputs are unused (build pieces never set them). */
 export const ROOF_CLIP = 65536;
 /** ADR-269: default character-only silhouette outline (union of body + worn layers): 1 atlas texel of dark plum, a
  *  little darker / more defined than the baked line art alone. Independent of the global StyleConfig.outline (off). */
@@ -218,7 +218,7 @@ uniform highp sampler2D uFrames;
 uniform float uZPerPx, uHH, uHW, uTime, uWind, uOutline;
 uniform int uShadowPass, uShadowMode;
 uniform vec2 uShadowDir; uniform float uBlobAspect; uniform vec2 uWindVec; // screen-x wind direction, strength 0..1
-out vec4 vFx; out vec3 vUvRaw; flat out int vLayer; out float vAlpha; flat out int vFlags; flat out vec4 vRect; out vec3 vTint; flat out vec3 vMisc; out vec2 vLocal; out vec2 vScr; flat out float vOcc; flat out ivec2 vFB; flat out vec4 vTint2; flat out float vSwayPx; flat out vec4 vLT; out vec2 vDeck; flat out ivec2 vDeckM; flat out float vSeed; out vec2 vRoofClip; flat out vec2 vRoofLine;
+out vec4 vFx; out vec3 vUvRaw; flat out int vLayer; out float vAlpha; flat out int vFlags; flat out vec4 vRect; out vec3 vTint; flat out vec3 vMisc; out vec2 vLocal; out vec2 vScr; flat out float vOcc; flat out ivec2 vFB; flat out vec4 vTint2; flat out float vSwayPx; flat out vec4 vLT; out vec2 vDeck; flat out ivec2 vDeckM; flat out float vSeed; out vec2 vRoofClip; flat out vec3 vRoofLine;
 uniform vec2 uViewPx; // drawing-buffer size (device px): sprite pivots snap to whole device pixels (no shimmer / half-texel blur)
 vec2 snapPivot(vec2 p) {
   if (uViewPx.x <= 0.0) return p;
@@ -234,7 +234,7 @@ void main() {
   float s = aA.w;
   vFx = (flags & ${ROOF_CLIP}) != 0 ? vec4(0.0) : aF; vFlags = flags; vRect = uvr; vTint = aD.rgb; int fw = int(dim.w + 0.5); vFB = ivec2(fw & 15, fw >> 4); vMisc = vec3(aE.y, aE.z, float(fw & 1)); vAlpha = aB.w;
   vTint2 = aH; vSwayPx = 0.0; vLT = aI; vSeed = aB.z;
-  vLocal = c * 2.0 - 1.0; vOcc = aG.w; vScr = aA.xy; vDeck = vec2(0.0); vDeckM = ivec2(0); vRoofClip = vec2(-1.0, 0.0); vRoofLine = vec2(0.0);
+  vLocal = c * 2.0 - 1.0; vOcc = aG.w; vScr = aA.xy; vDeck = vec2(0.0); vDeckM = ivec2(0); vRoofClip = vec2(-1.0, 0.0); vRoofLine = vec3(0.0);
   if (uShadowPass == 1) {
     if (aE.x <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
     vAlpha = aE.x;
@@ -261,7 +261,7 @@ void main() {
   float flip = (flags & 1) != 0 ? -1.0 : 1.0;
   float px = (x - aC.x) * s * flip;
   float hp = (aC.y - y) * s;
-  if ((flags & ${ROOF_CLIP}) != 0) { vRoofClip = vec2(hp - aF.x, px); vRoofLine = aF.yz; } // ADR-404: height over the roof plane at the pivot column, screen px
+  if ((flags & ${ROOF_CLIP}) != 0) { vRoofClip = vec2(hp - aF.x, px); vRoofLine = aF.yzw; } // ADR-404: height over the roof plane at the pivot column, screen px
   if (maskSway) vSwayPx = uWindVec.x * uWindVec.y * aG.x * (0.65 + 0.35 * sin(uTime * aG.y * 6.283 + aB.z * 6.283)) * flip * (uvr.z - uvr.x) / dim.x;
   else if (aG.x > 0.0) { // wind sway: weight from height above the pivot, global wind + per-instance phase
     float wgt = pow(clamp(hp / max(1.0, aC.y * s), 0.0, 1.0), 1.0 + 2.0 * clamp(aG.z, 0.0, 1.0)); // stiffness 0..1, higher = stiffer
@@ -284,7 +284,7 @@ void main() {
 
 const FS = /* glsl */ `#version 300 es
 precision highp float; precision highp int;
-in vec4 vFx; in vec3 vUvRaw; flat in int vLayer; in float vAlpha; flat in int vFlags; flat in vec4 vRect; in vec3 vTint; flat in vec3 vMisc; in vec2 vLocal; in vec2 vScr; flat in float vOcc; flat in ivec2 vFB; flat in vec4 vTint2; flat in float vSwayPx; flat in vec4 vLT; in vec2 vDeck; flat in ivec2 vDeckM; flat in float vSeed; in vec2 vRoofClip; flat in vec2 vRoofLine;
+in vec4 vFx; in vec3 vUvRaw; flat in int vLayer; in float vAlpha; flat in int vFlags; flat in vec4 vRect; in vec3 vTint; flat in vec3 vMisc; in vec2 vLocal; in vec2 vScr; flat in float vOcc; flat in ivec2 vFB; flat in vec4 vTint2; flat in float vSwayPx; flat in vec4 vLT; in vec2 vDeck; flat in ivec2 vDeckM; flat in float vSeed; in vec2 vRoofClip; flat in vec3 vRoofLine;
 uniform vec3 uSeason; // ADR-239: fall, winter, snow cap
 uniform highp sampler2DArray uAtlas, uPoolTex, uEmis, uSheenM, uSwayM, uTintM; uniform highp sampler2D uTints;
 #define vUv vec3(vUvRaw.xy, float(vLayer)) // flat int array layer (no interpolated layer index)
@@ -349,7 +349,7 @@ float h21(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); 
 void main() {
   vec2 cw = fwidth(vUvRaw.xy); // uniform control flow: crispUv's footprint (ADR-145)
   mat2 deckJu = mat2(dFdx(vUvRaw.xy), dFdy(vUvRaw.xy)), deckJd = mat2(dFdx(vDeck), dFdy(vDeck)); // ADR-210 seam remap Jacobians
-  if ((vFlags & ${ROOF_CLIP}) != 0 && vRoofClip.x > (vRoofLine.y > 0.5 ? -0.5 * abs(vRoofClip.y) : vRoofLine.x * vRoofClip.y)) discard; // ADR-404 (after the derivatives)
+  if ((vFlags & ${ROOF_CLIP}) != 0 && vRoofClip.x > (vRoofLine.y > 0.5 ? min(vRoofLine.x * vRoofClip.y, vRoofLine.x * vRoofLine.z - 0.5 * abs(vRoofClip.y - vRoofLine.z)) : vRoofLine.x * vRoofClip.y)) discard; // ADR-404 (after the derivatives)
   if (vDeckM.x != 0) { // ADR-197: a side face/rim is drawn only toward an open side (no deck neighbour there)
     float ha = float(vDeckM.y & 15) * 0.5 + ${DECK_EDGE_EPS}, hb = float((vDeckM.y >> 4) & 15) * 0.5 + ${DECK_EDGE_EPS};
     float ea = abs(vDeck.x) - ha, eb = abs(vDeck.y) - hb; int sd = (ea > 0.0 && ea >= eb) ? (vDeck.x > 0.0 ? 1 : 4) : (eb > 0.0 ? (vDeck.y > 0.0 ? 2 : 8) : 0); // ADR-210 owning face
@@ -507,16 +507,27 @@ export const RFX_SEAT_BIAS = 1.1;
  * (view u edge: down-right, view v edge: down-left); posts and centre pivots get a level line.
  */
 export function roofClipLine(pu: number, pv: number, planePx: number, liftPx: number, hh: number, hw: number,
-  roofAt?: (du: number, dv: number) => boolean): { h0: number; k: number; apex: boolean } {
+  roofAt?: (du: number, dv: number) => boolean): { h0: number; k: number; apex: boolean; c: number } {
   const fu = pu - Math.floor(pu), fv = pv - Math.floor(pv), half = (f: number): boolean => Math.abs(f - 0.5) < 0.1, whole = (f: number): boolean => f < 0.1 || f > 0.9;
-  let k = half(fu) && whole(fv) ? -hh / hw : whole(fu) && half(fv) ? hh / hw : 0, apex = false;
+  const uEdge = half(fu) && whole(fv), vEdge = whole(fu) && half(fv);
+  let k = uEdge ? -hh / hw : vEdge ? hh / hw : 0, apex = false, c = 0;
+  // the roof's far corner at view vertex (pu + du, pv + dv): roofed only in the view cell in front of it
+  const farCorner = (du: number, dv: number): boolean => !!roofAt && roofAt(du + 0.5, dv + 0.5) && !roofAt(du - 0.5, dv - 0.5) && !roofAt(du - 0.5, dv + 0.5) && !roofAt(du + 0.5, dv - 0.5);
   if (roofAt && whole(fu) && whole(fv)) { // a vertex post: the roof boundary through it, from the roofed view cells around it
     const b = roofAt(-0.5, -0.5), f = roofAt(0.5, 0.5), l = roofAt(-0.5, 0.5), r = roofAt(0.5, -0.5);
     if (f && !b && !l && !r) apex = true; // the far corner of a roof: both eaves fall away from the post (V line)
     else if (f && r && !b && !l) k = hh / hw; else if (f && l && !b && !r) k = -hh / hw; // on a far edge: that edge's line
+  } else if (uEdge || vEdge) { // an edge wall whose end is a far corner: past that end its post follows the other eave down
+    for (const e of [-0.5, 0.5]) {
+      const du = uEdge ? e : 0, dv = uEdge ? 0 : e;
+      if (farCorner(du, dv)) { apex = true; c = (du - dv) * hw; break; } // screen px of that end (view u -> +hw, v -> -hw)
+    }
   }
-  return { h0: planePx - liftPx, k, apex };
+  return { h0: planePx - liftPx, k, apex, c };
 }
+/** ADR-404: the clip line's height over h0 at screen px `x` (the wall keeps pixels at or below it). */
+export const roofClipAt = (l: { k: number; apex: boolean; c: number }, x: number, hh = 16, hw = 32): number =>
+  l.apex ? Math.min(l.k * x, l.k * l.c - (hh / hw) * Math.abs(x - l.c)) : l.k * x;
 
 export class SpriteBatch {
   private prog: Program;
@@ -1362,7 +1373,7 @@ export class SpriteBatch {
           s[14] = spk.sid; s[15] = spk.flags; s[16] = drawVis;
           s[17] = res.entry; s[18] = res.atlas; s[19] = res.ax; s[20] = res.ay; s[21] = res.flipX ? 1 : 0; s[22] = res.hasDamageFrames ? 1 : 0;
           s[23] = deckTop ?? -1; s[24] = deckMask; s[25] = lift; s[26] = crack ? 1 : 0;
-          s[27] = vq; s[28] = atlas.layoutVersion; s[29] = i; s[30] = nightSet?.has(vis) ? 1 : 0; s[31] = cx.pieceAnchor === "front" ? 1 : 0; s[32] = rclip?.h0 ?? -1; s[33] = rclip?.k ?? 0; s[34] = rclip?.apex ? 1 : 0;
+          s[27] = vq; s[28] = atlas.layoutVersion; s[29] = i; s[30] = nightSet?.has(vis) ? 1 : 0; s[31] = cx.pieceAnchor === "front" ? 1 : 0; s[32] = rclip?.h0 ?? -1; s[33] = rclip?.k ?? 0; s[34] = rclip?.apex ? 1 + rclip.c : 0;
           if (entry) {
             cacheHit = true;
             for (let q = 0; q < PIECE_SIG_N; q++) if (s[q] !== entry.sig[q]) { cacheHit = false; break; }
@@ -1394,7 +1405,7 @@ export class SpriteBatch {
             // slice foot = screen y of the front corner of its front-most tile, relative to pivot
             const footDy = single ? 0 : (best + 2) * hh - z * zs - sy;
             const o = this.writeOne(sx, sy, key, psc, res, flags, (i * 0.618034) % 1, alpha, sliceL, sliceR, tint, footDy, 0, ghost, dmgOverlay, 0);
-            o[27] = occT; if (rclip) { o[20] = rclip.h0; o[21] = rclip.k; o[22] = rclip.apex ? 1 : 0; }
+            o[27] = occT; if (rclip) { o[20] = rclip.h0; o[21] = rclip.k; o[22] = rclip.apex ? 1 : 0; o[23] = rclip.c; }
             if (deckMask) { o[38] = deckMask | (vfw << 4) | (vfh << 8); o[39] = deckTop!; }
             if (sway) { o[24] = sway[0]!; o[25] = sway[1]!; o[26] = sway[2]!; } // SpriteDef.sway (+ masks.sway weights in the shader)
             if (tints?.[1]) writeTint2(o, tints[1]);
