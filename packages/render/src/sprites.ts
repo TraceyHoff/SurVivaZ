@@ -169,6 +169,11 @@ export interface GameplayBindings {
   pieceSwing?: (entity: number, now: number) => { vis: number; state: number } | undefined;
   /** ADR-314: swing sprite of a door piece (undefined = not a door): its streamed page is warmed while the door is on screen. */
   pieceSwingSprite?: (entity: number) => number | undefined;
+  /** ADR-397 continuous roofs: once the rfx sprite `vis`'s streamed page is resident, the piece draws it at rotation row `row`,
+   *  raised by `liftPx` (1x px), with its overlay instances (verge / gable wall / chimney stack) right after it. Until then,
+   *  and on renderers without this binding (Canvas2D), BuildPiece.visualId (the legacy roof) draws as before (Art's §4
+   *  fallback). undefined = not an rfx roof. */
+  pieceRoofFx?: (entity: number) => RoofFxBinding | undefined;
   /** ADR-218 fired pieces: FireState (0 out, 1 lit, 2 lit hearth with embers/smoke); undefined = not a fired piece. Lit pieces whose
    *  sprite has a looping multi-frame `idle` anim animate it on the render clock (drawn dynamically, never baked into a static
    *  chunk); out pieces show the sprite's `unlit` anim frame when the building has no own unlit state. */
@@ -467,6 +472,13 @@ export function pieceDrawSprite(atlas: Pick<AtlasManager, "streamClass" | "pageR
   return cls === "bld" ? atlas.buildingFallback(vis, PRIO_NEAR) : atlas.placeholderOf(vis);
 }
 
+/** ADR-397: see SpriteBindings.pieceRoofFx. Overlays: sprite id, rotation row, lift (1x px). */
+export interface RoofFxBinding { vis: number; row: number; liftPx: number; overlays: readonly { vis: number; row: number; liftPx: number }[] }
+/** ADR-397: max draw parts per piece (L-corner arms + tile + roof overlays); the static-cache key is k * PIECE_PARTS_MAX + part. */
+export const PIECE_PARTS_MAX = 16;
+/** ADR-397: depth bias per roof overlay step, so each overlay wins the equal-depth test against its own tile (drawn after it). */
+export const ROOF_OVERLAY_BIAS = 0.002;
+
 export class SpriteBatch {
   private prog: Program;
   private vao: WebGLVertexArrayObject;
@@ -493,9 +505,10 @@ export class SpriteBatch {
   private dynamicChunkKeys = new Set<string>();
   // per-frame scratch reused across frames (no allocations in the gather/sort hot paths)
   private pieceTmp: number[] = [];
-  private pieceParts: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean }[] = [];
+  private pieceParts: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean; liftPx: number; bias: number }[] = [];
   /** ADR-381: scratch single-part object — the common case (no L-corner arms) reuses it instead of allocating one per piece per frame. */
-  private piecePartScratch: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean } = { vis: 0, rot: 0, layer: 0, x: 0, y: 0, last: true };
+  private piecePartScratch: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean; liftPx: number; bias: number } = { vis: 0, rot: 0, layer: 0, x: 0, y: 0, last: true, liftPx: 0, bias: 0 };
+  private roofParts: { vis: number; rot: number; layer: number; x: number; y: number; last: boolean; liftPx: number; bias: number }[] = [];
   /** ADR-381: per-part static cache. A static piece's instances are a pure function of its signature (see PIECE_SIG_N):
    *  on a hit the slice loop, crack block and per-frame FNV hash are skipped and the chunk sum comes from the stored
    *  per-part hashes. Keyed by dense slot * 4 + part index (≤3 parts: 2 L arms + post); the signature (incl. entity
@@ -1153,7 +1166,7 @@ export class SpriteBatch {
   }
   private gatherPieces(cx: PrepareContext, bp: ReturnType<World["store"]>, hasFocus: boolean, fwx: number, fwy: number, playerLevel: number, cut: Set<number> | null): void {
     const { world, atlas, rect } = cx; const tr = world.store(Transform);
-    const pieceLit = cx.bindings.pieceLit, pieceScale = cx.bindings.pieceScale;
+    const pieceLit = cx.bindings.pieceLit, pieceScale = cx.bindings.pieceScale; const roofFx = cx.bindings.pieceRoofFx; // ADR-397
     const d = bp.data as Record<string, ArrayLike<number>>;
     const hw = this.iso.tileW / 2, hh = this.iso.tileH / 2, zs = this.iso.zStep, zf = this.zFactor;
     // ADR-253: footprints / cover / cutaway / decks stay in world tiles; screen pivot, occlusion rect, column slices and depth
@@ -1192,9 +1205,20 @@ export class SpriteBatch {
       // ADR-211: an L corner draws its two arm walls (same tier straight wall at the arm edge pivots) then its post art
       const parts = this.pieceParts; parts.length = 0;
       { const v0 = d.visualId![k]!, r0 = d.rotation![k]!, arm = atlas.lArmOf(v0);
-        if (arm >= 0) for (const a of lCornerArmPivots(tr.data.x[ts]!, tr.data.y[ts]!, r0)) parts.push({ vis: arm, rot: a.rot | ROT_EXACT_PIVOT | ROT_DECK_LIFT, layer: 1, x: a.x, y: a.y, last: false });
+        if (arm >= 0) for (const a of lCornerArmPivots(tr.data.x[ts]!, tr.data.y[ts]!, r0)) parts.push({ vis: arm, rot: a.rot | ROT_EXACT_PIVOT | ROT_DECK_LIFT, layer: 1, x: a.x, y: a.y, last: false, liftPx: 0, bias: 0 });
         // ADR-381: the common single-part case reuses one scratch object instead of allocating one per piece per frame.
-        const p0 = this.piecePartScratch; p0.vis = v0; p0.rot = r0; p0.layer = d.layer![k]!; p0.x = tr.data.x[ts]!; p0.y = tr.data.y[ts]!; p0.last = true; parts.push(p0); }
+        const p0 = this.piecePartScratch; p0.vis = v0; p0.rot = r0; p0.layer = d.layer![k]!; p0.x = tr.data.x[ts]!; p0.y = tr.data.y[ts]!; p0.last = true; p0.liftPx = 0; p0.bias = 0; parts.push(p0);
+        const fx = roofFx ? roofFx(e) : undefined;
+        if (fx) { // ADR-397: rfx tile raised by its band, overlays right after it; legacy art until the rfx page is resident
+          if (atlas.pageReady(fx.vis, PRIO_NEAR)) {
+            p0.vis = fx.vis; p0.rot = (r0 & ~3) | (fx.row & 3); p0.liftPx = fx.liftPx;
+            for (let oi = 0; oi < fx.overlays.length && parts.length < PIECE_PARTS_MAX; oi++) {
+              const o = fx.overlays[oi]!; if (!atlas.pageReady(o.vis, PRIO_NEAR)) continue; // never a streaming stand-in for an overlay
+              const rp = (this.roofParts[oi] ??= { vis: 0, rot: 0, layer: 0, x: 0, y: 0, last: false, liftPx: 0, bias: 0 });
+              rp.vis = o.vis; rp.rot = (r0 & ~3) | (o.row & 3); rp.layer = p0.layer; rp.x = p0.x; rp.y = p0.y; rp.liftPx = o.liftPx; rp.bias = ROOF_OVERLAY_BIAS * (oi + 1); parts.push(rp);
+            }
+          }
+        } }
       let anyHit = false;
       for (let pi = 0; pi < parts.length; pi++) {
         const part = parts[pi]!;
@@ -1262,7 +1286,7 @@ export class SpriteBatch {
         const pvx = exact ? part.x : ax + fw / 2, pvy = exact ? part.y : ay + fh / 2;
         const pu = exact ? vc * part.x - vs * part.y : cx.pieceAnchor === "front" ? fx : vax + vfw / 2, pv = exact ? vs * part.x + vc * part.y : cx.pieceAnchor === "front" ? fy : vay + vfh / 2;
         // ADR-210: uprights on a deck stand on its top, not the ground under it
-        const lift = rotRaw & ROT_DECK_LIFT ? (exact ? decks.topNear(pvx, pvy, level) : decks.topOver(ax, ay, fw, fh, level)) : 0;
+        const lift = (rotRaw & ROT_DECK_LIFT ? (exact ? decks.topNear(pvx, pvy, level) : decks.topOver(ax, ay, fw, fh, level)) : 0) + part.liftPx; // ADR-397: + roof band lift (1x art px = world px: tileW 64)
         const sx = (pu - pv) * hw, sy = (pu + pv) * hh - z * zs - lift;
         const flat = flatLayer(layer, roof); // deck pieces (floors/foundations), never roofs
         // Build pieces were never crisp-sampled (only the character doll path set CRISP, and only for creatures):
@@ -1275,7 +1299,7 @@ export class SpriteBatch {
         const crackCovered = crackSid >= 0 && ca !== undefined;
         const crack = crackCovered && atlas.pageReady(crackSid, PRIO_NEAR) && atlas.resolve(crackSid, atlas.animIndex(crackSid, ca), 0, 0, 0, this.crackRes);
         const dmgOverlay = dmg > 0 && !res.hasDamageFrames && !crackCovered ? dmg : 0;
-        const bias = (roof ? 0.05 : layer * 0.01) + (exact ? exactTieBreak(pu, pv, ghost > 0) : pieceTieBreak(vax, vay, ghost > 0)) + (rotRaw & ROT_VERTEX_POST ? vertexPostGlBias(hh, zf / zs) : 0) + (zs > 0 ? (lift / zs) * zf : 0); // roofs above every other layer of the cell; ADR-197 unique tie-break
+        const bias = (roof ? 0.05 : layer * 0.01) + part.bias + (exact ? exactTieBreak(pu, pv, ghost > 0) : pieceTieBreak(vax, vay, ghost > 0)) + (rotRaw & ROT_VERTEX_POST ? vertexPostGlBias(hh, zf / zs) : 0) + (zs > 0 ? (lift / zs) * zf : 0); // roofs above every other layer of the cell; ADR-197 unique tie-break
         const deckTop = flat && !exact && cx.pieceAnchor !== "front" ? this.deckTop(atlas, vis) : undefined;
         const deckMask = deckTop === undefined ? 0 : rotSideMask(decks.mask(ax, ay, fw, fh, level, deckTop), vq); // view sides
         // ADR-381: static-part cache. A static part's instances are a pure function of the signature below
@@ -1284,7 +1308,7 @@ export class SpriteBatch {
         // never cached: their tmp changes per frame. On a hit, skip the slice loop, crack block and per-frame
         // FNV hash; the chunk sum comes from the stored per-part hashes and the rebuild list is built from
         // entries only if the chunk sum changed (see the rebuild loop below).
-        const cacheKey = k * 4 + pi;
+        const cacheKey = k * PIECE_PARTS_MAX + pi;
         let cacheHit = false;
         let entry = dynamic ? undefined : this.pieceCache.get(cacheKey);
         if (!dynamic) {

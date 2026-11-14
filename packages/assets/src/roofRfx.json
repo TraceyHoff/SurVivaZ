@@ -1,0 +1,21 @@
+{
+  "$doc": "ADR-397: continuous-roof selection (Art & Assets docs/ART_KEYS_ROOFS.md §4). rise = px per band at 1x (1 level = 48 px); kmax = band clamp. groups: piece key -> membership group (pieces of different groups never merge). materials: ADR-397 skin hook (rules matched against the building's wall material; empty until Art ships a skin).",
+  "seed": 1391461270,
+  "levelPx": 48,
+  "forms": {
+    "hip": { "rise": [14], "kmax": 3, "crest": true },
+    "gab": { "rise": [14], "kmax": 5, "crest": true },
+    "flt": { "rise": [0], "kmax": 0, "crest": false },
+    "cot": { "rise": [10, 16], "kmax": 3, "crest": true },
+    "gam": { "rise": [22, 8], "kmax": 5, "crest": true },
+    "shd": { "rise": [9], "kmax": 3, "crest": false }
+  },
+  "groups": {
+    "roof_flat": "legacy", "roof_slope": "legacy", "roof_corner": "legacy", "roof_hip": "legacy", "roof_gable": "legacy", "roof_chimney": "legacy",
+    "roof_cottage": "cot", "roof_gambrel": "gam", "roof_shed": "shd"
+  },
+  "materials": {
+    "skinKey": "{base}_{skin}{tier}",
+    "rules": []
+  }
+}

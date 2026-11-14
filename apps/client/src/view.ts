@@ -23,7 +23,7 @@ import { dayCount, sunFraction } from "./day-clock.js";
 import { clanPieceTint, clanPieceTintPair } from "./clan-tint.js";
 import { pieceVariantOpts } from "./piece-variant.js";
 import { DoorView, doorArt } from "./door-view.js";
-import { loadManifest, buildPieceVisual, type AssetRegistry } from "@engine/assets";
+import { loadManifest, buildPieceVisual, quarterTurn, type AssetRegistry } from "@engine/assets";
 import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard, setResizeSlicing } from "@engine/render";
 import { countFraction } from "./load-progress.js";
 import { isWarmupCandidate, warmupPageBudget, type WarmupResult } from "@engine/render";
@@ -85,6 +85,7 @@ import { task361AtlasSources, installVehicleMenuIcons, TASK361_ATLAS_KEYS } from
 import { installGuideArt } from "./task364-art.js";
 import { installGuideMenuIcon } from "./guide-art.js";
 import { stumpKeys } from "./stumps.js";
+import { RoofTiler, roofWallMaterial } from "./roof-tiler.js";
 /** `?cam=animal`: debug camera that follows the first ambient animal instead of the player. */
 const CAM_ANIMAL = typeof location !== "undefined" && new URLSearchParams(location.search).get("cam") === "animal";
 /** Max bytes for the sprite texture array (mips included) before customization layers are dropped. */
@@ -214,6 +215,9 @@ export function applyVehicleRiderPlacements(net: World, view: World, map: Map<En
 export class IsoView {
   readonly view = new World({ seed: 1 });
   private map = new Map<Entity, Entity>();
+  /** ADR-397: continuous roofs (Art's rfx scheme): per-level region picks, cached until a roof on that level changes. */
+  private roofs = new RoofTiler({ roofSpriteId: (key) => { const id = this.sid(key); if (id === undefined) return undefined; const sp = this.registry.sprite(id); return sp.building && (sp.building.piece ?? sp.key).startsWith("roof") ? id : undefined; } });
+  private roofPreview: { sig: string; fx: import("@engine/render").RoofFxBinding | undefined } | undefined;
   private nodeAmt = new Map<Entity, number>(); private nodeHit = new Map<Entity, { at: number; dx: number; dy: number }>(); // ADR-128 wiggle
   private seen = new Set<Entity>();
   /** ADR-134: net entity -> last seen HitReact.startTick + local receive time; view entity -> current flinch pose. */
@@ -238,7 +242,7 @@ export class IsoView {
     useRaidBurning(renderer.burning, registry); // ADR-242: pvp_clan raid flames when served
     const cat = noCosmetics ? undefined : registry.cosmetics;
     if (cat?.size) this.view.register(Appearance);
-    renderer.bindGameplay({ animState: VAnim, buildPiece: VPiece, wetness: VWet, bodyTemp: VTemp, lit: VFuel, burning: VBurn, pieceState: (e) => this.pieceStates.get(e), pieceSwing: (e, now) => this.doors.swing(e, now), pieceSwingSprite: (e) => this.doors.swingSprite(e), pieceScale: (e) => this.pieceScales.get(e), pieceLit: (e) => this.pieceLit.get(e), pieceTints: (e) => this.pieceTintPairs.get(e), litPieces: () => this.litHearths,
+    renderer.bindGameplay({ animState: VAnim, buildPiece: VPiece, wetness: VWet, bodyTemp: VTemp, lit: VFuel, burning: VBurn, pieceState: (e) => this.pieceStates.get(e), pieceSwing: (e, now) => this.doors.swing(e, now), pieceRoofFx: (e) => (e === this.ghost?.entity ? this.roofPreview?.fx : this.roofs.binding(e)), pieceSwingSprite: (e) => this.doors.swingSprite(e), pieceScale: (e) => this.pieceScales.get(e), pieceLit: (e) => this.pieceLit.get(e), pieceTints: (e) => this.pieceTintPairs.get(e), litPieces: () => this.litHearths,
       carriedSprite: (e) => this.carriedOf.get(e), bedFit: (e) => this.bedOf.get(e)?.fit, riderClip: (e) => this.riderClipOf.get(e), // ADR-244 carry socket / bed fit
       hitFlash: (e) => this.hitPoseOf.get(e)?.flash ?? 0, hitTilt: (e) => this.hitPoseOf.get(e)?.tilt ?? 0,
       animRate: (e, st) => (st === 1 && this.characters.has(e) ? this.walkRate : undefined),
@@ -482,7 +486,18 @@ export class IsoView {
     // Easing between cells showed a different location from the authoritative preview.
     const gx = p.x, gy = p.y;
     this.ghost.sync({ pieceKey: this.pk(p.pieceKey) ?? p.pieceKey, x: gx, y: gy, rot: p.rot, valid: p.valid }, { z: baseZ, level: p.level, tier: p.tier, rotSteps: p.rotSteps, rotFlags: pieceRotFlags(def), ...(names[p.variant] ? { variant: names[p.variant]! } : { variant: p.variant }) });
+    this.previewRoof(p, def, net);
     { const ge = this.ghost.entity, sc = this.pieceArtScale(p.pieceKey); if (ge !== null) { if (sc !== 1) this.pieceScales.set(ge, sc); else this.pieceScales.delete(ge); } } // ADR-227
+  }
+  /** ADR-397: the placement preview runs the same continuous-roof selection, with the ghost tile as a member (memoised per level version). */
+  private previewRoof(p: import("@engine/gameplay").BuildPreview, def: ReturnType<ReturnType<typeof gameplayDefs>["pieces"]["get"]>, net: World): void {
+    if (!def?.roof) { this.roofPreview = undefined; return; }
+    const x = Math.floor(p.x), y = Math.floor(p.y), rot = quarterTurn(p.rot, p.rotSteps); const tier = p.tier ?? 0;
+    const sig = `${def.key},${x},${y},${p.level},${rot},${tier},${this.roofs.version.get(p.level) ?? 0}`;
+    if (this.roofPreview?.sig === sig) return;
+    const wm = roofWallMaterial(net, x, y, p.level - 1);
+    const r = this.roofs.preview({ x, y, key: def.key, rot, tier, ...(wm !== undefined ? { wallMaterial: wm } : {}) }, p.level);
+    this.roofPreview = { sig, fx: r?.fx };
   }
   /** A ladder covers the whole terrain face with native-size painted sections, never a stretched sprite. */
   private syncTerrainLadders(net: World, tiles: TileMap | undefined): void {
@@ -634,6 +649,7 @@ export class IsoView {
         if (!spec) continue;
         ve = v.create(); this.map.set(e, ve);
         v.add(ve, Transform, { x: cur.x, y: cur.y, z: gr(cur.x, cur.y, cur.z), facing: cur.facing }).add(ve, PrevTransform, { x: prev.x, y: prev.y, z: gr(prev.x, prev.y, prev.z), facing: prev.facing });
+        if (spec.pieceVisual !== undefined && spec.roofRot !== undefined && spec.pieceKey) { const wm = roofWallMaterial(net, Math.floor(cur.x), Math.floor(cur.y), (spec.level ?? 0) - 1); this.roofs.add({ ve, x: Math.floor(cur.x), y: Math.floor(cur.y), level: spec.level ?? 0, key: spec.pieceKey, rot: spec.roofRot, tier: spec.roofTier ?? 0, ...(wm !== undefined ? { wallMaterial: wm } : {}) }); }
         if (spec.pieceVisual !== undefined) { v.add(ve, VPiece, { visualId: spec.pieceVisual, variant: spec.variant ?? 0, tint: spec.tint ?? 0, damageStage: spec.damage ?? 0, rotation: spec.rot ?? 0, level: spec.level ?? 0, layer: spec.layer ?? 1, ghost: 0 }); const sc = this.pieceArtScale(spec.pieceKey); if (sc !== 1) this.pieceScales.set(ve, sc); if (spec.tintIndex) this.setPieceTint(ve, spec.pieceVisual, spec.tintIndex); }
         else if (spec.sprite !== undefined) v.add(ve, Sprite, { spriteId: spec.sprite!, frameId: spec.frame ?? 0, flags: spec.flags ?? 0, scale: spec.scale ?? 1, tint: spec.tint ?? 0 });
         if (spec.shadow) v.add(ve, Shadow, { alpha: spec.shadow, length: 1 });
@@ -729,8 +745,9 @@ export class IsoView {
       if (v.has(ve, VFuel)) { const f = net.get(e, Fuel); if (f) { v.set(ve, VFuel, { lit: f.lit, burnUntilTick: f.burnUntilTick }); if (v.has(ve, Sprite)) { const sp = v.get(ve, Sprite)!; const fid = this.fireFrame(sp.spriteId, f.lit !== 0); if (sp.frameId !== fid) v.set(ve, Sprite, { frameId: fid }); } } }
     }
     if (r.vfx) this.raid.step(this.registry, r.vfx, this.raidPieces, performance.now() / 1000); this.raidPieces.length = 0; // ADR-242 (Canvas2D: no vfx layer)
-    for (const [ne, ve] of this.map) if (!seen.has(ne)) { if (ve === this.focusVe) { r.setFocusEntity(-1); this.focusVe = -1; } v.destroy(ve); this.map.delete(ne); this.corrSampler.forget(ne); this.lastFace.delete(ne); this.characters.delete(ve); this.movingVe.delete(ve); this.driverVe.delete(ve); this.bedOf.delete(ve); this.carriedOf.delete(ve); this.lightOf.delete(ne); this.dropHeldLight(ve); this.pieceStates.delete(ve); this.doors.forget(ve); this.pieceScales.delete(ve); this.pieceLit.delete(ve); this.litHearths.delete(ve); this.pieceTintPairs.delete(ve); this.pieceTintIdx.delete(ve); this.nodeAmt.delete(ne); this.nodeHit.delete(ne); this.animalHp.delete(ne); this.animalPrev.delete(ne); this.scales.delete(ve); this.hitSeen.delete(ne); this.hitPoseOf.delete(ve); this.gearOf.delete(ve); }
+    for (const [ne, ve] of this.map) if (!seen.has(ne)) { this.roofs.remove(ve); if (ve === this.focusVe) { r.setFocusEntity(-1); this.focusVe = -1; } v.destroy(ve); this.map.delete(ne); this.corrSampler.forget(ne); this.lastFace.delete(ne); this.characters.delete(ve); this.movingVe.delete(ve); this.driverVe.delete(ve); this.bedOf.delete(ve); this.carriedOf.delete(ve); this.lightOf.delete(ne); this.dropHeldLight(ve); this.pieceStates.delete(ve); this.doors.forget(ve); this.pieceScales.delete(ve); this.pieceLit.delete(ve); this.litHearths.delete(ve); this.pieceTintPairs.delete(ve); this.pieceTintIdx.delete(ve); this.nodeAmt.delete(ne); this.nodeHit.delete(ne); this.animalHp.delete(ne); this.animalPrev.delete(ne); this.scales.delete(ve); this.hitSeen.delete(ne); this.hitPoseOf.delete(ve); this.gearOf.delete(ve); }
 
+    this.roofs.flush(); // ADR-397: re-picks only levels where a roof was placed / removed
     this.syncTerrainLadders(net, tiles);
     this.syncHatchBottoms(net, tiles);
     this.syncClutter(tiles, ground);
@@ -1122,7 +1139,7 @@ export class IsoView {
       if (!vis.visualId) return undefined;
       const lh = (defs as unknown as { building?: { levelHeight?: number } }).building?.levelHeight ?? 1;
       const z = net.get(e, Transform)!.z; const level = Math.max(0, Math.round(z / (lh || 1)));
-      return { pieceVisual: vis.visualId, variant: p.variant, rot: vis.rotation | pieceRotFlags(def) | (LOW_PROP_PIECES.has(def?.key ?? "") ? ROT_NO_OCCLUDE : 0), tint: clanPieceTint(this.registry, vis), tintIndex: vis.tintIndex, damage: vis.damageStage, level, layer: vis.layer, pieceKey: def?.key };
+      return { pieceVisual: vis.visualId, variant: p.variant, rot: vis.rotation | pieceRotFlags(def) | (LOW_PROP_PIECES.has(def?.key ?? "") ? ROT_NO_OCCLUDE : 0), tint: clanPieceTint(this.registry, vis), tintIndex: vis.tintIndex, damage: vis.damageStage, level, layer: vis.layer, pieceKey: def?.key, ...(def?.roof ? { roofRot: vis.rotation, roofTier: p.tier } : {}) };
     }
     // emissive sprites (e.g. glow mushrooms) carry a light when the table knows their key
     return undefined;
@@ -1144,7 +1161,7 @@ const artRot = (rot: number, steps: number): { rot: number; rotSteps: number } =
 interface Spec {
   sprite?: number; frame?: number; flags?: number; scale?: number; shadow?: number; occluder?: boolean; /** ADR-152: explicit Occluder{fade:1} so a short prop never auto-fades */ noOcclude?: boolean; animated?: boolean; character?: boolean; fuel?: boolean;
   light?: { r: number; g: number; b: number; radius: number; intensity: number; flicker: number };
-  pieceVisual?: number; /** ADR-230: effective clan tint index (paint || tint) */ tintIndex?: number; variant?: number; rot?: number; onCreate?: number; tint?: number; damage?: number; level?: number; layer?: number; pieceKey?: string | undefined;
+  pieceVisual?: number; /** ADR-397: roof piece (quarter turn, tier) -> continuous-roof picks */ roofRot?: number; roofTier?: number; /** ADR-230: effective clan tint index (paint || tint) */ tintIndex?: number; variant?: number; rot?: number; onCreate?: number; tint?: number; damage?: number; level?: number; layer?: number; pieceKey?: string | undefined;
   /** light gated by this sibling's Fuel.lit (light attachment of a fired piece) */ fuelOf?: Entity | undefined;
 }
 

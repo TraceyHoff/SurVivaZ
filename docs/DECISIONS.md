@@ -8321,3 +8321,82 @@ every `icons/…` path in the built `index.html` and every non-embedded icon nam
 Gap for Art: there is no dedicated spring icon. `SEASON_LABEL` has four seasons, but `SEASON_ICON` has three
 entries, so spring falls back to `ic_sun.png`, which was already the behaviour. A dedicated `ic_spring.png`
 (or `ic_sprout.png`) is needed to fix that properly.
+
+## ADR-397: Continuous roofs, engine side of Art's rfx scheme: region picks, band lift, overlays, preview, material hook (SurVivaZ)
+
+Context: Tracey's screenshot of a placed log cabin roof shows repeated stripes and hard edges between cells. She wants
+more roof variety, roofs that blend across neighbours, and no larger files or lower quality. The engine audit (the
+real `building_t1` frames composited at the iso placement, plus a read of the render path) and Art & Assets' audit
+(their `docs/ART_KEYS_ROOFS.md` §1) agree:
+- Each `roof_gable` tile is its own mini ridge.
+- Every tile is a closed slab with its own outline and side face.
+- `roof_flat` sits at 4–7 px while slopes rise to about 27 px.
+- Every tile is an identical repeat.
+- Selection used only piece key, tier and rot (`buildPieceVisual`), with no neighbour context. ADR-311 picks pieces
+  per site; player-placed roofs (the screenshot) get exactly what was placed.
+
+The engine adds no seam of its own, so padding, snapping, overlap and lighting needed no change:
+- Every roof frame keeps at least 8 px of transparent margin inside its 84×96 cell, so neighbouring cells cannot
+  bleed (still 2 px at quarter resolution).
+- Piece pivots are device-pixel snapped (`snapPivot`).
+- Tiles meet exactly on the 64×32 diamond, and the 67 px silhouette overlaps its neighbour by about 1.5 px.
+- Pieces get no per-tile shade or tint jitter: the per-part seed only feeds season flags, which `bld_roof_*` does not get.
+- Roofs share one draw bias.
+
+Decision: implement Art's proposal §4 exactly (keys `rfx_<form>_<seg>_<shape>[c][_v<n>]_t<0..4>`).
+- `@engine/assets` `roofRfx.ts` (rules as data in `roofRfx.json`): one level's roof tiles go in, one pick per tile
+  comes out.
+  - Regions: 8-connected members of one membership group. The legacy keys form one group; `roof_cottage`,
+    `roof_gambrel` and `roof_shed` each form their own.
+  - Form: legacy groups are `hip` if they have any slope, corner or hip piece, `gab` if any gable, `flt` otherwise;
+    chimney-only is `hip`.
+  - Bands:
+    - `hip` / `cot`: Chebyshev BFS over the bbox + 1, `clamp(cheb − 1, 0, 3)`.
+    - `gab` / `gam`: ridge axis from the majority rot, else the long axis; `clamp(min(runA, runB), 0, 5)`.
+    - `shd`: members downhill along the majority rot, clamped to 0–3.
+    - `flt`: 0.
+  - Lower mask (gab/gam: perpendicular bits only; flt: non-membership only) → the exact 16-entry shape/row table, plus
+    the gab n = 0 `up_r` and shd `lotop` / `lo` / `top` / `up` exceptions.
+  - Crest on `e` / `o`, for forms that have crest keys.
+  - Interior variant from `hashU32(0x52F00396, tx, ty, level) & 3` (0–1 → v0, 2 → v1, 3 → v2), only on
+    `lo_e` / `up_e` / `f` and never with a crest.
+  - Lift: Σ rise per band (hip/gab 14; cot 10, 16…; gam 22, 8…; shd 9; flt 0).
+  - Overlays: gab/gam verges and gable-wall strips (`wall_lo` / `wall_up` for gam), shd verges, side walls and
+    high-side walls, and the `rfx_chimney` stack at the tile surface height.
+  - `rfxSpriteKeys` tries skin, then the variant dropped, then the crest dropped (all Art keys) before giving up.
+- Material hook: `materials.rules` maps a region's wall material (majority of its tiles' `roofWallMaterial` = wall
+  tier key or `tier:variant`, read from the walls one level down) to an Art skin (`skinKey` template). It is empty
+  until Art ships the split-log shake skin and its rule.
+- Client `RoofTiler` (`apps/client/src/roof-tiler.ts`):
+  - Tracks roof tiles per level. A place or remove bumps that level's version (the cache key: `StructureIndex` has no
+    single version, only `chunkVersions`). The next frame re-picks only that level.
+  - A steady frame does no roof work.
+  - The placement ghost runs the same selection with itself as a member, memoised on the level version.
+- Render: a new `SpriteBindings.pieceRoofFx`.
+  - Once the rfx sprite's streamed page is resident, the piece draws it at its row, raised by the lift, with overlay
+    parts right after it (`ROOF_OVERLAY_BIAS` per step, `PIECE_PARTS_MAX` = 16 parts per piece in the static cache
+    key).
+  - Until then, and on Canvas2D, `BuildPiece.visualId` is still the legacy roof and draws exactly as before.
+  - An overlay whose page is not resident is skipped, never replaced by a streaming stand-in.
+  - Cutaway still works: rfx sprites carry a `roof…` building piece.
+
+Result: no visual change until Art's `rfx_*` pages land. With no keys present, no binding is made and every roof
+draws its current sprite (pinned by test). Size impact today is zero; Art estimates ≈ 2.8 MB for the full set
+(hard ceiling 5 MB), against 732.6 MB of the 800 MB guard. Perf: the selection runs once per level change;
+`pieceRoofFx` is one map lookup per roof piece per frame, and the overlay parts are cached static instances.
+
+Validation:
+- `packages/assets/test/adr397_roof_rfx.test.ts` covers the full shape table and inner-corner rows, form rules,
+  hip 2×2 / 3×3 / 4×4 / 11×11, a concave L and a hole, gable E–W and N–S with verges and walls, crest, gambrel
+  rises and strips, flat parapet / field, shed segs, verges and walls, group separation, the chimney stack,
+  variants, key fallback order and the material rule.
+- `apps/client/test/adr397_roof_tiler.test.ts` covers `hashU32` parity with `abandoned.ts`, no bindings without
+  art, resolution with tier, lift and overlays, the level version, zero work on a steady frame, and the preview.
+- `apps/client/test/adr397_roof_draw.test.ts` covers the SpriteBatch path: legacy unchanged, resident rfx raised
+  14 px with its overlays in order, and the legacy fallback while the page streams.
+
+Questions back to Art, as read from §4:
+- A hip / cot outer corner's crest test ("(r+1)%4 or (r+2)%4 is a member with equal band") fires on every perimeter
+  corner of a ≥ 3-wide hip, because the corner's edge neighbours are band 0 too. That is implemented exactly as
+  written; if only the 2×2 case was meant, the rule needs "both".
+- Overlay depth is a fixed bias after the tile; a headless check with real overlay art is still to do.
