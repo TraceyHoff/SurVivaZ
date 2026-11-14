@@ -8,8 +8,17 @@ from PIL import Image
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../../../assets/tools'))
 from palette import ramp, hex2rgb, RAMPS
 
-CW, CH, PX, PY = 72, 68, 36, 44          # cell, pivot (diamond centre at the piece base)
-OV = 0.04                                  # eave overhang (tiles)
+CW, CH, PX, PY = 96, 80, 48, 44          # cell, pivot (diamond centre at the piece base). Eaves pass: was 72x68 (36,44)
+OV = 0.04                                  # legacy eave lip (tiles), only bounds() (kept for reference)
+# eaves pass: the roof surface runs past the tile diamond on every outer edge. 1 tile of outward shift = 32 px of
+# screen drop at 1x, so OV_E = 6 px, OV_C = 8 px at outer corners (flared over the half edge next to the corner).
+OV_E, OV_C = 6 / 32, 8 / 32
+FASCIA_PX = 4                              # board under the camera-facing (S/E) eaves: highlight, board, shade, ink
+FLT_FACE_PX = 11                           # flat roofs: parapet face 8 px + 3 px drop over the wall top
+WALL_DROP = 3                              # gable / shed end strips and band-0 gable triangles reach 3 px below the seat
+def set_frame(cw, ch, px, py):
+    global CW, CH, PX, PY
+    CW, CH, PX, PY = cw, ch, px, py
 S_, W_, N_, E_ = 0, 1, 2, 3                # ADR-311 dir order
 KMAX = 3
 INK = np.array(hex2rgb(RAMPS["ink"][2]), np.float32)
@@ -80,6 +89,32 @@ def raycast(piece, ext=0.85, zmax=44.0, zmin=-10.0, step=0.25):
         z -= step
     h, v, fac = piece.H(X, Y)
     return hit, X, Y, Z, v, fac
+
+ENDS = {S_: ((E_, "x"), (W_, "x")), N_: ((E_, "x"), (W_, "x")), E_: ((S_, "y"), (N_, "y")), W_: ((S_, "y"), (N_, "y"))}
+def ext_of(bnd, s, X, Y):
+    """outward reach (tiles) of outer side s at each point: OV_E, flaring to OV_C over the half edge next to a corner
+    whose other side is outer too."""
+    a = X if s in (S_, N_) else Y
+    r = np.zeros_like(X)
+    (pe, _), (me, _) = ENDS[s]
+    if pe in bnd: r = np.maximum(r, np.clip(a / 0.5, 0, 1))
+    if me in bnd: r = np.maximum(r, np.clip(-a / 0.5, 0, 1))
+    return OV_E + (OV_C - OV_E) * r
+def region(bnd, X, Y, margin=0.0, reach=None, inner=0.0):
+    """world footprint of a piece: the tile diamond, pushed out by ext_of on outer sides (margin grows it). reach: extra
+    plain reach on some non-outer sides; inner: how far past the other (member) sides to accept (neighbour fill)."""
+    m = np.ones(X.shape, bool)
+    for s in range(4):
+        lim = -ext_of(bnd, s, X, Y) if s in bnd else -(reach or {}).get(s, inner)
+        m &= term(s, X, Y) >= lim - margin - 1e-6
+    return m
+def outer_edge(bnd, X, Y, sides=None, tol=0.08):
+    """surface points on the outermost band of an outer side's overhang (eave / rake line); -> mask, side index."""
+    best = np.full(X.shape, np.inf); side = np.full(X.shape, -1)
+    for s in (bnd if sides is None else [q for q in bnd if q in sides]):
+        d = term(s, X, Y) + ext_of(bnd, s, X, Y)
+        upd = (d < tol) & (d < best); best = np.where(upd, d, best); side = np.where(upd, s, side)
+    return side >= 0, side
 
 def bounds(piece, ov=OV):
     o = {s: (ov if (s in piece.bnd and piece.form != "flt") else 0.0) for s in range(4)}
@@ -300,14 +335,18 @@ def _flt_H(piece):
         return np.where(rim, 8.0, 4.0), T.min(0), np.full(x.shape, -1)
     return H
 
-def render_piece(piece, tier, seed=0, mat=""):
+def down(a): o = np.zeros_like(a); o[1:] = a[:-1]; return o          # o[r] = a[r-1]: shift one row down
+
+def render_piece(piece, tier, seed=0, mat="", extra=None, reach=None):
+    """one roof piece. extra = an outer end side x (gable / shed rake): render ONLY the overhang the piece gains when x is
+    outer too (rake strip past x + the corner flare on its eave sides), for the verge overlay."""
     P = mat_for(piece.form, tier, mat)
     if piece.form == "flt": piece.H = _flt_H(piece)
     hit, X, Y, Z, v, fac = raycast(piece)
     Hh, _, _ = piece.H(X, Y)
-    x0, x1, y0, y1 = bounds(piece)
-    eps = 1e-6
-    foot = hit & (X >= x0 - eps) & (X < x1 + eps) & (Y >= y0 - eps) & (Y < y1 + eps)
+    bnd = set(piece.bnd) | ({extra} if extra is not None else set())
+    foot = hit & region(bnd, X, Y, reach=reach)
+    if extra is not None: foot &= ~region(piece.bnd, X, Y)
     riser = foot & (Hh - Z > 0.9)
     top = foot & ~riser
     img = np.zeros((CH, CW, 4), np.float32)
@@ -335,7 +374,6 @@ def render_piece(piece, tier, seed=0, mat=""):
             m = cap & (fac == f)
             if m.any(): img[m, :3] = tones(P["trim"], S_ if f < 0 else f)[0]
         seg_l = np.floor((along(X, Y, fac) + 0.5) * 4).astype(np.int64)
-        cl = cap & ~((cap == up(cap)) & (cap == left(cap)) & (cap == right(cap)))
         # cap edge line only against roof surface (not against the tile cut)
         ed = cap & ((top & ~cap) == False) & (((~cap) & top)[[0] + list(range(CH - 1))] | left((~cap) & top) | right((~cap) & top))
         img[ed, :3] = C(P["trim"])[3]
@@ -345,26 +383,21 @@ def render_piece(piece, tier, seed=0, mat=""):
     # ---- risers (flat parapet inner faces, plateau steps)
     if riser.any():
         img[riser, :3] = C(P["trim"])[2]
-    # ---- fascia on visible boundary sides (world S / E)
-    fasc = np.zeros(X.shape, bool)
-    py, px = np.mgrid[0:CH, 0:CW].astype(np.float64); sx = px + 0.5 - PX; sy = py + 0.5 - PY
-    FD = FASCIA[piece.form]
-    for sd in piece.bnd:
-        if sd not in (S_, E_): continue
-        if sd == S_:
-            Yp = y1; xx = sx / 32 + Yp; zz = (xx + Yp) * 16 - sy; ok = (xx >= x0) & (xx <= x1)
-            he, _, _ = piece.H(np.clip(xx, -0.9, 0.9), np.full_like(xx, Yp))
-        else:
-            Xp = x1; yy = Xp - sx / 32; zz = (Xp + yy) * 16 - sy; ok = (yy >= y0) & (yy <= y1)
-            he, _, _ = piece.H(np.full_like(yy, Xp), np.clip(yy, -0.9, 0.9))
-        fd = he if piece.form == "flt" else FD
-        m = ok & (zz <= he + 0.3) & (zz >= he - fd) & ~top & ~riser
-        col = C(P["trim"])[1 if sd == S_ else 2]
-        img[m, :3] = col
-        bot = m & (zz < he - fd + 1.0)
-        img[bot, :3] = C(P["trim"])[3]
-        fasc |= m
-    alpha = top | riser | fasc
+    # ---- fascia: a board hanging under the camera-facing (S/E) eave / rake line of the overhang
+    surf = top | riser
+    edge, eside = outer_edge(bnd, X, Y, sides=(S_, E_))
+    edge &= surf & ~np.vstack([surf[1:], np.zeros((1, CW), bool)])
+    FD = FLT_FACE_PX if piece.form == "flt" else FASCIA_PX
+    tc = C(P["trim"]); fasc = np.zeros(X.shape, bool)
+    cur, cs = edge, eside
+    for i in range(1, FD + 1):
+        cur = down(cur) & ~surf; cs = down(cs)
+        if not cur.any(): break
+        for sd in (S_, E_):
+            m = cur & (cs == sd); o = 0 if sd == S_ else 1
+            img[m, :3] = tc[o] if i == 1 else (tc[o + 2 if o == 0 else 3] if i == FD - 1 else tc[o + 1])
+        fasc |= cur
+    alpha = surf | fasc
     # ---- variants (interior only)
     if piece.variant:
         inner = top & ~cap & (np.abs(X) < 0.32) & (np.abs(Y) < 0.32)
@@ -376,9 +409,9 @@ def render_piece(piece, tier, seed=0, mat=""):
             blob = inner & (r < 1 + wob)
             mc = C(P["moss"])
             img[blob, :3] = mc[1]
-            edge = blob & ~(up(blob) & left(blob) & right(blob))
-            img[edge, :3] = mc[2]
-            dots = blob & ~edge & (ihash(np.floor(X * 40).astype(np.int64), np.floor(Y * 40).astype(np.int64), seed) % 5 == 0)
+            edge_ = blob & ~(up(blob) & left(blob) & right(blob))
+            img[edge_, :3] = mc[2]
+            dots = blob & ~edge_ & (ihash(np.floor(X * 40).astype(np.int64), np.floor(Y * 40).astype(np.int64), seed) % 5 == 0)
             img[dots, :3] = mc[0]
         else:                      # repair patch (a nailed board / new sheet)
             cx, cy = rng.uniform(-0.1, 0.1, 2)
@@ -391,13 +424,13 @@ def render_piece(piece, tier, seed=0, mat=""):
             img[pe, :3] = pc[3]
             nail = pm & ~pe & (ihash(np.floor(X * 30).astype(np.int64), np.floor(Y * 30).astype(np.int64), seed + 9) % 9 == 0)
             img[nail, :3] = pc[0]
-    # ---- silhouette outline (skip internal seams)
-    sil = alpha & ~(up(alpha) & left(alpha) & right(alpha) & np.vstack([alpha[1:], alpha[-1:]]))
-    internal = np.zeros(X.shape, bool)
-    for sd in range(4):
-        if sd in piece.bnd: continue
-        internal |= term(sd, X, Y) < 0.06
-    sil &= ~(top & internal & ~fasc)
+    # ---- silhouette outline, judged against the whole roof: pixels the member neighbours (or, for a rake strip, the
+    # piece under it) cover count as filled, so tile cuts get no ink; the fascia is inked along its bottom only
+    virt = hit & ~foot & region(bnd, X, Y, inner=0.6)
+    filled = alpha | virt
+    below = lambda a: np.vstack([a[1:], np.zeros((1, CW), bool)])
+    sil = alpha & ~fasc & ~(up(filled) & left(filled) & right(filled) & below(filled))
+    sil |= fasc & ~below(alpha)
     img[sil, :3] = outline_of(P["rp"])
     img[..., 3] = alpha * 255
     img[~alpha] = 0
@@ -450,7 +483,9 @@ def _finish(img, alpha, rp, no_outline=None):
     return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), "RGBA")
 
 def render_verge(form, seg, kind, row, tier, seed=0, mat=""):
-    """gable-end overlay: wall triangle under this tile's roof edge + bargeboard. kind el/er (row = downhill d),
+    """gable / shed end overlay on the end tile: gable-wall triangle under the roof edge (camera-facing ends S/E) plus
+    the rake overhang: the roof surface run OV_E past the end side (OV_C flare at the eave corners) with a fascia
+    bargeboard under camera-facing rakes. Back ends (N/W) carry only the rake strip. kind el/er (row = downhill d),
     vr / vf (row = end side)."""
     P = mat_for(form, tier, mat)
     if kind in ("el", "er"):
@@ -459,26 +494,30 @@ def render_verge(form, seg, kind, row, tier, seed=0, mat=""):
         x = row; base = Piece(form, seg, "r", 0 if x in (E_, W_) else 1)
     else:
         x = row; base = Piece(form, seg, "f", 0)
-    img = np.zeros((CH, CW, 4), np.float32)
-    if x not in (S_, E_): return Image.fromarray(img.astype(np.uint8), "RGBA")
-    x0, x1, y0, y1 = bounds(base)
-    lo_, hi_ = (x0, x1) if x == S_ else (y0, y1)
-    t, zz, X, Y, ok = _plane(x, lo_, hi_)
-    he, _, _ = base.H(X, Y)
-    rise = RISES[form][base.k]; rows = max(1, round(rise / 4)); rowh = rise / rows
-    wall = ok & (zz >= 0) & (zz <= he - 1.0) & (np.abs(t) <= 0.5)
-    board = ok & (zz > he - 1.0) & (zz <= he + 2.0)
-    _paint_wall(img, wall, x, P, t, zz, rowh, seed)
-    tc = C(P["trim"]); img[board, :3] = tc[1 if x == S_ else 2]
-    img[board & (zz > he + 1.0), :3] = tc[0 if x == S_ else 1]
-    if kind == "vr" and form in ("gab", "gam") and tier in (1, 2):   # little round attic vent
-        vz = he * 0.0 + rise * 0.22
-        vent = ok & ((t / 0.075) ** 2 + ((zz - vz) / 2.2) ** 2 < 1) & wall
-        img[vent, :3] = tc[3]
-        ring = wall & ~vent & ((t / 0.11) ** 2 + ((zz - vz) / 3.2) ** 2 < 1)
-        img[ring, :3] = tc[1]
-    alpha = wall | board
-    return _finish(img, alpha, P["rp"], no_outline=(zz < 1.0) & wall)
+    img = np.zeros((CH, CW, 4), np.float32); alpha = np.zeros((CH, CW), bool)
+    if x in (S_, E_):
+        t, zz, X, Y, ok = _plane(x, -0.5, 0.5)
+        he, _, _ = base.H(X, Y)
+        rise = RISES[form][base.k]; rows = max(1, round(rise / 4)); rowh = rise / rows
+        z0 = -WALL_DROP if base.k == 0 else 0
+        wall = ok & (zz >= z0) & (zz <= he - 0.5) & (np.abs(t) <= 0.5)
+        _paint_wall(img, wall, x, P, t, zz, rowh, seed)
+        if kind == "vr" and form in ("gab", "gam") and tier in (1, 2):   # little round attic vent
+            tc = C(P["trim"]); vz = rise * 0.22
+            vent = ok & ((t / 0.075) ** 2 + ((zz - vz) / 2.2) ** 2 < 1) & wall
+            img[vent, :3] = tc[3]
+            ring = wall & ~vent & ((t / 0.11) ** 2 + ((zz - vz) / 3.2) ** 2 < 1)
+            img[ring, :3] = tc[1]
+        sil = wall & ~(up(wall) & left(wall) & right(wall) & np.vstack([wall[1:], wall[-1:]]))
+        sil &= ~(zz < z0 + 1.0) & ~(np.abs(t) > 0.5 - 1.5 / 32)   # no ink where it meets the wall below / the next end tile
+        img[sil, :3] = outline_of(P["rp"])
+        alpha |= wall
+    reach = {(row + 2) % 4: OV_E} if form == "shd" else None   # shed: the high end may be the roof's top edge (key has no top flag)
+    rake = np.asarray(render_piece(base, tier, seed, mat, extra=x, reach=reach)).astype(np.float32)
+    m = rake[..., 3] > 0
+    img[m] = rake[m]; alpha |= m
+    img[..., 3] = alpha * 255; img[~alpha] = 0
+    return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), "RGBA")
 
 def render_wall(form, which, row, tier, seed=0, mat=""):
     P = mat_for(form, tier, mat)
@@ -487,7 +526,7 @@ def render_wall(form, which, row, tier, seed=0, mat=""):
     h = RISES[form][0 if which == "lo" else 1]
     rows = max(1, round(h / 4)); rowh = h / rows
     t, zz, X, Y, ok = _plane(row, -0.5, 0.5)
-    m = ok & (zz >= 0) & (zz < h)
+    m = ok & (zz >= -WALL_DROP) & (zz < h)     # eaves pass: 3 px lower, over the wall top under it
     _paint_wall(img, m, row, P, t, zz, rowh, seed)
     img[..., 3] = m * 255; img[~m] = 0
     return Image.fromarray(np.clip(img, 0, 255).astype(np.uint8), "RGBA")

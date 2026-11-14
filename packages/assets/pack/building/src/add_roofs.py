@@ -15,7 +15,7 @@ from roofs_lib import S_, W_, N_, E_
 
 ROOT = Path(__file__).resolve().parents[5]
 BLD = ROOT / "packages/assets/pack/building"; ITEM = ROOT / "packages/assets/pack/items"
-COLS = 28
+COLS = 21                      # 21 x 96 = 2016 px pages (eaves pass: 96x80 cells)
 PIECE_BASE = {"hip": "roof_slope", "cot": "roof_slope", "shd": "roof_slope", "gab": "roof_gable", "gam": "roof_gable", "flt": "roof_flat"}
 PAGES = {"a": ("hip", "gab", "flt"), "b": ("cot", "gam", "shd")}
 

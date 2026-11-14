@@ -109,7 +109,7 @@ the legacy `@tierN` ones, so first-declared-wins `spriteForPiece` is unaffected.
 | `flt` | `lo_{e,o,i,r,h,p}` (parapet) · `f f_v1 f_v2` (field, no seg) (9) | 22 |
 | stack | `rfx_chimney_t1..t4` | 1 |
 
-Tiers: `hip`, `flt`, `shd` t0–t4; `gab`, `cot`, `gam` t1–t4 (no twig gable). **475 sprites, 1,450 frames.**
+Tiers: `hip`, `flt`, `shd` t0–t4; `gab`, `cot`, `gam` t1–t4 (no twig gable). **475 sprites, 1,526 frames** (eaves pass: back-end verges are no longer blank).
 
 Examples: `rfx_hip_lo_e_t1`, `rfx_hip_up_ec_t2`, `rfx_hip_up_e_v2_t1`, `rfx_gab_lo_ver_t3`, `rfx_gab_up_vf_t2`,
 `rfx_gam_wall_up_t1`, `rfx_shd_lotop_e_t0`, `rfx_flt_f_v1_t4`, `rfx_chimney_t1`.
@@ -189,22 +189,22 @@ selection.
 
 ## 5. Pages, residency, bytes (measured)
 
-Cells **72×68**, pivot **(36,44)**, anchor (0.5, 44/68) — the same world point as the 84×96/(42,72) building cells.
-1x only, solid cel, binary alpha, indexed PNG, oxipng'd, KTX2 twin via `assets/tools/ktx2.py`. Page `_a` = hip, gab,
-flt (+ stack), `_b` = cot, gam, shd; 28 columns, cells deduped by hash. All `residency: "stream"`.
+Cells **96×80**, pivot **(48,44)**, anchor **(0.5, 0.55)** (= 44/80) since the eaves pass (§9; was 72×68, (36,44), anchor
+44/68 — the pivot is the same world point, only the frame grew to fit the overhang). 1x only, solid cel, binary alpha,
+indexed PNG, oxipng'd, KTX2 twin via `assets/tools/ktx2.py`. Page `_a` = hip, gab, flt (+ stack), `_b` = cot, gam, shd;
+**21 columns** (2016 px), cells deduped by hash. All `residency: "stream"`.
 
 | page | size | sprites | PNG | KTX2 |
 |---|---|---|---|---|
-| `rfx_t0_a` | 2016×272 | 30 | 14,747 | 75,220 |
-| `rfx_t0_b` | 2016×136 | 13 | 5,133 | 30,969 |
-| `rfx_t1_a` / `_b` | 2016×408 / 408 | 52 / 56 | 17,332 / 23,297 | 106,129 / 122,527 |
-| `rfx_t2_a` / `_b` | 2016×408 / 408 | 52 / 56 | 18,510 / 25,418 | 106,961 / 119,938 |
-| `rfx_t3_a` / `_b` | 2016×340 / 408 | 52 / 56 | 15,732 / 24,412 | 104,412 / 130,331 |
-| `rfx_t4_a` / `_b` | 2016×340 / 408 | 52 / 56 | 16,002 / 22,616 | 100,344 / 120,148 |
-| **10 roof pages** | | 475 | **183,199** | **1,016,979** |
+| `rfx_t0_a` / `_b` | 2016×400 / 240 | 30 / 13 | 16,684 / 8,838 | 86,925 / 46,403 |
+| `rfx_t1_a` / `_b` | 2016×640 / 720 | 52 / 56 | 22,829 / 28,484 | 134,041 / 157,479 |
+| `rfx_t2_a` / `_b` | 2016×640 / 720 | 52 / 56 | 24,268 / 31,923 | 136,686 / 157,516 |
+| `rfx_t3_a` / `_b` | 2016×640 / 720 | 52 / 56 | 21,612 / 32,295 | 136,363 / 171,161 |
+| `rfx_t4_a` / `_b` | 2016×640 / 720 | 52 / 56 | 22,514 / 28,866 | 131,684 / 158,435 |
+| **10 roof pages** | | 475 | **238,313** | **1,316,693** |
 | `items_build_rfx` + `@2x` | 256×128 / 512×256 | 27 | 25,191 | 46,462 |
 
-- **Dist delta ≈ 1.62 MB raw**: 1,271,831 B atlases (PNG + KTX2) + manifest.building +327 KB raw (+13.9 KB gz) +
+- Base-set ship delta (before the eaves pass): **≈ 1.62 MB raw**: 1,271,831 B atlases (PNG + KTX2) + manifest.building +327 KB raw (+13.9 KB gz) +
   manifest.items +6.6 KB + gameplay-panels.css +2.5 KB (ids.lock +15 KB, repo only). Well under the 2.8 MB estimate.
 - GPU: ≈ 0.9 MB per resident roof page (ETC2/ASTC with mips). A typical cabin needs one page.
 - **EA note:** the `bld` stream pool (`isStreamedBuildingAtlas`) only matches `/^building_t\d+$/`; extend it to
@@ -258,7 +258,7 @@ the same world-space heightfield as the base set. Where no shake key exists (oth
 falls back to the base key, so a t2+ roof on log walls keeps its base material
 (slate, tin, plate); only t0/t1 roofs show shakes.
 
-Pages: `rfx_shk_t0` (2016×272) and `rfx_shk_t1` (2016×612), one page per tier (a cabin loads one page), stream.
+Pages: `rfx_shk_t0` (2016×480) and `rfx_shk_t1` (2016×960) since the eaves pass, one page per tier (a cabin loads one page), stream.
 
 **Selection rule** (data in `roofRfx.json`, vote logic in `roofRfx.ts`):
 - Log walls = **twig- and wood-tier walls** (owner decision: shakes on wood-wall cabins too): any `family: "wall"`
@@ -278,3 +278,34 @@ Pages: `rfx_shk_t0` (2016×272) and `rfx_shk_t1` (2016×612), one page per tier 
 **Bytes:** PNG 57,635 + KTX2 263,120 = 320,755 B atlases; `manifest.building.json` +77,653 B raw (+2.9 KB gz); total dist +398,408 B (≈ 0.40 MB).
 Preview: `/workspace/assets/preview/roofs_shake.png` (6×4 cabins, stone-wall base vs wood/twig-wall shake, rendered
 with EA's selection; last row: wood-wall cabin at t1 shakes vs t2 slate fallback).
+
+## 9. Eaves pass: roofs overhang the walls (ADR-404 follow-up)
+
+Owner ask (via EA): the roof sits **on top of** the walls and overhangs them; no wall strip shows. Every rfx form × tier and
+the `shk` skin were repainted (same keys, same grammar, same selection; only the art and the frame changed).
+
+- **Overhang** (measured as screen drop at 1x: 1 tile of outward shift = 32 px): the surface continues the form's own
+  slope **6 px** (0.1875 tile) past the tile diamond on every **outer** edge — every side in the piece's lower mask
+  (`lo` eaves, shed high edge `top`/`lotop`, flat parapets) — and **8 px** (0.25 tile) at outer corners, flared over the
+  half edge next to the corner (`o`, `h`, `p`, the gable eave/rake corners). Interior sides (member neighbours, all `up`
+  pieces, `f` crowns, `i` valleys) stop exactly at the diamond, so seams tile as before; tile cuts carry no ink (the
+  outline is judged against the neighbours' fill).
+- **Fascia:** a 4 px trim-ramp board under the camera-facing **S/E** eave and rake lines (highlight, board, hard shade,
+  ink bottom). Flat roofs: the parapet face drops 8 + 3 = 11 px. N/W (back) eaves overhang with the outline only.
+- **Rakes (gable / gambrel / shed ends):** the verge overlays `…_v{el,er,r,f}` now carry the rake strip (6 px past the
+  end side, 8 px flare at the eave corner) plus the bargeboard on S/E ends; back ends (N/W rows), blank before, now hold
+  just the rake strip. Shed verges also reach 6 px past their uphill side (the key has no `top` flag), so the shed's high
+  corner is covered too.
+- **End strips:** `rfx_gab_wall`, `rfx_gam_wall_lo/up`, `rfx_shd_wall` and the band-0 gable / shed triangles reach **3 px
+  below** the seat (over the wall top under them).
+- **Frame:** 96×80, pivot (48,44), **anchor (0.5, 0.55)** — 12 px wider each side, 12 px deeper below the pivot, top
+  unchanged; the art's union bbox is x −48…+47, y −41…+33 around the pivot.
+- **Seat guidance (EA):** wall art tops sit ≈ 5–6 px above the level line at an edge's centre column (twig 4.5).
+  Eaves on hip/cot hang ≥ 8 px (overhang + slope drop) + 4 px fascia below their seat line, so **hip/cot seat ≈ 13** hides
+  the wall tops with no clip on the eave sides. Gable / shed ends and flat faces only reach 3 px below the seat, so with
+  them **gab/gam/shd/flt seat ≤ 9** (else a gap opens under the end triangle) — or keep the ADR-404 clip on the end walls.
+- **Bytes:** atlases PNG 240,834 → 312,459 B, KTX2 1,280,099 → 1,652,245 B (**+443,771 B**); `manifest.building.json`
+  −8,165 B raw (+678 B gz; anchors shorten). **Dist ≈ +0.44 MB.** Tools: `add_roofs.py --no-icons` and
+  `--material shk --no-icons`, oxipng `-o 4`, `ktx2.py` on a temp manifest of the 12 `rfx_*` atlases. Icons unchanged.
+- Preview: `/workspace/assets/preview/roofs_eaves.png` (left = live before, right = eaves pass; hip, shake cabins, gable,
+  shed, gambrel, cottage, flat over real wall art with the ADR-404 clip).
