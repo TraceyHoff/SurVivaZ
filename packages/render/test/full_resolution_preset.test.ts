@@ -116,19 +116,19 @@ describe("Full Resolution preset", () => {
   });
 });
 
-describe("Task 26: Full is the default preset on every device", () => {
+describe("ADR-408: Auto is the default preset on every device", () => {
   const store = new Map<string, string>();
   const stub = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v), removeItem: (k: string) => void store.delete(k) };
   const prev = (globalThis as Record<string, unknown>).localStorage;
   const withStorage = (fn: () => void): void => { (globalThis as Record<string, unknown>).localStorage = stub; try { fn(); } finally { (globalThis as Record<string, unknown>).localStorage = prev; } };
-  it("DEFAULT_QUALITY_PRESET is full; a fresh install (nothing stored) loads Full", () => {
-    expect(DEFAULT_QUALITY_PRESET).toBe("full");
-    withStorage(() => { store.clear(); expect(loadPreset()).toBe("full"); expect(new QualityController().preset).toBe("full"); expect(new QualityController().fullResolution).toBe(true); });
+  it("DEFAULT_QUALITY_PRESET is auto; a fresh install (nothing stored) loads Auto", () => {
+    expect(DEFAULT_QUALITY_PRESET).toBe("auto");
+    withStorage(() => { store.clear(); expect(loadPreset()).toBe("auto"); expect(new QualityController().preset).toBe("auto"); expect(new QualityController().fullResolution).toBe(false); });
   });
   it("a stored choice is always kept — only the default changes", () => {
     withStorage(() => {
       for (const p of ["auto", "low", "medium", "high", "ultra", "full"] as const) { savePreset(p); expect(loadPreset()).toBe(p); }
-      store.set(PRESET_STORAGE_KEY, "nonsense"); expect(loadPreset()).toBe("full"); // unparseable stored value falls back to the default
+      store.set(PRESET_STORAGE_KEY, "nonsense"); expect(loadPreset()).toBe("auto"); // unparseable stored value falls back to the default
     });
   });
 });

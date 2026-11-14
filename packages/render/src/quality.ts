@@ -3,11 +3,12 @@
  * Settings preset (Auto / Low / Medium / High / Ultra / Full, persisted; ADR-116). Auto runs the governor; fixed presets pin a tier.
  * Full pins the Ultra tier AND bypasses the soft DPR / pixel-budget caps in IsoRenderer.resize() (hard GPU limits
  * still apply), so it renders at the device's native DPR. ADR-407: on consoles Full does NOT bypass the caps
- * (the 1 GB UWP app cap cannot afford 4K targets) — see fullResolution. Task 26: Full is now the DEFAULT on every device
- * (reversing the Task 1 decision that kept Auto as the safe default) — the user explicitly requires it.
- * Auto / Low / Medium / High / Ultra stay selectable, and a stored choice is always kept (only the
- * default for fresh installs changes). Trade-off, stated plainly: low-end phones render at native DPR
- * and may run hotter/slower; the player can lower the preset in Settings at any time.
+ * (the 1 GB UWP app cap cannot afford 4K targets) — see fullResolution. ADR-408: Auto is the DEFAULT on every device
+ * (reversing the Task 26 decision that made Full the default, which itself reversed the Task 1 decision
+ * that kept Auto as the safe default) — the user asked for the default back to Auto so the game adapts
+ * per device via the governor instead of pinning Full (native DPR) on every device, including low-end phones.
+ * Full / Low / Medium / High / Ultra stay selectable, and a stored choice is always kept (only the
+ * default for fresh installs changes). A player who chose Full keeps Full.
  */
 export interface QualityTier { name: string; resScale: number; lightDownscale: number; bloom: boolean; weather: number; particles: number;
   /** ADR-116: clutter density multiplier (1+ on ultra) */ clutter: number; /** max sprite/anim detail (all dir frames, full wearables) */ maxDetail: boolean }
@@ -20,8 +21,8 @@ export const QUALITY_TIERS: readonly QualityTier[] = [
 ];
 export type QualityPreset = "auto" | "low" | "medium" | "high" | "ultra" | "full";
 export const QUALITY_PRESETS: readonly QualityPreset[] = ["auto", "low", "medium", "high", "ultra", "full"];
-/** Task 26: the default preset for fresh installs (no stored choice). Stored choices are always kept. */
-export const DEFAULT_QUALITY_PRESET: QualityPreset = "full";
+/** ADR-408: the default preset for fresh installs (no stored choice). Stored choices are always kept. */
+export const DEFAULT_QUALITY_PRESET: QualityPreset = "auto";
 /** Atlas page scale a preset asks for: Ultra / Full use the @2x pages where they exist (1x otherwise);
  *  every other preset stays on 1x pages, so Auto never triggers an atlas rebuild on a governor step. */
 export function atlasPageScaleForPreset(p: QualityPreset): number { return p === "ultra" || p === "full" ? 2 : 1; }
@@ -82,7 +83,7 @@ export class QualityController {
   }
   get level(): number { return this.preset === "auto" ? this.governor.level : PRESET_TIER[this.preset]; }
   /** True only for the explicit Full preset: native DPR with soft DPR / pixel caps bypassed (see IsoRenderer.resize).
-   *  ADR-407: never on a console — Full is the default preset, and the bypass would re-open the 4K targets the
+   *  ADR-407: never on a console — a stored Full choice would re-open the 4K targets the
    *  high tier caps at 1080p; the console's 1 GB UWP app cap cannot afford them. Desktop/mobile Full is untouched. */
   get fullResolution(): boolean { return this.preset === "full" && this.detected?.klass !== "console"; }
   get tier(): QualityTier { return QUALITY_TIERS[this.level]!; }

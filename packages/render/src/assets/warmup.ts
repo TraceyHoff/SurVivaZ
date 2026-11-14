@@ -15,7 +15,7 @@
  * before the first paint, inside a bounded window, instead of letting the draw order decide.
  *
  * Deliberately NOT changed here: resolution, mip levels, texture quality, preset defaults
- * (Full stays the default), bloom / lighting quality, the compass, or any art.
+ * (Auto is the default since ADR-408), bloom / lighting quality, the compass, or any art.
  */
 
 /** Priority of a warm-up page-in: near-player, but not the local player. */
