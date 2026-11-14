@@ -11,7 +11,7 @@ import { dayCount, dayHours, sunScheduleNow } from "./day-clock.js";
 import { formatClock12 } from "./clock-format.js";
 import { sunFractionFor } from "@engine/core";
 import { activeDiseases, diseasePresentation, infectionTier, Diseases, Exposure, Health, RoomHeat, Survival, temperatureTier, damagingTemperatureTier, wetnessStage } from "@engine/gameplay";
-import { conditionIconImg, iconImg } from "./game-icons.js";
+import { conditionIconImg, iconImg, iconUrl } from "./game-icons.js";
 import { seasonAtDays } from "@engine/core";
 import { formatBodyTemp, formatTemp, gaugeFrac, TEMP_UNIT_EVENT, GAUGE_GRADIENT, hudAirTemp, hudShelteredTemp, loadTempUnit, SEASON_LABEL, tempBand, type TempUnit } from "./hud-temp.js";
 
@@ -20,7 +20,7 @@ const STATS = [
   { key: "hp", color: "#E8475F", icon: "ic_health.png" }, { key: "hunger", color: "#F4A74A", icon: "ic_hunger.png" },
   { key: "thirst", color: "#5CC6DC", icon: "ic_thirst.png" }, { key: "stamina", color: "#FFD45A", icon: "ic_stamina.png" },
 ] as const;
-/** Task 25: custom pixel-art icons (apps/client/public/icons/) for the season glyph — the atlas has no season frames. */
+/** Task 25: custom pixel-art icons (embedded data URIs, game-icons-data.ts — never a public/icons/ fetch) for the season glyph. */
 const SEASON_ICON = ["ic_sun.png", "ic_leaf.png", "ic_snowflake.png"] as const;
 
 /**
@@ -126,10 +126,10 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
     SPRITE_KEYS.forEach((k, i) => nine(`#hud .row[data-stat="${STATS[i]!.key}"] .fill`, `bar_fill_${k}`, "border-radius:0;height:0;margin:-1px 0;box-sizing:border-box;min-width:7px"));
     css.push("#hud .clock{color:#FFE7A8}#hud .ic{width:13px;height:13px;vertical-align:middle;image-rendering:pixelated}#hud .l{display:flex;align-items:center;gap:3px}#hud .lab{display:flex;width:14px}");
     const st = document.createElement("style"); st.textContent = css.join("\n"); style.after(st);
-    icons.forEach((ic, i) => { const url = u.url(`vital_${SPRITE_KEYS[i]}`) ?? `${base}icons/${STATS[i]!.icon}`; ic.src = url; ic.style.display = ""; ic.nextSibling?.remove(); });
+    icons.forEach((ic, i) => { const url = u.url(`vital_${SPRITE_KEYS[i]}`) ?? iconUrl(STATS[i]!.icon); ic.src = url; ic.style.display = ""; ic.nextSibling?.remove(); });
     // Task 25: the thermometer falls back to the custom icon when the atlas has no icon_temp frame.
     if (u.url("icon_temp")) { tIc.style.display = ""; tIc.nextSibling?.remove(); }
-    else { tIc.src = `${base}icons/ic_temp.png`; tIc.style.display = ""; tIc.nextSibling?.remove(); tempIcon = "custom"; }
+    else { tIc.src = iconUrl("ic_temp.png"); tIc.style.display = ""; tIc.nextSibling?.remove(); tempIcon = "custom"; }
     update();
   });
   const update = (): void => {
@@ -145,7 +145,7 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
     try { // ADR-239 season + temperature
       const days = dayCount(), si = ov.season !== undefined ? Math.floor(((ov.season % 4) + 4) % 4) : seasonAtDays(w, days).index;
       // Task 25: season is a custom icon (was the ☀/🍂/❄ text emoji).
-      if (seasonIcon.dataset["k"] !== String(si)) { seasonIcon.dataset["k"] = String(si); seasonIcon.src = `${base}icons/${SEASON_ICON[si] ?? "ic_sun.png"}`; }
+      if (seasonIcon.dataset["k"] !== String(si)) { seasonIcon.dataset["k"] = String(si); seasonIcon.src = iconUrl(SEASON_ICON[si] ?? "ic_sun.png"); }
       setAttr("seasonTitle", seasonText, "title", `${SEASON_LABEL[si] ?? ""}${ov.season !== undefined ? " (view override ?season=)" : ""}`);
       const now = Date.now(); if (!ov.unit && now - unitAt > 1000) { unitAt = now; unit = loadTempUnit(); }
       const ovr = ov.season !== undefined || ov.hours !== undefined || ov.weather !== undefined;

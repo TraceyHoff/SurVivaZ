@@ -8298,3 +8298,26 @@ non-PNG file (KTX2, m4a, fonts, JSON) is byte- or parse-identical to its source.
 Result: on the final build the guard reports 5,081 files, 732,608,668 B (PNG 372.4 MB / 2,299, KTX2
 330.8 MB / 1,960, m4a 20.5 MB / 706, JS 4.3 MB, `.json.gz` 2.4 MB / 26). The pre-change dist fails it
 on budget, ogg, plain manifests and duplicated pack art.
+
+## ADR-396: HUD icons resolve through `iconUrl`; every icon path the client requests must exist (SurVivaZ)
+
+Context: the live site requested `icons/ic_sun.png` and got a 404, both before and after the ADR-391–395 size
+cuts. Task 25 moved the custom 32×32 HUD icons into embedded data URIs (`apps/client/src/game-icons-data.ts`,
+`ICON_DATA`, read through `iconUrl(file)`), and `apps/client/public/icons` keeps only the app icons
+(`icon_180/192/512.png`). `hud.ts` still built `${BASE_URL}icons/<file>` by hand in three places: the season
+chip (`ic_sun.png` / `ic_leaf.png` / `ic_snowflake.png`), the thermometer fallback (`ic_temp.png`) and the
+vitals fallback when a `vital_*` UI frame is missing. Those files were never shipped, so each request 404'd.
+The sun icon itself exists and is dedicated art: `ICON_DATA["ic_sun.png"]` (the same icon the guide and the
+touch overlay's Wake button already draw through `iconUrl`).
+
+Decision: the three HUD call sites use `iconUrl`, so they draw the embedded data URIs and make no network
+request. No icon was swapped or reused: each slot draws the same dedicated file it named before.
+`apps/client/test/adr396_icon_paths.test.ts` fails when client or gameplay source builds an `icons/…` URL
+outside `iconUrl`, or names an `ic_*.png` / `icon_*.png` that is in neither `ICON_DATA` nor `public/icons`.
+Its dist block, run with `SURVIVAZ_DIST` in the CI and Pages dist step next to `adr395_dist`, checks that
+every `icons/…` path in the built `index.html` and every non-embedded icon name exists in the dist.
+`adr239_hud_temp` now expects the season chip's `src` to be the embedded data URI.
+
+Gap for Art: there is no dedicated spring icon. `SEASON_LABEL` has four seasons, but `SEASON_ICON` has three
+entries, so spring falls back to `ic_sun.png`, which was already the behaviour. A dedicated `ic_spring.png`
+(or `ic_sprout.png`) is needed to fix that properly.

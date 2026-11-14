@@ -28,4 +28,4 @@ jobs:
         env:
           SURVIVAZ_OXIPNG: required
           SURVIVAZ_DIST: apps/client/dist
-        run: node scripts/check-dist-size.mjs apps/client/dist && pnpm exec vitest run apps/client/test/adr395_dist.test.ts
+        run: node scripts/check-dist-size.mjs apps/client/dist && pnpm exec vitest run apps/client/test/adr395_dist.test.ts apps/client/test/adr396_icon_paths.test.ts
