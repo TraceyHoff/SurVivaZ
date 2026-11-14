@@ -73,6 +73,16 @@
         ]
       },
       {
+        "wall": "wood",
+        "skin": "shk",
+        "forms": [
+          "hip",
+          "gab",
+          "shd",
+          "cot"
+        ]
+      },
+      {
         "wall": "twig:clan_palisade",
         "skin": "shk",
         "forms": [
@@ -153,6 +163,6 @@
         ]
       }
     ],
-    "$doc": "Art docs/ART_KEYS_ROOFS.md \u00a78: split-log shakes (shk) on log-wall buildings. twig walls are the log walls (pieces.py texture 'logs'; wood = planks). '<tier>:clan_palisade' activates once the wall piece gets variantNames; 'site:<kind>' is what the client reports for walls of an abandoned cabin / hunter_shack / fisher_hut site (EA wiring). Region skin = strict majority of the walls' votes, tie -> base. Art exists for hip/shd at t0 and hip/gab/shd/cot at t1; elsewhere rfxSpriteKeys falls back to the base key."
+    "$doc": "Art docs/ART_KEYS_ROOFS.md \u00a78: split-log shakes (shk) on log-wall buildings. log walls = twig and wood tier walls (owner: shakes on wood-wall cabins too). '<tier>:clan_palisade' activates once the wall piece gets variantNames; 'site:<kind>' is what the client reports for walls of an abandoned cabin / hunter_shack / fisher_hut site (EA wiring). Region skin = strict majority of the walls' votes, tie -> base. Art exists for hip/shd at t0 and hip/gab/shd/cot at t1; elsewhere rfxSpriteKeys falls back to the base key."
   }
 }

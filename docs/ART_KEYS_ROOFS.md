@@ -255,23 +255,26 @@ No `flt` (flat roofs aren't shingled) and no `gam` (barns, not cabins). Twig has
 Unique art: own ramps (`shake_split`, `shake_cedar`), own `shake` pattern (split widths, per-shake butt length,
 dropped shakes, split grain), log gable walls; 0 of 335 shake cells is pixel-identical to any base cell. Seamless by
 the same world-space heightfield as the base set. Where no shake key exists (other tiers/forms) `rfxSpriteKeys`
-falls back to the base key, so a stone roof on log walls stays slate.
+falls back to the base key, so a t2+ roof on log walls keeps its base material
+(slate, tin, plate); only t0/t1 roofs show shakes.
 
 Pages: `rfx_shk_t0` (2016×272) and `rfx_shk_t1` (2016×612), one page per tier (a cabin loads one page), stream.
 
 **Selection rule** (data in `roofRfx.json`, vote logic in `roofRfx.ts`):
-- Log walls = **twig-tier walls** (any `family: "wall"` piece — `wall`, `wall_low`, `wall_window`, `wall_doorway`,
-  corners — at tier `twig`; the building art paints twig walls as logs, `wood` as planks). Client material string
-  `twig`.
+- Log walls = **twig- and wood-tier walls** (owner decision: shakes on wood-wall cabins too): any `family: "wall"`
+  piece — `wall`, `wall_low`, `wall_window`, `wall_doorway`, `wall_arched`, `wall_fortified`, corners — at tier
+  `twig` or `wood`. Client material strings `twig`, `wood`. Stone, metal and reinforced walls vote base.
 - Clan palisade wall (`wall` variant 3, logs) on any tier: rule `"<tier>:clan_palisade"`. Inactive until EA gives
   the `wall` piece `variantNames` (`roofWallMaterial` only appends a variant name when one exists).
-- Cabin ruins: abandoned kinds **`cabin` (5), `hunter_shack` (7), `fisher_hut` (26)** — rules `site:cabin`,
-  `site:hunter_shack`, `site:fisher_hut`. They are stamped with wood (plank) walls, so EA's client should report
-  `site:<kind>` for walls inside such an `AbandonedSite` footprint (not wired yet).
+- Cabin ruins: abandoned kinds **`cabin` (5), `hunter_shack` (7), `fisher_hut` (26)** are stamped with tier-1 wood
+  walls, so the `wood` rule already gives them shakes; rules `site:cabin`, `site:hunter_shack`, `site:fisher_hut` keep
+  them shaked if EA ever reports `site:<kind>` (e.g. for stone-tier ruins). Note: every wood-walled ruin (cottage,
+  farmhouse…) with a t1 hip/gab/cot/shd roof now gets shakes too.
 - Forms `hip`, `gab`, `shd`, `cot` only.
 - **Mixed walls:** every roof tile of the connected region that reports a supporting wall (one level down) votes for
   the skin its wall maps to (no rule = base). Strict majority wins; **a tie goes to base**. Interior tiles don't vote.
   The whole region gets one skin, so a roof never mixes shakes and shingles.
 
 **Bytes:** PNG 57,635 + KTX2 263,120 = 320,755 B atlases; `manifest.building.json` +77,653 B raw (+2.9 KB gz); total dist +398,408 B (≈ 0.40 MB).
-Preview: `/workspace/assets/preview/roofs_shake.png` (6×4 cabins, base vs shake, rendered with EA's selection).
+Preview: `/workspace/assets/preview/roofs_shake.png` (6×4 cabins, stone-wall base vs wood/twig-wall shake, rendered
+with EA's selection; last row: wood-wall cabin at t1 shakes vs t2 slate fallback).

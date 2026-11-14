@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { rfxPickLevel, rfxSpriteKeys, type RfxTile } from "../src/roofRfx.js";
 
 // docs/ART_KEYS_ROOFS.md: seamless neighbour-aware roof set (rfx_*), add-only on its own pages.
 const root = "packages/assets/pack/";
@@ -70,5 +71,15 @@ describe("rfx seamless roofs", () => {
       expect(statSync(root + "building/" + a.ktx2).size).toBeLessThan(200 * 1024);
     }
     expect(man.atlases.filter((x: { key: string }) => x.key.startsWith("rfx_shk_")).length).toBe(2);
+  });
+  it("a wood-walled cabin resolves shk_t1 art at t1 and falls back to base at t2+ (§8)", () => {
+    const cabin = (key: string, tier: number, wall: string): RfxTile[] => { const o: RfxTile[] = []; for (let x = 0; x < 6; x++) for (let y = 0; y < 4; y++) o.push({ x, y, key: x === 4 && y === 1 && (key === "roof_gable" || key === "roof_slope") ? "roof_chimney" : key, rot: 0, tier, ...(x === 0 || y === 0 || x === 5 || y === 3 ? { wallMaterial: wall } : {}) }); return o; };
+    const resolve = (st: string[], tier: number, skin?: string): string | undefined => { for (const s of st) for (const k of rfxSpriteKeys(s, tier, skin)) if (byKey.has(k)) return k; return undefined; };
+    const keysOf = (tiles: RfxTile[]): string[] => [...rfxPickLevel(tiles, 1).values()].flatMap((p) => [resolve([p.stem, ...p.alts], tiles[0]!.tier, p.skin), ...p.overlays.map((o) => resolve([o.key, ...o.alts], tiles[0]!.tier, p.skin))]).map((k) => k ?? "MISSING");
+    for (const form of ["roof_gable", "roof_slope", "roof_cottage", "roof_shed"]) {
+      const t1 = keysOf(cabin(form, 1, "wood")); expect(t1.every((k) => /_shk_t1$/.test(k)), `${form} ${t1.filter((k) => !/_shk_t1$/.test(k))}`).toBe(true);
+      for (const t of [2, 3, 4]) { const k = keysOf(cabin(form, t, "wood")); expect(k.every((x) => x !== "MISSING" && !x.includes("_shk_") && x.endsWith(`_t${t}`)), `${form} t${t}`).toBe(true); }
+    }
+    expect(keysOf(cabin("roof_gable", 1, "stone")).some((k) => k.includes("_shk_"))).toBe(false);   // stone walls keep base shingles
   });
 });
