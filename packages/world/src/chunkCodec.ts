@@ -3,18 +3,20 @@ import { Chunk, CHUNK_AREA, CHUNK_SIZE } from "./chunk.js";
 import type { BuildingGrid } from "./building.js";
 
 export const CHUNK_MAGIC = 0x4b4e4843; // "CHNK"
-export const CHUNK_VERSION = 1;
+export const CHUNK_VERSION = 2;
 
 /**
- * Versioned binary chunk format v1 (LE):
+ * Versioned binary chunk format v2 (LE):
  *   u32 magic, u16 version, i32 cx, i32 cy
  *   tiles: u16 runCount, runCount x (u16 len, u16 id)      (RLE)
- *   height: 1024 x u8
+ *   height: 1024 x i16                                     (v1: 1024 x u8, two's complement — decode sign-extends)
  *   buildings: u16 n, n x (u16 piece, u8 lx, u8 ly, u8 z, u8 rot|state<<2, f32 hp)   (state 0..63 in the upper bits; v1-compatible)
  *   components: u8 n, n x (u16 componentId, u32 schemaHash)   (persistent components present in this chunk)
  *   entities: u32 n, n x (u8 compCount, compCount x (u8 tableIndex, record))
  * Transform x/y are stored chunk-relative (precision: see WorldOrigin guidance) and rebased on decode.
  * No storage backend: callers persist the bytes (ChunkProvider.save / their own store).
+ * ADR-411: v2 widens heights to i16 because absolute terrain levels now span -300..326 (v1's byte held -60..75).
+ * v1 blobs still decode (heights read as u8 and sign-extended; legacy flow-water bytes decode as before).
  */
 let scratch = new ArrayBuffer(1 << 16); let scratchView = new DataView(scratch);
 function ensureScratch(n: number): void { if (scratch.byteLength >= n) return; let c = scratch.byteLength; while (c < n) c *= 2; scratch = new ArrayBuffer(c); scratchView = new DataView(scratch); }
@@ -22,13 +24,13 @@ function ensureScratch(n: number): void { if (scratch.byteLength >= n) return; l
 function encodeStatic(chunk: Chunk, buildings: BuildingGrid | undefined): number {
   const anchored = buildings?.layer(chunk.key)?.anchored;
   const nb = anchored?.size ?? 0; if (nb > 0xffff) throw new Error("too many pieces in chunk");
-  ensureScratch(14 + 2 + CHUNK_AREA * 4 + CHUNK_AREA + 2 + nb * 10);
+  ensureScratch(14 + 2 + CHUNK_AREA * 4 + CHUNK_AREA * 2 + 2 + nb * 10);
   const d = scratchView; let o = 0; const t = chunk.tiles;
   d.setUint32(o, CHUNK_MAGIC, true); d.setUint16(o + 4, CHUNK_VERSION, true); d.setInt32(o + 6, chunk.cx, true); d.setInt32(o + 10, chunk.cy, true); o = 14;
   const runsAt = o; o += 2; let runs = 0;
   for (let i = 0; i < CHUNK_AREA;) { const v = t[i]!; let n = 1; while (i + n < CHUNK_AREA && t[i + n] === v && n < 0xffff) n++; d.setUint16(o, n, true); d.setUint16(o + 2, v, true); o += 4; runs++; i += n; }
   d.setUint16(runsAt, runs, true);
-  new Uint8Array(scratch, o, CHUNK_AREA).set(chunk.height); o += CHUNK_AREA;
+  for (let i = 0; i < CHUNK_AREA; i++) { d.setInt16(o + i * 2, chunk.height[i]!, true); } o += CHUNK_AREA * 2;
   d.setUint16(o, nb, true); o += 2;
   if (anchored && nb) {
     const ox = chunk.cx * CHUNK_SIZE, oy = chunk.cy * CHUNK_SIZE;
@@ -72,7 +74,12 @@ export function decodeChunk(bytes: Uint8Array, opts: { world?: World; buildings?
   let p = 0; const nr = r.read("u16");
   for (let k = 0; k < nr; k++) { const n = r.read("u16"), t = r.read("u16"); if (p + n > CHUNK_AREA) throw new Error("tile RLE overflow"); chunk.tiles.fill(t, p, p + n); p += n; }
   if (p !== CHUNK_AREA) throw new Error("tile RLE underflow");
-  for (let i = 0; i < CHUNK_AREA; i++) chunk.height[i] = r.read("u8");
+  if (ver === 1) {
+    // v1 heights are one two's-complement byte per tile: sign-extend into the i16 array (a raw 251 is -5, not 251).
+    for (let i = 0; i < CHUNK_AREA; i++) { const b = r.read("u8"); chunk.height[i] = b > 127 ? b - 256 : b; }
+  } else {
+    for (let i = 0; i < CHUNK_AREA; i++) chunk.height[i] = r.read("i16");
+  }
   const ox = cx * CHUNK_SIZE, oy = cy * CHUNK_SIZE; const buildings: DecodedChunk["buildings"] = [];
   const nb = r.read("u16");
   for (let k = 0; k < nb; k++) {

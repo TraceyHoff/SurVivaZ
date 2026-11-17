@@ -82,6 +82,7 @@ import { task34AtlasSources, TASK34_ATLAS_KEYS } from "./task34-art.js";
 import { task256AtlasSources, TASK256_ATLAS_KEYS } from "./task256-art.js";
 import { task355AtlasSources, installStoreMenuIcons, TASK355_ATLAS_KEYS } from "./task355-art.js";
 import { task361AtlasSources, installVehicleMenuIcons, TASK361_ATLAS_KEYS } from "./task361-art.js";
+import { task410AtlasSources, TASK410_ATLAS_KEYS } from "./task410-art.js";
 import { installGuideArt } from "./task364-art.js";
 import { installGuideMenuIcon } from "./guide-art.js";
 import { stumpKeys } from "./stumps.js";
@@ -381,6 +382,8 @@ export class IsoView {
     for (const [k, src] of await task355AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-361: dedicated drawn-vehicle + harness atlases (world sprites keyed by def id, harness overlays).
     for (const [k, src] of await task361AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-410: sloped-ground tilesets (ramps/wedges per material x season, 1x + @2x pages painted at runtime).
+    for (const [k, src] of await task410AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-357: the five store build-menu icons point at items_build frames 297–301, which are transparent
     // in the shipped atlas (no binary could ship through the snapshot route) — paint them at runtime from
     // the stores' own world art so the build menu shows them. Safe no-op without a canvas.
@@ -413,7 +416,7 @@ export class IsoView {
     // ADR-118: count atlas/KTX2 image responses as they land (Resource Timing works for fetch and <img>); expected =
     // the eager atlases (paper-doll/streamed ones load on demand later), so the fraction stays honest and capped < 1.
     // Task 34 blob URLs carry no file extension, so the png-regex watcher never counts them; exclude them so the fraction stays honest.
-    const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[]), ...(TASK355_ATLAS_KEYS as readonly string[]), ...(TASK361_ATLAS_KEYS as readonly string[])]);
+    const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[]), ...(TASK355_ATLAS_KEYS as readonly string[]), ...(TASK361_ATLAS_KEYS as readonly string[]), ...(TASK410_ATLAS_KEYS as readonly string[])]);
     const expected = [...registry.atlases.keys()].filter((k) => !custom.includes(k) && !paintedAtlas.has(k)).length;
     const stopWatch = watchResources(/\.(png|webp|ktx2|avif|jpe?g)(\?|$)/i, (n, bytes) => onStage("atlases", countFraction(n, expected), `Loading sprite atlases (${n}/${expected}${bytes ? `, ${(bytes / 1048576).toFixed(1)} MB` : ""})`));
     // ADR-380: the initial setRegistry has no frames to protect — disable the ADR-190 resize slicer for it (its

@@ -8818,3 +8818,84 @@ Decision: `DEFAULT_QUALITY_PRESET` in `packages/render/src/quality.ts` changes f
 Validation: the "Task 26: Full is the default preset" tests in `packages/render/test/full_resolution_preset.test.ts` are updated to ADR-408: the default is Auto, a fresh install loads Auto, a bare `new QualityController()` is Auto and not full-resolution, every stored choice is still kept verbatim, and an unparseable stored value falls back to Auto. The updated tests were run against the pre-change code: 2 failed / 11 passed (exactly the two updated default tests fail behaviourally, `expected 'full' to be 'auto'`); all 13 pass with the fix. Full suites, serialized, on the rebased tree (base 3f6c13e7, ADR-407 in the tree): total 4,552 passed, 9 skipped, 1 failed — the 1 failure is the known persist autosave bench flake (p95 66.24 vs 50; re-run standalone with `PERF=1`: 1/1 passed). The pre-rebase run on 6ca7c2f7 gave 4,545 passed, 9 skipped, 1 failed (same flake, p95 56.02); the +7 is ADR-407's console-budget tests, which pass alongside the ADR-408 default tests (targeted run: 20/20). Typecheck EXIT 0, all 11 projects (TS 5.9.3), re-run on the rebased tree. Canaries 34/34 (adr252 18/18 + 3/3, adr331 8/8, adr385 5/5, in the full-suite logs).
 
 Result: fresh installs start on Auto and the governor adapts the tier to the device; nothing changes for anyone who already picked a preset. No speedup is claimed and no phone ms is claimed — the governor's behaviour is unchanged, only the starting preset for players with no stored choice.
+
+## ADR-411: Varied terrain heights + dig/raise 300 (SurVivaZ)
+
+Context: two gaps in the terrain model. (1) Worldgen never reached its own maximum: sampling `heightAt` over ±512 (step 2) for 5 seeds gave min 0 but max 20 on every seed — 21 and 22 never occur. The formula's real ceiling was plateau 3 × relief 6 + detail 2 = 20 (the "detail 0..3" comment was wrong; `floor(field*2) + floor(biome*2)` tops out at 2). (2) Tracey clarified (2026-11-17) that players can dig 300 tiles down and raise the ground 300 tiles up from a tile's generated ground. The old absolute bounds (-60..75, ADR-297) and every byte-wide store behind them could not hold that: `terrainDigAt` is levels relative to generated ground (0..22), while LEVEL_MIN/LEVEL_MAX are absolute levels, so the absolute bounds must cover generated ground ± 300.
+
+Decision — worldgen: `HEIGHT_MAX` 22 → 26 and wilderness relief 2..6 → 2..8 (`relief = 2 + 6*blend`), so plateau 3 × 8 + detail 2 = 26 is actually reached. 1 level stays 16 px and 1 floor stays 3 levels. Near spawn nothing changes: within 160 tiles `blend` is 0, relief is still 2, and the height formula is byte-identical to before — spawn patches keep faces ≤ 3 and the same gentle cap (max 7). Farther out the world gets real mountains and valleys (measured faces up to 24 levels in the wilderness survey).
+
+Decision — dig/raise 300: `TERRAIN.minLevel/maxLevel` are now -300 / `HEIGHT_MAX + 300` = 326 (`TERRAIN_EDIT_RANGE = 300` in `terrain_depth.ts`); the shovel flow (`TerrainFail.Limit` + the `setTerrainDig` clamp) follows the same constants, so no other gameplay code changes. Everything that assumed the byte range widens: `Chunk.height` Int8 → Int16 and the chunk codec v1 → v2 (heights 1024 × i16; v1 blobs still decode — u8 heights sign-extended, legacy flow bytes decoded as before); the flow-water encoding gains a v2 code `raw = level + 1000` (700..1326) while the ADR-297 legacy branches are kept and checked after it; `TerrainEdit.dig` i8 → i16; world-preview heights Int8 → Int16 (a flow-encoded lake surface is 1000+); TileSync full-chunk height runs switch from `v & 0xff` bytes to zigzag varints (server and client ship together, so the wire change needs no versioning). Render, camera, `standHeightAt`, climb/fall rules and underground rules need no change: they all read decoded levels, and the 3-level climb cap / fall-damage formula already handle arbitrary drops.
+
+Compatibility: old saves load. A v1 chunk decodes through the v1 branch, and a v1 chunk holding a `TerrainEdit` entity migrates: `migrate.ts` gains a `widened` migration kind (old field type → new type, signed values sign-extended — a dug -5 stays -5 instead of becoming 251), with `TERRAIN_EDIT_WIDEN_MIGRATION` in `DEFAULT_MIGRATIONS`; `migrateChunkBytes` now returns early for v2 rows, whose 2-byte height section the v1 layout walk would misparse. Without the migration, decode rejects the old schema hash (verified in the new persist test). The graphics preset default is untouched (ADR-408 stands), and the ground-shape model / tilesets are ADR-409/410's slices, not this one — slopes derived from height deltas now see larger deltas in the wilderness (up to ~24 levels), which is the intended cliff face, not a regression.
+
+Validation: new tests `adr411_varied_heights.test.ts` (world), `adr411_dig_raise_300.test.ts` (gameplay), `adr411_terrain_edit_widen.test.ts` (persist), plus a TileSync heights case in `net/test/tiles.test.ts`. Measured before/after on the same 5 seeds (±512, step 2): min 0 / max 20 → min 0 / max 26 = HEIGHT_MAX on every seed. Real shovel loops reach -300 and 326 from generated ground 0 and 26, with `Limit` exactly at the bounds; a -300 pit floods and keeps level -300 through flow/render; `TerrainEdit` dig ±300 round-trips the codec; 60°F holds at 300 levels down in winter. Existing bounds assertions updated (not weakened): task36 terrain tests, ADR-273 preview (`HEIGHT_MAX` 26, wilderness max ≥ 25), ADR-296/297 codec round-trip over -300..326, ADR-386 preview levels ≤ `HEIGHT_MAX`, empty-chunk size bound (2075 bytes with i16 heights), persist chunk `format` 2. Two knock-ons, both measured, not assumed: the world schema hash moves `0x35deea19` → `0x92e6f70a` (TerrainEdit.dig i8 → i16, no new component — the ADR-360/371 pins are updated), and the ADR-384 single-level-ruin flat share drops ~0.41 → ~0.35 (taller wilderness relief leaves fewer perfectly flat footprints; the realised ruin density stays inside its 0.08–0.13 band, so only the flat-share band widens to 0.30–0.47). Typecheck clean with pinned TS 5.9.3; neighbour suites (worldgen, terrain, farming, building/placement, water, render, net, persist) re-run with no regressions.
+
+## ADR-410: Tilesets for the sloped ground shapes (SurVivaZ)
+
+Context: ADR-409 gives every ground tile a shape (flat/ramp/wedge/valley/peak/stepped) and the renderer already swaps the base layer to a slope key when it resolves — but no slope art existed, so every sloped tile fell back to the flat base tilted geometrically. Valley/peak/stepped keep a flat top + cliffs and need no new art.
+
+Decision: runtime-painted slope tilesets, following the ADR-356/357/361 pattern (no binaries in the snapshot push route). One atlas per season (`gt_slope_summer/fall/winter/spring`), 15 cols × 4 rows of 68×52 cells, anchor (34,18): frame = material index (GROUND_PRIORITY order: rock, sand, dirt, mud, forest, grass, snow) × 8 + shape (0–3 ramp downhill +u/+v/−u/−v, 4–7 wedge low corner (u−,v−)/(u+,v−)/(u+,v+)/(u−,v+)); 224 sprites, ids 6100–6323, keys `gt_<mat>_slope_ramp_<d>` / `gt_<mat>_slope_wedge_<c>` with the same season suffixes as flat ground. The painter (`apps/client/src/task410-art.ts`) transcribes the shipped ground palettes faithfully from `ground_mats.py` (note: Python calls the material "stone", the engine "rock") and reuses the flat tiles' art language — tone-field islands, value-noise specks, and the same per-material decorations (tufts, flowers, pebbles, leaves, cracks, slabs, puddles, frost, snow patches). The tone field is cached per (material, season) and shared by all 8 shapes; only the light model differs per shape, so each tile is genuinely drawn for its shape: 5 quantized cel bands (1.14/1.07/1.00/0.93/0.86) with narrow blends, a downhill crease (×0.84 at the edge) and an uphill rim (×1.06); a wedge shades its two triangles on the fold diagonal, each by its own downhill axis. The vertex shader does the geometric foreshortening, so the texture is painted flat-on-the-ground. 2x is the master (2040×416 per season); 1x is box-downsampled and snapped to the block's own palette colours, mirroring the shipped pipeline. Install follows ADR-357: `task410AtlasSources()` is idempotent and a safe no-op without canvas; `view.ts` merges the blob URLs over the manifest sources and excludes the four atlases from load-progress counting. Flat tiles are untouched — the renderer only swaps when the slope key resolves.
+
+Validation: new tests `apps/client/test/adr410_slope_art.test.ts` (5 tests) and `packages/render/test/adr410_slope_art.test.ts` (2 tests), 7/7 passing: every one of the 224 keys resolves through the merged registry; every painted cell is non-blank by pixel check (2x cells ~4,557 opaque px, 1x >1,000), in-palette with cel-bounded colour counts (2x < 320 distinct, 1x < 210); all 8 shapes of a tile differ; ramp downhill thirds are darker than uphill thirds (ratio < 0.93) in all 4 directions and wedge low corners darker than the opposite corner, for every material; flat keys still resolve to the flat atlases; the end-to-end TileTerrain test with the real registry shows a ramp tile uploading the slope sprite id (not the flat base) in all 4 view rotations, a wedge uploading its low-corner key, and a flat tile keeping the flat base. Neighbours: render + world slope suites 577 passed / 0 failed; assets pack test 47 passed / 1 failed — the known pre-existing `assets/building/KEYS.md` ENOENT (the `assets/` drop is absent from this checkout; unrelated). Client painter neighbours (task355/357/361) 70 passed. Typecheck with pinned TS 5.9.3: apps/client, packages/assets, packages/render all clean except two pre-existing errors from `scripts/oxipng.mjs` being skip-worktree in this checkout (untouched files).
+
+Result: 7 materials × 4 seasons × 8 shapes = 224 slope tiles shipped as runtime paint, 0 download bytes. Cost is a one-time ~0.53 s paint at boot and ~0.6 MB of in-memory PNG blobs (measured in the VM with a filter-0 zlib-6 encoder: 43–44 KB per 1x atlas, 105–108 KB per 2x atlas; browser toBlob output will differ slightly). No quality reduction: the same palettes, decorations, and cel shading as the flat ground, with per-shape light so the tilt reads. The graphics preset default is untouched (ADR-408 stands). The user's eyes are still the final check that slopes read correctly on the phone.
+
+## ADR-409: Sloped ground shapes (SurVivaZ)
+
+Context: terrain transitions were blocky stepped levels — every 1-level height step drew as a vertical cliff
+face (mesh cliff + textured skirt + gt_side face + drop-edge relief), so gentle hills read as stacked slabs.
+The game already had the heightfield (seeded worldgen, 1 level = 16 px); what it lacked was a shape model
+that turns neighbour heights into ramps and wedges.
+
+Decision — model (`packages/world/src/slope.ts`, pure, no imports): `classifyGroundShape({h, edge, diag})`
+is a deterministic function of one tile's render height and its 8 neighbours' render heights, so the mesh
+(`tilemap.ts`, world axes) and the textured instances (`terrainTiles.ts`, view-space axes) always agree, in
+all 4 view rotations. Corner rule: a top-face corner drops exactly 1 level iff the lowest tile touching
+that vertex is exactly 1 level below this tile. The vertex minimum is the same whoever asks, so adjacent
+top faces share their edge heights exactly — no slits, no holes. Water neighbours carry the 0.25 surface
+inset, so their heights are fractional and can never equal h-1: shores stay ledges, never slopes. Void
+neighbours (<= -90, the renderer's existing void convention) are ignored. Kinds from the 4 edge drops:
+`flat`, `ramp` (one edge 1 lower — one sloping plane), `wedge` (two adjacent edges 1 lower — the top folds
+down toward the low corner), `valley` (two opposite), `peak` (all four), `stepped` (any edge 2+ lower).
+Guard: valley, peak and 3-edge wedges would need all four corners down, which would drop the whole top to
+the low height and erase the tile (a lone peak would read as flat ground while the player stands 1 level
+above it), so they keep a flat top and their 1-level cliff faces — they render exactly as before ADR-409
+and need a centre vertex to slope. A `slopeSide` is an edge with a 1-level drop whose two corners both
+dropped: only there is the cliff face suppressed. Any other 1-level edge keeps its cliff face, which closes
+the strip between the descending top edge and the low neighbour. Diagonal-only lows dimple the shared
+corner (kind stays `flat`).
+
+Decision — rendering: the mesh top face uses `h - cornerDrops[i]` per corner, drops the dark ledge lip on
+sloped corners, and emits no cliff quad on slope sides (tilemap stamp now covers the 4 diagonal chunks too,
+since diagonals feed the corner drops). The textured instance carries the corner drops in its skirt-mask
+bits 16/32/64/128 (corners (u-,v-),(u+,v-),(u+,v+),(u-,v+)); the vertex shader bilinearly interpolates
+them over the diamond so the art tilts with the mesh (flat tiles are bit-identical to before), and the
+build clears the downhill skirt bit, zeroes the drop-edge relief, and skips the gt_side face on slope sides.
+A wedge's textured diamond is a bilinear interpolation of the mesh's two triangles — it can sit up to 0.25
+level off the mesh at the diamond centre, inside the existing +0.004 depth bias, so no z-fighting is
+expected; the mesh underneath is the same material colour if it ever shows. 2+-level steps are unchanged
+(cliffs, skirts, side faces, relief all as before). Canvas2D keeps flat diamonds (fallback renderer only).
+
+Decision — gameplay truth unchanged: stand height, movement, pathing, building placement and farming all
+still read the flat tile height h; nothing in gameplay was touched. Flat buildable areas place exactly as
+before (no placement rule changed). Rendering never writes chunk heights (asserted in the new render test).
+
+Decision — ADR-410 contract: `groundSlopeArt(shape)` (world/slope.ts) returns the art selector for a
+sloped tile, and `groundSlopeKey(mat, season, kind, dir)` (render/groundArt.ts) builds the sprite key:
+`gt_<mat>_slope_ramp_<d>` (d = downhill axis, view-space: 0=+u, 1=+v, 2=-u, 3=-v) and
+`gt_<mat>_slope_wedge_<c>` (c = low corner: 0=(u-,v-), 1=(u+,v-), 2=(u+,v+), 3=(u-,v+)), same 68x52 cell
+and anchor (34,18) as the flat `gt_<mat>` bases, same season suffixes. The renderer swaps the base layer
+to the slope key only when `GroundArt.id()` resolves it, and the slope keys are pinned in `pageSprites`
+once they ship; until ADR-410 paints them the flat base is kept and tilted geometrically, so nothing is
+ever invisible. The graphics preset default is untouched (ADR-408 stands); the height range and edit
+bounds are ADR-411's slice, not this one.
+
+Validation: new tests `adr409_ground_shape.test.ts` (world, 8 tests: flat/void, ramps × 4 directions,
+wedges × 4 corners, valley/peak/3-edge guard, stepped + ramp-next-to-cliff, diagonal dimple, water
+inset, cornerMask) and `adr409_slopes.test.ts` (render, 7 tests: ramp/wedge instance bits in all 4 view
+quarters, 2-level step keeps skirt + relief, gt side-face counts 1 vs 3, slope-art fallback vs shipped
+key, mesh corner heights + cliff suppression, render never writes heights). Typecheck clean with pinned
+TS 5.9.3 (world + render). Neighbour suites re-run with no regressions (worldgen, render, terrain,
+building/placement, pathing, farming). Not verified on a real phone: the tilt is geometric, but whether
+ramps read as slopes (rather than smeared diamonds) at play zoom needs Tracey's eyes on the live build.

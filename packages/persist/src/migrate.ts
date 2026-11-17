@@ -15,6 +15,9 @@ export interface AddedFields {
   /** Scalar fields whose DEFAULT changed since the old layout: name -> old default. The schema hash includes
    *  defaults, so a migration that also changed a default must name the old one or it never matches a real save. */
   oldDefaults?: Readonly<Record<string, number>>;
+  /** Scalar fields whose TYPE widened since the old layout: name -> old type (ADR-411: TerrainEdit.dig i8 -> i16).
+   *  Old values are extended into the wider field (signed old types sign-extend, unsigned zero-extend). */
+  widened?: Readonly<Record<string, FieldType>>;
 }
 /** core Slot.crafterId on gameplay's slot containers (4b8b28d): 0 = no crafter. */
 export const CRAFTER_ID_MIGRATIONS: readonly AddedFields[] = [
@@ -63,53 +66,68 @@ export const DISEASES_INFECTION_CLOCK_MIGRATIONS: readonly AddedFields[] = [
 ];
 /** ADR-287: finite fertilizer timer; legacy fertilized flags receive one dose in gameplay. */
 export const CROP_FERTILIZER_MIGRATION: AddedFields = { component: "Crop", fields: ["fertilizerUntilTick"] };
-export const DEFAULT_MIGRATIONS: readonly AddedFields[] = [...CRAFTER_ID_MIGRATIONS, APPEARANCE_VERSION_MIGRATION, ...CONTAINER_96_MIGRATIONS, ...INVENTORY_24_MIGRATIONS, ...APPEARANCE_HANDS_MIGRATIONS, APPEARANCE_SKIN_SCHEME_MIGRATION, PROGRESSION_TREES_MIGRATION, LOOTBAG_DESPAWN_MIGRATION, WORLD_RULES_AI_HUMANS_MIGRATION, DISEASES_CARE_TICKS_MIGRATION, ...DISEASES_INFECTION_CLOCK_MIGRATIONS, CROP_FERTILIZER_MIGRATION];
+/** ADR-411: TerrainEdit.dig widened i8 -> i16 (the shovel's ±300-level range does not fit a byte); old values
+ *  sign-extend, so a dug -5 stays -5 instead of becoming 251. */
+export const TERRAIN_EDIT_WIDEN_MIGRATION: AddedFields = { component: "TerrainEdit", fields: [], widened: { dig: "i8" } };
+export const DEFAULT_MIGRATIONS: readonly AddedFields[] = [...CRAFTER_ID_MIGRATIONS, APPEARANCE_VERSION_MIGRATION, ...CONTAINER_96_MIGRATIONS, ...INVENTORY_24_MIGRATIONS, ...APPEARANCE_HANDS_MIGRATIONS, APPEARANCE_SKIN_SCHEME_MIGRATION, PROGRESSION_TREES_MIGRATION, LOOTBAG_DESPAWN_MIGRATION, WORLD_RULES_AI_HUMANS_MIGRATION, DISEASES_CARE_TICKS_MIGRATION, ...DISEASES_INFECTION_CLOCK_MIGRATIONS, CROP_FERTILIZER_MIGRATION, TERRAIN_EDIT_WIDEN_MIGRATION];
 
 const BYTES: Record<FieldType, number> = { f32: 4, f64: 8, i8: 1, u8: 1, i16: 2, u16: 2, i32: 4, u32: 4 };
-export const oldSchemaOf = (s: Schema, added: readonly string[], grown: Readonly<Record<string, number>> = {}, oldDefaults: Readonly<Record<string, number>> = {}): Schema =>
+export const oldSchemaOf = (s: Schema, added: readonly string[], grown: Readonly<Record<string, number>> = {}, oldDefaults: Readonly<Record<string, number>> = {}, widened: Readonly<Record<string, FieldType>> = {}): Schema =>
   Object.fromEntries(Object.entries(s).filter(([k]) => !added.includes(k)).map(([k, v]) => {
     let out = k in grown && typeof v === "object" ? { ...v, length: grown[k]! } : v;
+    if (k in widened) out = typeof out === "string" ? widened[k]! : { ...out, type: widened[k]! };
     if (k in oldDefaults) out = typeof out === "string" ? { type: out, default: oldDefaults[k]! } : { ...out, default: oldDefaults[k]! };
     return [k, out];
   })) as Schema;
-/** Per field of the CURRENT schema: byte size now, byte size in the old record (0 = added), and whether it is added. */
-export interface FieldPlan { fields: { bytes: number; oldBytes: number; added: boolean }[]; oldSize: number; newSize: number }
+/** Per field of the CURRENT schema: byte size now, byte size in the old record (0 = added), and whether it is added.
+ *  `signExtend` marks a widened field whose old type was signed: the new high bytes copy the old sign bit. */
+export interface FieldPlan { fields: { bytes: number; oldBytes: number; added: boolean; signExtend?: boolean }[]; oldSize: number; newSize: number }
 /** The migration that explains stored hash `h` for `store`, if any. */
 export function planFor(store: ComponentStore, h: number, migrations: readonly AddedFields[]): FieldPlan | undefined {
   for (const m of migrations) {
     const grown = m.grown ?? {}; const gk = Object.keys(grown);
+    const widened = m.widened ?? {}; const wk = Object.keys(widened);
     if (m.component !== store.def.name) continue;
-    if (!m.fields.some((f) => f in store.def.schema) && !gk.some((f) => f in store.def.schema)) continue;
+    if (!m.fields.some((f) => f in store.def.schema) && !gk.some((f) => f in store.def.schema) && !wk.some((f) => f in store.def.schema)) continue;
     if (gk.some((f) => !(f in store.def.schema) || fieldLength(store.def.schema[f]!) < grown[f]!)) continue;
-    if (schemaHash(oldSchemaOf(store.def.schema, m.fields, grown, m.oldDefaults ?? {})) !== h) continue;
+    if (wk.some((f) => !(f in store.def.schema) || fieldType(store.def.schema[f]!) === widened[f]!)) continue;
+    if (schemaHash(oldSchemaOf(store.def.schema, m.fields, grown, m.oldDefaults ?? {}, widened)) !== h) continue;
     const fields = store.fields.map((f) => {
       const spec = store.def.schema[f]!; const added = m.fields.includes(f); const el = BYTES[fieldType(spec)];
-      return { bytes: el * fieldLength(spec), oldBytes: added ? 0 : el * (grown[f] ?? fieldLength(spec)), added };
+      const oldEl = f in widened ? BYTES[widened[f]!] : el;
+      const signExtend = f in widened && (widened[f] === "i8" || widened[f] === "i16" || widened[f] === "i32");
+      return { bytes: el * fieldLength(spec), oldBytes: added ? 0 : oldEl * (grown[f] ?? fieldLength(spec)), added, ...(signExtend ? { signExtend: true } : {}) };
     });
     let oldSize = 0, newSize = 0; for (const f of fields) { newSize += f.bytes; oldSize += f.oldBytes; }
     return { fields, oldSize, newSize };
   }
   return undefined;
 }
-/** Old-layout record bytes -> current-layout bytes (added fields and grown array tails zero). */
+/** Old-layout record bytes -> current-layout bytes (added fields and grown array tails zero; widened signed
+ *  fields sign-extend, so a negative old value keeps its sign instead of becoming a large positive). */
 export function upgradeRecord(plan: FieldPlan, src: Uint8Array, at: number, out: Uint8Array, to: number): void {
   let i = at, o = to;
   for (const f of plan.fields) {
     if (f.oldBytes) out.set(src.subarray(i, i + f.oldBytes), o);
-    out.fill(0, o + f.oldBytes, o + f.bytes); i += f.oldBytes; o += f.bytes;
+    const fill = f.signExtend && f.oldBytes > 0 && (src[i + f.oldBytes - 1]! & 0x80) !== 0 ? 0xff : 0;
+    out.fill(fill, o + f.oldBytes, o + f.bytes); i += f.oldBytes; o += f.bytes;
   }
 }
 
 /**
- * Rewrites a chunk row (world chunk format v1) whose component table has hashes explained by `migrations` into the
- * current layout so world's decodeChunk accepts it. Returns undefined when nothing needs migrating (or the row is
+ * Rewrites a chunk row (world chunk format v1 or v2) whose component table has hashes explained by `migrations`
+ * into the current layout so world's decodeChunk accepts it. Returns undefined when nothing needs migrating (or the row is
  * not understood: decodeChunk then reports the real error). Pure byte rewrite; world/core are untouched.
  */
 export function migrateChunkBytes(world: World, bytes: Uint8Array, migrations: readonly AddedFields[] = DEFAULT_MIGRATIONS): Uint8Array | undefined {
   if (!migrations.length || bytes.length < 16) return undefined;
   const d = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  // ADR-411: the height section is 1 byte/tile in v1 and 2 in v2; the component table + entity section
+  // after it are the same in both, so the walk skips the right number of height bytes for the row's version.
+  const ver = d.getUint16(4, true);
+  if (ver !== 1 && ver !== 2) return undefined; // unknown layout: decodeChunk reports the real error
   try {
-    let o = 14; const runs = d.getUint16(o, true); o += 2 + runs * 4 + CHUNK_AREA;
+    let o = 14; const runs = d.getUint16(o, true); o += 2 + runs * 4 + CHUNK_AREA * (ver === 2 ? 2 : 1);
     const nb = d.getUint16(o, true); o += 2 + nb * 10;
     const tableAt = o; const nc = d.getUint8(o); o += 1;
     const sizes: number[] = []; const plans: (FieldPlan | undefined)[] = []; let any = false;

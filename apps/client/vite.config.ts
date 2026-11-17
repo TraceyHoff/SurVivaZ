@@ -26,7 +26,7 @@ const { servedManifestIndex } = await import("@engine/assets");
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = resolve(here, "../..");
 const MOUNTS: [string, string, (rel: string) => boolean][] = [
-  ["pack/", join(root, "packages/assets/pack"), (r) => /^(manifest\.json|piece_variants\.json|ids\.lock\.json|(?:customization\/)?(?:atlases|mirror)\/[^/]+\.(png|json|ktx2)|(?:vehicles|building|items|nature|vehicle_items|task34|task256|task355|task361)\/(?:manifest\.\w+\.json|atlases\/[^/]+\.(?:png|json|ktx2))|customization\/strings\/en\.json|customization\/manifest\.customization(?:\.[\w-]+)*\.json|audio\/(?:sfx|ambience|ui|music|voice)\/[\w-]+\.(?:opus|m4a|mp3))$/.test(r)],
+  ["pack/", join(root, "packages/assets/pack"), (r) => /^(manifest\.json|piece_variants\.json|ids\.lock\.json|(?:customization\/)?(?:atlases|mirror)\/[^/]+\.(png|json|ktx2)|(?:vehicles|building|items|nature|vehicle_items|task34|task256|task355|task361|task410)\/(?:manifest\.\w+\.json|atlases\/[^/]+\.(?:png|json|ktx2))|customization\/strings\/en\.json|customization\/manifest\.customization(?:\.[\w-]+)*\.json|audio\/(?:sfx|ambience|ui|music|voice)\/[\w-]+\.(?:opus|m4a|mp3))$/.test(r)],
   ["survival_fx/", join(root, "assets/survival_fx"), (r) => /^(render_tuning\.json|daynight_grading\.json|textures\/[^/]+\.png|lut\/[^/]+\.(png|json))$/.test(r)],
   // ADR-242: Art's top-level PvP/clan + stalls drops (fragment image paths are art-root relative: "pvp_clan/atlases/x.png")
   ["pvp_clan/", join(root, "assets/pvp_clan"), (r) => /^(manifest\.fragment\.json|atlases\/[^/]+\.(?:png|json|ktx2)|(?:world_ui_colors|clan_palettes|outline_colors|rarity_palette)\.json)$/.test(r)],

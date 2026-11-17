@@ -13,7 +13,7 @@
  * cached instance buffer per view quarter; vWorld is rotated back to world space for the surface noise / shimmer.
  * ADR-256: `grazedAt(tx,ty)` swaps grass bases for `gt_grass_grazed` (+ seasonal twin) when a GrazedTile is present.
  */
-import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, renderTileHeight, waterShoreTint, waterCornerTint, type TileMap, type Chunk, type IsoConfig } from "@engine/world";
+import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, renderTileHeight, waterShoreTint, waterCornerTint, classifyGroundShape, groundSlopeArt, SHAPE_EDGE_TO_UV, type TileMap, type Chunk, type IsoConfig } from "@engine/world";
 import { SEASON_GROUND_GLSL } from "./season.js";
 import { terrainDropEdges, DROP_EDGE_GLSL } from "./dropEdges.js";
 import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/util.js";
@@ -22,7 +22,7 @@ import { planWaterfallArt, waterfallArtResident, isWaterfallSheetAt, VIEW_PLUS_X
 import type { AtlasManager } from "./assets/atlasManager.js";
 import type { Rect } from "./camera.js";
 import { TileId, TERRAIN_SPRITES, isWaterTile } from "./ids.js";
-import { GroundArt, GroundLayerKind, groundHash, groundLayers, groundMaterial, groundSideKey, groundSideLevels, type GroundLayer } from "./groundArt.js";
+import { GroundArt, GroundLayerKind, groundHash, groundLayers, groundMaterial, groundSideKey, groundSideLevels, groundSlopeKey, type GroundLayer } from "./groundArt.js";
 import type { SurfaceState, SurfaceProvider } from "./tilemap.js";
 
 const FLOATS = 16;
@@ -49,15 +49,26 @@ void main() {
   vec2 cu = vec2(mix(c.x, 1.0 - c.x, flip), c.y);
   vec2 px = cu * dim.xy; // frame px
   vec2 anchor = vec2(mix(aC.x, dim.x - aC.x, flip), aC.y);
+  // ADR-409: ground slopes — aB.z bits 16/32/64/128 are the view-space corner drops (u-,v-),(u+,v-),
+  // (u+,v+),(u-,v+); the diamond tilts by bilinear interpolation over the frame so its corners meet the
+  // mesh top face and the neighbour tops. Flat tiles are unaffected (all four bits zero).
+  int sm = int(aB.z + 0.5);
+  float sc00 = float((sm & 16) != 0), sc10 = float((sm & 32) != 0), sc11 = float((sm & 64) != 0), sc01 = float((sm & 128) != 0);
+  vec2 sd = (px - anchor) / uIso.xy;
+  float sfu = clamp((sd.x + sd.y) * 0.5 + 0.5, 0.0, 1.0);
+  float sfv = clamp((sd.y - sd.x) * 0.5 + 0.5, 0.0, 1.0);
+  float sdrop = mix(mix(sc00, sc10, sfu), mix(sc01, sc11, sfu), sfv);
+  float sdropAvg = (sc00 + sc10 + sc11 + sc01) * 0.25;
+  float zt = aA.z - sdrop;
   vUvRaw = vec3(mix(uvr.xy, uvr.zw, cu), dim.z); vLayer = int(dim.z + 0.5); vRect = uvr; vLocal = px; vInfo = vec4(dim.xy, aB.z, aC.z); vCorn = aD; vOrg = aA.xy - 0.5; vArt = vec3(anchor, aC.w);
-  vec2 pivot = vec2((aA.x - aA.y) * uIso.x, (aA.x + aA.y) * uIso.y - aA.z * uIso.z); // tile centre
+  vec2 pivot = vec2((aA.x - aA.y) * uIso.x, (aA.x + aA.y) * uIso.y - zt * uIso.z); // tile centre
   vec2 iso = pivot + px - anchor;
   // world position (for overlays) of the ground point under this pixel
   vec2 d = (px - anchor) / uIso.xy; vView = vec2(aA.x, aA.y) + vec2(d.x + d.y, d.y - d.x) * 0.5;
   vWorld = vec2(uRot.x * vView.x + uRot.y * vView.y, -uRot.y * vView.x + uRot.x * vView.y);
   float hp = anchor.y - px.y; // px above pivot
-  float key = aA.x + aA.y + aA.z * uZFactor + 0.004 - max(hp, -uIso.y) / uIso.y; // ground plane; skirt clamped to the front corner
-  vKey = aA.x + aA.y + aA.z * uZFactor + 0.004;
+  float key = aA.x + aA.y + zt * uZFactor + 0.004 - max(hp, -uIso.y) / uIso.y; // ground plane; skirt clamped to the front corner
+  vKey = aA.x + aA.y + (aA.z - sdropAvg) * uZFactor + 0.004;
   gl_Position = vec4(isoToClip(iso), keyToNdc(key), 1.0);
 }`;
 const FS = /* glsl */ `#version 300 es
@@ -240,8 +251,12 @@ export class TileTerrain {
       const tx = ox + lx, ty = oy + ly; const water = isWaterTile(id); // world tile
       const x = q === 0 ? tx : q === 1 ? -ty - 1 : q === 2 ? -tx - 1 : ty, y = q === 0 ? ty : q === 1 ? tx : q === 2 ? -ty - 1 : -tx - 1; // its view cell
       const z = renderTileHeight(id, c.height[i]!) - (water ? 0.25 : 0); // ADR-182: one flat water surface
-      const pu = hAt(x + 1, y), pv = hAt(x, y + 1);
-      const drops = water ? [0, 0, 0, 0] : terrainDropEdges(z, pu, pv, hAt(x - 1, y), hAt(x, y - 1));
+      const pu = hAt(x + 1, y), pv = hAt(x, y + 1), nu = hAt(x - 1, y), nv = hAt(x, y - 1);
+      // ADR-409: view-space ground shape (land only; water stays flat). A slope side loses its skirt, its
+      // drop-edge relief and its gt_side face — the tilted top meets the low neighbour exactly.
+      const shape = water ? undefined : classifyGroundShape({ h: z, edge: [pu, nu, pv, nv], diag: [hAt(x + 1, y - 1), hAt(x + 1, y + 1), hAt(x - 1, y + 1), hAt(x - 1, y - 1)] });
+      const drops = water ? [0, 0, 0, 0] : terrainDropEdges(z, pu, pv, nu, nv);
+      if (shape) for (const s of shape.slopeSides) drops[SHAPE_EDGE_TO_UV[s]!] = 0; // drops are [+u,+v,-u,-v]
       // ADR-386: on a waterfall face (a water tile dropping >= 2 levels to a neighbour that exists)
       // the skirt is suppressed, so the animated mesh falls face shows in full (32 px for a 2-level
       // drop); a 1-level ledge keeps its skirt (it covers the 1-level mesh face, as before), and a
@@ -252,20 +267,29 @@ export class TileTerrain {
       // 1-level stream steps are not cascade faces, so their skirts stay.
       const hideX = water && pu > -99 && (dropX >= WATERFALL_MIN_DROP || (wfArt && isWaterfallSheetAt(map, tx, ty, dirX)));
       const hideY = water && pv > -99 && (dropY >= WATERFALL_MIN_DROP || (wfArt && isWaterfallSheetAt(map, tx, ty, dirY)));
-      const mask = (pu < z && !hideX ? 1 : 0) | (pv < z && !hideY ? 2 : 0);
+      const slopeU = !!shape && shape.slopeSides.includes(0), slopeV = !!shape && shape.slopeSides.includes(2);
+      const mask = (pu < z && !hideX && !slopeU ? 1 : 0) | (pv < z && !hideY && !slopeV ? 2 : 0) | (shape?.cornerMask ?? 0);
       if (art && g) { // ADR-246: gt_ layers (base, edges by priority, shore/bank | water or ice, leaves)
         const grazed = this.grazedAt ? (X: number, Y: number): boolean => this.grazedAt!(wx(X, Y), wy(X, Y)) : undefined;
+        const mat = water ? undefined : groundMaterial(id);
         groundLayers(tileAt, x, y, art - 1, tintAt, L, groundHash(tx, ty), grazed); let n = 0;
         for (const l of L) {
-          const e = EI(g.id(l.key)); if (!e) continue; const wl = l.kind === GroundLayerKind.Water;
+          let key = l.key;
+          // ADR-409: slope art (ADR-410) for the base layer when it ships; until then the flat base
+          // stays and the vertex shader tilts it geometrically, so nothing is ever invisible.
+          if (l.kind === GroundLayerKind.Base && shape && mat && mat !== "water") {
+            const sa = groundSlopeArt(shape);
+            if (sa) { const sk = groundSlopeKey(mat, art - 1, sa.kind, sa.dir); if (g.id(sk) >= 0) key = sk; }
+          }
+          const e = EI(g.id(key)); if (!e) continue; const wl = l.kind === GroundLayerKind.Water;
           const mode = l.kind === GroundLayerKind.Ice || l.kind === GroundLayerKind.Leaves ? 2 : 1;
           data.push(x + 0.5, y + 0.5, z, e.first, e.count, e.fps, mask, 0, e.ax, e.ay, wl ? 1 : l.kind === GroundLayerKind.Ice ? -1 : 0, mode, ...(wl ? [cT(x, y), cT(x + 1, y), cT(x + 1, y + 1), cT(x, y + 1)] : l.kind === GroundLayerKind.Ice ? [0, 0, 0, 0] : drops)); n++;
         }
         // ADR-251: gt_side faces where a +x / +y neighbour is lower, one per level of drop (left half +y, right half +x;
         // the shader's skirt rule keeps the half whose mask bit is set). Drawn over the polygon-offset mesh cliff, which
         // stays the fallback (no gt_side art, void neighbours, drops deeper than GROUND_SIDE_MAX_LEVELS).
-        const mat = water ? undefined : groundMaterial(id);
-        if (n && mat && mat !== "water" && mask) for (const sl of groundSideLevels(z, pu, pv, SL)) {
+        // ADR-409: a slope side draws no side face — the tilted top already meets the low neighbour.
+        if (n && mat && mat !== "water" && mask) for (const sl of groundSideLevels(z, slopeU ? z : pu, slopeV ? z : pv, SL)) {
           const e = EI(g.id(groundSideKey(mat, art - 1, sl.level))); if (!e) break;
           data.push(x + 0.5, y + 0.5, z - sl.level, e.first, e.count, e.fps, sl.mask, 0, e.ax, e.ay, 0, 1, 0, 0, 0, 0); n++;
           minZ = Math.min(minZ, z - sl.level);

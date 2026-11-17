@@ -5,7 +5,7 @@
  * Meshes are rebuilt only when a chunk's `version` (or a neighbour's) changes. Chunks outside
  * the camera rect are culled (one draw call per visible chunk).
  */
-import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, tileToChunk, tileToLocal, renderTileHeight, waterCornerTint, type TileMap, type Chunk, type IsoConfig } from "@engine/world";
+import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, tileToChunk, tileToLocal, renderTileHeight, waterCornerTint, classifyGroundShape, type TileMap, type Chunk, type IsoConfig } from "@engine/world";
 import { SEASON_GROUND_GLSL } from "./season.js";
 import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/util.js";
 import type { Rect } from "./camera.js";
@@ -165,11 +165,13 @@ export class TilemapRenderer {
     this.prog = createProgram(gl, VS, FS, "tilemap");
   }
 
-  /** Combined version stamp of a chunk and the 4 neighbours whose heights affect its cliff faces (ADR-253: all sides). */
+  /** Combined version stamp of a chunk and the 8 neighbours whose heights affect its cliff faces and
+   *  ADR-409 slope corners (ADR-253: all sides; diagonals feed the shared-vertex corner drops). */
   private stamp(map: TileMap, c: Chunk): number {
     const v = (d: Chunk | undefined): number => (d ? d.version + 1 : 0);
     const a = map.getChunk(c.cx + 1, c.cy), b = map.getChunk(c.cx, c.cy + 1), a2 = map.getChunk(c.cx - 1, c.cy), b2 = map.getChunk(c.cx, c.cy - 1);
-    return (((c.version * 1009 + v(a)) * 1013 + v(b)) * 1019 + v(a2)) * 1021 + v(b2);
+    const d1 = map.getChunk(c.cx + 1, c.cy + 1), d2 = map.getChunk(c.cx - 1, c.cy + 1), d3 = map.getChunk(c.cx + 1, c.cy - 1), d4 = map.getChunk(c.cx - 1, c.cy - 1);
+    return (((((((c.version * 1009 + v(a)) * 1013 + v(b)) * 1019 + v(a2)) * 1021 + v(b2)) * 1031 + v(d1)) * 1033 + v(d2)) * 1039 + v(d3)) * 1049 + v(d4);
   }
 
   private build(map: TileMap, c: Chunk, old?: ChunkMesh): ChunkMesh {
@@ -190,6 +192,14 @@ export class TilemapRenderer {
       const v = 0.94 + hash(x, y) * 0.12;
       const water = isWaterTile(id) ? 1 : 0;
       const zt = water ? z - 0.25 : z;
+      // ADR-409: neighbour lows (water carries the 0.25 inset, void is NO_TILE_HEIGHT) and the ground shape.
+      // Water keeps its flat surface; only land tilts. The shape's corner drops are vertex-consistent, so the
+      // top face meets every neighbour's top exactly and no cliff face is needed on a slope side.
+      const low = (nx: number, ny: number): number => { const h = tileHeight(map, nx, ny); return h <= NO_TILE_HEIGHT ? NO_TILE_HEIGHT : h - (tileIsWater(map, nx, ny) ? 0.25 : 0); };
+      const bx = low(x + 1, y), by = low(x, y + 1), bnx = low(x - 1, y), bny = low(x, y - 1);
+      const shape = water ? undefined : classifyGroundShape({ h: zt, edge: [bx, bnx, by, bny], diag: [low(x + 1, y - 1), low(x + 1, y + 1), low(x - 1, y + 1), low(x - 1, y - 1)] });
+      const cornerDrops: [0 | 1, 0 | 1, 0 | 1, 0 | 1] = shape?.cornerDrops ?? [0, 0, 0, 0];
+      if (shape?.sloped) minZ = Math.min(minZ, z - 1);
       if (water) { // ADR-182: shore tint blended per corner (smooth, not stepped) over one flat surface
         const base = verts.length / 3; const corners = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]] as const;
         for (const [qx, qy] of corners) {
@@ -211,20 +221,22 @@ export class TilemapRenderer {
         ];
         const base = verts.length / 3;
         for (let ci = 0; ci < 4; ci++) {
-          const lip = ledgeLipShade(lips[ci]!); verts.push(corners[ci]![0], corners[ci]![1], zt);
+          // ADR-409: a dropped corner is a slope, not a ledge — no dark lip on it; the other corners keep theirs.
+          const lip = ledgeLipShade(lips[ci]! && cornerDrops[ci]! === 0);
+          verts.push(corners[ci]![0], corners[ci]![1], zt - cornerDrops[ci]!);
           cols.push(pal[0] * v * lip, pal[1] * v * lip, pal[2] * v * lip, water);
         }
         idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
       }
       // Cliff faces on every side whose neighbour is lower (ADR-253/254): far faces keep a dim silhouette (CLIFF_HIDDEN_SHADE).
       // ADR-386: a water tile's face is a waterfall face (flag +4) when it drops >= WATERFALL_MIN_DROP levels.
+      // ADR-409: no cliff face on a slope side — the tilted top already meets the low neighbour there.
       const side = SIDE[id] ?? pal;
-      const low = (nx: number, ny: number): number => { const h = tileHeight(map, nx, ny); return h <= NO_TILE_HEIGHT ? NO_TILE_HEIGHT : h - (tileIsWater(map, nx, ny) ? 0.25 : 0); };
-      const bx = low(x + 1, y), by = low(x, y + 1), bnx = low(x - 1, y), bny = low(x, y - 1);
-      if (bx < zt) quad([[x + 1, y, zt], [x + 1, y + 1, zt], [x + 1, y + 1, bx], [x + 1, y, bx]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PX, zt, bx));
-      if (by < zt) quad([[x, y + 1, zt], [x + 1, y + 1, zt], [x + 1, y + 1, by], [x, y + 1, by]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PY, zt, by));
-      if (bnx < zt) quad([[x, y + 1, zt], [x, y, zt], [x, y, bnx], [x, y + 1, bnx]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NX, zt, bnx));
-      if (bny < zt) quad([[x + 1, y, zt], [x, y, zt], [x, y, bny], [x + 1, y, bny]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NY, zt, bny));
+      const slope = (edge: number): boolean => !!shape && shape.slopeSides.includes(edge); // edge order: +x 0, -x 1, +y 2, -y 3
+      if (bx < zt && !slope(0)) quad([[x + 1, y, zt], [x + 1, y + 1, zt], [x + 1, y + 1, bx], [x + 1, y, bx]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PX, zt, bx));
+      if (by < zt && !slope(2)) quad([[x, y + 1, zt], [x + 1, y + 1, zt], [x + 1, y + 1, by], [x, y + 1, by]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PY, zt, by));
+      if (bnx < zt && !slope(1)) quad([[x, y + 1, zt], [x, y, zt], [x, y, bnx], [x, y + 1, bnx]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NX, zt, bnx));
+      if (bny < zt && !slope(3)) quad([[x + 1, y, zt], [x, y, zt], [x, y, bny], [x + 1, y, bny]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NY, zt, bny));
     }
     const n = verts.length / 3;
     const buf = new ArrayBuffer(n * 16); const f = new Float32Array(buf); const u8 = new Uint8Array(buf);

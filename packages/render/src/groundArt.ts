@@ -102,6 +102,7 @@ export class GroundArt {
       for (const m of GROUND_PRIORITY) for (let k = 1; k < 256; k++) if (blobReduce(k) === k) { add(`gt_${m}_edge_${k}${GROUND_SEASON_SUFFIX[s]}`); }
       for (let k = 1; k < 256; k++) if (blobReduce(k) === k) { add(`gt_shore_${k}${GROUND_SEASON_SUFFIX[s]}`); add(`gt_bank_${k}${GROUND_SEASON_SUFFIX[s]}`); }
       for (const m of GROUND_PRIORITY) { add(groundSideKey(m, s, 0)); add(groundSideKey(m, s, 1)); } // ADR-251 height-drop faces
+      for (const m of GROUND_PRIORITY) for (let d = 0; d < 4; d++) { add(groundSlopeKey(m, s, "ramp", d)); add(groundSlopeKey(m, s, "wedge", d)); } // ADR-409: slope art pages, once ADR-410 paints them (no-op until then)
       if (s === 2) for (const v of GROUND_VARIANTS) add(`gt_ice${v}`); else { const ws = s === 3 ? "_spring" : ""; add(`gt_water${ws}`); add(`gt_water_shallow${ws}`); }
       if (s === 1) for (const c of "abc") add(`gt_water_leaves_${c}`);
       add(`gt_grass_grazed${GROUND_SEASON_SUFFIX[s]}`); // ADR-256: grazed lawn atlas (gt_grazed)
@@ -126,6 +127,13 @@ export class GroundArt {
   /** One sprite per atlas page the season draws from (stream keep-alive + readiness). */
   pageSprites(season: number): readonly number[] { return this.pages[season] ?? []; }
 }
+/** ADR-409: slope-art key ADR-410 paints against (see world/slope.ts for the contract): `gt_<mat>_slope_ramp_<d>`
+ * (d = downhill axis in the shape's axes: 0=+u, 1=+v, 2=-u, 3=-v) and `gt_<mat>_slope_wedge_<c>` (c = low
+ * corner: 0=(u-,v-), 1=(u+,v-), 2=(u+,v+), 3=(u-,v+)). Same 68x52 cell / anchor as the flat bases. The
+ * renderer only uses the key when GroundArt.id() resolves it (missing art -> -1 -> flat base kept). */
+export type GroundSlopeKind = "ramp" | "wedge";
+export const groundSlopeKey = (mat: GroundMaterial, season: number, kind: GroundSlopeKind, dir: number): string =>
+  `gt_${mat}_slope_${kind}_${dir & 3}${GROUND_SEASON_SUFFIX[season] ?? ""}`;
 /** ADR-251: max height-drop levels drawn as gt_side faces (deeper drops keep the mesh cliff below them). */
 export const GROUND_SIDE_MAX_LEVELS = 8;
 /** ADR-251: side-face key for one level of a height drop: level 0 = `gt_side_<mat>` (top, with the material's lip),

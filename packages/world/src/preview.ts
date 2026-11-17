@@ -6,14 +6,14 @@ import { terrainLevel } from "./waterDepth.js";
 /** Origin and stride are geographic east/south tile units, not world-grid axes.
  * The square covers the previous 384x256 world-grid footprint after rotation, at the same sample density. */
 export const PREVIEW = { width: 128, height: 128, stride: 4, x: -256, y: -256 } as const;
-export interface WorldPreview { seed: number; tiles: Uint16Array; heights: Int8Array }
+export interface WorldPreview { seed: number; tiles: Uint16Array; heights: Int16Array }
 /** World tile sampled by a thumbnail pixel; also the inverse/picking contract for preview consumers. */
 export function previewWorldAt(x: number, y: number): { x: number; y: number } {
   const w = northUpToWorld(PREVIEW.x + x * PREVIEW.stride, PREVIEW.y + y * PREVIEW.stride);
   return { x: Math.floor(w.x), y: Math.floor(w.y) };
 }
 export function sampleWorldPreview(seed: number): WorldPreview {
-  const g = new ProceduralGenerator({ seed }); const tiles = new Uint16Array(PREVIEW.width * PREVIEW.height), heights = new Int8Array(tiles.length);
+  const g = new ProceduralGenerator({ seed }); const tiles = new Uint16Array(PREVIEW.width * PREVIEW.height), heights = new Int16Array(tiles.length);
   for (let y = 0; y < PREVIEW.height; y++) for (let x = 0; x < PREVIEW.width; x++) {
     const i = y * PREVIEW.width + x, { x: tx, y: ty } = previewWorldAt(x, y);
     const sample = g.sampleAt(tx, ty); tiles[i] = sample.tile; heights[i] = sample.height;
@@ -24,8 +24,8 @@ export function sampleWorldPreview(seed: number): WorldPreview {
 export function worldPreviewSvg(p: WorldPreview): string {
   const palette: Record<number, readonly [number, number, number]> = { 1: [36, 102, 149], 2: [201, 180, 117], 3: [106, 147, 69], 4: [85, 114, 58], 5: [137, 137, 130], 6: [220, 229, 230], 7: [50, 89, 53], 8: [67, 153, 177], 9: [116, 99, 65] };
   const paths = new Map<string, string[]>();
-  // ADR-383: shade by terrain level, not the stored height byte — elevated-lake water stores the ADR-263/297
-  // flow encoding of its surface (raw 80+), which would otherwise paint a white halo on the shore pixels.
+  // ADR-383: shade by terrain level, not the stored height — elevated-lake water stores the ADR-263/411
+  // flow encoding of its surface (raw 1000+, ADR-297 legacy raw 80+), which would otherwise paint a white halo on the shore pixels.
   const level = (i: number): number => terrainLevel(p.tiles[i]!, p.heights[i]!);
   for (let y = 0; y < PREVIEW.height; y++) for (let x = 0; x < PREVIEW.width; x++) {
     const i = y * PREVIEW.width + x, h = level(i), tile = p.tiles[i]!;

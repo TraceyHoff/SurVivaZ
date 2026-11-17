@@ -63,7 +63,7 @@ describe("chunk codec + persistence", () => {
     expect(() => decodeChunk(bytes.slice(0, 20))).toThrow();
     const w3 = new World(); expect(() => decodeChunk(bytes, { world: w3 })).toThrow(/schema/);
   });
-  it("empty chunk encodes compactly via RLE", () => { expect(encodeChunk(new Chunk(0, 0)).length).toBeLessThan(1100); });
+  it("empty chunk encodes compactly via RLE", () => { expect(encodeChunk(new Chunk(0, 0)).length).toBeLessThan(2200); }); // ADR-411: heights are 2 bytes/tile now (2075 total), tiles still RLE
 });
 
 describe("membership + origin", () => {

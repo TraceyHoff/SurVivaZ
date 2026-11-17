@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  ProceduralGenerator, CHUNK_SIZE, WATER_FEATURE_RADIUS,
+  ProceduralGenerator, CHUNK_SIZE, WATER_FEATURE_RADIUS, HEIGHT_MAX,
   waterFeatureLayout, waterFeatureAt, elevatedLakeDist,
   flowWaterRaw, renderTileHeight, terrainLevel, waterDepthAt, WaterDepth, isWaterId,
   sampleWorldPreview,
@@ -257,7 +257,7 @@ describe("ADR-386 spillway + waterfall: structure, levels, no flat merge", () =>
       for (let i = 0; i < p.tiles.length; i++) {
         const level = terrainLevel(p.tiles[i]!, p.heights[i]!);
         expect(level).toBeGreaterThanOrEqual(0);
-        expect(level).toBeLessThanOrEqual(22);
+        expect(level).toBeLessThanOrEqual(HEIGHT_MAX); // ADR-411: generated heights reach 26
       }
     }
   });

@@ -3,7 +3,7 @@
  *  - A shovel (any tier, items.json tool.kind "shovel") raises or lowers the ground one level per use. Players use the
  *    one in their main hand (hotbar); hired AI humans may use one carried in their bag. Edits write the chunk height
  *    field ADR-254 generated (so cliff faces / ledge lips redraw) and keep a TerrainEdit entity with the offset from the
- *    generated ground; absolute terrain levels are limited to -60..75 (ADR-297).
+ *    generated ground; absolute terrain levels are limited to -300..326 (ADR-411: generated ground 0..26 ± 300).
  *  - Flowing water: water spreads, one tile per neighbour per flow step, from any water tile into an adjacent dug tile
  *    (dig < 0) whose bed is at or below the source water's surface (a natural lake's surface is the flat ADR-182 level,
  *    a flowed tile's surface is its own bed). Raised ground (walls / berms) and undug ground never flood, so elevated
@@ -26,7 +26,7 @@ import { emit, XpActivity } from "./events.js";
 import { indexEntity } from "./spawn.js";
 import { TerrainRes, type Terrain } from "./world.js";
 import { editAt, editIndex, invalidateTerrainIndex, LEVEL_MAX, LEVEL_MIN, terrainDigAt, TERRAIN, tkey, untkey } from "./terrain_depth.js";
-export { LEVEL_MAX, LEVEL_MIN, TERRAIN, terrainDigAt, undergroundDepthAt, isUnderground, invalidateTerrainIndex } from "./terrain_depth.js";
+export { LEVEL_MAX, LEVEL_MIN, TERRAIN, TERRAIN_EDIT_RANGE, terrainDigAt, undergroundDepthAt, isUnderground, invalidateTerrainIndex } from "./terrain_depth.js";
 
 export const enum TerrainFail { None = 0, NoShovel = 1, Limit = 2, NoPrivilege = 3, Occupied = 4, NotLoaded = 5, TooFar = 6, BadTile = 7, NoSoil = 8, InventoryFull = 9 }
 export const TERRAIN_FAIL_REASONS = ["", "no_shovel", "limit", "no_privilege", "occupied", "not_loaded", "too_far", "bad_tile", "no_soil", "inventory_full"] as const;

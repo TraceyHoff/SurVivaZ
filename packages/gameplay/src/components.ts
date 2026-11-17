@@ -342,9 +342,10 @@ export const Tamed = defineComponent("Tamed", { kind: "u8", owner: "u32", fedUnt
 export const Road = defineComponent("Road", { surface: "u8", mask: "u8", owner: "u32" }, { networked: true, persistent: true });
 export const enum RoadSurface { None = 0, Path = 1, Gravel = 2, Paved = 3 }
 /** ADR-263 (Task 36) shovel terrain edit: standalone entity at a tile centre (like Road). dig = levels raised (+) or dug
- * (-) relative to the generated ground there, clamped to ±25. Networked (client depth / darkness / HUD temperature) and
- * persistent (the chunk height byte is saved with the chunk; this keeps the "how far below ground" reference). */
-export const TerrainEdit = defineComponent("TerrainEdit", { dig: "i8" }, { networked: true, persistent: true });
+ * (-) relative to the generated ground there, within ±TERRAIN_EDIT_RANGE (ADR-411: 300; was an i8 holding the
+ * ADR-297 ±25..75 range — a ±300 offset needs i16). Networked (client depth / darkness / HUD temperature) and
+ * persistent (the chunk height is saved with the chunk; this keeps the "how far below ground" reference). */
+export const TerrainEdit = defineComponent("TerrainEdit", { dig: "i16" }, { networked: true, persistent: true });
 export const SIGN_TEXT_MAX = 48;
 /** ADR-120 sign (signs.ts). kind = signs.json index + 1; rot = quarter turns; owner = PlayerId, clan = owner's clan at
  *  placement (edit rights); text = sanitized ASCII bytes, len used. Networked (rendered as a world label) + persistent. */

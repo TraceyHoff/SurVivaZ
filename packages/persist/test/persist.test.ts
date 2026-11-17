@@ -43,7 +43,7 @@ describe("chunk round trip", () => {
     expect(a.persist.isDirty("0,0")).toBe(true);
     const e0 = performance.now(); const saved = await a.persist.saveAll(); const saveMs = performance.now() - e0;
     expect(saved.chunks).toBe(1);
-    const row = s1.readChunk("0,0")!; expect(row.format).toBe(1);
+    const row = s1.readChunk("0,0")!; expect(row.format).toBe(2); // ADR-411: chunk codec v2 (i16 heights)
     console.log(`[bench] 3000-piece chunk: place ${placeMs.toFixed(1)} ms, encode+commit ${saveMs.toFixed(1)} ms, ${row.bytes.length} bytes`);
     expect(a.world.isAlive(crates[0]!)).toBe(true);
     await s1.close();

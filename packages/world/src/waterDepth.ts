@@ -37,12 +37,27 @@ export const FLOW_WATER_OFFSET = 80, FLOW_WATER_MIN_RAW = 50;
 /** ADR-297: retain legacy 50..127 encoding (-30..47), use unused negative bytes for the
  * added -60..-31 and 48..75 levels. Natural generated water is nonnegative (0..12).
  * No chunk format migration, wider arrays, or extra per-column layers. */
+/** ADR-411: absolute terrain levels now span -300..326 (generated ground 0..26, shovel ±300), which no byte
+ * encoding can hold. Flowed water at those levels uses a v2 code: raw = level + FLOW_WATER_OFFSET_V2
+ * (700..1326), stored in the chunk's i16 height array. Natural water is still 0..12 and land is stored
+ * directly, so the v2 code is unambiguous — and a v1 chunk's legacy bytes still decode via the old branches
+ * below (checked after the v2 branch, since a v2 raw >= 1000 also satisfies the legacy >= 50 test). */
+export const FLOW_WATER_OFFSET_V2 = 1000;
+/** ADR-411: flow-water level range — the same absolute bounds as gameplay's TERRAIN (see terrain_depth.ts);
+ * kept here because the world package cannot import gameplay. The gameplay ADR-411 test asserts they agree. */
+export const FLOW_WATER_LEVEL_MIN = -300, FLOW_WATER_LEVEL_MAX = 326;
+/** ADR-411: smallest v2 raw (level -300 + offset 1000). v2 raws are 700..1326; legacy raws are -128..127,
+ * so this threshold separates them — the offset itself (1000) would misread deep v2 water as legacy. */
+export const FLOW_WATER_MIN_RAW_V2 = FLOW_WATER_OFFSET_V2 + FLOW_WATER_LEVEL_MIN;
 export function isFlowWater(id: number, raw: number): boolean { return isWaterId(id) && (raw >= FLOW_WATER_MIN_RAW || raw <= -71); }
 export function flowWaterRaw(level: number): number {
-  const n = Math.max(-60, Math.min(75, Math.round(level)));
-  return n < -30 ? n - 68 : n > 47 ? n - 146 : n + FLOW_WATER_OFFSET;
+  const n = Math.max(FLOW_WATER_LEVEL_MIN, Math.min(FLOW_WATER_LEVEL_MAX, Math.round(level)));
+  return n + FLOW_WATER_OFFSET_V2;
 }
-function flowLevel(raw: number): number { return raw >= FLOW_WATER_MIN_RAW ? raw - FLOW_WATER_OFFSET : raw <= -99 ? raw + 68 : raw + 146; }
+function flowLevel(raw: number): number {
+  if (raw >= FLOW_WATER_MIN_RAW_V2) return raw - FLOW_WATER_OFFSET_V2; // ADR-411 v2 code (also matches the legacy >= 50 test, so it must come first)
+  return raw >= FLOW_WATER_MIN_RAW ? raw - FLOW_WATER_OFFSET : raw <= -99 ? raw + 68 : raw + 146;
+}
 /** Terrain level of a tile (decodes flowing water; natural water = its stored height). */
 export function terrainLevel(id: number, raw: number): number { return isFlowWater(id, raw) ? flowLevel(raw) : raw; }
 /** Natural water is flat; flowed water keeps its own surface level. */

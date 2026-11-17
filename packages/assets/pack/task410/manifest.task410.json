@@ -1,0 +1,3881 @@
+{
+  "$comment": "ADR-410: tilesets for ADR-409's sloped ground shapes (ramps + wedges, per ground material x season). The atlases have NO image files of their own: their pixels are painted at runtime by apps/client/src/task410-art.ts (software rasterizer -> blob URLs, 1x + @2x pages, the vehicles/atlas.ts pattern) and the sources override in view.ts points the registry at those blob URLs, so the image/ktx2 paths below are never fetched. They point at the matching season's real ground atlas (gt_<season>_p0, 15 cols of 68x52) only because the pack test requires every manifest atlas to name a PNG + KTX2 twin that exist on disk. Atlas layout is a plain grid (frame() math): 15 cols x 4 rows of 68x52, frame = materialIndex*8 + shapeIndex (material order = groundArt GROUND_PRIORITY: rock, sand, dirt, mud, forest, grass, snow; shape 0-3 = ramp downhill dirs 0-3, 4-7 = wedge low corners 0-3). Valley/peak/stepped keep a flat top and need no art.",
+  "atlases": [
+    {
+      "columns": 15,
+      "frameH": 52,
+      "frameW": 68,
+      "image": "../atlases/gt_summer_p0.png",
+      "key": "gt_slope_summer",
+      "ktx2": "../atlases/gt_summer_p0.ktx2",
+      "pages": [
+        {
+          "scale": 2,
+          "image": "../atlases/gt_summer_p0@2x.png",
+          "ktx2": "../atlases/gt_summer_p0@2x.ktx2"
+        }
+      ],
+      "rows": 4
+    },
+    {
+      "columns": 15,
+      "frameH": 52,
+      "frameW": 68,
+      "image": "../atlases/gt_fall_p0.png",
+      "key": "gt_slope_fall",
+      "ktx2": "../atlases/gt_fall_p0.ktx2",
+      "pages": [
+        {
+          "scale": 2,
+          "image": "../atlases/gt_fall_p0@2x.png",
+          "ktx2": "../atlases/gt_fall_p0@2x.ktx2"
+        }
+      ],
+      "rows": 4
+    },
+    {
+      "columns": 15,
+      "frameH": 52,
+      "frameW": 68,
+      "image": "../atlases/gt_winter_p0.png",
+      "key": "gt_slope_winter",
+      "ktx2": "../atlases/gt_winter_p0.ktx2",
+      "pages": [
+        {
+          "scale": 2,
+          "image": "../atlases/gt_winter_p0@2x.png",
+          "ktx2": "../atlases/gt_winter_p0@2x.ktx2"
+        }
+      ],
+      "rows": 4
+    },
+    {
+      "columns": 15,
+      "frameH": 52,
+      "frameW": 68,
+      "image": "../atlases/gt_spring_p0.png",
+      "key": "gt_slope_spring",
+      "ktx2": "../atlases/gt_spring_p0.ktx2",
+      "pages": [
+        {
+          "scale": 2,
+          "image": "../atlases/gt_spring_p0@2x.png",
+          "ktx2": "../atlases/gt_spring_p0@2x.ktx2"
+        }
+      ],
+      "rows": 4
+    }
+  ],
+  "name": "survivaz-task410",
+  "sprites": [
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            0
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            1
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            2
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            3
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            4
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            5
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            6
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            7
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            8
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            9
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            10
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            11
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            12
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            13
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            14
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            15
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            16
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            17
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            18
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            19
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            20
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            21
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            22
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            23
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            24
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            25
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            26
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            27
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            28
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            29
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            30
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            31
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            32
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            33
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            34
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            35
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            36
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            37
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            38
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            39
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            40
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            41
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            42
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            43
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            44
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            45
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            46
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            47
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            48
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            49
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            50
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            51
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            52
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_0"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            53
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_1"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            54
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_2"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            55
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_summer",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_3"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            0
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            1
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            2
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            3
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            4
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            5
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            6
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            7
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            8
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            9
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            10
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            11
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            12
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            13
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            14
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            15
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            16
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            17
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            18
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            19
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            20
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            21
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            22
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            23
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            24
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            25
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            26
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            27
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            28
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            29
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            30
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            31
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            32
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            33
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            34
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            35
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            36
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            37
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            38
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            39
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            40
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            41
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            42
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            43
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            44
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            45
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            46
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            47
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            48
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            49
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            50
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            51
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            52
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_0_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            53
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_1_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            54
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_2_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            55
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_fall",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_3_fall"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            0
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            1
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            2
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            3
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            4
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            5
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            6
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            7
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            8
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            9
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            10
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            11
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            12
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            13
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            14
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            15
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            16
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            17
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            18
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            19
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            20
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            21
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            22
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            23
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            24
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            25
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            26
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            27
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            28
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            29
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            30
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            31
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            32
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            33
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            34
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            35
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            36
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            37
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            38
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            39
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            40
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            41
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            42
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            43
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            44
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            45
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            46
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            47
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            48
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            49
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            50
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            51
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            52
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_0_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            53
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_1_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            54
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_2_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            55
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_winter",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_3_winter"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            0
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            1
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            2
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            3
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_rock_slope_ramp_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            4
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            5
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            6
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            7
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_rock_slope_wedge_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            8
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            9
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            10
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            11
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_sand_slope_ramp_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            12
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            13
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            14
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            15
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_sand_slope_wedge_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            16
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            17
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            18
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            19
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_dirt_slope_ramp_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            20
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            21
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            22
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            23
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_dirt_slope_wedge_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            24
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            25
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            26
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            27
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_mud_slope_ramp_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            28
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            29
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            30
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            31
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_mud_slope_wedge_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            32
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            33
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            34
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            35
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_forest_slope_ramp_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            36
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            37
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            38
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            39
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_forest_slope_wedge_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            40
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            41
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            42
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            43
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_grass_slope_ramp_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            44
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            45
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            46
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            47
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_grass_slope_wedge_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            48
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            49
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            50
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            51
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_snow_slope_ramp_3_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            52
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_0_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            53
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_1_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            54
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_2_spring"
+    },
+    {
+      "anchor": {
+        "x": 0.5,
+        "y": 0.346154
+      },
+      "animations": {
+        "idle": {
+          "frames": [
+            55
+          ],
+          "fps": 1
+        }
+      },
+      "atlas": "gt_slope_spring",
+      "category": "tile",
+      "key": "gt_snow_slope_wedge_3_spring"
+    }
+  ],
+  "version": 1
+}

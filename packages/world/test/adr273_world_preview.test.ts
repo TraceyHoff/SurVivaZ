@@ -32,7 +32,7 @@ describe("ADR-272 sampled seed preview and wilderness", () => {
     for (let y = 384; y < 640; y += 2) for (let x = 384; x < 640; x += 2) {
       const h = g.heightAt(x, y); min = Math.min(min, h); max = Math.max(max, h); face = Math.max(face, Math.abs(h - g.heightAt(x + 1, y)), Math.abs(h - g.heightAt(x, y + 1)));
     }
-    expect(HEIGHT_MAX).toBe(22); expect(min).toBeLessThanOrEqual(3); expect(max).toBeGreaterThanOrEqual(19); expect(max).toBeLessThanOrEqual(22); expect(face).toBeGreaterThan(3);
+    expect(HEIGHT_MAX).toBe(26); expect(min).toBeLessThanOrEqual(3); expect(max).toBeGreaterThanOrEqual(25); expect(max).toBeLessThanOrEqual(26); expect(face).toBeGreaterThan(3);
     for (const p of computeSpawnPoints(g)) for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) {
       const tx = Math.floor(p.x) + x, ty = Math.floor(p.y) + y, h = g.heightAt(tx, ty);
       expect(Math.abs(h - g.heightAt(tx + 1, ty))).toBeLessThanOrEqual(3);

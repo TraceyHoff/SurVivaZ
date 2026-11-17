@@ -259,8 +259,10 @@ describe("ADR-384 single-level abandoned ruins", () => {
     const planRate = plans / chunks; // ~SITE_CHANCE (0.25)
     expect(planRate).toBeGreaterThan(0.20);
     expect(planRate).toBeLessThan(0.30);
-    const flatRate = flatPlans / plans; // ~0.41 of planned sites are single-level
-    expect(flatRate).toBeGreaterThan(0.35);
+    const flatRate = flatPlans / plans; // ADR-411: ~0.35 of planned sites are single-level (was ~0.41 —
+    // taller wilderness relief, plateau steps up to 8, leaves fewer perfectly flat footprints).
+    // The realised density below is unchanged, so this band only guards the flat share itself.
+    expect(flatRate).toBeGreaterThan(0.30);
     expect(flatRate).toBeLessThan(0.47);
     // Realised density: planRate x flatRate ~= 0.10 of chunks get a ruin — the
     // old gate's ~0.106 (0.15 x 0.709), all single-level.

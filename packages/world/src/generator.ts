@@ -60,8 +60,10 @@ export function randomWorldSeed(random: () => number = Math.random): number {
   const n = (Math.floor(random() * 0xffffffff) >>> 0); return n || 1;
 }
 
-/** ADR-254: terrain height levels. Biome noise still drives tile bands; a separate height field adds hills, plateaus and ledges. */
-export const HEIGHT_MAX = 22;
+/** ADR-254: terrain height levels. Biome noise still drives tile bands; a separate height field adds hills, plateaus and ledges.
+ * ADR-411: raised 22 -> 26 (relief 2..8, so plateau 3 x 8 + detail 2 = 26 is actually reached — the old
+ * 22 was unreachable: plateau 3 x relief 6 + detail 2 topped out at 20 on every measured seed). */
+export const HEIGHT_MAX = 26;
 const HEIGHT_SALT = 0x6834; // "h4"
 const TERRACE_SALT = 0x7465; // "te"
 
@@ -417,14 +419,15 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     const field = 0.55 * valueNoise(seed ^ HEIGHT_SALT, tx, ty, 48)
       + 0.30 * valueNoise(seed ^ HEIGHT_SALT ^ 0x111, tx, ty, 18)
       + 0.15 * valueNoise(seed ^ HEIGHT_SALT ^ 0x222, tx, ty, 8);
-    // Plateau bands (0..3), scaled below: gentle starter hills grow into six-level wilderness cliffs.
+    // Plateau bands (0..3), scaled below: gentle starter hills grow into eight-level wilderness cliffs.
     // Detail + a little biome keep rolling variation on top of each plateau so the ground is not a flat shelf.
     const plateau = Math.floor(valueNoise(seed ^ TERRACE_SALT, tx, ty, 28) * 4); // 0..3
-    const detail = Math.floor(field * 2) + Math.floor(biome * 2); // 0..3
+    const detail = Math.floor(field * 2) + Math.floor(biome * 2); // 0..2
     // Gentle starter hills (all adjacent faces <=3); grow the relief over a wide transition,
-    // not a ring-shaped cliff. Beyond it, six-level terraces make real cliffs and deep valleys.
+    // not a ring-shaped cliff. Beyond it, eight-level terraces make real cliffs and deep valleys.
+    // ADR-411: relief tops out at 8, so plateau 3 x 8 + detail 2 = HEIGHT_MAX (26) is actually reached.
     const distance = Math.max(Math.abs(tx), Math.abs(ty));
-    const blend = Math.max(0, Math.min(1, (distance - 160) / 224)), relief = 2 + 4 * blend;
+    const blend = Math.max(0, Math.min(1, (distance - 160) / 224)), relief = 2 + 6 * blend;
     const gentleDetail = Math.floor(field + biome);
     const localDetail = Math.floor(gentleDetail + (detail - gentleDetail) * blend);
     const natural = Math.max(0, Math.min(H, Math.floor(plateau * relief) + localDetail));

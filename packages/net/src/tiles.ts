@@ -6,7 +6,8 @@
  *
  * Wire (reliable):
  *  Tiles (s->c): u32 tick, then sections `bit more=1, u2 kind, chunkKey (zigzag varuint cx, cy)`, ended by bit 0:
- *    0 Full:  varuint version, tile runs, height runs   (runs: varuint nRuns, nRuns x (varuint len, varuint value))
+ *    0 Full:  varuint version, tile runs, height runs   (runs: varuint nRuns, nRuns x (varuint len, varuint value);
+ *             tile values are plain varuints, height values are zigzag varints — ADR-411, heights are signed i16)
  *    1 Hit:   varuint version                           (client restores its cached copy)
  *    2 Delta: varuint n, n bytes core encodeTileDelta (u32 version, u16 count, count x (u16 index, u16 tile))
  *    3 Leave:                                          (client moves the chunk into its LRU cache)
@@ -24,14 +25,20 @@ export const TileSection = { Full: 0, Hit: 1, Delta: 2, Leave: 3 } as const;
 export const TileCtl = { Evict: 0, Nack: 1 } as const;
 
 interface Blob { bytes: Uint8Array; bits: number }
-function runs(w: BitWriter, a: Uint16Array | Uint8Array | Int8Array): void {
+/** Zigzag for signed values (ADR-411): heights are i16 (-300..326, plus the 1000+ flow-water code), so a plain
+ * varuint would see a negative as a huge u32. Zigzag keeps small magnitudes small on the wire. */
+const zigzag = (v: number): number => ((v << 1) ^ (v >> 31)) >>> 0;
+const unzigzag = (v: number): number => (v >>> 1) ^ -(v & 1);
+function runs(w: BitWriter, a: Uint16Array | Uint8Array | Int8Array | Int16Array): void {
+  const signed = a instanceof Int8Array || a instanceof Int16Array;
   let n = 0; for (let i = 0; i < a.length;) { let j = i + 1; while (j < a.length && a[j] === a[i]) j++; n++; i = j; }
   w.writeVarUint(n);
-  for (let i = 0; i < a.length;) { let j = i + 1; while (j < a.length && a[j] === a[i]) j++; w.writeVarUint(j - i); w.writeVarUint(a instanceof Int8Array ? a[i]! & 0xff : a[i]!); i = j; } // ADR-263: signed heights as bytes
+  for (let i = 0; i < a.length;) { let j = i + 1; while (j < a.length && a[j] === a[i]) j++; w.writeVarUint(j - i); w.writeVarUint(signed ? zigzag(a[i]!) : a[i]!); i = j; } // ADR-263: signed heights as zigzag varints (was: bytes)
 }
-function readRuns(r: BitReader, a: Uint16Array | Uint8Array | Int8Array): void {
+function readRuns(r: BitReader, a: Uint16Array | Uint8Array | Int8Array | Int16Array): void {
+  const signed = a instanceof Int8Array || a instanceof Int16Array;
   const n = r.readVarUint(); let o = 0;
-  for (let k = 0; k < n; k++) { const len = r.readVarUint(), v = r.readVarUint(); if (o + len > a.length) throw new RangeError("tile runs overflow"); a.fill(v, o, o + len); o += len; }
+  for (let k = 0; k < n; k++) { const len = r.readVarUint(), v = r.readVarUint(); if (o + len > a.length) throw new RangeError("tile runs overflow"); a.fill(signed ? unzigzag(v) : v, o, o + len); o += len; }
   if (o !== a.length) throw new RangeError("tile runs short");
 }
 

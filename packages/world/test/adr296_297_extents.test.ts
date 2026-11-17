@@ -12,9 +12,9 @@ it("ADR-296: doubles each supported side; near/far interest has identical bounde
     expect(worldTileFromKey(worldTileKey(x,x))).toEqual([x,x]);
   }
 });
-it("ADR-297: every height, including flowed water, round-trips the unchanged byte codec", () => {
+it("ADR-297/411: every height, including flowed water, round-trips the chunk codec (v2 i16 heights)", () => {
   const c=new Chunk(0,0);
-  for(let level=-60;level<=75;level++) {
+  for(let level=-300;level<=326;level++) {
     c.set(0,0,1); c.setHeight(0,0,flowWaterRaw(level));
     const b=decodeChunk(encodeChunk(c)).chunk;
     expect(terrainLevel(1,b.getHeight(0,0))).toBe(level);
