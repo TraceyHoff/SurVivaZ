@@ -52,6 +52,7 @@ export * from "./building/modular.js";
 export * from "./building/chimney.js";
 export * from "./gl/sceneTarget.js";
 export * from "./canvas2d.js";
+export * from "./canvasGroundHeight.js"; // ADR-414: terrain height on the Canvas2D fallback
 export * from "./canvasLight.js";
 export * from "./report.js";
 export * from "./season.js";

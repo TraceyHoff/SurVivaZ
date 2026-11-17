@@ -5,7 +5,11 @@ import { reportRenderError } from "./report.js";
  * World IsoView fills for IsoRenderer: terrain diamonds, depth-sorted sprites (Transform + Sprite + AnimState), and a
  * day/night lightmap (ambient + iso light ellipses, multiplied; ADR-216), and paper-doll wearables (tinted on the CPU, ADR-128 head offset).
  * No bloom or masks. Building pieces (ADR-197) are painted level by level in a total order, with deck side faces
- * clipped where a neighbouring deck covers them.
+ * clipped where a neighbouring deck covers them. ADR-417: indoor cutaway + Occluder fading, the same pass WebGL2
+ * runs in SpriteBatch.prepare — roofs / upper floors / front walls above or in front of the focus entity fade to
+ * the cutaway alpha instead of hiding the player, and tall sprites in front of the player fade to their
+ * Occluder.fade. Without it the console browser (which lands here whenever WebGL2 cannot be created) drew every
+ * ceiling and front wall opaque over the player indoors.
  *
  * Presents the subset of the IsoRenderer surface the client uses (camera, capabilities, atlas.setRegistry, bindGameplay,
  * loadLook, resize, render, tilemap, setFocusEntity, diagReport) so IsoView can drive either one.
@@ -13,15 +17,16 @@ import { reportRenderError } from "./report.js";
 import { Transform, PrevTransform, entityIndex, getAppearance, type World, type Entity } from "@engine/core";
 import { fireAnimTime, hearthParticles, pieceFireFrame, isFireAnim, type HearthParticle } from "./fire-anim.js";
 import { previewLayers2D, tintPixels, type PreviewLayer2D } from "./character/preview2d.js";
-import { worldToScreen, toView, fromView, viewRect, DEFAULT_ISO, CHUNK_SIZE, floorToTerrainZ, terrainZToFloor, isWaterId, waterShoreTint, type TileMap, type Chunk } from "@engine/world";
+import { worldToScreen, toView, fromView, viewRect, DEFAULT_ISO, CHUNK_SIZE, floorToTerrainZ, terrainZToFloor, renderTileHeight, isWaterId, waterShoreTint, type TileMap, type Chunk } from "@engine/world";
+import { C2D_GT_Z_CLAMP, c2dClampHeight, c2dCliffShade, c2dGroundGeometry, c2dGtFaceBelowSkirt, c2dGtPads, c2dNeighbourLow, c2dTileHeight, drawC2DGroundCell, fillC2DPoly, offsetC2DPoly, type C2DGroundGeom, type C2DSide } from "./canvasGroundHeight.js";
 import { allWaterfallArtKeys, planWaterfallArt, WATERFALL_ANIM } from "./waterfallTiles.js";
 import type { AssetRegistry } from "@engine/assets";
 import { IsoCamera } from "./camera.js";
-import { Sprite, LightSource, SpriteAlpha } from "./components.js";
+import { Sprite, LightSource, Occluder, SpriteAlpha } from "./components.js";
 import { frameAnim } from "./frame-select.js";
 import { Canvas2DLightmap, lightRadiusPx, type C2DLight } from "./canvasLight.js";
 import { DEFAULT_STYLE } from "./style.js";
-import { SpriteFlag } from "./ids.js";
+import { SpriteFlag, TileId } from "./ids.js";
 import { GroundArt, groundHash, groundLayers, GroundLayerKind, type GroundLayer } from "./groundArt.js";
 import { STATE_ANIMS, type AtlasSource } from "./assets/atlasManager.js";
 import { computeDayLighting, dimForWeather, undergroundInto } from "./timeOfDay.js";
@@ -31,9 +36,10 @@ import { readDayFraction, readDayNumber, readWeather, readWind } from "./env.js"
 import { VfxLayer } from "./vfx.js";
 import { WeatherFx } from "./weatherFx.js";
 import { newStats, type FrameStats } from "./gl/util.js";
-import { BED_SORT_EPS, roofClipAt, roofClipLine, type GameplayBindings } from "./sprites.js";
+import { BED_SORT_EPS, occluderFade, roofClipAt, roofClipLine, type GameplayBindings } from "./sprites.js";
 import { DeckNeighbors, rotSideMask, deckTopPx, deckClipPolygon, deckSeamPatches, pieceTieBreak, exactTieBreak, pieceOrder, VERTEX_POST_BIAS } from "./building/deckFaces.js";
-import { lCornerArmPiece, lCornerArmPivots, ROT_EXACT_PIVOT, ROT_DECK_LIFT, ROT_VERTEX_POST } from "./building/modular.js";
+import { lCornerArmPiece, lCornerArmPivots, PieceCoverIndex, pieceShouldCutaway, pieceHiddenByStory, isEnclosurePieceKey, tileKey, ROT_EXACT_PIVOT, ROT_DECK_LIFT, ROT_VERTEX_POST, ROT_NO_OCCLUDE } from "./building/modular.js";
+import { isoZDepthFactor } from "./depth.js";
 
 export type FallbackRendererKind = "webgl2" | "canvas2d" | "debug";
 export interface ContextProbe { (kind: "webgl2" | "2d"): unknown }
@@ -50,6 +56,11 @@ export function chooseRenderer(probe: ContextProbe, opts: { forceDebug?: boolean
 /** Flat ground fill per world tile id (world DEFAULT_BANDS: 1 water, 2 sand, 3 grass, 4 forest, 5 rock; 0 = none). The old
  * table was shifted by one, so grass (3) drew brown, forest blue and water green. */
 export const TILE_COLORS = ["#1b1f1a", "#2d5d8a", "#c8b47a", "#4f8a43", "#3f7a3a", "#6b6b6b", "#e8eef0", "#35552c", "#4f93bf", "#5e4a33"]; // [8] ADR-181 shallow water (lighter than deep [1]); ADR-246: [6] snow / [7] forest were swapped, [9] mud
+
+/** ADR-414: cliff-face base colours (tilemap.ts SIDE: the mesh cliff colour per material). */
+const C2D_SIDE: Record<number, [number, number, number]> = {
+  [TileId.Grass]: [112, 84, 56], [TileId.Sand]: [168, 140, 92], [TileId.Water]: [38, 92, 140],
+};
 
 /** ADR-145: snap a sprite origin to a whole device pixel (x*s + o integer) so nearest-neighbour pixel art keeps even texel widths. */
 export function snapPx(v: number, s: number, o: number): number { return s >= 1 ? (Math.round(v * s + o) - o) / s : v; }
@@ -117,6 +128,107 @@ export class Canvas2DRenderer {
   }
   private grazedKeys = new Set<string>(); private grazedBindRev = 0;
   setFocusEntity(e: number): void { this.focus = e; }
+  /** ADR-417: indoor cutaway state (parity with IsoRenderer.indoor / SpriteBatch.cutawayActive): the last frame had a roof/upper-floor cutaway around the focus entity. */
+  cutawayActive = false;
+  /** ADR-417: the focus entity is indoors (a roof/upper-floor cutaway is active around it) — the same signal the indoor zoom reads on WebGL2. */
+  get indoor(): boolean { return this.cutawayActive; }
+  /** ADR-417: gridless piece cover (last frame / being gathered this frame), the same PieceCoverIndex SpriteBatch.prepare uses when the client has no BuildingGrid. */
+  private cover = new PieceCoverIndex(); private coverNext = new PieceCoverIndex();
+  /** ADR-417: cutaway region around the focus from last frame's cover (null = outdoors / no focus), the player level it was computed for, the focus front edge (viewRect sum) pieces compare against, and the focus's continuous view position + z for the in-front test. */
+  private cut: Set<number> | null = null; private cutPlayerLevel = 0; private cutFocusFront = 0; private cutFu = 0; private cutFv = 0; private cutFz = 0;
+  /** ADR-417: cache key of the cut above (focus tile/level + view quarter + cover fingerprint/size). */
+  private cutKey = "";
+  /** ADR-417: smoothed occlusion amount per entity index (WebGL occT), and the clock of the last occlusion step. */
+  private occT = new Map<number, number>(); private occLast = -1;
+  /** ADR-417: focus occlusion context of this frame (screen rect + continuous focus depth key + fade dt), or null when occlusion is off / no focus. Recomputed at most once per clock value so render() and gatherPieces() share one step. */
+  private occCtx: { fl: number; fr: number; ft: number; fb: number; fk: number; dt: number } | null = null; private occCtxTime = -1;
+
+  /** ADR-417: terrain height under a world tile (tileHeight in tilemap.ts, inlined so this file stays GL-free): 0 when the tilemap / chunk / tile is missing. */
+  private groundZAt(x: number, y: number): number {
+    const tm = this.tilemap; if (!tm) return 0;
+    const ch = tm.getChunk(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE)); if (!ch) return 0;
+    const li = (((y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE) * CHUNK_SIZE + (((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE);
+    const id = ch.tiles[li]!; if (!id) return 0;
+    return renderTileHeight(id, ch.height[li]!);
+  }
+  /** ADR-417: footprintHits (sprites.ts, same -1/+1 margin the WebGL piece path uses): any tile of the piece's footprint (plus a 1-tile ring) lies in the cutaway region. */
+  private footprintHits(region: Set<number>, ax: number, ay: number, fw: number, fh: number): boolean {
+    for (let y = ay - 1; y <= ay + fh; y++) for (let x = ax - 1; x <= ax + fw; x++) if (region.has(tileKey(x, y))) return true;
+    return false;
+  }
+  /**
+   * ADR-417: cutaway region around the focus entity (local player) from LAST frame's piece cover — the gridless path
+   * SpriteBatch.prepare uses when the client has no BuildingGrid (the client never calls setBuildingGrid, so the grid
+   * path never runs). Cached on the focus tile/level + view quarter + cover fingerprint, like ADR-381: a second call
+   * in the same frame (render + gatherPieces) is a cache hit, and the region is recomputed only when its inputs move.
+   * One frame of lag, as on WebGL2: the cover is filled by gatherPieces and swapped in at its end. The focus position
+   * is the current Transform (not interpolated: the region is tile-granular, and gatherPieces has no alpha).
+   */
+  private updateCutaway(world: World): void {
+    const q = (this.camera.iso.view ?? 0) & 3;
+    let fx = 0, fy = 0, fz = 0, hasFocus = false;
+    if (this.focus >= 0 && world.isAlive(this.focus) && world.isRegistered(Transform)) {
+      const t = world.get(this.focus, Transform);
+      if (t) { fx = t.x; fy = t.y; fz = t.z; hasFocus = true; }
+    }
+    const ctx = hasFocus ? Math.floor(fx) : 0, cty = hasFocus ? Math.floor(fy) : 0;
+    const level = hasFocus ? terrainZToFloor(fz, Math.max(0, this.groundZAt(ctx, cty))) : 0;
+    const key = `${ctx},${cty},${level},${q},${this.cover.fingerprint},${this.cover.size}`;
+    if (key === this.cutKey) return;
+    this.cutKey = key;
+    this.cut = hasFocus ? this.cover.region(ctx, cty, level) : null;
+    this.cutPlayerLevel = level;
+    const fv = hasFocus && q ? toView(fx, fy, q) : null;
+    this.cutFu = fv ? fv.u : fx; this.cutFv = fv ? fv.v : fy; this.cutFz = fz;
+    this.cutFocusFront = hasFocus ? (() => { const pr = viewRect(ctx, cty, 1, 1, q); return pr.x + pr.y + pr.w + pr.h; })() : 0;
+    this.cutawayActive = !!this.cut;
+  }
+  /**
+   * ADR-417: focus occlusion context for this frame (WebGL sprites.ts prepare): the focus screen rect (from its idle
+   * frame, 32x56 fallback when unresolvable), the continuous focus depth key (view x + y + z * zFactor), and the fade
+   * dt for the smoothed occlusion step. Recomputed at most once per clock value.
+   */
+  private occContext(world: World, reg: AssetRegistry | undefined, time: number): { fl: number; fr: number; ft: number; fb: number; fk: number; dt: number } | null {
+    if (time === this.occCtxTime) return this.occCtx;
+    this.occCtxTime = time;
+    const dt = this.occLast < 0 ? 1 : Math.min(0.25, Math.max(0, time - this.occLast)); this.occLast = time;
+    this.occCtx = null;
+    const occ = DEFAULT_STYLE.occlusion;
+    if (!occ.enabled || this.focus < 0 || !world.isAlive(this.focus) || !reg || !world.isRegistered(Transform) || !world.isRegistered(Sprite)) return null;
+    const t = world.get(this.focus, Transform)!; const sp = world.get(this.focus, Sprite)!;
+    const iso = this.camera.iso; const q = (iso.view ?? 0) & 3;
+    const p = worldToScreen(t.x, t.y, t.z, iso);
+    let w = 32, h = 56, ax = 16, ay = 56;
+    try { const f = reg.dirFrame(sp.spriteId, "idle", t.facing + q * (Math.PI / 2), 0); const sc = sp.scale || 1; w = f.w * sc; h = f.h * sc; ax = f.anchorX * sc; ay = f.anchorY * sc; } catch { /* fallback rect, as WebGL */ }
+    this.occCtx = { fl: p.sx - ax + w * 0.2, fr: p.sx - ax + w * 0.8, ft: p.sy - ay + h * 0.1, fb: p.sy - ay + h * 0.95, fk: this.cutFu + this.cutFv + this.cutFz * isoZDepthFactor(iso), dt };
+    return this.occCtx;
+  }
+  /**
+   * ADR-417: smoothed occlusion alpha for one entity this frame (WebGL sprites.ts occlusion math, Task 21): an
+   * explicit Occluder fades toward its own `fade`, a tall static prop toward the style alpha; characters / animated
+   * actors never auto-occlude and reset the reused entity-index slot. `rect` is the drawn frame's screen rect
+   * ([l, r, t, b]); `inFront` is the caller's depth comparison against the focus key (WebGL: key > fk + 0.05).
+   * Returns 1 when nothing occludes. Dither mode falls back to the same fade (Canvas2D has no dither pattern; the
+   * player stays visible either way).
+   */
+  private occAlpha(world: World, e: Entity, occ: { fl: number; fr: number; ft: number; fb: number; fk: number; dt: number } | null, inFront: boolean, rect: [number, number, number, number] | null, hgt: number, flags: number, isActor: boolean): number {
+    if (!occ || e === this.focus) return 1;
+    const idx = entityIndex(e);
+    const oc = world.isRegistered(Occluder) ? world.store(Occluder) : null;
+    const os = oc ? oc.slot(idx) : -1;
+    if (isActor && os < 0) { this.occT.delete(idx); return 1; }
+    if (!rect) return 1;
+    const occSt = DEFAULT_STYLE.occlusion;
+    const canOcclude = os >= 0 || (hgt >= occSt.minHeightPx && !isActor && !(flags & SpriteFlag.Footprint));
+    const hit = canOcclude && inFront && rect[1] > occ.fl && rect[0] < occ.fr && rect[3] > occ.ft && rect[2] < occ.fb;
+    const prev = this.occT.get(idx) ?? 0;
+    const step = Math.min(1, occ.dt * occSt.fadeSpeed);
+    const v = prev + ((hit ? 1 : 0) - prev) * step;
+    const occT = v < 0.004 ? 0 : v;
+    if (occT === 0) this.occT.delete(idx); else this.occT.set(idx, occT);
+    if (occT <= 0) return 1;
+    return occluderFade(os >= 0 ? oc!.data.fade[os]! : occSt.alpha, occT);
+  }
   private fullRes = false;
   /** Full preset: do not cap the backbuffer at 1.5x DPR (see resize). Any other preset restores the 1.5x cap. */
   setQualityPreset(p: unknown): void { this.fullRes = p === "full"; }
@@ -126,7 +238,7 @@ export class Canvas2DRenderer {
     const d = this.fullRes ? dpr : Math.min(dpr, 1.5); this.w = Math.round(cssW * d); this.h = Math.round(cssH * d);
     this.canvas.width = this.w; this.canvas.height = this.h; this.camera.setViewport(this.w, this.h, d);
   }
-  diagReport(): string { return `renderer: Canvas2D sprites (WebGL2 unavailable); images ${[...this.images.values()].filter(Boolean).length}/${this.images.size}; draws ${this.stats.drawCalls}`; }
+  diagReport(): string { return `renderer: Canvas2D sprites (WebGL2 unavailable); indoor ${this.cutawayActive}; images ${[...this.images.values()].filter(Boolean).length}/${this.images.size}; draws ${this.stats.drawCalls}`; }
   dispose(): void {}
 
   /** ADR-405: store a loaded image (LRU: refresh recency, then evict the oldest LOADED images past the cap;
@@ -254,7 +366,7 @@ export class Canvas2DRenderer {
   private gArt: GroundArt | null = null; private gArtReg: AssetRegistry | undefined;
   /** ADR-389: cached "any waterfall sprite is in the pack"; undefined = not scanned yet. */
   private waterfallArtOn: boolean | undefined;
-  private gBlocks = new Map<string, { cv: HTMLCanvasElement; stamp: string; used: number }>(); private gFrame = 0;
+  private gBlocks = new Map<string, { cv: HTMLCanvasElement; stamp: string; used: number; topPad: number }>(); private gFrame = 0;
   /** false = flat legacy diamonds (tests / diag). */ groundArtEnabled = true;
   /** ADR-256: world-tile grazed lookup; undefined = ungrazed. */ grazedAt: ((tx: number, ty: number) => boolean) | undefined;
   /** ADR-256: bumped when the grazed set changes so gt blocks rebuild. */ grazedRev = 0;
@@ -264,29 +376,67 @@ export class Canvas2DRenderer {
     return this.gArt;
   }
   /** One baked block (null = an art page is still loading or no DOM). Back-to-front so skirts sit under front cells. */
-  private gtBlock(tm: TileMap, reg: AssetRegistry, ga: GroundArt, bx: number, by: number, season: number, build: boolean, q = 0): HTMLCanvasElement | null {
+  private gtBlock(tm: TileMap, reg: AssetRegistry, ga: GroundArt, bx: number, by: number, season: number, build: boolean, q = 0): { cv: HTMLCanvasElement; topPad: number } | null {
     // ADR-253: (bx, by) and the cells below are VIEW indices (U, V) of quarter q; tile (x, y) sits at view point toView(x, y)
     // (C2D centres tile (x, y) on the point (x, y)), so view index -> world tile = fromView. q = 0 is unchanged.
     const B = GT_BLOCK, x0 = bx * B, y0 = by * B; let st = `${season}:g${this.grazedRev | 0}`; // ADR-256
     const ca = fromView(x0 - 1, y0 - 1, q), cb = fromView(x0 + B, y0 + B, q); // world tile bounds of the block (+1 ring)
     const wx0 = Math.min(ca.x, cb.x), wx1 = Math.max(ca.x, cb.x), wy0 = Math.min(ca.y, cb.y), wy1 = Math.max(ca.y, cb.y);
     for (let cy = Math.floor(wy0 / CHUNK_SIZE); cy <= Math.floor(wy1 / CHUNK_SIZE); cy++) for (let cx = Math.floor(wx0 / CHUNK_SIZE); cx <= Math.floor(wx1 / CHUNK_SIZE); cx++) { const n = tm.getChunk(cx, cy); st += n ? `,${n.version}` : ",x"; }
-    const k = `${q}:${bx},${by}`; const hit = this.gBlocks.get(k); if (hit && hit.stamp === st) { hit.used = this.gFrame; return hit.cv; }
-    if (!build || typeof document === "undefined") return hit?.cv ?? null; // stale block until rebuilt (no flash)
+    const k = `${q}:${bx},${by}`; const hit = this.gBlocks.get(k); if (hit && hit.stamp === st) { hit.used = this.gFrame; return { cv: hit.cv, topPad: hit.topPad }; }
+    if (!build || typeof document === "undefined") return hit ? { cv: hit.cv, topPad: hit.topPad } : null; // stale block until rebuilt (no flash)
     const at = q === 0 ? (a: number, b: number): number => tm.getTile(a, b) : (a: number, b: number): number => { const w = fromView(a, b, q); return tm.getTile(w.x, w.y); };
+    const tintAt = (a: number, b: number): number => waterShoreTint(at, a, b);
+    // ADR-414: per-cell clamped heights + geometry (view-space neighbours), and the canvas pads.
+    const lowAt = (vx: number, vy: number): number | undefined => { const w2 = q === 0 ? { x: vx, y: vy } : fromView(vx, vy, q); const h = c2dNeighbourLow(tm, w2.x, w2.y); return h === undefined ? undefined : c2dClampHeight(h); };
+    interface GtCell { x: number; y: number; lx: number; d: number; t: number; wx: number; wy: number; z: number; geom: C2DGroundGeom }
+    const cells: GtCell[] = []; let zHi = 0, zLo = 0;
+    for (let d = 0; d <= 2 * (B - 1); d++) for (let lx = Math.max(0, d - B + 1); lx <= Math.min(B - 1, d); lx++) {
+      const x = x0 + lx, y = y0 + d - lx; const id = at(x, y); if (!id || isWaterId(id)) continue;
+      const w = q === 0 ? { x, y } : fromView(x, y, q);
+      const zRaw = c2dTileHeight(tm, w.x, w.y); if (zRaw === undefined) continue;
+      const z = c2dClampHeight(zRaw);
+      const geom = c2dGroundGeometry(z, (dx, dy) => lowAt(x + dx, y + dy));
+      cells.push({ x, y, lx, d, t: id, wx: w.x, wy: w.y, z, geom });
+      zHi = Math.max(zHi, z); zLo = Math.min(zLo, z, geom.minLow);
+    }
+    const { topPad, botPad } = c2dGtPads(zHi, zLo);
     const L: GroundLayer[] = [];
-    const ops: { img: CanvasImageSource; f: { x: number; y: number; w: number; h: number; anchorX: number; anchorY: number }; dx: number; dy: number }[] = [];
+    type GtOp = { img: CanvasImageSource; f: { x: number; y: number; w: number; h: number; anchorX: number; anchorY: number }; dx: number; dy: number; br: number | undefined }
+      | { poly: [number, number][]; style: string };
+    const ops: GtOp[] = [];
+    const zOf = new Map<string, GtCell>(cells.map((c) => [`${c.x},${c.y}`, c]));
     for (let d = 0; d <= 2 * (B - 1); d++) for (let lx = Math.max(0, d - B + 1); lx <= Math.min(B - 1, d); lx++) {
       const x = x0 + lx, y = y0 + d - lx; if (!at(x, y)) continue;
+      const cell = zOf.get(`${x},${y}`);
+      const dx = (lx - (d - lx)) * 32 + GT_OX, dy = d * 16 + GT_OY - (cell?.z ?? 0) * 16 + topPad;
       const w = q === 0 ? null : fromView(x, y, q);
       const grazed = this.grazedAt ? (a: number, b: number): boolean => { const ww = q === 0 ? { x: a, y: b } : fromView(a, b, q); return this.grazedAt!(ww.x, ww.y); } : undefined;
-      groundLayers(at, x, y, season, (a, b) => waterShoreTint(at, a, b), L, w ? groundHash(w.x, w.y) : undefined, grazed);
-      for (const l of L) { if (l.kind === GroundLayerKind.Water) continue; /* tinted by the drawWater gradient underneath (the grey detail art needs the GPU tint) */ const id = ga.id(l.key); if (id < 0) continue; let f; try { f = reg.dirFrame(id, "idle", 0, 0); } catch { continue; }
-        const img = this.image(f.atlas.key); if (!img) return hit?.cv ?? null; ops.push({ img, f, dx: (lx - (d - lx)) * 32 + GT_OX, dy: d * 16 + GT_OY }); }
+      // far faces first (the cell art paints over their overlap, as the mesh depth test does)
+      if (cell) for (const f of cell.geom.faces) if (f.side === 1 || f.side === 3)
+        ops.push({ poly: offsetC2DPoly(f.poly, dx, d * 16 + GT_OY + topPad), style: this.cliffColor(cell.t, cell.wx, cell.wy, c2dCliffShade(f.side)) });
+      groundLayers(at, x, y, season, tintAt, L, w ? groundHash(w.x, w.y) : undefined, grazed);
+      for (const l of L) {
+        // ADR-415: water tiles draw their gt_water art here (baked colour, ADR-251) with the same deep->shallow
+        // brightness ramp the WebGL2 shader applies (0.80 deep -> 1.06 shallow). The old skip left the console
+        // fallback path (Canvas2D) with only the flat drawWater gradient underneath, so water showed no tiles.
+        const id = ga.id(l.key); if (id < 0) continue; let f; try { f = reg.dirFrame(id, "idle", 0, 0); } catch { continue; }
+        const img = this.image(f.atlas.key); if (!img) return hit ? { cv: hit.cv, topPad: hit.topPad } : null;
+        const br = l.kind === GroundLayerKind.Water ? 0.80 + 0.26 * tintAt(x, y) : undefined;
+        ops.push({ img, f, dx, dy, br });
+      }
+      // near faces after the art; only the part below the 16 px skirt (1-level drops need no fill)
+      if (cell) for (const f of cell.geom.faces) if ((f.side === 0 || f.side === 2) && cell.z - f.low > 1)
+        ops.push({ poly: offsetC2DPoly(c2dGtFaceBelowSkirt(f.poly), dx, d * 16 + GT_OY + topPad), style: this.cliffColor(cell.t, cell.wx, cell.wy, c2dCliffShade(f.side)) });
     }
-    const cv = hit?.cv ?? document.createElement("canvas"); cv.width = GT_W; cv.height = GT_H; const g = cv.getContext("2d"); if (!g) return null;
-    g.clearRect(0, 0, GT_W, GT_H); for (const o of ops) g.drawImage(o.img, o.f.x, o.f.y, o.f.w, o.f.h, o.dx - o.f.anchorX, o.dy - o.f.anchorY, o.f.w, o.f.h);
-    this.gBlocks.set(k, { cv, stamp: st, used: this.gFrame }); this.groundStats.built++; return cv;
+    const cv = hit?.cv ?? document.createElement("canvas"); cv.width = GT_W; cv.height = GT_H + topPad + botPad; const g = cv.getContext("2d"); if (!g) return null;
+    g.clearRect(0, 0, GT_W, GT_H + topPad + botPad);
+    for (const o of ops) {
+      if ("poly" in o) { g.filter = "none"; fillC2DPoly(g, o.poly, 0, 0, o.style); }
+      else { g.filter = o.br !== undefined ? `brightness(${o.br.toFixed(3)})` : "none"; g.drawImage(o.img, o.f.x, o.f.y, o.f.w, o.f.h, o.dx - o.f.anchorX, o.dy - o.f.anchorY, o.f.w, o.f.h); }
+    }
+    g.filter = "none";
+    this.gBlocks.set(k, { cv, stamp: st, used: this.gFrame, topPad }); this.groundStats.built++; return { cv, topPad };
   }
   /** Draws the visible gt blocks (iso order); blocks not baked yet fall back to flat diamonds. Returns false = no gt art. */
   private drawGroundArt(tm: TileMap, reg: AssetRegistry, cx: number, cy: number, R: number, s: number, ox: number, oy: number, stats: FrameStats): boolean {
@@ -297,11 +447,11 @@ export class Canvas2DRenderer {
     const bx0 = Math.floor((cx - R) / B), bx1 = Math.floor((cx + R) / B), by0 = Math.floor((cy - R) / B), by1 = Math.floor((cy + R) / B);
     for (let d = bx0 + by0; d <= bx1 + by1; d++) for (let bx = Math.max(bx0, d - by1); bx <= Math.min(bx1, d - by0); bx++) {
       const by = d - bx; const sx = (bx - by) * B * 32 - GT_OX, sy = (bx + by) * B * 16 - GT_OY; // block canvas origin (world px)
-      if (sx > vx1 || sx + GT_W < vx0 || sy > vy1 || sy + GT_H < vy0) continue;
+      if (sx > vx1 || sx + GT_W < vx0 || sy - C2D_GT_Z_CLAMP * 16 > vy1 || sy + GT_H + C2D_GT_Z_CLAMP * 16 < vy0) continue;
       { const w0 = fromView(bx * B, by * B, q), w1 = fromView(bx * B + B - 1, by * B + B - 1, q); // any chunk under the block
         if (!tm.getChunk(Math.floor(w0.x / CHUNK_SIZE), Math.floor(w0.y / CHUNK_SIZE)) && !tm.getChunk(Math.floor(w1.x / CHUNK_SIZE), Math.floor(w1.y / CHUNK_SIZE))) continue; }
-      const nb = this.groundStats.built; const cv = this.gtBlock(tm, reg, ga, bx, by, season, budget > 0, q); if (this.groundStats.built > nb) budget--;
-      if (cv) { g.drawImage(cv, sx, sy); stats.drawCalls++; this.groundStats.blocks++; stats.tiles += B * B; continue; }
+      const nb = this.groundStats.built; const blk = this.gtBlock(tm, reg, ga, bx, by, season, budget > 0, q); if (this.groundStats.built > nb) budget--;
+      if (blk) { g.drawImage(blk.cv, sx, sy - blk.topPad); stats.drawCalls++; this.groundStats.blocks++; stats.tiles += B * B; continue; }
       this.flatTiles(tm, bx * B, by * B, B, stats, q); // still loading / over budget: flat diamonds
     }
     const cap = Math.max(48, this.groundStats.blocks + 24); // LRU: drop the least recently drawn blocks
@@ -326,11 +476,17 @@ export class Canvas2DRenderer {
   }
   /** Legacy flat land diamonds for an n x n tile square (water: the gradient image below). */
   private flatTiles(tm: TileMap, x0: number, y0: number, n: number, stats: FrameStats, q = 0): void { // (x0, y0): view indices
-    const g = this.ctx, tw = DEFAULT_ISO.tileW, th = DEFAULT_ISO.tileH;
-    for (let y = y0; y < y0 + n; y++) for (let x = x0; x < x0 + n; x++) {
+    const g = this.ctx;
+    // ADR-414: diagonal painter order (a later low tile must not paint over an earlier high tile's cliff face)
+    for (let d = 0; d <= 2 * (n - 1); d++) for (let lx = Math.max(0, d - n + 1); lx <= Math.min(n - 1, d); lx++) {
+      const x = x0 + lx, y = y0 + d - lx;
       const w = fromView(x, y, q); const t = tm.getTile(w.x, w.y); if (!t || isWaterId(t)) { if (t) stats.tiles++; continue; }
-      const p = worldToScreen(x, y, 0, DEFAULT_ISO); g.fillStyle = this.groundColor(t, w.x, w.y);
-      g.beginPath(); g.moveTo(p.sx, p.sy - th / 2); g.lineTo(p.sx + tw / 2, p.sy); g.lineTo(p.sx, p.sy + th / 2); g.lineTo(p.sx - tw / 2, p.sy); g.fill(); stats.tiles++;
+      const z = c2dTileHeight(tm, w.x, w.y); if (z === undefined) continue;
+      const lowAt = (vx: number, vy: number): number | undefined => { const w2 = fromView(vx, vy, q); return c2dNeighbourLow(tm, w2.x, w2.y); };
+      const geom = c2dGroundGeometry(z, (dx, dy) => lowAt(x + dx, y + dy));
+      const p = worldToScreen(x, y, 0, DEFAULT_ISO);
+      drawC2DGroundCell(g, geom, p.sx, p.sy, this.groundColor(t, w.x, w.y), (s) => this.cliffColor(t, w.x, w.y, c2dCliffShade(s)));
+      stats.tiles++;
     }
   }
 
@@ -367,6 +523,21 @@ export class Canvas2DRenderer {
     r += (0.9 - r) * sn; g += (0.93 - g) * sn; b += (0.98 - b) * sn;
     c = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`; if (this.groundCache.size > 512) this.groundCache.clear(); this.groundCache.set(key, c); return c;
   }
+  /** ADR-414: cliff-face colour for a ground tile (C2D_SIDE, season-tinted like the mesh cliff
+   *  faces in tilemap.ts, shaded by view side via c2dCliffShade). Shares groundCache with a `c` key. */
+  private cliffColor(t: number, x: number, y: number, shade: number): string {
+    const side = C2D_SIDE[t] ?? [255, 0, 255]; // unknown tile: magenta, as the mesh palette fallback
+    const sv = this.sv;
+    const plain = `rgb(${Math.round(side[0] * shade)},${Math.round(side[1] * shade)},${Math.round(side[2] * shade)})`;
+    if (sv.fall + sv.winter < 0.01) return plain;
+    const v = ((x * 73856093) ^ (y * 19349663)) & 1, qf = Math.round(sv.fall * 16), qw = Math.round(sv.winter * 16), qs = Math.round(sv.snow * 16);
+    const key = `c${t}|${v}|${qf}|${qw}|${qs}|${shade}`; let c = this.groundCache.get(key); if (c) return c;
+    let [r, g, b] = seasonGroundRgb([side[0] / 255, side[1] / 255, side[2] / 255], qf / 16, qw / 16, v ? 0.7 : 0.3);
+    const sn = (qs / 16) * (t === 5 ? 0.6 : 0.92); // bare rock holds less snow (same as groundColor)
+    r += (0.9 - r) * sn; g += (0.93 - g) * sn; b += (0.98 - b) * sn;
+    c = `rgb(${Math.round(r * 255 * shade)},${Math.round(g * 255 * shade)},${Math.round(b * 255 * shade)})`;
+    if (this.groundCache.size > 512) this.groundCache.clear(); this.groundCache.set(key, c); return c;
+  }
 
   private decks = new DeckNeighbors();
   /** ADR-197: building pieces as painter items: level-major, decks under their floor's uprights, iso order, unique tie-break. */
@@ -374,6 +545,10 @@ export class Canvas2DRenderer {
     const bpd = this.bindings.buildPiece; if (!bpd || !world.isRegistered(bpd)) return [];
     const iso = this.camera.iso; const hw = iso.tileW / 2, hh = iso.tileH / 2; const q = (iso.view ?? 0) & 3; const raw: { e: Entity; ax: number; ay: number; fw: number; fh: number; level: number; layer: number; z: number; vis: number; rot: number; dmg: number; ghost: boolean; deck: boolean; top: number | undefined; px: number; py: number; tint: number; lift: number; ordFrac: number ; roof: boolean }[] = [];
     this.decks.clear();
+    this.updateCutaway(world); // ADR-417: cutaway region from last frame's cover (cache hit when render() already ran it)
+    this.coverNext.clear();
+    const occ = this.occContext(world, reg, time); // ADR-417: focus occlusion context (one step per clock value)
+    const zf = isoZDepthFactor(iso);
     for (const e of world.query([bpd, Transform])) {
       const b = world.get(e, bpd)!; const t = world.get(e, Transform)!;
       // ADR-401: continuous roof (same binding and fallback as WebGL2): the rfx tile raised by its band once its page image is
@@ -401,6 +576,8 @@ export class Canvas2DRenderer {
       const spk = r.ghost ? { sid: r.vis, flags: 0 } : this.seasonPick(reg, r.vis); // ADR-239: <key>_<season> piece art, else procedural
       const ar = (r.rot + q) & 3; // ADR-253: the art row seen from this view
       let f; try { f = pieceFireFrame(reg, spk.sid, ar, r.dmg, pst, fire, r.ghost, time, entityIndex(r.e)); } catch { try { f = pieceFireFrame(reg, r.vis, ar, r.dmg, pst, fire, r.ghost, time, entityIndex(r.e)); } catch { continue; } } let img: CanvasImageSource | null = this.image(f.atlas.key); if (!img) continue;
+      // ADR-417: every resolved piece counts as cover for the NEXT frame's cutaway (WebGL: coverNext.add before the cutaway test)
+      this.coverNext.add(r.ax, r.ay, r.fw, r.fh, r.level, r.layer === 0, r.roof);
       if (!r.ghost && this.bindings.pieceSwing && r.vis === world.get(r.e, bpd)?.visualId) { // ADR-314: a swinging door draws its swing step once that atlas image is loaded
         const sw = this.bindings.pieceSwing?.(r.e, time);
         if (sw) { try { const sf = reg.buildingFrame(sw.vis, ar, r.dmg, sw.state); const si = this.image(sf.atlas.key); if (si) { f = sf; img = si; } } catch { /* no swing art */ } }
@@ -422,9 +599,26 @@ export class Canvas2DRenderer {
       const plane = !r.roof && !r.deck && r.top === undefined && this.bindings.pieceRoofPlane ? this.bindings.pieceRoofPlane(pvx, pvy, r.level) : undefined;
       const rl = plane === undefined ? undefined : roofClipLine(pv.u, pv.v, plane, lift, hh, hw, (du, dv) => { const w = fromView(pv.u + du, pv.v + dv, q); return this.bindings.pieceRoofPlane!(w.x, w.y, r.level) !== undefined; });
       const roofClip: [number, number][] | undefined = rl && [...[-256, ...(rl.apex ? [rl.c] : []), 256].map((x): [number, number] => [x, -(rl.h0 + roofClipAt(rl, x, hh, hw))]), [256, 512], [-256, 512]];
+      // ADR-417: indoor cutaway + front occlusion (WebGL sprites.ts piece path): a piece on another level inside the
+      // cutaway region is hidden outright; a roof / upper floor / front enclosure wall in the region fades to the
+      // cutaway alpha; any other tall piece in front of the focus whose art rect overlaps it fades like a sprite
+      // occluder (smoothed, toward the style alpha). Flat decks never occlude.
+      const inCut = !!this.cut && this.footprintHits(this.cut, r.ax, r.ay, r.fw, r.fh);
+      if (pieceHiddenByStory(inCut, r.level, this.cutPlayerLevel)) continue;
+      let drawnDef; try { drawnDef = reg.sprite(spk.sid); } catch { drawnDef = undefined; }
+      const enclosure = isEnclosurePieceKey(drawnDef?.building?.piece ?? drawnDef?.key ?? "");
+      const cutaway = pieceShouldCutaway(inCut, r.level, this.cutPlayerLevel, r.roof, enclosure, ar, vr.x + vr.y + vr.w + vr.h, this.cutFocusFront);
+      const pscale = this.bindings.pieceScale?.(r.e) ?? 1;
+      let alpha = cutaway ? DEFAULT_STYLE.cutawayAlpha : 1;
+      if (!cutaway && !r.deck && !(r.rot & ROT_NO_OCCLUDE) && occ) {
+        const front = vr.x + vr.w + vr.y + vr.h - 2 + 1.95 + r.z * zf;
+        const rect: [number, number, number, number] = [p.sx - f.anchorX * pscale, p.sx - f.anchorX * pscale + f.w * pscale, p.sy - f.anchorY * pscale, p.sy];
+        alpha = this.occAlpha(world, r.e, occ, front > occ.fk + 0.05, rect, f.anchorY * pscale, 0, false);
+      }
       out.push({ e: r.e, sx: p.sx, sy: p.sy, depth: r.level * LEVEL_DEPTH + (r.deck ? DECK_DEPTH : 0) + isoD, ord: pieceOrder(r.level, r.layer, vr.x, vr.y) * 2 + (r.ghost ? 1 : 0) + r.ordFrac, img, f,
-        clip: mask ? deckClipPolygon(vr.w, vr.h, mask, r.top!, hw, hh) : roofClip, seams: mask ? deckSeamPatches(vr.w, vr.h, mask, r.top!, hw, hh) : undefined, ghost: r.ghost, hearth: fire === 2 && !r.ghost && r.dmg === 0, scale: this.bindings.pieceScale?.(r.e) ?? 1 });
+        clip: mask ? deckClipPolygon(vr.w, vr.h, mask, r.top!, hw, hh) : roofClip, seams: mask ? deckSeamPatches(vr.w, vr.h, mask, r.top!, hw, hh) : undefined, ghost: r.ghost, hearth: fire === 2 && !r.ghost && r.dmg === 0, scale: pscale, alpha });
     }
+    { const t = this.cover; this.cover = this.coverNext; this.coverNext = t; } // ADR-417: this frame's cover is next frame's cutaway input (WebGL: swap at end of prepare)
     return out;
   }
   private hearthBuf: HearthParticle[] = [];
@@ -443,14 +637,14 @@ export class Canvas2DRenderer {
   private drawPiece(pc: C2DPiece, s: number, ox: number, oy: number): void {
     const g = this.ctx; const f = pc.f; g.save(); g.translate(snapPx(pc.sx, s, ox), snapPx(pc.sy, s, oy));
     if (pc.clip) { g.beginPath(); pc.clip.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.clip(); }
-    if (pc.ghost) g.globalAlpha = 0.6;
+    g.globalAlpha = pc.alpha * (pc.ghost ? 0.6 : 1); // ADR-417: cutaway alpha (0.10) x ghost alpha
     if (pc.scale !== 1) g.scale(pc.scale, pc.scale); // ADR-227: about the pivot
     if (f.flipX) g.scale(-1, 1);
     g.drawImage(pc.img, f.x, f.y, f.w, f.h, -f.anchorX, -f.anchorY, f.w, f.h); g.restore(); this.stats.sprites++; this.stats.drawCalls++;
     if (pc.seams) for (const sp of pc.seams) { // ADR-210 connected top: closed-side border bands repainted from the interior
       g.save(); g.translate(snapPx(pc.sx, s, ox), snapPx(pc.sy, s, oy));
       g.beginPath(); sp.poly.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y))); g.closePath(); g.clip();
-      if (pc.ghost) g.globalAlpha = 0.6;
+      g.globalAlpha = pc.alpha * (pc.ghost ? 0.6 : 1); // ADR-417: cutaway alpha (0.10) x ghost alpha
       g.translate(-sp.dx, -sp.dy); if (f.flipX) g.scale(-1, 1);
       g.drawImage(pc.img, f.x, f.y, f.w, f.h, -f.anchorX, -f.anchorY, f.w, f.h); g.restore(); this.stats.drawCalls++;
     }
@@ -471,25 +665,28 @@ export class Canvas2DRenderer {
     const tm = this.tilemap; const c = cam.cssToWorld(cam.viewW / cam.dpr / 2, cam.viewH / cam.dpr / 2);
     const R = Math.ceil(Math.max(this.w, this.h) / (s * th)) + 2;
     if (tm) this.drawWater(tm, Math.floor(c.x) - R, Math.floor(c.y) - R, 2 * R + 1); // ADR-184: smooth gradient under the land diamonds
-    if (tm && !(this.registry && this.drawGroundArt(tm, this.registry, Math.floor(c.x), Math.floor(c.y), R, s, ox, oy, stats))) for (let y = Math.floor(c.y) - R; y < c.y + R; y++) for (let x = Math.floor(c.x) - R; x < c.x + R; x++) {
-      let t = tm.getTile(x, y); if (!t && !tm.getChunk(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE))) continue;
-      if (isWaterId(t)) { stats.tiles++; continue; }
-      const p = worldToScreen(x, y, 0, iso); g.fillStyle = this.groundColor(t, x, y); // ADR-239 season tint
-      g.beginPath(); g.moveTo(p.sx, p.sy - th / 2); g.lineTo(p.sx + tw / 2, p.sy); g.lineTo(p.sx, p.sy + th / 2); g.lineTo(p.sx - tw / 2, p.sy); g.fill(); stats.tiles++;
+    if (tm && !(this.registry && this.drawGroundArt(tm, this.registry, Math.floor(c.x), Math.floor(c.y), R, s, ox, oy, stats))) {
+      const vc = toView(Math.floor(c.x), Math.floor(c.y), vq);
+      this.flatTiles(tm, vc.u - R, vc.v - R, 2 * R, stats, vq);
     }
     if (tm) this.drawWaterfallArt(tm, Math.floor(c.x) - R, Math.floor(c.y) - R, 2 * R + 1, time); // ADR-389: art hook after ground (no-op without frames)
     // sprites: gather, sort by iso depth (screen y of the foot), draw
-    const reg = this.registry; const items: { e: Entity; sx: number; sy: number; depth: number; ord: number; pc?: C2DPiece }[] = [];
+    const reg = this.registry; const items: { e: Entity; sx: number; sy: number; depth: number; ord: number; front: boolean; pc?: C2DPiece }[] = [];
+    this.updateCutaway(world); // ADR-417: indoor cutaway region from last frame's cover (also sets indoor)
+    const occ = this.occContext(world, reg, time); // ADR-417: focus occlusion context for this frame
+    const zf = isoZDepthFactor(iso); // ADR-417: continuous depth key (WebGL: key = u + v + z * zFactor)
     if (reg && world.isRegistered(Sprite)) for (const e of world.query([Transform, Sprite])) {
       const cur = world.get(e, Transform)!; const prev = world.get(e, PrevTransform) ?? cur;
       const x = prev.x + (cur.x - prev.x) * alpha, y = prev.y + (cur.y - prev.y) * alpha, z = prev.z + (cur.z - prev.z) * alpha;
       const p = worldToScreen(x, y, z, iso); const flat = (world.get(e, Sprite)!.flags & SpriteFlag.Flat) !== 0;
       const lvl = z >= FLOOR_Z - 1e-6 ? terrainZToFloor(z, 0) : 0;
+      // ADR-417: other-story sprites under the cutaway roof stay hidden (WebGL hideOtherStory in prepare)
+      if (this.cut && e !== this.focus && lvl !== this.cutPlayerLevel && this.cut.has(tileKey(Math.floor(x), Math.floor(y)))) continue;
       const bed = this.bindings.bedFit?.(e) ? BED_SORT_EPS : 0; // ADR-244 (c): a lying sleeper sorts just after its bed (as WebGL)
       const vp = vq ? toView(x, y, vq) : null; // ADR-253: depth along the view axes
-      items.push({ e, sx: p.sx, sy: p.sy, depth: lvl * LEVEL_DEPTH + flatSortDepth(vp ? vp.u + vp.v : x + y, flat) + bed, ord: 1e15 + e });
+      items.push({ e, sx: p.sx, sy: p.sy, depth: lvl * LEVEL_DEPTH + flatSortDepth(vp ? vp.u + vp.v : x + y, flat) + bed, ord: 1e15 + e, front: !!occ && (vp ? vp.u + vp.v : x + y) + z * zf > occ.fk + 0.05 });
     }
-    if (reg) for (const pc of this.gatherPieces(world, reg)) items.push({ e: pc.e, sx: pc.sx, sy: pc.sy, depth: pc.depth, ord: pc.ord, pc });
+    if (reg) for (const pc of this.gatherPieces(world, reg)) items.push({ e: pc.e, sx: pc.sx, sy: pc.sy, depth: pc.depth, ord: pc.ord, front: false, pc });
     items.sort((a, b) => (a.depth - b.depth) || (a.ord - b.ord)); // ADR-197: total order (no equal-key coin flips) // Flat ground decals (roads) first: always under feet and entities
     const an = this.bindings.animState; const tick = world.tick;
     for (const it of items) {
@@ -511,13 +708,19 @@ export class Canvas2DRenderer {
       const fx = (): void => { if (tilt) g.rotate(tilt); if (hf > 0) g.filter = `brightness(${(1 + 2.5 * Math.min(1, hf)).toFixed(2)})`; };
       // paper doll (same layer list + per-frame anchors as the creator's 2D preview; head layers follow the body's head anchor)
       const apB = this.bindings.appearance; const look = apB && world.has(it.e, apB.def) ? getAppearance(world, it.e) : undefined;
+      // ADR-417: characters / animated actors never auto-occlude (WebGL: only an explicit Occluder opts one in)
+      const isActor = !!(an && world.has(it.e, an)) || look !== undefined;
       if (look && apB) {
         let ls: PreviewLayer2D[] = []; try { ls = previewLayers2D(reg!, apB.mapLayers ? { ...apB, resolve: (a, fa, o) => apB.mapLayers!(it.e, apB.resolve(a, fa, o)) } : apB, look, 0, tAnim, this.sources, anim, facing); } catch { ls = []; }
         if (ls.length) {
           // ADR-244 (c): sleep_lie* frames put their pivot on the bed footprint centre + bedFits offset (WebGL: sprites.ts)
           const bf = anim.startsWith("sleep_lie") ? this.bindings.bedFit?.(it.e) : undefined; const bx = (bf?.x ?? 0) * k, by = (bf?.y ?? 0) * k;
+          // ADR-417: an explicit Occluder on a doll fades the whole doll (rect from the body layer); actors without one reset the slot
+          const body = ls.find((p) => p.layer.slot === "body");
+          const bRect: [number, number, number, number] | null = body ? [it.sx + bx - body.ref.anchorX * k, it.sx + bx - body.ref.anchorX * k + body.ref.w * k, it.sy + by - body.ref.anchorY * k, it.sy + by] : null;
+          const occA = this.occAlpha(world, it.e, occ, it.front, bRect, body ? body.ref.anchorY * k : 0, 0, isActor);
           for (const p of ls) { const li = this.layerImage(p); if (!li) continue; const r = p.ref;
-            g.save(); g.translate(snapPx(it.sx + bx, s, ox), snapPx(it.sy + by, s, oy)); fx(); if (r.flipX) g.scale(-1, 1);
+            g.save(); g.translate(snapPx(it.sx + bx, s, ox), snapPx(it.sy + by, s, oy)); fx(); if (occA < 1) g.globalAlpha = occA; if (r.flipX) g.scale(-1, 1);
             g.drawImage(li.img, li.x, li.y, r.w, r.h, (p.dx - r.anchorX) * k, (p.dy - r.anchorY) * k, r.w * k, r.h * k); g.restore(); stats.drawCalls++; }
           stats.sprites++; continue;
         }
@@ -531,7 +734,9 @@ export class Canvas2DRenderer {
       const dw = f.w * k, dh = f.h * k;
       const sAl = world.isRegistered(SpriteAlpha) ? world.getField(it.e, SpriteAlpha, "alpha") : undefined; // ADR-238 despawn fade
       if (sAl !== undefined && sAl <= 0.01) continue;
-      g.save(); g.translate(snapPx(it.sx, s, ox), snapPx(it.sy, s, oy)); fx(); if (f.flipX) g.scale(-1, 1); if (sAl !== undefined) g.globalAlpha = Math.min(1, sAl);
+      // ADR-417: tall static props / explicit Occluders in front of the focus whose rect overlaps it fade (WebGL occlusion)
+      const occA = this.occAlpha(world, it.e, occ, it.front, [it.sx - f.anchorX * k, it.sx - f.anchorX * k + dw, it.sy - f.anchorY * k, it.sy], f.anchorY * k, sp.flags, isActor);
+      g.save(); g.translate(snapPx(it.sx, s, ox), snapPx(it.sy, s, oy)); fx(); if (f.flipX) g.scale(-1, 1); if (sAl !== undefined || occA < 1) g.globalAlpha = Math.min(1, sAl ?? 1) * occA;
       g.drawImage(img, f.x, f.y, f.w, f.h, -f.anchorX * k, -f.anchorY * k, dw, dh); g.restore(); stats.sprites++; stats.drawCalls++;
       if (hearth) this.drawHearth(it.sx, it.sy, time, entityIndex(it.e), s, ox, oy, k);
     }
@@ -549,7 +754,7 @@ export class Canvas2DRenderer {
       stats.lights = lights.length;
       this.lightmap.apply(g, this.w, this.h, { s, ox: this.w / 2 - cam.x * s, oy: this.h / 2 - cam.y * s }, a, C2D_DAYLIGHT_LIGHT_SCALE + (1 - C2D_DAYLIGHT_LIGHT_SCALE) * day.glow, time, lights);
     }
-    g.globalCompositeOperation = "source-over"; void this.focus;
+    g.globalCompositeOperation = "source-over";
     this.completeFrames++;
   }
 }
@@ -572,7 +777,7 @@ export function tintPiecePixels(px: Uint8ClampedArray, mask: Uint8ClampedArray, 
     for (let c = 0; c < 3; c++) px[i + c] = px[i + c]! * (1 + (p[c]! - 1) * mr) * (1 + (q[c]! - 1) * mg);
   }
 }
-interface C2DPiece { e: Entity; sx: number; sy: number; depth: number; ord: number; img: CanvasImageSource; f: { x: number; y: number; w: number; h: number; anchorX: number; anchorY: number; flipX?: boolean }; clip: [number, number][] | undefined; seams?: { poly: [number, number][]; dx: number; dy: number }[] | undefined; ghost: boolean; hearth?: boolean; scale: number }
+interface C2DPiece { e: Entity; sx: number; sy: number; depth: number; ord: number; img: CanvasImageSource; f: { x: number; y: number; w: number; h: number; anchorX: number; anchorY: number; flipX?: boolean }; clip: [number, number][] | undefined; seams?: { poly: [number, number][]; dx: number; dy: number }[] | undefined; ghost: boolean; hearth?: boolean; scale: number; /** ADR-417: cutaway / occlusion alpha (1 = opaque, 0.10 = cut away). */ alpha: number }
 const rgb = (c: readonly number[]): string => `rgb(${Math.round(Math.min(1, c[0]!) * 255)},${Math.round(Math.min(1, c[1]!) * 255)},${Math.round(Math.min(1, c[2]!) * 255)})`;
 
 /** Canvas2D sort key: Flat ground decals (roads, ADR-119) draw in a layer below every upright sprite, in iso order. */
