@@ -51,6 +51,7 @@ import { COLD_BELOW } from "./autonomy.js";
 import { aiMemoryOf, markAiDirty, plannerIndex } from "./planner.js";
 import { mayTakeFromStorageAt, storageWithdrawActions } from "./storage_api.js";
 import { WATER_DATA, decideCrossing, legUncrossableAtPlan, profileFromDepths, waterSeconds, type CrossingBot, type CrossingSpeeds, type WaterProfile } from "./water_crossing.js";
+import { maybeFormWornPath, recordWornTrip, wornPathWaypoints } from "./worn_paths.js";
 import { JOURNEY_DATA, bagCounts, bagPoints, canPrepareJourney, drainProvisions, estimateJourney, freeBagSlots, planJourneyPack, provisionsExhausted, requiredToolChain, routeTiles, shouldTurnBack, stepTargetsToolChain, willRide, type JourneyState, type PackItem } from "./journey.js";
 import type { GameDefs } from "../defs.js";
 
@@ -432,7 +433,11 @@ export function fillTravelSensors(world: World, self: Entity, view: AgentWorldVi
   }
   const tr = m.travel; if (!tr) return;
   let justAssigned = false;
-  if (tr.pending) { const r = requestRoute(world, a.identity.id, t.x, t.y, tr.x, tr.y); if (r === null) { endTravel(a, tick, false); return; } if (r) { tr.route = r; tr.leg = 0; delete tr.pending; justAssigned = true; if (!checkRouteWater(world, self, a, tr, view)) return; markAiDirty(a, tick); } }
+  if (tr.pending) { const r = requestRoute(world, a.identity.id, t.x, t.y, tr.x, tr.y); if (r === null) { endTravel(a, tick, false); return; } if (r) { tr.route = r; tr.leg = 0; delete tr.pending; justAssigned = true; // ADR-413: a route travelled often enough wears a path, and the bot then walks the path
+    maybeFormWornPath(world, self, a, { x: t.x, y: t.y }, { x: tr.x, y: tr.y });
+    const worn = wornPathWaypoints(world, { x: t.x, y: t.y }, { x: tr.x, y: tr.y });
+    if (worn) { tr.route = worn; tr.leg = 0; }
+    if (!checkRouteWater(world, self, a, tr, view)) return; markAiDirty(a, tick); } }
   // ADR-344: a long trip prepares before it leaves (pack from the base storage, or depart bag-only);
   // a trip whose provisions ran out turns back instead of pressing on.
   if (tr.route && !tr.journey) prepareJourneySensors(world, self, a, view, tr, justAssigned);
@@ -515,6 +520,8 @@ function prepareJourneySensors(world: World, self: Entity, a: Agent, view: Agent
 /** Travel done (arrived = true) or dropped: relocations move the homestead, a clan roamer's return clears its roam clock. */
 export function endTravel(a: Agent, tick: number, arrived: boolean): void {
   const m = memOf(a); const tr = m.travel; if (!tr) return;
+  // ADR-413: a completed trip counts toward wearing a path on its route (either direction)
+  if (arrived) recordWornTrip(a, tr.origin, { x: tr.x, y: tr.y }, tick);
   a.bb.set("journeyPacked", undefined); // ADR-344: a finished trip leaves no packed tally for the next one
   if (arrived && tr.kind === "relocate") { delete m.base; m.stats.relocations++; }
   if (tr.kind === "return" && arrived) { delete m.roamSince; delete m.resourceReturn; }
@@ -743,7 +750,11 @@ export function offscreenPlan(world: World, e: Entity, a: Agent, at: { x: number
   if (!m.travel && (m.sent || tick - m.travelAt >= T.travelCooldownTicks)) { m.travelAt = tick; const g = pickTravelGoal(world, e, a, m.base ?? at, !!m.base); if (g) { m.travel = { ...g, pending: true }; markAiDirty(a, tick); } }
   const tr = m.travel; if (!tr?.pending) return;
   const r = requestRoute(world, a.identity.id, at.x, at.y, tr.x, tr.y); if (r === null) { endTravel(a, tick, false); return; }
-  if (r) { tr.route = r; tr.leg = 0; delete tr.pending; checkRouteWater(world, e, a, tr); markAiDirty(a, tick); }
+  if (r) { tr.route = r; tr.leg = 0; delete tr.pending; // ADR-413: worn path, then walk it (same rule as the full-sim sensor pass)
+    maybeFormWornPath(world, e, a, at, { x: tr.x, y: tr.y });
+    const worn = wornPathWaypoints(world, at, { x: tr.x, y: tr.y });
+    if (worn) { tr.route = worn; tr.leg = 0; }
+    checkRouteWater(world, e, a, tr); markAiDirty(a, tick); }
 }
 /** ADR-325: mark a freshly spawned bot as off-screen-eligible (it stays in the coarse sim until a human comes near). */
 export function markSpawnOffscreen(a: Agent, on: boolean): void { const m = memOf(a); if (on) m.spawnOff = true; else delete m.spawnOff; }

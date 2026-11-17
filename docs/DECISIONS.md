@@ -8899,3 +8899,60 @@ key, mesh corner heights + cliff suppression, render never writes heights). Type
 TS 5.9.3 (world + render). Neighbour suites re-run with no regressions (worldgen, render, terrain,
 building/placement, pathing, farming). Not verified on a real phone: the tilt is geometric, but whether
 ramps read as slopes (rather than smeared diamonds) at play zoom needs Tracey's eyes on the live build.
+
+## ADR-413: AI humans wear paths into roads on routes they travel often (SurVivaZ)
+
+Context: AI humans walked the same home <-> destination / home <-> favourite spot / home <-> resource routes
+for hundreds of trips and the world never showed it — no visible trace of use, and no reason for a bot to
+prefer the way it already knows. The user asked for paths/roads to emerge from repeated travel.
+
+Decision — counting (`packages/gameplay/src/ai/worn_paths.ts`, new): a route is an unordered pair of
+tile endpoints (the travel layer's trip origin and goal, so home <-> destination, home <-> favourite spot and
+home <-> resource node are all the same mechanism, either direction). Every completed trip (arrived) on a
+route counts once, in the bot's AiMemory (`wornRoutes`, new field on AiMemory in `ai/planner.ts`, persisted
+through game.agents like the rest of AiMemory — flushAiMemory JSON). Failed / timed-out trips do not count,
+and neither do hops under 6 tiles. A route needs WORN_PATH_TRIPS = 3 completed trips before it wears a path;
+endpoints within 4 tiles of a remembered route count as the same route (a bot rarely departs from the exact
+tile it left from last time).
+
+Decision — forming: at route assignment (`fillTravelSensors`, and the off-screen counterpart `offscreenPlan`
+in `ai/travel.ts`), a route worn enough lays Dirt Path road tiles (RoadSurface.Path, owner 0 = worn, not
+player-built) along the Bresenham line between the endpoints via roads.ts `spawnRoad` — so a worn path is a
+first-class ADR-119 road: it renders through the existing road autotile art (`road_path_m<mask>`, canvas2d
+flat decals, seasonal dusting — no new art, no new rendering path), it gives the ADR-119 movement bonus
+(roadSpeedMul, 1.1x on dirt path), and it persists / replicates through the core chunk codec (Road is
+networked + persistent, like Crop) with no new component, no schema change and no persist migration. Tiles
+are skipped when already road, in water, or inside someone else's privilege zone (hasPrivilege) — a worn
+path never paves a lake or a stranger's claim. Forming again lays nothing once the path exists.
+
+Decision — use: at the same route-assignment point, when >= 60% of the straight line's tiles are already
+road (and road reaches both ends), the route waypoints are replaced by the road tiles, compressed to
+direction changes (a straight 100-tile path is 2 waypoints, not 100), so the bot walks the path instead of
+its region-centre route. The water check (checkRouteWater) still runs afterwards on the new route, so a worn
+path never strands a bot at a river it cannot cross; a re-plan around water replaces the worn route as
+before. Off-screen bots follow the same rule (offscreenStep walks tr.route, whatever it is).
+
+Decision — cost bounds: counting happens only on trip completion; forming and the preference check happen
+only at route assignment (a <= 128-tile Bresenham scan each) — no per-tick work, no full-world scans. Caps:
+at most 8 routes remembered per bot (least-travelled evicted first), at most 128 tiles laid per formation,
+at most 4096 worn-path tiles per world (a formation past it lays nothing). The graphics preset default is
+untouched (ADR-408 stands).
+
+Validation: new tests `adr413_worn_paths.test.ts` (gameplay, 5 tests: 3 trips form an owner-0 Path road
+along the line, 2 trips / failed trips / short hops do not, a later trip is routed along the road tiles and
+the bot walks them to the goal, counts + path survive an AiMemory JSON round-trip with the Road
+networked+persistent contract asserted, per-bot route cap with eviction). Typecheck clean with pinned
+TS 5.9.3 (gameplay). Neighbour suites re-run with no regressions (adr324, adr343, adr344, adr345, adr326,
+adr336, roads_signs_hordes — 134 passed total including the 5 new). Not verified on a real phone: the path
+is the existing dirt-path art, but whether a worn path reads as a track (rather than a player road) at play
+zoom needs Tracey's eyes on the live build.
+
+## ADR-412: Abandoned-structure corners and walls sit on their own ground tile (SurVivaZ)
+
+Context: generated abandoned structures bumped up against raised ground looked unnatural — their corner pieces and walls elevated off the ground, floating over a visible gap. Repro (cottage 5x5 at origin (8,8), flat footprint at level 2, neighbours at level 5 from x/y 13): the south wall, east wall and the NE / SE / SW corners all rendered at level 5 while the foundations and north/west walls sat at level 2.
+
+Root cause: no terrain height lives in generation or placement at all — every stamped piece carries story level only (`Transform.z` = level * levelHeight, 0 for ground floor), and the lift is entirely the renderer's (`view.ts` `groundZ`, which reads the single tile under `floor(x), floor(y)`). But walls and `wall_corner_outer` L pieces anchor exactly on the footprint boundary lines: south walls at y = y0+h, east walls at x = x0+w, corners at the four vertices (x0/y0, x0+w/y0, x0+w/y0+h, x0/y0+h). For those anchors `floor()` lands on the neighbour tile OUTSIDE the structure, so a raised neighbour lifted the piece by the full height difference. ADR-384's single-level gate only checks footprint tiles, so a flat-footprint site next to raised ground stamps fine and then floats — generation was never the defect, and the gate must not change (skipping such sites would thin ruins near hills for no reason).
+
+Decision — render-side grounding (`apps/client/src/view.ts`): new `pieceBoundaryGroundZ(tiles, x, y, z, lh)` grounds a build piece on the lowest terrain height among the tiles touching its anchor (2 tiles for an edge, 4 for a vertex, across chunk edges via a direct `getChunk` read that leaves groundZ's one-entry cache alone). The structure's own tile is always one of the touched tiles, so a raised neighbour can no longer lift the piece; a lower neighbour only sinks the base behind the higher ground, which reads as a foundation down the slope, never a floating gap. Off-boundary anchors touch exactly one tile, so it is identical to `pieceGroundZ` for foundations, furniture and interior pieces, and story lift / decor offsets are unchanged. It is used for placed build pieces (the render loop's `GPiece` branch; walkers keep `pieceGroundZ`) and for the placement ghost preview, so a wall ghosted against raised ground sits on the structure's tile too. Deliberately NOT a placement-time nudge: nudging stored Transforms would desync them from the slot derived from the position (`slotFromPos` / `structureIndexSystem`) and would leave already-stamped ruins floating. Because the fix is in render, old ruins in already-generated/saved worlds are fixed in place — no regeneration, no persist/schema change, no generation or placement change, and the graphics preset default is untouched (ADR-408 stands).
+
+Validation: new tests `apps/client/test/adr412_ruin_ground.test.ts` (7 tests) and `packages/gameplay/test/adr412_ruin_ground.test.ts` (3 tests), 10/10 passing. The client tests pin the repro (single-tile read = 5 on the south/east walls and three corners) and the fix (all four corners and all four walls = 2, upper-story boundary pieces keep their story on top of the structure's ground, off-boundary anchors identical to `pieceGroundZ`, chunk-edge anchors read both chunks, lower neighbour sinks the base only). The gameplay tests pin the anchor geometry (corners on the four vertices, south/east walls on the boundary lines), that a flat footprint next to raised ground still stamps, and that stamped pieces carry story level only — so the render fix covers pre-ADR-412 ruins. Neighbour suites re-run with no regressions (adr142 ghost ground, adr300/301/311/340/373/384 abandoned, modular_building — 70 passed). Typecheck clean with pinned TS 5.9.3 (gameplay clean; apps/client clean except the two pre-existing `scripts/oxipng.mjs` errors in untouched files). Not verified on a real phone: the gap is gone by construction in the headless harness, but whether the grounded walls read correctly at play zoom needs Tracey's eyes on the live build.

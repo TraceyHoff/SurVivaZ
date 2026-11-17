@@ -64,7 +64,10 @@ export interface AiMemory { v: 1; base?: { x: number; y: number }; stats: AiStat
   /** ADR-344: a journey ended early (turned back for lack of provisions) — no new resource expedition
    *  launches until this ages past journeyRetryCooldownTicks, so the bot does not ping-pong out and
    *  back on an empty pantry. */
-  journeyBlocked?: { at: number } }
+  journeyBlocked?: { at: number };
+  /** ADR-413: routes this bot has travelled often, with completed-trip counts (ai/worn_paths.ts) — the
+   *  memory behind worn paths. Cap WORN_PATH_MAX_ROUTES_PER_AI per bot. */
+  wornRoutes?: import("./worn_paths.js").WornRoute[] }
 const newStats = (): AiStats => ({ trips: 0, tripMax: 0, deposits: 0, withdraws: 0, repairs: 0, refuels: 0, crafts: 0, stationCrafts: 0, built: 0, hunts: 0, loots: 0, wears: 0, relocations: 0, bestTier: 0, snoozed: 0 });
 const aiDirty = new WeakMap<Agent, number>();
 /** The agent's AiMemory (identity.ai, validated / created on first use). */

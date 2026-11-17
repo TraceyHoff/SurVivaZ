@@ -130,6 +130,44 @@ export function pieceGroundZ(tiles: TileMap | undefined, x: number, y: number, z
   const step = lh || 1; const floor = Math.round(z / step) * step; const off = z - floor;
   return groundZ(tiles, x, y, 0) + off;
 }
+/** Raw terrain height of one tile (renderTileHeight), or undefined when its chunk is not resident.
+ * Reuses groundZ's one-entry chunk cache when the tile is in it, otherwise reads the chunk directly
+ * (a boundary anchor can touch tiles in up to 4 chunks) without disturbing the cache. */
+function tileHeightAt(tiles: TileMap, tx: number, ty: number): number | undefined {
+  const cx = tileToChunk(tx), cy = tileToChunk(ty);
+  const c = gz.tiles === tiles && gz.cx === cx && gz.cy === cy ? gz.c : tiles.getChunk(cx, cy);
+  if (!c) return undefined;
+  const i = tileToLocal(ty) * CHUNK_SIZE + tileToLocal(tx);
+  return renderTileHeight((c.tiles as Uint16Array | undefined)?.[i] ?? 0, c.height[i] ?? 0);
+}
+/**
+ * ADR-412: terrain lift for a build piece whose anchor sits exactly on a tile boundary. A wall on the
+ * south/east edge of its structure — and the `wall_corner_outer` L at a vertex — anchors on the boundary
+ * line itself, so groundZ's floor() reads the NEIGHBOUR tile outside the structure; when that neighbour
+ * is raised ground the piece rendered a whole step (or more) above its own floor, floating over a visible
+ * gap. That is the reported ruin defect: ADR-384 only gates the footprint itself, so a flat-footprint site
+ * bumped up against raised tiles stamps fine and then floats. Take the lowest ground among the tiles
+ * touching the anchor (2 for an edge, 4 for a vertex): the structure's own tile is always one of them, so
+ * a raised neighbour can no longer lift the piece. A lower neighbour only sinks the base behind the higher
+ * ground — it reads as a foundation down the slope, never a floating gap. Off-boundary anchors touch
+ * exactly one tile, so this is identical to pieceGroundZ for every other piece (foundations, furniture,
+ * interior walls). Render-side, so ruins already standing in saved worlds are fixed in place: no
+ * regeneration, no persist/schema change, and generation/placement are untouched (a placement-time nudge
+ * would desync Transform from the derived slot and leave old ruins floating). Story lift / decor offset
+ * handling is pieceGroundZ's, unchanged.
+ */
+export function pieceBoundaryGroundZ(tiles: TileMap | undefined, x: number, y: number, z: number, lh: number): number {
+  const step = lh || 1; const floor = Math.round(z / step) * step; const off = z - floor;
+  if (!tiles) return off; // no tiles → sim z stripped of story, like pieceGroundZ(undefined, …)
+  const onX = Math.abs(x - Math.round(x)) < 1e-4, onY = Math.abs(y - Math.round(y)) < 1e-4;
+  if (!onX && !onY) return groundZ(tiles, x, y, 0) + off;
+  const xs = onX ? [Math.round(x) - 1, Math.round(x)] : [Math.floor(x)];
+  const ys = onY ? [Math.round(y) - 1, Math.round(y)] : [Math.floor(y)];
+  let h: number | undefined;
+  for (const ty of ys) for (const tx of xs) { const th = tileHeightAt(tiles, tx, ty); if (th !== undefined) h = h === undefined ? th : Math.min(h, th); }
+  if (h === undefined) return groundZ(tiles, x, y, 0) + off; // no resident tile touched: same as before
+  return h + off; // groundZ(…, 0) semantics: the raw height (max(0, h) for h >= 0, h for a pit)
+}
 /** ADR-299: pin a shaft hatch (and anyone standing on its lid) to the surrounding rim instead of the pit floor. */
 export function shaftRimGroundZ(tiles: TileMap | undefined, x: number, y: number, z: number): number {
   const tx = Math.floor(x), ty = Math.floor(y);
@@ -481,7 +519,9 @@ export class IsoView {
     const names = gameplayDefs(net).pieces.get(p.piece)?.variantNames ?? [];
     const def = gameplayDefs(net).pieces.get(p.piece);
     // ADR-142: lifted onto the terrain step like the placed piece (view mirror `ground`); at z=0 it sank under raised ground
-    const baseZ = pieceGroundZ(this.lastTiles, p.x, p.y, p.z, gameplayDefs(net).building.levelHeight);
+    // ADR-412: boundary-anchored pieces (walls, corners) ground on the lowest touching tile, not the neighbour — a wall
+    // ghost previewed against raised ground must sit on the structure's own tile, like the placed piece.
+    const baseZ = pieceBoundaryGroundZ(this.lastTiles, p.x, p.y, p.z, gameplayDefs(net).building.levelHeight);
     // Overlay uses the drawn world z (story restored); the ghost entity keeps the stripped base so sprites.ts
     // `floorToTerrainZ(level, Transform.z)` does not double the story again.
     this.ghostZ = floorToTerrainZ(p.level, baseZ);
@@ -615,6 +655,8 @@ export class IsoView {
     const lhv = (defs as unknown as { building?: { levelHeight?: number } } | undefined)?.building?.levelHeight ?? 3;
     // ADR-162: a piece raised above its level floor (decor on a table) keeps that lift over terrain steps
     const groundPiece = (x: number, y: number, z: number): number => pieceGroundZ(tiles, x, y, z, lhv);
+    // ADR-412: build pieces ground on the lowest tile touching a boundary anchor (walls, corners); walkers keep pieceGroundZ.
+    const groundBoundaryPiece = (x: number, y: number, z: number): number => pieceBoundaryGroundZ(tiles, x, y, z, lhv);
     const hatchTiles = new Set<string>();
     if (defs && net.isRegistered(GPiece)) {
       for (const pe of net.query([GPiece, Transform])) {
@@ -647,7 +689,7 @@ export class IsoView {
     for (const e of net.query([Transform])) {
       if (e === net.environment) continue;
       const tf = net.get(e, Transform)!;
-      const grBase = net.has(e, GPiece) || net.has(e, GAnim) ? groundPiece : ground; // ADR-212: walkers on a deck keep their stand height over terrain steps
+      const grBase = net.has(e, GPiece) ? groundBoundaryPiece : net.has(e, GAnim) ? groundPiece : ground; // ADR-212: walkers on a deck keep their stand height over terrain steps
       const pinToRim = hatchTiles.has(`${Math.floor(tf.x)},${Math.floor(tf.y)}`) && (net.has(e, GPiece) || !(net.isRegistered(InShaft) && net.getField(e, InShaft, "down")));
       const gr = pinToRim ? (net.has(e, GPiece) || net.has(e, GAnim) ? rimPiece : shaftRimGroundZ.bind(null, tiles)) : grBase;
       const cur = readXform(net, e, Transform, this.sCur)!; let prev = readXform(net, e, PrevTransform, this.sPrev) ?? cur; // ADR-157: scratch, no per-entity allocation
