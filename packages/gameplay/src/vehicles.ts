@@ -28,8 +28,11 @@ import { netIdEntity } from "./vehicle_net.js";
 import { hasKeyFor, keyIssueSystem } from "./vehicle_keys.js";
 import { Riding, VehicleLock } from "./components.js";
 
-export const VEHICLE_CLASSES = ["bicycle", "car", "truck", "van", "camper", "semi", "trailer", "wagon", "cart", "carriage", "chariot"] as const;
+export const VEHICLE_CLASSES = ["bicycle", "car", "truck", "van", "camper", "semi", "trailer", "wagon", "cart", "carriage", "chariot", "boat"] as const;
 export type VehicleClass = (typeof VEHICLE_CLASSES)[number];
+/** ADR-421: paddle boats — no engine, no fuel; paddling drains the driver's stamina (bicycle-style). */
+export const BOAT_CLASSES = ["boat"] as const;
+export const isBoatClass = (c: string): boolean => c === "boat";
 /** ADR-358: animal-drawn classes — no engine, no fuel, never self-propelled; pulled by a harnessed mount (see below). */
 export const DRAWN_CLASSES = ["wagon", "cart", "carriage", "chariot"] as const;
 export type DrawnClass = (typeof DRAWN_CLASSES)[number];
@@ -54,6 +57,13 @@ export interface VehicleDef {
 }
 /** True for an animal-drawn def (class wagon/cart/carriage/chariot). */
 export const isDrawnDef = (d: VehicleDef): boolean => isDrawnClass(d.class);
+/** True for a paddle-boat def (class boat, ADR-421). */
+/** ADR-422: a boat is exactly one of motor (fuel, no stamina) or paddle (stamina, no fuel) — never both, never neither. */
+export const isBoatDef = (d: VehicleDef): boolean => isBoatClass(d.class);
+/** ADR-422: motorboat def (class boat with a fuel tank: motorboat, pontoon, speedboat). */
+export const isMotorBoatDef = (d: VehicleDef): boolean => isBoatClass(d.class) && !!d.fuel;
+/** ADR-422: paddle-boat def (class boat with stamina, no tank: raft, canoe, rowboat). */
+export const isPaddleBoatDef = (d: VehicleDef): boolean => isBoatClass(d.class) && !d.fuel;
 const STATIONS: Record<string, number> = (stationsRaw as { stations: Record<string, number> }).stations;
 
 export function validateVehicleDefs(defs: readonly VehicleDef[]): string[] {
@@ -66,7 +76,8 @@ export function validateVehicleDefs(defs: readonly VehicleDef[]): string[] {
     if (!(d.seats >= 0 && d.seats <= VEHICLE_MAX_SEATS) || !Number.isInteger(d.seats)) errs.push(`${p}: seats`);
     if (d.class === "trailer" ? d.seats !== 0 : d.seats < 1) errs.push(`${p}: seats for class`);
     if (d.class === "bicycle" && (d.fuel || !d.stamina)) errs.push(`${p}: bicycles use stamina, not fuel`);
-    if (d.class !== "bicycle" && d.class !== "trailer" && !isDrawnDef(d) && !d.fuel) errs.push(`${p}: motor vehicles need fuel`);
+    if (d.class === "boat" && (d.fuel ? !!d.stamina : !d.stamina)) errs.push(`${p}: boats use fuel (motor) or stamina (paddling), never both or neither`);
+    if (d.class !== "bicycle" && d.class !== "trailer" && d.class !== "boat" && !isDrawnDef(d) && !d.fuel) errs.push(`${p}: motor vehicles need fuel`);
     if (isDrawnDef(d)) {
       if (d.fuel || d.stamina) errs.push(`${p}: drawn vehicles have no engine or stamina drain`);
       if (!d.drawn || !(d.drawn.pullMul > 0 && d.drawn.pullMul <= 2)) errs.push(`${p}: drawn needs pullMul in (0, 2]`);
@@ -147,7 +158,7 @@ export function spawnVehicle(world: World, def: number | string, x: number, y: n
     .add(e, Container, { slotCount: cap.slots, maxWeight: cap.maxWeight });
   if (d.seats > 0) world.add(e, VehicleSeats);
   if (d.hitches.length) world.add(e, Hitch);
-  if (d.class !== "trailer" && !isDrawnDef(d)) world.add(e, VehicleState); // trailers and drawn vehicles have no engine/lights
+  if (d.class !== "trailer" && !isDrawnDef(d) && !isPaddleBoatDef(d)) world.add(e, VehicleState); // trailers, drawn vehicles and paddle boats have no engine/lights; motorboats do
   return e;
 }
 export const netIdOf = (world: World, e: Entity): number => world.getField(e, NetId, "id") ?? 0;
@@ -192,6 +203,31 @@ function footprintPoints(d: VehicleDef, x: number, y: number, h: number): [numbe
 function poseBlocked(world: World, d: VehicleDef, x0: number, y0: number, h0: number, x1: number, y1: number, h1: number): boolean {
   const b = blockerOf(world); const a = footprintPoints(d, x0, y0, h0), n = footprintPoints(d, x1, y1, h1);
   for (let i = 0; i < n.length; i++) if (b(world, a[i]![0], a[i]![1], n[i]![0], n[i]![1])) return true;
+  return false;
+}
+
+// ---- boats on water (ADR-421) -----------------------------------------------------------------------
+/** Water drag for a boat at (x, y): 0 on land (beached — cannot move), 0.55 in shallows, 1 in deep water.
+ *  Boats never take the road bonus (roadVehicleMul): water is their only surface. */
+export const BOAT_WATER_MUL = { shallow: 0.55, deep: 1 } as const;
+export function boatWaterMul(world: World, x: number, y: number): number {
+  const d = waterDepth(world, x, y);
+  return d === WaterDepth.Deep ? BOAT_WATER_MUL.deep : d === WaterDepth.Shallow ? BOAT_WATER_MUL.shallow : 0;
+}
+/**
+ * Boat collision: every footprint point of the destination pose must sit on water (waterDepth != None) —
+ * a boat that reaches the shore stops (beaching), it never clips onto land — and must clear the same
+ * terrain-height / edge / solid blockers a land vehicle clears, with the water tiles passable (swim = true
+ * in movementBlocked, so swimTiles do not block). A custom VehicleBlocker override (tests) is honoured
+ * as-is, plus the water check. No sinking in this slice: a boat at rest on water stays afloat.
+ */
+export function boatPoseBlocked(world: World, d: VehicleDef, x0: number, y0: number, h0: number, x1: number, y1: number, h1: number): boolean {
+  const a = footprintPoints(d, x0, y0, h0), n = footprintPoints(d, x1, y1, h1);
+  const custom = world.getResource(VehicleBlockerRes);
+  for (let i = 0; i < n.length; i++) {
+    if (waterDepth(world, n[i]![0], n[i]![1]) === WaterDepth.None) return true;
+    if (custom ? custom(world, a[i]![0], a[i]![1], n[i]![0], n[i]![1]) : movementBlocked(world, a[i]![0], a[i]![1], n[i]![0], n[i]![1], 0, true)) return true;
+  }
   return false;
 }
 
@@ -346,16 +382,18 @@ function stepPowered(world: World, v: Entity, d: VehicleDef, dt: number, inputs:
   if (st.health <= 0) cap = 0;
   const s = { x: t.x, y: t.y, speed: st.speed, heading: st.heading, drift: st.drift, steer: st.steer };
   if (mag === 0 && s.speed === 0 && s.steer === 0 && s.drift === 0) return; // at rest: no writes
-  stepVehicleKinematics(d, s, inp, cap, dt, roadVehicleMul(world, t.x, t.y)); // ADR-119 road bonus
+  const boat = isBoatDef(d);
+  stepVehicleKinematics(d, s, inp, cap, dt, boat ? boatWaterMul(world, t.x, t.y) : roadVehicleMul(world, t.x, t.y)); // ADR-421: boats take water drag, never the road bonus
   let health = st.health;
-  if (poseBlocked(world, d, t.x, t.y, st.heading, s.x, s.y, s.heading)) {
+  const blocked = boat ? boatPoseBlocked : poseBlocked;
+  if (blocked(world, d, t.x, t.y, st.heading, s.x, s.y, s.heading)) {
     // per-axis slide (keeps the free component); if the slide keeps < half the step it is an impact: stop, bounce, damage
     const want = Math.hypot(s.x - t.x, s.y - t.y);
-    if (!poseBlocked(world, d, t.x, t.y, st.heading, s.x, t.y, s.heading)) s.y = t.y;
-    else if (!poseBlocked(world, d, t.x, t.y, st.heading, t.x, s.y, s.heading)) s.x = t.x;
+    if (!blocked(world, d, t.x, t.y, st.heading, s.x, t.y, s.heading)) s.y = t.y;
+    else if (!blocked(world, d, t.x, t.y, st.heading, t.x, s.y, s.heading)) s.x = t.x;
     else { s.x = t.x; s.y = t.y; }
     if (Math.hypot(s.x - t.x, s.y - t.y) < want * 0.5) {
-      s.x = t.x; s.y = t.y; if (poseBlocked(world, d, t.x, t.y, st.heading, t.x, t.y, s.heading)) s.heading = st.heading;
+      s.x = t.x; s.y = t.y; if (blocked(world, d, t.x, t.y, st.heading, t.x, t.y, s.heading)) s.heading = st.heading;
       health = Math.max(0, health - Math.abs(s.speed) * (d.mass / 1000) * T.impactDamagePerSpeedTon);
       s.speed = -s.speed * T.bounce; s.drift = 0;
     } else s.speed *= 0.9; // scraping along a wall
@@ -683,7 +721,7 @@ export function validateVehicleToggle(world: World, actor: Entity, v: Entity, bi
   if (!world.isAlive(v) || !world.has(v, Vehicle)) return "not_vehicle";
   if (on > 2) return "bad_value";
   const d = vehicleDefOf(world, v); if (!d) return "not_vehicle";
-  if (d.class === "trailer" || isDrawnDef(d)) return "no_controls"; // trailers and drawn vehicles have no engine/lights
+  if (d.class === "trailer" || isDrawnDef(d) || isPaddleBoatDef(d)) return "no_controls"; // trailers, drawn vehicles and paddle boats have no engine/lights; motorboats do
   if (bit === VEHICLE_ENGINE_ON && !d.fuel) return "no_engine";
   if (!netIdOf(world, actor) || world.getField(actor, Driver, "vehicleNetId") !== netIdOf(world, v) || world.getField(actor, Driver, "seat") !== 0) return "not_driver";
   if (bit === VEHICLE_ENGINE_ON && on !== 0 && (world.getField(v, Vehicle, "health") ?? 0) <= 0) return "wrecked";

@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fnv1a } from "@engine/core";
-import { CHUNK_SIZE, Chunk, ChunkManager, HEIGHT_MAX, PREVIEW, previewWorldAt, ProceduralGenerator, WORLD_TILE_DIAMETER, WORLD_TILE_HALF_EXTENT, computeSpawnPoints, sampleWorldPreview, waterFeatureLayout, worldPreviewSvg, worldToNorthUp, worldTileFromKey, worldTileKey } from "../src/index.js";
+import { CHUNK_SIZE, Chunk, ChunkManager, HEIGHT_MAX, PREVIEW, previewWorldAt, ProceduralGenerator, REGION_SIZE, WORLD_TILE_DIAMETER, WORLD_TILE_HALF_EXTENT, computeSpawnPoints, sampleWorldPreview, worldPreviewSvg, worldToNorthUp, worldTileFromKey, worldTileKey } from "../src/index.js";
 
 describe("ADR-272 sampled seed preview and wilderness", () => {
   it.each([0, 1234, 424242, 0xffffffff])("seed %i: same thumbnail and exact playable terrain samples", seed => {
@@ -42,9 +41,16 @@ describe("ADR-272 sampled seed preview and wilderness", () => {
   it("far regions contain genuine generated terrain, resources and seeded lakes/ponds", () => {
     const seed = 424242, g = new ProceduralGenerator({ seed }); let nodes = 0;
     for (const [rx, ry] of [[100, 110], [-100, -100], [80, -100]]) {
-      const water = waterFeatureLayout(fnv1a(`${rx},${ry}`, seed));
-      for (const p of [water.lake, water.pond]) expect([1, 8]).toContain(g.tileAt(rx! * 512 + Math.floor(p.x), ry! * 512 + Math.floor(p.y)));
-      for (let j = 0; j < 4; j++) { const c = g.load(rx! * 16 + j, ry! * 16 + j); nodes += c.nodes.length; expect(c.chunk.tiles.some(t => t !== 0)).toBe(true); }
+      // ADR-423: regions are REGION_SIZE tiles; the generator's own (sited, scaled) layout is the authority.
+      const water = g.regionLayout(rx! * REGION_SIZE, ry! * REGION_SIZE)!;
+      for (const p of [water.lake, water.pond]) expect([1, 8]).toContain(g.tileAt(rx! * REGION_SIZE + Math.floor(p.x), ry! * REGION_SIZE + Math.floor(p.y)));
+      // ADR-424: every far region also has a great lake with >= 1 island of buildable land in it.
+      const great = water.greatLake!;
+      expect(great.islands.length).toBeGreaterThanOrEqual(1);
+      const isl = great.islands[0]!;
+      expect(g.tileAt(rx! * REGION_SIZE + Math.floor(isl.x), ry! * REGION_SIZE + Math.floor(isl.y))).toBe(3);
+      expect(g.sampleAt(rx! * REGION_SIZE + Math.floor(isl.x), ry! * REGION_SIZE + Math.floor(isl.y)).height).toBe(2);
+      for (let j = 0; j < 4; j++) { const c = g.load(rx! * (REGION_SIZE / CHUNK_SIZE) + j, ry! * (REGION_SIZE / CHUNK_SIZE) + j); nodes += c.nodes.length; expect(c.chunk.tiles.some(t => t !== 0)).toBe(true); }
     }
     expect(nodes).toBeGreaterThan(0);
   });

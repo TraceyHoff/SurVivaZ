@@ -13,9 +13,11 @@ describe("ADR-125 player speed tuning", () => {
     expect(walk * mv.swimSpeedMul).toBeGreaterThan(0.9); // swimming still usable
   });
   it("motor vehicles are 2.5-6x sprint; zombie runners stay escapable but not trivial", () => {
-    for (const d of G.VEHICLE_DEFS) if (d.class !== "bicycle" && d.class !== "trailer" && !G.isDrawnDef(d)) { // ADR-358: drawn vehicles are mount-pulled, not motor
+    for (const d of G.VEHICLE_DEFS) if (d.class !== "bicycle" && d.class !== "trailer" && d.class !== "boat" && !G.isDrawnDef(d)) { // ADR-358: drawn vehicles are mount-pulled, not motor; ADR-421/422: boats are watercraft, not land motor vehicles
       expect(d.maxSpeed / sprint).toBeGreaterThanOrEqual(2.5); expect(d.maxSpeed / sprint).toBeLessThanOrEqual(6);
     }
+    // ADR-421/422: boats are tuned against swim speed, not sprint — every boat still beats swimming.
+    for (const d of G.VEHICLE_DEFS) if (d.class === "boat") expect(d.maxSpeed).toBeGreaterThan(walk * mv.swimSpeedMul);
     const zs = [...G.defaultDefs().zombies.values()];
     const runner = zs.find((z) => z.key === "zombie_runner")!;
     expect(runner.speed).toBeLessThan(sprint); expect(runner.speed).toBe(2.8); // ADR-274: unchanged runners are now marginally below the 2.9 walk

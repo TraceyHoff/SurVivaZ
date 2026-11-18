@@ -89,3 +89,30 @@ describe("ADR-409 ground-shape classification", () => {
     expect(classifyGroundShape(nb(5)).cornerMask).toBe(0);
   });
 });
+
+describe("ADR-419 ramp profiles classify as ramps", () => {
+  /** Neighbourhood of tile (x, y) from a height function (cf. adr418 nbAt). */
+  const nbAt = (h: (x: number, y: number) => number, x: number, y: number): GroundNeighbourhood => ({
+    h: h(x, y),
+    edge: [h(x + 1, y), h(x - 1, y), h(x, y + 1), h(x, y - 1)],
+    diag: [h(x + 1, y - 1), h(x + 1, y + 1), h(x - 1, y + 1), h(x - 1, y - 1)],
+  });
+  it("a broad ±1 staircase (cross neighbours on the same profile) classifies every interior tile as a ramp", () => {
+    // A wide ramp: heights rise 1 per tile along +x at every y, so each tile has exactly one
+    // edge 1 lower (its downhill side) and no other drop — the shape a graded ramp is meant to be.
+    const h = (x: number, _y: number): number => 2 + Math.max(0, Math.min(3, x));
+    for (const x of [1, 2, 3]) {
+      const s = classifyGroundShape(nbAt(h, x, 0));
+      expect(s.kind).toBe("ramp"); expect(s.slopeSides).toEqual([1]); // downhill -x
+      expect(groundSlopeArt(s)).toEqual({ kind: "ramp", dir: 2 });
+    }
+    // A 1-wide ramp on flat ground is NOT all ramps: its sides are cliffs by design (stepped /
+    // wedge off-axis). Only the graded axis is a ±1 staircase — assert that, not the kind.
+    const narrow = (x: number, y: number): number => (y === 0 ? 2 + Math.max(0, Math.min(3, x)) : 2);
+    for (const x of [1, 2, 3]) {
+      const s = classifyGroundShape(nbAt(narrow, x, 0));
+      expect(s.edgeDrops[1]).toBe(1); // downhill axis edge is still exactly 1
+      expect(s.edgeDrops[0]).toBe(0); // uphill axis edge never drops
+    }
+  });
+});

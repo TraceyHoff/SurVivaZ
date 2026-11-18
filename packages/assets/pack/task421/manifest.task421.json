@@ -1,0 +1,129 @@
+{
+ "$comment": "ADR-421: dedicated tier-1 boat art (raft, canoe, rowboat). The atlases have NO image files of their own: their pixels are painted at runtime by apps/client/src/task421-art.ts (software rasterizer -> blob URL, the Task 34 / ADR-361 pattern) and the sources override in view.ts points the registry at those blob URLs, so the image/ktx2 paths below are never fetched. They point at a real pack atlas only because the pack test requires every manifest atlas to name a PNG + KTX2 twin that exist on disk. Vehicle layout: 4 cols x 6 rows of the def's frame (two rows per paddle phase 0-2, Art order E,SE,S,SW,W,NW,N,NE in row-major order); frame(phase, dir) = phase*8 + dir, so the idle animation is frames [8] (mid-stroke) and the row animation cycles [0, 8, 16] at 4 fps. resolveVehicleArt binds these by def id (sprite key == def id, first animation 8 directions, veh_art_* atlas = native scale).",
+ "name": "survivaz-task421",
+ "atlases": [
+  {
+   "key": "veh_art_raft",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 264,
+   "frameH": 162,
+   "columns": 4,
+   "rows": 6
+  },
+  {
+   "key": "veh_art_canoe",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 261,
+   "frameH": 160,
+   "columns": 4,
+   "rows": 6
+  },
+  {
+   "key": "veh_art_rowboat",
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "frameW": 290,
+   "frameH": 175,
+   "columns": 4,
+   "rows": 6
+  }
+ ],
+ "sprites": [
+  {
+   "key": "raft",
+   "category": "vehicle",
+   "atlas": "veh_art_raft",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5802
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      8
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    },
+    "row": {
+     "frames": [
+      0,
+      8,
+      16
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    }
+   }
+  },
+  {
+   "key": "canoe",
+   "category": "vehicle",
+   "atlas": "veh_art_canoe",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5813
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      8
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    },
+    "row": {
+     "frames": [
+      0,
+      8,
+      16
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    }
+   }
+  },
+  {
+   "key": "rowboat",
+   "category": "vehicle",
+   "atlas": "veh_art_rowboat",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5714
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      8
+     ],
+     "fps": 1,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": false
+    },
+    "row": {
+     "frames": [
+      0,
+      8,
+      16
+     ],
+     "fps": 4,
+     "directions": 8,
+     "dirStride": 1,
+     "loop": true
+    }
+   }
+  }
+ ],
+ "version": 1
+}

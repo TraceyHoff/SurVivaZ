@@ -50,6 +50,8 @@ export const enum BuildFail {
   NoMovePermission = 33,
   /** ADR-355: deposit refused — the item is not in the storage piece's accepts list. */
   WrongStorage = 34,
+  /** ADR-420: a water-required piece (dock / shipyard) needs deep water under every footprint tile. */
+  NeedsDeepWater = 35,
 }
 export const enum DestroyCause { Damage = 1, Collapse = 2, Demolish = 3 }
 

@@ -12,13 +12,15 @@ const slotOf = (w: World, p: Entity, item: number): number => { const v = G.read
 describe("vehicle crafting data", () => {
   it("every vehicle has a kit recipe at workbench/garage with craft time; costs scale with size; rules validate", () => {
     const w = makeWorld(); expect(G.validateVehicleCraft(w)).toEqual([]);
-    const wb = G.StationKind.Workbench, gar = G.StationKind.Garage;
+    const wb = G.StationKind.Workbench, gar = G.StationKind.Garage, dock = G.StationKind.Dock, sy = G.StationKind.Shipyard;
     const cost = new Map<string, number>();
     for (const v of G.VEHICLE_DEFS) {
       const kit = G.vehicleKitKey(v.id)!; expect(kit).toBe(`vehicle_kit_${v.id}`);
       const r = [...d.recipes.values()].find((x) => d.items.get(x.output.item)?.key === kit)!; expect(r).toBeDefined();
-      expect([wb, gar]).toContain(r.station); expect(r.seconds).toBeGreaterThan(0);
-      if (v.class !== "bicycle" && v.class !== "trailer" && !G.isDrawnDef(v)) expect(r.station).toBe(gar); // ADR-358: wooden drawn vehicles craft at the workbench
+      expect([wb, gar, dock, sy]).toContain(r.station); expect(r.seconds).toBeGreaterThan(0);
+      if (G.isPaddleBoatDef(v)) expect(r.station).toBe(dock); // ADR-421: paddle-boat kits craft at the dock (ADR-420)
+      else if (G.isMotorBoatDef(v)) expect(r.station).toBe(G.StationKind.Shipyard); // ADR-422: motorboat kits craft at the shipyard
+      else if (v.class !== "bicycle" && v.class !== "trailer" && !G.isDrawnDef(v)) expect(r.station).toBe(gar); // ADR-358: wooden drawn vehicles craft at the workbench
       cost.set(v.id, r.ingredients.reduce((a: number, i) => a + i.count, 0));
     }
     const avg = (s: G.VehicleSize) => { const xs = G.VEHICLE_DEFS.filter((v) => v.size === s); return xs.reduce((a, v) => a + cost.get(v.id)!, 0) / xs.length; };

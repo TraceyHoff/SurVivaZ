@@ -1088,6 +1088,82 @@
         { "item": "planks", "count": 6 }
       ],
       "output": { "item": "vehicle_kit_carriage", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_raft",
+      "station": "dock",
+      "seconds": 45,
+      "ingredients": [
+        { "item": "wood", "count": 10 },
+        { "item": "planks", "count": 4 },
+        { "item": "rope", "count": 2 }
+      ],
+      "output": { "item": "vehicle_kit_raft", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_canoe",
+      "station": "dock",
+      "seconds": 60,
+      "ingredients": [
+        { "item": "wood", "count": 8 },
+        { "item": "planks", "count": 6 },
+        { "item": "rope", "count": 1 }
+      ],
+      "output": { "item": "vehicle_kit_canoe", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_rowboat",
+      "station": "dock",
+      "seconds": 90,
+      "ingredients": [
+        { "item": "planks", "count": 10 },
+        { "item": "wood", "count": 6 },
+        { "item": "rope", "count": 2 },
+        { "item": "seat", "count": 2 }
+      ],
+      "output": { "item": "vehicle_kit_rowboat", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_motorboat",
+      "station": "shipyard",
+      "seconds": 180,
+      "skill": { "key": "smithing", "level": 2 },
+      "ingredients": [
+        { "item": "planks", "count": 12 },
+        { "item": "steel_ingot", "count": 8 },
+        { "item": "engine_small", "count": 1 },
+        { "item": "rubber", "count": 4 },
+        { "item": "seat", "count": 2 }
+      ],
+      "output": { "item": "vehicle_kit_motorboat", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_pontoon",
+      "station": "shipyard",
+      "seconds": 300,
+      "skill": { "key": "smithing", "level": 3 },
+      "ingredients": [
+        { "item": "planks", "count": 10 },
+        { "item": "steel_ingot", "count": 16 },
+        { "item": "engine_diesel", "count": 1 },
+        { "item": "seat", "count": 4 },
+        { "item": "rope", "count": 4 }
+      ],
+      "output": { "item": "vehicle_kit_pontoon", "count": 1 }
+    },
+    {
+      "key": "vehicle_kit_speedboat",
+      "station": "shipyard",
+      "seconds": 240,
+      "skill": { "key": "smithing", "level": 3 },
+      "ingredients": [
+        { "item": "planks", "count": 8 },
+        { "item": "steel_ingot", "count": 12 },
+        { "item": "engine_large", "count": 1 },
+        { "item": "polymer_sheet", "count": 4 },
+        { "item": "seat", "count": 2 }
+      ],
+      "output": { "item": "vehicle_kit_speedboat", "count": 1 }
     }
   ]
 }

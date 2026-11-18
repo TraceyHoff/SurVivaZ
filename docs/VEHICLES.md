@@ -5,7 +5,7 @@ Decision record: ADR-096 in DECISIONS.md. Code: `packages/gameplay/src/vehicles.
 (JSON Schema `vehicles.schema.json`). Tests: `packages/gameplay/test/vehicles.test.ts`.
 
 ## Classes and defs
-Classes: `bicycle`, `car`, `truck`, `van`, `camper`, `semi`, `trailer`, `wagon`, `cart`, `carriage`, `chariot` (the last four are animal-drawn, ADR-358 — see below). Sizes: `xs`, `s`, `m`, `l`, `xl`.
+Classes: `bicycle`, `car`, `truck`, `van`, `camper`, `semi`, `trailer`, `wagon`, `cart`, `carriage`, `chariot`, `boat` (the last four before `boat` are animal-drawn, ADR-358 — see below; `boat` is paddle-powered, ADR-421, or motor-powered, ADR-422 — see below). Sizes: `xs`, `s`, `m`, `l`, `xl`.
 
 | field | meaning |
 |---|---|
@@ -16,10 +16,10 @@ Classes: `bicycle`, `car`, `truck`, `van`, `camper`, `semi`, `trailer`, `wagon`,
 | `maxSpeed`, `accel`, `brake` | tiles/s, tiles/s². |
 | `turn` | max yaw rate (rad/s). |
 | `grip` | 0..1. Lower means more drift. |
-| `fuel` | `{capacity, perSecond}` at full throttle, or `null`. Required for motor classes, forbidden on bicycles, trailers and drawn vehicles. |
+| `fuel` | `{capacity, perSecond}` at full throttle, or `null`. Required for motor classes, forbidden on bicycles, trailers, drawn vehicles and paddle boats (ADR-422: motorboats have fuel, paddle boats have stamina instead). |
 | `covered` | ADR-358, wagons only: `true` = canvas cover over the same footprint as the uncovered twin. |
 | `drawn` | ADR-358, drawn classes only: `{pullMul}` — multiplies the pulling mount's current gait speed (see below). |
-| `stamina` | `{perSecond}` (bicycles): drains the rider's Survival.stamina. At 0 the bike runs at 35% throttle. |
+| `stamina` | `{perSecond}` (bicycles and boats): drains the rider's Survival.stamina. At 0 the vehicle runs at 35% throttle. |
 | `health` | vehicle HP. At 0 the vehicle is wrecked: no throttle and no entering. |
 | `storage` | `{slots, maxWeight}` → `Container` on the vehicle. Base slots; the Container gets `storageCapacity` = base x class scale, clamped to the class max in `data/vehicle_storage.json` (<= 96, ADR-098). maxWeight is used as is. |
 | `hitches` | `[{at: front|rear, offset, accepts: [class…]}]`. Towing needs the trailer's front hitch to accept the tow's class AND the tow's rear hitch to accept the trailer's class. |
@@ -34,7 +34,55 @@ Shipped: 9 bicycles (basic, road, mountain, bmx, fat tire, cruiser, tandem, carg
 2 campers (van, rv; both with interiors), the semi tractor, and 8 trailers (small utility, medium cargo, large flatbed,
 livestock, tanker, camper trailer, semi box, semi flatbed). Semi trailers hitch only to a semi. Animal-drawn (ADR-358):
 6 wagons (small / medium / large, each covered and uncovered — covered twins share the uncovered twin's footprint,
-seats and storage), 1 cart, 1 carriage, 1 transport chariot.
+seats and storage), 1 cart, 1 carriage, 1 transport chariot. Paddle boats (ADR-421): raft, canoe, rowboat.
+Motorboats (ADR-422): motorboat, pontoon, speedboat.
+
+## Boats (ADR-421)
+No engine, no fuel, no `VehicleState` (render gives them no headlight cone, no cabin crop); paddling drains the
+driver's stamina like a bicycle (`stamina.perSecond`: raft 0.6, canoe 1.0, rowboat 1.2). Boats move ONLY on water
+(`waterDepth != None`): deep water at full speed, shallows at 0.55x, land at 0x — a boat driven at the shore
+beaches and stops, it never clips onto land (`boatPoseBlocked`: every footprint point of the destination pose
+must be water, plus the usual terrain/edge/solid blockers with swim tiles passable). No road bonus on water.
+Boat kits deploy on water only (`validateDeploy` returns `not_water` on land; shallow counts); kits craft at
+the dock (ADR-420) — raft 45s, canoe 60s, rowboat 90s. Boats have no hitches: nothing tows a boat, no boat
+tows anything; `validateHitch` refuses both directions. Dismount reuses the ADR-371 safe-tile search, which
+prefers land/shallow over deep water, so a rider exits onto the shore when one is in reach. Bots see boats in
+`fillVehicleSensors` and can board/drive one through the generic `drive` behaviour; `decideCrossing` returns
+`"boat"` (new decision) for a fit on-foot bot when a boat is available and the leg holds deep water — the swim
+length cap does not apply to a boat, but the fitness floors still do. No sinking in this slice; a boat at rest
+on water stays afloat. Trade-offs: raft — 2 seats, 2.2 tiles/s, 24 slots / 600 kg (slowest, biggest cheap
+storage); canoe — 2 seats, 4.2 tiles/s, 8 slots / 120 kg (fastest, lightest); rowboat — 4 seats, 3.2 tiles/s,
+16 slots / 300 kg (balanced). Art: `apps/client/src/task421-art.ts` + `pack/task421` (4 cols x 6 rows per
+atlas, 2 rows per paddle phase; idle = mid-stroke frame 8, `row` cycles [0, 8, 16]); the ADR-420 dock/shipyard
+art wiring (pack/task420 fragment + view.ts hook) landed in this slice too.
+
+## Motorboats (ADR-422)
+A boat is exactly one of paddle or motor, never both, never neither (`validateVehicleDefs`: a boat with
+fuel must have no stamina, a boat without fuel must have stamina). Motorboats have a fuel tank, a
+`VehicleState` (engine + headlights toggles, driver seat 0 only, key required — same as a car), and no
+stamina drain; the engine toggle is `no_controls` on paddle boats only. Fuel burns at `fuel.perSecond`
+x throttle x 1.3 when boosting (the same `stepPowered` drain as cars); at an empty tank the throttle cap
+is 0, so no new thrust — the boat coasts to a stop on drag, it never drifts onto land. Movement is the ADR-421 water
+path unchanged: deep water at full speed, shallows at 0.55x, land at 0x (no shallow-water stall — a
+prop still bites in the shallows; the pontoon's flat twin-hull draft is flavour, not a mechanic).
+Deploy is the same water-only kit deploy (10% fuel on deploy, `VEHICLE_CRAFT.deploy.startFuel`); kits
+craft at the shipyard (ADR-420) with a smithing gate — motorboat 180s / smithing 2, pontoon 300s /
+smithing 3, speedboat 240s / smithing 3. Fuel classes: motorboat gasoline, pontoon diesel, speedboat
+gasoline; biofuel fills either class. Repair: `repair_kit` (all classes) works in the field; the four
+engine repair items (`engine_small` / `engine_medium` / `engine_large` / `engine_diesel`) list `boat`
+and revive a wrecked motorboat at a garage (field 0, garage-only, as on cars). Bots see a motorboat's
+real fuel fraction in `fillVehicleSensors` (paddle boats still read 1), `pickRide` offers a fueled
+motorboat, and `vehicle_service` refuels below 0.25 — the same `refuelBelow` gate as cars.
+Trade-offs: motorboat — 4 seats, 7.5 tiles/s, 12 slots / 200 kg, gasoline 40 L @ 0.12 L/s (~333 s
+full-throttle range, the balanced motorboat); pontoon — 8 seats, 5.0 tiles/s, 36 slots / 1500 kg
+(the class-max storage, the water hauler), diesel 90 L @ 0.10 L/s (~900 s, the longest range);
+speedboat — 2 seats, 11.0 tiles/s (fastest boat afloat, still below the chariot's 11.5 on land),
+4 slots / 60 kg, gasoline 45 L @ 0.28 L/s (~161 s, the thirstiest engine in the game). Art:
+same painter as tier-1 (`apps/client/src/task421-art.ts` + `pack/task422`, 4 cols x 6 rows, throttle
+phases 0 idle / 1 full throttle / 2 cruise; idle = frame 8, `wake` cycles [0, 8, 16]) — outboard
+motor + prop wash instead of paddles, console + windshield on motorboat/speedboat, twin hulls + deck
++ canopy on the pontoon; the client engine/lights HUD and the render headlight cone both treat a
+motorboat as powered (`isMotorBoatDef` / `isPowered`).
 
 ## Animal-drawn vehicles (ADR-358)
 No engine, no fuel, no stamina drain, no `VehicleState` (render gives them no headlight cone). A drawn vehicle never

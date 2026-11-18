@@ -16,7 +16,7 @@ import { Transform, type Entity, type World } from "@engine/core";
 import { eidOfNetId } from "@engine/net";
 import {
   Driver, Vehicle, VehicleState, VehicleEnterCmd, VehicleExitCmd, VehicleEngineCmd, VehicleHeadlightsCmd, VehicleDeployCmd,
-  PASSENGER_SEAT, VEHICLE_ENGINE_ON, VEHICLE_HEADLIGHTS, VEHICLE_TUNING, vehicleDefOf, vehicleHasDriver, isDrawnDef, kitVehicle, type MenuIntent,
+  PASSENGER_SEAT, VEHICLE_ENGINE_ON, VEHICLE_HEADLIGHTS, VEHICLE_TUNING, vehicleDefOf, vehicleHasDriver, isDrawnDef, isPaddleBoatDef, kitVehicle, type MenuIntent,
 } from "@engine/gameplay";
 
 export interface VehicleControlsDeps {
@@ -67,8 +67,10 @@ export function mountVehicleControls(root: HTMLElement, d: VehicleControlsDeps):
     if (v !== undefined) {
       // ADR-360: a drawn vehicle has no engine or lights — the chip says nothing true about a wagon, so hide it
       // and ignore the engine/lights buttons there (Interact still exits). `driving` stays true: the driver steers.
+      // ADR-421: same for a paddle boat — paddled, no engine or lights (the server refuses toggles as no_controls).
+      // ADR-422: a motorboat DOES have an engine and lights, so the chip and buttons stay live for it.
       // ADR-371: a passenger gets a chip instead — the one thing they can do is get off (Interact).
-      const drawn = (() => { try { const d = vehicleDefOf(w, v); return !!d && isDrawnDef(d); } catch { return false; } })();
+      const drawn = (() => { try { const d = vehicleDefOf(w, v); return !!d && (isDrawnDef(d) || isPaddleBoatDef(d)); } catch { return false; } })();
       if (!drawn) {
         hud.style.display = "flex";
         const f = vehicleFlagsOf(w, v), eng = (f & VEHICLE_ENGINE_ON) !== 0, li = (f & VEHICLE_HEADLIGHTS) !== 0;

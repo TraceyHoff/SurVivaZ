@@ -109,7 +109,7 @@ describe("ADR-266 finite autonomous terrain bases", () => {
         w.set(p,Transform,{x:.5,y:2.5});
         const result=G.tryPlace(w,p,{...req(d,step.x,step.y),piece:d.pieceId(step.k==="ladder"?"ladder":"campfire")});
         expect(result.ok,JSON.stringify({step,result})).toBe(true); if(step.k==="ladder")ladder=true;
-      } else {
+      } else if (step.k === "fuel") {
         // Exercise the same authoritative open / deposit / toggle commands as the AI, not a Fuel-state shortcut.
         w.set(p,Transform,{x:.5,y:1.5});
         G.setIntent(w,p,{action:G.IntentAction.OpenContainer,target:step.piece});G.containerSystem(w);
@@ -118,7 +118,7 @@ describe("ADR-266 finite autonomous terrain bases", () => {
         fillPlanSensors(w,p,view,a,d,G.readSlots(w,p));expect(view.panel).toBeUndefined(); // a fire is NOT a carcass to loot
         G.setIntent(w,p,{action:G.IntentAction.ToggleFire,target:step.piece});G.fuelSystem(w,.05);
         expect(w.getField(step.piece,G.Fuel,"lit")).toBe(1);G.closeContainer(w,p);lit=true;
-      }
+      } else { expect(step.k).toBe("fuel"); } // pad/pit plans never emit a ramp step (ADR-419 added the variant)
       w.tick++;
     }
     expect(plan.abandoned).not.toBe(true); expect(plan.done).toBe(true); expect(ladder).toBe(true);

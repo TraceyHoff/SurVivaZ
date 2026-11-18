@@ -12,6 +12,9 @@
  * nothing new overlaps the HUD): ⬆ Raise / ⬇ Dig buttons (touch / mouse), keyboard Y raise / H dig, gamepad LT + D-pad ↑
  * raise / LT + D-pad ↓ dig. Target: the tile under the mouse when it is within reach, else the tile the player faces
  * (touch / gamepad always use the faced tile); a dashed diamond marks it. `#world-tool-bar [data-tool=raise|dig]`.
+ * ADR-419 ramp mode (same column, same shovel): "Ramp" toggles the mode (T / LT + Y, Esc exits; click the button again
+ * to cycle length 2/3/4/6), then ⬆ / ⬇ (Y / H, LT + D-pad) grades a whole ramp up / down from the marked foot tile in
+ * the facing / aimed direction — one gameplay.terrainRamp command, foot + graded line previewed as diamonds.
  * DOM hooks: `#world-labels`, `.sign-label[data-sign]`, `#settlement-label[data-kind]`, `#horde-toast[data-phase]`,
  * `#road-tool[data-surface][data-device]`, `#world-tool-bar [data-tool=road|sign]`, `#road-confirm [data-role=confirm|cancel]`,
  * `#road-preview`, `#road-cursor`.
@@ -22,7 +25,7 @@ import { Transform, type Entity, type World } from "@engine/core";
 import { worldToScreen, DEFAULT_ISO, type IsoConfig } from "@engine/world";
 import {
   Sign, HordeStatus, HordePhase, PlaceRoadCmd, PlaceSignCmd, SetSignTextCmd, SIGNS, ROADS, countItem, gameplayDefs,
-  signText, signDef, homesteads, classifySettlements, settlementNear, TerrainCmd, TERRAIN, holdingShovel, type MenuIntent,
+  signText, signDef, homesteads, classifySettlements, settlementNear, TerrainCmd, TerrainRampCmd, TERRAIN, holdingShovel, type MenuIntent,
 } from "@engine/gameplay";
 import { RoadTool, lineTiles, type RoadDevice, type RoadLine, type Tile } from "./road-tool.js";
 import { buildSignEditor } from "./sign-editor.js";
@@ -64,6 +67,31 @@ export function shovelPrompt(device: RoadDevice): string {
   if (device === "gamepad") return "Shovel: LT + D-pad ↑ raise · LT + D-pad ↓ dig";
   if (device === "touch") return "Shovel: ⬆ Raise / ⬇ Dig the marked tile";
   return "Shovel: Y raise · H dig (aim with the mouse)";
+}
+/** ADR-419: ramp lengths the Ramp button cycles through (one command grades the whole ramp). */
+export const RAMP_LENGTHS = [2, 3, 4, 6] as const;
+/** ADR-419: ramp prompt line per device (length = levels climbed / descended). */
+export function rampPrompt(device: RoadDevice, len: number): string {
+  if (device === "gamepad") return `Ramp ${len}: LT + Y on/off · LT + D-pad ↑ grade up ${len} · LT + D-pad ↓ grade down ${len}`;
+  if (device === "touch") return `Ramp ${len}: tap Ramp for length · ⬆ grade up ${len} · ⬇ grade down ${len}`;
+  return `Ramp ${len}: aim the foot tile · Y grade up ${len} · H grade down ${len} · T on/off`;
+}
+/**
+ * ADR-419: ramp direction — keyboard/mouse: from the player tile toward the hovered tile (dominant axis);
+ * touch / gamepad: the facing direction, snapped to an axis. Always one of (+-1,0) / (0,+-1).
+ */
+export function rampDir(body: { x: number; y: number; facing: number }, hovered?: Tile): { dx: number; dy: number } {
+  const px = Math.floor(body.x), py = Math.floor(body.y);
+  if (hovered && (hovered.x !== px || hovered.y !== py)) {
+    const dx = hovered.x - px, dy = hovered.y - py;
+    return Math.abs(dx) >= Math.abs(dy) ? { dx: Math.sign(dx), dy: 0 } : { dx: 0, dy: Math.sign(dy) };
+  }
+  const cx = Math.cos(body.facing), cy = Math.sin(body.facing);
+  return Math.abs(cx) >= Math.abs(cy) ? { dx: Math.sign(cx) || 1, dy: 0 } : { dx: 0, dy: Math.sign(cy) || 1 };
+}
+/** ADR-419: the tiles one ramp grades — the foot tile itself is unchanged, tiles 1..|delta| rise / fall by 1 each. */
+export function rampTiles(start: Tile, dx: number, dy: number, delta: number): Tile[] {
+  const out: Tile[] = []; for (let i = 1; i <= Math.abs(delta); i++) out.push({ x: start.x + dx * i, y: start.y + dy * i }); return out;
 }
 /**
  * ADR-263: which tile a shovel use targets. Keyboard/mouse: the hovered tile when its centre is within reach of the body,
@@ -129,12 +157,16 @@ export function mountWorldTools(root: HTMLElement, d: WorldToolsDeps): WorldTool
   // Task 25: buttons carry a custom icon (ic_road.png / ic_sign.png) + a text span; setBtnLabel updates only the span so the icon survives.
   const mkBtn = (txt: string, attr: string, val: string, fn: () => void, title: string, icon?: string): HTMLButtonElement => { const b = document.createElement("button"); b.type = "button"; if (icon) b.append(iconImg(icon, 18, "")); const s = document.createElement("span"); s.textContent = txt; b.append(s); b.dataset[attr] = val; b.title = title; b.setAttribute("aria-label", title); b.addEventListener("click", (e) => { e.stopPropagation(); fn(); }); return b; };
   const setBtnLabel = (b: HTMLButtonElement, v: string): void => { const s = b.querySelector("span"); if (s && s.textContent !== v) s.textContent = v; };
+  // ADR-419: ramp mode (shovel held): grade a ±rampLen slope from the marked foot tile instead of one level.
+  let rampOn = false, rampLen = 3;
   const roadBtn = mkBtn("Road", "tool", "road", () => road(), "Road tool (G): path, gravel, paved, off", "ic_road.png");
   const signBtn = mkBtn("Sign", "tool", "sign", () => { if (!editNearestSign()) placeSign(); }, "Place a sign you carry (N), or edit the sign next to you", "ic_sign.png");
   // ADR-263: shovel Raise / Dig (context-only: visible while a shovel is in the main hand)
-  const raiseBtn = mkBtn("⬆ Raise", "tool", "raise", () => { shovel(1); }, "Raise the ground here one level — costs 1 Soil (Y / LT + D-pad ↑)");
-  const digBtn = mkBtn("⬇ Dig", "tool", "dig", () => { shovel(-1); }, "Dig the ground here one level — gains 1 Soil (H / LT + D-pad ↓)");
-  bar.append(roadBtn, signBtn, raiseBtn, digBtn);
+  const raiseBtn = mkBtn("⬆ Raise", "tool", "raise", () => { rampOn ? ramp(1) : shovel(1); }, "Raise the ground here one level — costs 1 Soil (Y / LT + D-pad ↑); in Ramp mode grades the ramp up");
+  const digBtn = mkBtn("⬇ Dig", "tool", "dig", () => { rampOn ? ramp(-1) : shovel(-1); }, "Dig the ground here one level — gains 1 Soil (H / LT + D-pad ↓); in Ramp mode grades the ramp down");
+  // ADR-419: Ramp mode toggle — click again while on to cycle the length (2/3/4/6 levels); T / LT+Y toggles it off
+  const rampBtn = mkBtn("Ramp", "tool", "ramp", () => { if (!rampOn) { rampOn = true; } else { rampLen = RAMP_LENGTHS[(RAMP_LENGTHS.indexOf(rampLen as (typeof RAMP_LENGTHS)[number]) + 1) % RAMP_LENGTHS.length]!; } }, "Ramp tool (T / LT + Y): grade a slope from the marked tile — click again to change length");
+  bar.append(roadBtn, signBtn, raiseBtn, digBtn, rampBtn);
   const confirmBar = document.createElement("div"); confirmBar.id = "road-confirm"; confirmBar.style.display = "none";
   confirmBar.append(mkBtn("✓ Lay road", "role", "confirm", () => confirmRoad(), "Lay the planned road"), mkBtn("✕ Cancel", "role", "cancel", () => cancelRoad(), "Cancel the planned road"));
   const SVGNS = "http://www.w3.org/2000/svg";
@@ -176,6 +208,16 @@ export function mountWorldTools(root: HTMLElement, d: WorldToolsDeps): WorldTool
     if (d.hidden() || rt.active || !shovelHeld()) return false; const at = shovelTile(); if (!at) return false;
     d.sound?.("ui.click"); return d.send({ cmd: TerrainCmd, args: { x: at.x, y: at.y, dir } } as unknown as MenuIntent);
   }
+  /** ADR-419: grade a ramp from the marked foot tile in the facing / aimed direction (one command, server-validated). */
+  function ramp(dirSign: 1 | -1): boolean {
+    if (d.hidden() || rt.active || !shovelHeld() || !rampOn) return false;
+    const p = d.player(); const t = p !== undefined ? d.world().get(p, Transform) : undefined; if (!t) return false;
+    const at = shovelTile(); if (!at) return false;
+    const { dx, dy } = rampDir({ x: t.x, y: t.y, facing: t.facing ?? 0 }, device() === "keyboardMouse" ? aimTile() : undefined);
+    d.sound?.("ui.click");
+    return d.send({ cmd: TerrainRampCmd, args: { x: at.x, y: at.y, dx, dy, delta: dirSign * rampLen } } as unknown as MenuIntent);
+  }
+  function toggleRamp(): void { rampOn = !rampOn; }
   let shovelHintUntil = 0, wasShovel = false;
   const editNearestSign = (): boolean => { const e = nearestSign(); if (e === undefined) return false; editSign(e); return true; };
   let editor: { close(): void } | undefined;
@@ -193,8 +235,8 @@ export function mountWorldTools(root: HTMLElement, d: WorldToolsDeps): WorldTool
   const typing = (e: KeyboardEvent): boolean => e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
   const onKey = (e: KeyboardEvent): void => {
     if (d.input || e.repeat || typing(e) || d.hidden()) return; // with an input system the actions drive this in update()
-    if (e.code === "KeyG") road(); else if (e.code === "KeyN") placeSign(); else if (e.code === "Escape" && rt.active) cancelRoad();
-    else if (e.code === "KeyY") shovel(1); else if (e.code === "KeyH") shovel(-1);
+    if (e.code === "KeyG") road(); else if (e.code === "KeyN") placeSign(); else if (e.code === "Escape" && rampOn) rampOn = false; else if (e.code === "Escape" && rt.active) cancelRoad();
+    else if (e.code === "KeyT") toggleRamp(); else if (e.code === "KeyY") rampOn ? ramp(1) : shovel(1); else if (e.code === "KeyH") rampOn ? ramp(-1) : shovel(-1);
   };
   const target = d.canvas ?? document;
   const down = (e: Event): void => {
@@ -214,7 +256,7 @@ export function mountWorldTools(root: HTMLElement, d: WorldToolsDeps): WorldTool
   document.addEventListener("keydown", onKey); target.addEventListener("pointerdown", down); target.addEventListener("pointermove", move); target.addEventListener("pointerup", up);
   const update = (dt = 1 / 60): void => {
     const i = d.input; if (!i || d.hidden()) return;
-    if (!rt.active) { if (i.pressed("RoadTool")) road(); if (i.pressed("PlaceSign")) placeSign(); if (i.pressed("Terrain.Raise")) shovel(1); else if (i.pressed("Terrain.Lower")) shovel(-1); return; }
+    if (!rt.active) { if (i.pressed("RoadTool")) road(); if (i.pressed("PlaceSign")) placeSign(); if (i.pressed("Terrain.Ramp")) toggleRamp(); if (i.pressed("Cancel") && rampOn) { rampOn = false; return; } if (i.pressed("Terrain.Raise")) rampOn ? ramp(1) : shovel(1); else if (i.pressed("Terrain.Lower")) rampOn ? ramp(-1) : shovel(-1); return; }
     if (i.pressed("Road.Next")) road();
     if (!rt.active) return;
     if (i.pressed("Road.Cancel")) { cancelRoad(); return; }
@@ -235,12 +277,13 @@ export function mountWorldTools(root: HTMLElement, d: WorldToolsDeps): WorldTool
       layer.style.display = hide ? "none" : "";
       const dig = !hide && !rt.active && shovelHeld(); const dev = device();
       { const vis = worldToolBarState({ active: rt.active, nearSign: !hide && nearestSign() !== undefined, hidden: hide }); bar.style.display = vis.bar || dig ? "" : "none"; roadBtn.style.display = vis.road ? "" : "none"; signBtn.style.display = vis.sign ? "" : "none";
-        raiseBtn.style.display = dig ? "" : "none"; digBtn.style.display = dig ? "" : "none"; }
+        raiseBtn.style.display = dig ? "" : "none"; digBtn.style.display = dig ? "" : "none"; rampBtn.style.display = dig ? "" : "none"; }
       if (dig && !wasShovel) shovelHintUntil = performance.now() + 4000; wasShovel = dig;
-      setAttr(roadBtn, "aria-pressed", String(rt.active)); setBtnLabel(roadBtn, rt.active ? `${ROADS.surfaces[rt.surface - 1]!.name.split(" ")[0]}` : "Road");
+      setAttr(roadBtn, "aria-pressed", String(rt.active)); setAttr(rampBtn, "aria-pressed", String(rampOn)); setBtnLabel(rampBtn, rampOn ? `Ramp ${rampLen}` : "Ramp"); setBtnLabel(roadBtn, rt.active ? `${ROADS.surfaces[rt.surface - 1]!.name.split(" ")[0]}` : "Road");
       const hint = dig && performance.now() < shovelHintUntil;
-      tool.style.display = (rt.active || hint) && !hide ? "" : "none";
-      if (hint && !rt.active) { tool.dataset["device"] = dev; const txt = shovelPrompt(dev); if (tool.textContent !== txt) tool.textContent = txt; }
+      tool.style.display = (rt.active || hint || (rampOn && dig)) && !hide ? "" : "none";
+      if (rampOn && dig && !rt.active) { tool.dataset["device"] = dev; const txt = rampPrompt(dev, rampLen); if (tool.textContent !== txt) tool.textContent = txt; }
+      else if (hint && !rt.active) { tool.dataset["device"] = dev; const txt = shovelPrompt(dev); if (tool.textContent !== txt) tool.textContent = txt; }
       if (rt.active) { tool.dataset["surface"] = String(rt.surface); tool.dataset["device"] = dev; tool.textContent = `Road tool: ${ROADS.surfaces[rt.surface - 1]!.name} — ${roadPrompt(dev, { start: !!rt.start, pending: !!rt.pending })}`; }
       confirmBar.style.display = rt.active && rt.pending && !hide && dev !== "gamepad" ? "flex" : "none";
       // preview + gamepad cursor
@@ -249,6 +292,12 @@ export function mountWorldTools(root: HTMLElement, d: WorldToolsDeps): WorldTool
       svg.replaceChildren();
       if (line && cam) { svg.style.display = ""; lineTiles(line).forEach((t, k) => svg.append(diamond(cam, t, k === 0 ? "start" : ""))); }
       else if (rt.active && rt.start && cam && !hide) { svg.style.display = ""; svg.append(diamond(cam, rt.start, "start")); }
+      else if (rampOn && dig && cam) { // ADR-419: ramp preview — foot tile + the graded line
+        const p = d.player(); const t = p !== undefined ? d.world().get(p, Transform) : undefined;
+        const at = shovelTile();
+        if (at && t) { const { dx, dy } = rampDir({ x: t.x, y: t.y, facing: t.facing ?? 0 }, dev === "keyboardMouse" ? aimTile() : undefined); svg.style.display = ""; svg.append(diamond(cam, at, "start")); for (const rtile of rampTiles(at, dx, dy, rampLen)) svg.append(diamond(cam, rtile, "dig")); }
+        else svg.style.display = "none";
+      }
       else if (dig && cam) { const at = shovelTile(); if (at) { svg.style.display = ""; svg.append(diamond(cam, at, "dig")); } else svg.style.display = "none"; } // ADR-263 shovel target
       else svg.style.display = "none";
       const ct = rt.cursorTile();

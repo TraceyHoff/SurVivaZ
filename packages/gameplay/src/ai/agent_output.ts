@@ -1,4 +1,5 @@
 import { TerrainCmd } from "../terrain.js";
+import { TerrainRampCmd, RAMP_MAX_DELTA } from "../ramp.js";
 import { DyeCmd } from "../dye.js";
 import { DropItemCmd, PetOfferCmd } from "../pets.js";
 /**
@@ -70,6 +71,7 @@ export type AgentOutputWithCommands = AgentOutput & { commands?: AgentCommand[] 
 /** Entity fields hold the bot's replica entity; the host (local.ts sendAgentCommands -> NetClient.sendCommand) maps them to NetIds. */
 export function actionCommand(action: string): AgentCommand | undefined {
   if (action.startsWith("terrain:")) { const n = action.split(":").slice(1).map(Number); return n.length === 3 && n.every(Number.isInteger) && Math.abs(n[2]!) === 1 ? { type: TerrainCmd.name, payload: { x: n[0]!, y: n[1]!, dir: n[2]! } } : undefined; }
+  if (action.startsWith("ramp:")) { const n = action.split(":").slice(1).map(Number); return n.length === 5 && n.every(Number.isInteger) && Math.abs(n[4]!) >= 1 && Math.abs(n[4]!) <= RAMP_MAX_DELTA && ((n[2]! === 1 || n[2]! === -1) && n[3]! === 0 || (n[3]! === 1 || n[3]! === -1) && n[2]! === 0) ? { type: TerrainRampCmd.name, payload: { x: n[0]!, y: n[1]!, dx: n[2]!, dy: n[3]!, delta: n[4]! } } : undefined; } // ADR-419: one command grades the whole ramp
   const party = partyActionCommand(action); if (party !== null) return party;
   const clan = clanActionCommand(action); if (clan !== null) return clan;
   const veh = vehicleActionCommand(action); if (veh !== null) return veh;
@@ -185,7 +187,7 @@ function ropeActionCommand(action: string): AgentCommand | undefined | null {
     default: return null;
   }
 }
-const COMMAND_ACTIONS = new Set(["mfeed", "mride", "mdismount", "msaddle", "mrepair", "mharness", "munharness", "rope", "terrain", "venter", "vexit", "vhitch", "vunhitch", "vstation", "vrefuel", "vrepair", "vdeploy", "ccreate", "cinvite", "caccept", "cleave", "cpromote", "cdemote", "ckick", "cperms", "cgoal", "cstock", "eat", "drink", "craft", "build", "open", "buy", "pinvite", "paccept", "pdecline", "pleave", "pkick", "skill", "equip", "repair", "upgrade", "copen", "cclose", "cdeposit", "fire", "cwithdraw", "wear", "door", "drop", "dye"]);
+const COMMAND_ACTIONS = new Set(["mfeed", "mride", "mdismount", "msaddle", "mrepair", "mharness", "munharness", "rope", "terrain", "ramp", "venter", "vexit", "vhitch", "vunhitch", "vstation", "vrefuel", "vrepair", "vdeploy", "ccreate", "cinvite", "caccept", "cleave", "cpromote", "cdemote", "ckick", "cperms", "cgoal", "cstock", "eat", "drink", "craft", "build", "open", "buy", "pinvite", "paccept", "pdecline", "pleave", "pkick", "skill", "equip", "repair", "upgrade", "copen", "cclose", "cdeposit", "fire", "cwithdraw", "wear", "door", "drop", "dye"]);
 /**
  * Moves the command-type actions (eat, drink, craft, build, open, buy) out of out.actions and into out.commands, in order.
   Movement and gather/attack/sleep stay

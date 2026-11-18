@@ -83,6 +83,9 @@ import { task256AtlasSources, TASK256_ATLAS_KEYS } from "./task256-art.js";
 import { task355AtlasSources, installStoreMenuIcons, TASK355_ATLAS_KEYS } from "./task355-art.js";
 import { task361AtlasSources, installVehicleMenuIcons, TASK361_ATLAS_KEYS } from "./task361-art.js";
 import { task410AtlasSources, TASK410_ATLAS_KEYS } from "./task410-art.js";
+import { task420AtlasSources, installTask420MenuIcons, TASK420_ATLAS_KEYS } from "./task420-art.js";
+import { task421AtlasSources, installBoatMenuIcons, TASK421_ATLAS_KEYS } from "./task421-art.js";
+import { task422AtlasSources, installMotorboatMenuIcons, TASK422_ATLAS_KEYS } from "./task421-art.js";
 import { installGuideArt } from "./task364-art.js";
 import { installGuideMenuIcon } from "./guide-art.js";
 import { stumpKeys } from "./stumps.js";
@@ -422,6 +425,12 @@ export class IsoView {
     for (const [k, src] of await task361AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-410: sloped-ground tilesets (ramps/wedges per material x season, 1x + @2x pages painted at runtime).
     for (const [k, src] of await task410AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-420: dedicated dock / shipyard atlases (world sprites keyed dec_dock / dec_shipyard).
+    for (const [k, src] of await task420AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-421: dedicated tier-1 boat atlases (world sprites keyed by def id, like ADR-361).
+    for (const [k, src] of await task421AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-422: dedicated tier-2 motorboat atlases (world sprites keyed by def id, like ADR-421).
+    for (const [k, src] of await task422AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-357: the five store build-menu icons point at items_build frames 297–301, which are transparent
     // in the shipped atlas (no binary could ship through the snapshot route) — paint them at runtime from
     // the stores' own world art so the build menu shows them. Safe no-op without a canvas.
@@ -430,6 +439,16 @@ export class IsoView {
     // (they fall back to the fiber category icon) — paint them at runtime from the world art. Safe no-op
     // without a canvas.
     installVehicleMenuIcons();
+    // ADR-420: the dock / shipyard build-menu icons point at items_build cells that are transparent in
+    // the shipped atlas — paint them at runtime from the structures' own world art. Safe no-op without
+    // a canvas.
+    installTask420MenuIcons();
+    // ADR-421: the three boat kits have no atlas cell or CSS rule either — paint them at runtime from
+    // the boats' own world art. Safe no-op without a canvas.
+    installBoatMenuIcons();
+    // ADR-422: the three motorboat kits likewise — paint them at runtime from the motorboats' own
+    // world art. Safe no-op without a canvas.
+    installMotorboatMenuIcons();
     // ADR-364: the guide's placement-hologram image needs the ghost ore store, which has no menu-icon art
     // (it is a rendering of the store's own world art in the game's ghost treatment) — paint it at
     // runtime from the store art. Safe no-op without a canvas.
@@ -454,7 +473,7 @@ export class IsoView {
     // ADR-118: count atlas/KTX2 image responses as they land (Resource Timing works for fetch and <img>); expected =
     // the eager atlases (paper-doll/streamed ones load on demand later), so the fraction stays honest and capped < 1.
     // Task 34 blob URLs carry no file extension, so the png-regex watcher never counts them; exclude them so the fraction stays honest.
-    const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[]), ...(TASK355_ATLAS_KEYS as readonly string[]), ...(TASK361_ATLAS_KEYS as readonly string[]), ...(TASK410_ATLAS_KEYS as readonly string[])]);
+    const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[]), ...(TASK355_ATLAS_KEYS as readonly string[]), ...(TASK361_ATLAS_KEYS as readonly string[]), ...(TASK410_ATLAS_KEYS as readonly string[]), ...(TASK420_ATLAS_KEYS as readonly string[]), ...(TASK421_ATLAS_KEYS as readonly string[]), ...(TASK422_ATLAS_KEYS as readonly string[])]);
     const expected = [...registry.atlases.keys()].filter((k) => !custom.includes(k) && !paintedAtlas.has(k)).length;
     const stopWatch = watchResources(/\.(png|webp|ktx2|avif|jpe?g)(\?|$)/i, (n, bytes) => onStage("atlases", countFraction(n, expected), `Loading sprite atlases (${n}/${expected}${bytes ? `, ${(bytes / 1048576).toFixed(1)} MB` : ""})`));
     // ADR-380: the initial setRegistry has no frames to protect — disable the ADR-190 resize slicer for it (its

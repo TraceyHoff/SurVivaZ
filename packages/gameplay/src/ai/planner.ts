@@ -1,4 +1,4 @@
-import { nextTerrainWork, type TerrainBasePlan } from "./terrain_base.js";
+import { nextRampWork, nextTerrainWork, type RampPlan, type TerrainBasePlan } from "./terrain_base.js";
 import { hasShovel } from "../terrain.js";
 /**
  * ADR-252: goal-driven planner for AI humans. Each sense pass (autonomy.ts, every SENSE_EVERY ticks per bot) walks a fixed
@@ -50,7 +50,10 @@ export function fireState(world: World, defs: GameDefs, e: Entity): { lit: boole
 
 // ---------------- long-term memory ----------------
 export interface AiStats { trips: number; tripMax: number; deposits: number; withdraws: number; repairs: number; refuels: number; crafts: number; stationCrafts: number; built: number; hunts: number; loots: number; wears: number; relocations: number; bestTier: number; snoozed: number }
-export interface AiMemory { v: 1; base?: { x: number; y: number }; stats: AiStats; earth?: TerrainBasePlan; hireEarth?: TerrainBasePlan; fails: Record<string, number>; blocked: string[]; snooze?: Record<string, number>;
+export interface AiMemory { v: 1; base?: { x: number; y: number }; stats: AiStats; earth?: TerrainBasePlan; hireEarth?: TerrainBasePlan;
+  /** ADR-419: ramp plan for a >= 2-level step on a frequent route (smoothed before the bot keeps tripping over it). */
+  ramp?: RampPlan;
+  fails: Record<string, number>; blocked: string[]; snooze?: Record<string, number>;
   /** ADR-343: the plan's unmet gather need (item ids + the tick it was last confirmed by a sensor pass) — the travel
    *  layer's fuel for a resource expedition, readable off-screen where there is no view / plan. Cleared when the plan
    *  no longer needs anything. */
@@ -110,6 +113,10 @@ export const STATION_SLOTS: Readonly<Record<string, readonly { x: number; y: num
   claim_totem: [{ x: -1.5, y: 0.5 }, { x: 2.5, y: 3.8 }, { x: 1, y: -1.7 }], // ADR-310: flag first, covering the hut (ADR-315: radius 32; the slot must also clear every other claim)
   campfire: [{ x: 2.6, y: 2.9 }, { x: 1.6, y: 3.4 }], workbench: [{ x: 3.5, y: 0.5 }, { x: 0.5, y: -1.5 }], storage_box: [{ x: 3.5, y: 1.6 }, { x: 1.5, y: -1.5 }], basic_storage_box: [{ x: 3.5, y: 1.6 }, { x: 1.5, y: -1.5 }], // ADR-250 starter box: same spots (one base box)
   furnace: [{ x: -1.5, y: 0.5 }, { x: 3.5, y: -1.2 }], anvil: [{ x: -1.5, y: 1.6 }, { x: -1.2, y: -1.2 }],
+  // ADR-420: water stations have no land slot at the base — these are outward probes (the ghost check
+  // rejects land/shallow, so only a probe that lands on deep water ever builds). There is no water
+  // search yet: a base with no deep water in these directions simply never builds a dock/shipyard.
+  dock: [{ x: 6.5, y: 0.5 }, { x: -5.5, y: 0.5 }], shipyard: [{ x: 6.5, y: 3.5 }, { x: -5.5, y: 3.5 }],
   // Task 28: furnishing — table inside the hut (SE tile), light by the door, shelf + trough + salt barrel in the yard
   table: [{ x: 1.5, y: 1.5 }], torch_stand: [{ x: 0.5, y: 2.9 }, { x: 2.6, y: 2.9 }],
   shelf_rustic: [{ x: 3.5, y: 0.5 }, { x: 0.5, y: -1.5 }], feeding_trough: [{ x: 3.5, y: 2.6 }, { x: -1.5, y: 2.6 }],
@@ -136,7 +143,7 @@ interface Ix {
   animal: Map<number, number[]>; station: Map<StationKind, PieceDef>; reachable: Set<number>; tools: ItemDef[]; foods: number[]; useful: Set<number>;
 }
 const ixCache = new WeakMap<GameDefs, Ix>();
-const STATION_KEYS: Record<string, StationKind> = { campfire: StationKind.Campfire, workbench: StationKind.Workbench, furnace: StationKind.Furnace, anvil: StationKind.Anvil };
+const STATION_KEYS: Record<string, StationKind> = { campfire: StationKind.Campfire, workbench: StationKind.Workbench, furnace: StationKind.Furnace, anvil: StationKind.Anvil, dock: StationKind.Dock, shipyard: StationKind.Shipyard };
 export function plannerIndex(defs: GameDefs): Ix {
   let ix = ixCache.get(defs); if (ix) return ix;
   ix = { item: new Map(), piece: new Map(), recipes: new Map(), nodes: new Map(), animal: new Map(), station: new Map(), reachable: new Set(), tools: [], foods: [], useful: new Set() };
@@ -290,6 +297,8 @@ const gameplayDefsOf = (world: World): GameDefs | undefined => world.getResource
 // ---------------- the planner ----------------
 export type Step =
   | { k: "terrain"; x: number; y: number; dir: number; stand: { x: number; y: number } }
+  /** ADR-419: grade a whole ramp in one command (TerrainRampCmd via the "ramp:..." action). */
+  | { k: "ramp"; x: number; y: number; dx: number; dy: number; delta: number; stand: { x: number; y: number } }
   | { k: "light"; piece: Entity }
   | { k: "withdraw"; item: number; count: number }
   | { k: "craft"; recipe: number; count: number; station: StationKind; ticks: number }
@@ -299,13 +308,14 @@ export type Step =
   | { k: "upgrade"; piece: number; tier: number };
 export interface Plan { goal: string; step?: Step; leaves: number[]; hunt: number[]; keep: Set<number>; blocked: string[] }
 
-type Goal = { k: "earthworks" } | { k: "tool"; kind: ToolKind; tier: number; name: string } | { k: "item"; key: string; count: number; alt?: string } | { k: "piece"; key: string } | { k: "base" } | { k: "wear"; key: string } | { k: "cook" } | { k: "hearth" } | { k: "bed" } | { k: "furnish"; key: string; slot?: BaseSlot } | { k: "upgrade" } | { k: "defence" };
+type Goal = { k: "earthworks" } | { k: "ramp" } | { k: "tool"; kind: ToolKind; tier: number; name: string } | { k: "item"; key: string; count: number; alt?: string } | { k: "piece"; key: string } | { k: "base" } | { k: "wear"; key: string } | { k: "cook" } | { k: "hearth" } | { k: "bed" } | { k: "furnish"; key: string; slot?: BaseSlot } | { k: "upgrade" } | { k: "defence" };
 export const GOAL_LADDER: readonly Goal[] = [
   { k: "tool", kind: ToolKind.Axe, tier: 1, name: "axe" }, { k: "tool", kind: ToolKind.Pickaxe, tier: 1, name: "pickaxe" },
   // ADR-252 / ADR-250: campfire -> starter storage box -> workbench (isBaseStoragePiece: any storage piece satisfies the box goal)
   { k: "piece", key: "campfire" }, { k: "piece", key: STARTER_STORAGE_PIECE }, { k: "item", key: "wood", count: 8 }, { k: "piece", key: "workbench" },
   { k: "wear", key: "torch" }, // ADR-252 / ADR-217: a held light in the off hand keeps zombies out of its 5.5-tile ring at dusk / night
   { k: "earthworks" }, // Yard stations stay outside the finite footprint/quarry.
+  { k: "ramp" }, // ADR-419: smooth a >= 2-level step on a frequent route (after the shelter pad/pit, before building on it).
   { k: "base" }, { k: "hearth" },
   { k: "bed" },
   // ADR-341: defence is a first-class plan goal once the bot has shelter (tools, fire, storage,
@@ -321,7 +331,12 @@ export const GOAL_LADDER: readonly Goal[] = [
   { k: "cook" }, { k: "wear", key: "straw_hat" }, { k: "wear", key: "reed_sandals" }, { k: "tool", kind: ToolKind.Shovel, tier: 1, name: "shovel" },
   { k: "item", key: "wood", count: 20 }, { k: "item", key: "cooked_meat", count: 2 }, { k: "wear", key: "leather_gloves" }, { k: "wear", key: "leather_boots" },
   { k: "wear", key: "leather_cap" }, { k: "item", key: "water_flask", count: 1 }, { k: "piece", key: "furnace" }, { k: "item", key: "charcoal", count: 4 },
-  { k: "item", key: "bronze_ingot", count: 4 }, { k: "piece", key: "anvil" }, { k: "tool", kind: ToolKind.Axe, tier: 2, name: "axe2" },
+  { k: "item", key: "bronze_ingot", count: 4 }, { k: "piece", key: "anvil" },
+  // ADR-420: boatbuilding comes after the anvil (the shipyard's iron/steel needs the furnace + anvil
+  // chain). Both are water goals: obtainPiece ghost-checks the STATION_SLOTS probes, and a base with
+  // no deep water nearby just records them blocked and moves on (a stuck piece goal never holds the ladder).
+  { k: "piece", key: "dock" }, { k: "piece", key: "shipyard" },
+  { k: "tool", kind: ToolKind.Axe, tier: 2, name: "axe2" },
   { k: "tool", kind: ToolKind.Pickaxe, tier: 2, name: "pickaxe2" }, { k: "item", key: "bronze_spear", count: 1 },
   // Task 28: last of all, upgrade the home to the max tier (reinforced) one piece at a time.
   { k: "upgrade" },
@@ -345,6 +360,8 @@ export interface PlanInput {
   /** ADR-323: recursion cap of the backward chain (recipe depth); deeper = stuck. */
   maxDepth?: number;
   earth?: TerrainBasePlan; terrainOnly?: boolean; shelterOnly?: boolean; world: World; self: Entity; defs: GameDefs; base?: { x: number; y: number }; bs?: BaseState; fails: Record<string, number>; hungry?: boolean; snooze?: Record<string, number>; freezing?: boolean; evening?: boolean; /** ADR-252 / ADR-239: winter (cold all day): fire + a day's fuel come first */ winter?: boolean;
+  /** ADR-419: a ramp plan for a >= 2-level step on a frequent route (found by fillPlanSensors). */
+  ramp?: RampPlan;
   /** ADR-340: adopted ruin home anchor (ruin centre minus 1, so anchor+1 is the centre — the hut
    *  anchor convention). Behaviour goals (piece / furnish / hearth / bed / upgrade / cook / storage)
    *  run against it via `bs` (scanned at the anchor); the `base` goal (BASE_SLOTS build) NEVER runs
@@ -439,6 +456,7 @@ export function makePlan(p: PlanInput): Plan {
   const worn = new Set<number>(); const wi = world.getArray(self, Worn, "item"); if (wi) for (const x of wi) if (x) worn.add(x);
   const blocked: string[] = []; const keepAll = new Set<number>();
   if (p.earth && !p.earth.done) { const soil = ix.item.get("soil"); if (soil) keepAll.add(soil.id); }
+  if (p.ramp && !p.ramp.done) { const soil = ix.item.get("soil"); if (soil) keepAll.add(soil.id); }
   const pre: Goal[] = []; if (p.freezing) pre.push(...EMERGENCY); if (p.hungry) pre.push({ k: "cook" });
   if (p.winter && !p.evening) { const fire = p.bs?.stations.get(StationKind.Campfire); const inFire = fire ? Math.floor(fire.fuelTicks / 400) : 0; if (inFire < WINTER_WOOD) { if (!fire) pre.push(GOAL_LADDER[0]!, { k: "piece", key: "campfire" }); pre.push({ k: "item", key: "wood", count: Math.max(8, WINTER_WOOD - inFire) }); } }
   if (p.evening) { const fire = p.bs?.stations.get(StationKind.Campfire); const inFire = fire ? Math.floor(fire.fuelTicks / 400) : 0; if (inFire < NIGHT_WOOD) { if (!fire) pre.push(GOAL_LADDER[0]!, { k: "piece", key: "campfire" }); pre.push(...EVENING(inFire)); } } // ADR-252: a stone axe and the fire first (5 wood + 4 stone), then its night of fuel
@@ -474,6 +492,18 @@ export function makePlan(p: PlanInput): Plan {
       }
       if (r.step || r.leaves.size || r.hunt.size) return out(g, r);
       if (!p.earth.done && !p.earth.abandoned) return out(g, r); // don't lay foundations before the planned earthworks
+      continue;
+    }
+    else if (g.k === "ramp") {
+      name = "ramp"; if (!p.ramp || p.ramp.done || p.ramp.abandoned) continue;
+      if (!hasShovel(world, self)) { r.obtainTool(ToolKind.Shovel, 1); }
+      else {
+        const work = nextRampWork(world, self, p.ramp);
+        if (work?.k === "ramp") r.step = work;
+        else if (work?.k === "terrain") r.step = work; // quarry soil for the ramp first
+      }
+      if (r.step || r.leaves.size || r.hunt.size) return out(g, r);
+      if (!p.ramp.done && !p.ramp.abandoned) return out(g, r); // ramp first, then the rest of the ladder
       continue;
     }
     else if (g.k === "base") { name = "base"; if (!p.base) continue; // ADR-340: ruinBase never builds BASE_SLOTS — a ruin home skips this goal entirely

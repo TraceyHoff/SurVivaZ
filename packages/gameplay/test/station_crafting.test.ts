@@ -5,7 +5,7 @@ import * as G from "../src/index.js";
 import { makeWorld, steps, spawnLearned } from "./helpers.js";
 
 const d = G.defaultDefs(); const id = (k: string) => d.itemId(k);
-const KINDS = [0, 1, 2, 3, 4, 5];
+const KINDS = Object.keys(G.STATION_NAMES).map(Number); // ADR-420: dock 6 + shipyard 7 — derived, so a new station cannot go untagged
 function setup() { const w = makeWorld(); G.installCraftQueue(w); const p = spawnLearned(w, { x: 0, y: 0, maxWeight: 0 }); return { w, p, c: { world: w, player: p } }; }
 
 describe("ADR-136 station crafting split", () => {

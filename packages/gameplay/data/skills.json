@@ -2964,6 +2964,44 @@
    },
    "desc": "Saddlery 4: Steel Saddle (9 bag slots).",
    "icon": "skill_armorsmithing_3"
+  },
+  {
+   "key": "dock_craft",
+   "name": "Dock",
+   "branch": "crafting",
+   "tier": 4,
+   "x": 920,
+   "y": 440,
+   "cost": 1,
+   "requires": [
+    "workbench_craft"
+   ],
+   "effects": {
+    "unlock": [
+     "piece:dock"
+    ]
+   },
+   "desc": "Build a dock in deep water and craft rafts, canoes and rowboats.",
+   "icon": "skill_tinkerer"
+  },
+  {
+   "key": "shipyard_craft",
+   "name": "Shipyard",
+   "branch": "crafting",
+   "tier": 5,
+   "x": 920,
+   "y": 550,
+   "cost": 2,
+   "requires": [
+    "anvil_craft"
+   ],
+   "effects": {
+    "unlock": [
+     "piece:shipyard"
+    ]
+   },
+   "desc": "Build a shipyard in deep water and craft motorboats, pontoons and speedboats.",
+   "icon": "skill_grease_monkey"
   }
  ]
 }

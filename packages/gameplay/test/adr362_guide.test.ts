@@ -16,6 +16,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_TICK_HZ } from "@engine/core";
+import { REGION_SIZE } from "@engine/world";
 import guideRaw from "../data/guide.json";
 import diseasesRaw from "../data/diseases.json";
 import environmentRaw from "../data/environment.json";
@@ -34,6 +35,7 @@ import piecesRaw from "../data/pieces.json";
 import itemsRaw from "../data/items.json";
 import mountsRaw from "../data/mounts.json";
 import vehiclesRaw from "../data/vehicles.json";
+import vehicleStorageRaw from "../data/vehicle_storage.json";
 import recipesRaw from "../data/recipes.json";
 import vehicleRecipesRaw from "../data/vehicle_recipes.json";
 import tiersRaw from "../data/tiers.json";
@@ -48,6 +50,7 @@ import {
   resolvedGuideSection, validateGuide, type GuideFactFormat,
 } from "../src/guide.js";
 import { WANTED_ITEM_KEYS } from "../src/recruitment.js";
+import { RAMP_MAX_DELTA, RAMP_MAX_EDITS } from "../src/ramp.js";
 import { SAFE_SPAWN_RADIUS } from "../src/spawn_points.js";
 import { FIRE_HEAT_MAX_C, FIRE_HEAT_TAU_S, FREEZING_C, WET_INSULATION_LOSS } from "../src/systems/environment.js";
 import { SALT_CONSUME_TICKS } from "../src/systems/spoilage.js";
@@ -98,6 +101,13 @@ const loveTreats = (speciesKey: string): string[] => {
   expect(s, `pet species ${speciesKey} must exist`).toBeDefined();
   return Object.entries(s!.treats).filter(([, pref]) => pref === "love").map(([k]) => k);
 };
+const vehicle = (id: string) => {
+  const v = (vehiclesRaw as { vehicles: { id: string; class: string; seats: number; maxSpeed: number; storage: { slots: number; maxWeight: number }; fuel?: { capacity: number; perSecond: number } | null }[] }).vehicles.find((x) => x.id === id);
+  expect(v, `vehicle ${id} must exist in vehicles.json`).toBeDefined();
+  return v!;
+};
+const boatScale = (vehicleStorageRaw as { scale: Record<string, number> }).scale.boat!;
+const boatMax = (vehicleStorageRaw as { max: Record<string, number> }).max.boat!;
 /** Body-temp tier boundary, probed from the game's own temperatureTier (same idea as the loader). */
 const tierBoundary = (tier: "freezing" | "overheating"): number => {
   if (tier === "freezing") {
@@ -175,6 +185,11 @@ const EXPECTED: Record<string, string> = {
   "food.frozenBelowC": `${cToF(FREEZING_C)} °F`,
   "building.claimRadiusTiles": `${piece("claim_totem").privilegeRadius} tiles`,
   "building.claimCost": piece("claim_totem").cost!.map((c) => `${c.amount} ${itemName(c.resource)}`).join(", "),
+  "building.dockCost": piece("dock").cost!.map((c) => `${c.amount} ${itemName(c.resource)}`).join(", "),
+  "building.shipyardCost": piece("shipyard").cost!.map((c) => `${c.amount} ${itemName(c.resource)}`).join(", "),
+  "terrain.rampMaxDelta": String(RAMP_MAX_DELTA),
+  "terrain.rampMaxEdits": String(RAMP_MAX_EDITS),
+  "world.regionSizeTiles": `${REGION_SIZE} tiles`,
   "building.maxPiecesPerZone": String(tiers.building.maxPiecesPerZone),
   "building.maxLevel": String(tiers.building.maxLevel),
   "building.containerReachTiles": `${tiers.building.containerReach} tiles`,
@@ -220,6 +235,14 @@ const EXPECTED: Record<string, string> = {
   )} tiles/s`,
   "vehicles.carriageSeats": String((vehiclesRaw as { vehicles: { id: string; seats: number }[] }).vehicles.find((v) => v.id === "carriage")!.seats),
   "vehicles.wagonLargeStorageSlots": `${(vehiclesRaw as { vehicles: { id: string; storage: { slots: number } }[] }).vehicles.find((v) => v.id === "wagon_large")!.storage.slots} slots`,
+  "vehicles.boatCount": String((vehiclesRaw as { vehicles: { class: string }[] }).vehicles.filter((v) => v.class === "boat").length),
+  "vehicles.canoeSpeed": `${vehicle("canoe").maxSpeed} tiles/s`,
+  "vehicles.raftStorageSlots": `${Math.max(1, Math.min(boatMax, 96, Math.round(vehicle("raft").storage.slots * boatScale)))} slots`,
+  "vehicles.rowboatSeats": String(vehicle("rowboat").seats),
+  "vehicles.motorboatSpeed": `${vehicle("motorboat").maxSpeed} tiles/s`,
+  "vehicles.pontoonStorageSlots": `${Math.max(1, Math.min(boatMax, 96, Math.round(vehicle("pontoon").storage.slots * boatScale)))} slots`,
+  "vehicles.speedboatSpeed": `${vehicle("speedboat").maxSpeed} tiles/s`,
+  "vehicles.motorboatFuelCapacity": String(vehicle("motorboat").fuel!.capacity),
   "farming.plantableCount": String(farm.plantables.length),
   "farming.growMinSeconds": fmtDur(Math.min(...farm.plantables.map((p) => p.growSeconds))),
   "farming.growMaxSeconds": fmtDur(Math.max(...farm.plantables.map((p) => p.growSeconds))),
@@ -318,7 +341,7 @@ describe("ADR-362 guide content + data", () => {
     expect(resolveGuideFact("building.claimCost", "cost")).toBe("10 Pine Log, 10 Stone, 2 Dye");
     expect(resolveGuideFact("safety.safeRadiusTiles", "tiles")).toBe("20 tiles");
     expect(resolveGuideFact("inventory.totalSlots", "count")).toBe("24");
-    expect(resolveGuideFact("cooking.recipeCount", "count")).toBe("394");
+    expect(resolveGuideFact("cooking.recipeCount", "count")).toBe("400");
     expect(resolveGuideFact("temperature.fireHeatMaxC", "tempDelta")).toBe("+15 °C (+27 °F)");
   });
 
@@ -390,7 +413,7 @@ describe("ADR-362 guide content + data", () => {
       "mouse.wheelDown": "Scroll down", "mouse.wheelUp": "Scroll up",
     };
     for (let d = 1; d <= 8; d++) CONTROL_LABELS[`key.Digit${d}`] = String(d);
-    for (const code of ["KeyE", "KeyR", "KeyX", "KeyC", "KeyM", "KeyP", "KeyB", "KeyY", "KeyH", "KeyU", "KeyV", "KeyF", "KeyG", "KeyN", "KeyQ", "KeyZ"]) {
+    for (const code of ["KeyE", "KeyR", "KeyX", "KeyC", "KeyM", "KeyP", "KeyB", "KeyY", "KeyH", "KeyU", "KeyV", "KeyF", "KeyG", "KeyN", "KeyQ", "KeyZ", "KeyT"]) {
       CONTROL_LABELS[`key.${code}`] = code.slice(3);
     }
     const gameplayBindings = (kbmRaw as { bindings: Record<string, { action: string; control?: string; composite?: { up: string; down: string; left: string; right: string } }[]> }).bindings.Gameplay;

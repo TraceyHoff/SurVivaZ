@@ -7,6 +7,8 @@
 export interface VehicleRenderDef {
   id: string; class: string; seats: number;
   footprint: { length: number; width: number };
+  /** ADR-422: fuel tank when the def has one (motorboats and motor vehicles); absent/null on paddle boats. */
+  fuel?: { capacity: number; perSecond: number } | null;
   hitches: readonly { at: "front" | "rear"; offset: number; /** vehicle-local hitch point (x = u, y = v); gameplay defs carry it (ADR-101) */ anchor?: { x: number; y: number; z: number } }[];
   /** Per-seat anchors from vehicles.json (x = u, y = v, z). Required for riders (ADR-101). */
   seatAnchors?: readonly { x: number; y: number; z: number }[];
@@ -31,14 +33,20 @@ export const toWorld = (x: number, y: number, h: number, u: number, v: number): 
   const c = Math.cos(h), s = Math.sin(h); return [x + c * u - s * v, y + s * u + c * v];
 };
 
-/** Classes whose body hides the rider's lower half (cabin crop); bicycles show the whole rider. */
-export const hasCabin = (d: VehicleRenderDef): boolean => d.class !== "bicycle" && d.class !== "trailer";
+/** Classes whose body hides the rider's lower half (cabin crop); bicycles and boats show the whole rider. */
+export const hasCabin = (d: VehicleRenderDef): boolean => d.class !== "bicycle" && d.class !== "trailer" && d.class !== "boat";
 export const hasInterior = (d: VehicleRenderDef): boolean => d.interior.stations.length > 0;
 /** ADR-358: animal-drawn classes (gameplay vehicles.json) — engineless, so no headlamps. Render does not depend on
  * gameplay, so the list is duplicated here; keep it in sync with DRAWN_CLASSES in gameplay vehicles.ts. */
 export const DRAWN_VEHICLE_CLASSES = ["wagon", "cart", "carriage", "chariot"] as const;
 export const isDrawnVehicleClass = (c: string): boolean => (DRAWN_VEHICLE_CLASSES as readonly string[]).includes(c);
-export const isPowered = (d: VehicleRenderDef): boolean => d.class !== "trailer" && !isDrawnVehicleClass(d.class);
+/** ADR-421: paddle boats — engineless (stamina), so no headlamps either. Keep in sync with BOAT_CLASSES. */
+export const BOAT_VEHICLE_CLASSES = ["boat"] as const;
+export const isBoatVehicleClass = (c: string): boolean => c === "boat";
+/** ADR-422: a motorboat (class boat WITH a fuel tank) is powered like a car — its headlamps render when the
+ * engine + lights bits are on. A paddle boat (class boat, no tank) stays unpowered. The gameplay def flows
+ * through as the render def (view.ts casts it), so `fuel` is present exactly when the def has a tank. */
+export const isPowered = (d: VehicleRenderDef): boolean => d.class !== "trailer" && !isDrawnVehicleClass(d.class) && (!isBoatVehicleClass(d.class) || !!d.fuel);
 
 export interface SeatAnchor { u: number; v: number; z: number; cabin: boolean }
 /** Seat anchors from vehicles.json (ADR-101; seat 0 = driver). Verified equal to the old computed layout before it was

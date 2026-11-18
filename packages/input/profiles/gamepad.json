@@ -269,6 +269,13 @@
     ]
    },
    {
+    "action": "Terrain.Ramp",
+    "control": "pad.y",
+    "modifiers": [
+     "pad.lt"
+    ]
+   },
+   {
     "action": "ToggleDemolish",
     "control": "pad.b",
     "modifiers": [

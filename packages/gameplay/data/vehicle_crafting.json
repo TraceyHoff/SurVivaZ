@@ -89,7 +89,8 @@
           "van",
           "camper",
           "truck",
-          "semi"
+          "semi",
+          "boat"
         ],
         "wreckOk": true
       },
@@ -101,7 +102,8 @@
           "van",
           "camper",
           "truck",
-          "semi"
+          "semi",
+          "boat"
         ],
         "wreckOk": true
       },
@@ -113,7 +115,8 @@
           "van",
           "camper",
           "truck",
-          "semi"
+          "semi",
+          "boat"
         ],
         "wreckOk": true
       },
@@ -123,7 +126,8 @@
         "classes": [
           "truck",
           "semi",
-          "camper"
+          "camper",
+          "boat"
         ],
         "wreckOk": true
       },
@@ -305,6 +309,30 @@
     "chariot": {
       "kit": "vehicle_kit_chariot",
       "fuel": "none"
+    },
+    "raft": {
+      "kit": "vehicle_kit_raft",
+      "fuel": "none"
+    },
+    "canoe": {
+      "kit": "vehicle_kit_canoe",
+      "fuel": "none"
+    },
+    "rowboat": {
+      "kit": "vehicle_kit_rowboat",
+      "fuel": "none"
+    },
+    "motorboat": {
+      "kit": "vehicle_kit_motorboat",
+      "fuel": "gasoline"
+    },
+    "pontoon": {
+      "kit": "vehicle_kit_pontoon",
+      "fuel": "diesel"
+    },
+    "speedboat": {
+      "kit": "vehicle_kit_speedboat",
+      "fuel": "gasoline"
     }
   },
   "bots": {

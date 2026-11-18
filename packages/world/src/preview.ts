@@ -1,11 +1,13 @@
 /** Cheap seed survey: the exact generator's tile and height samplers, never full chunks/entities.
- * North-up, 512 x 512 tiles around the four starter areas; not a promise that it shows the entire streamed world. */
+ * North-up, 1536 x 1536 tiles around the four starter areas (ADR-423: was 512 x 512); not a promise
+ * that it shows the entire streamed world. Stride 12 keeps the sample count at 128 x 128 = 16,384 —
+ * the same SVG path count and menu-render cost as before, at 3x coarser ground per pixel. */
 import { northUpToWorld } from "./geography.js";
 import { ProceduralGenerator } from "./generator.js";
 import { terrainLevel } from "./waterDepth.js";
 /** Origin and stride are geographic east/south tile units, not world-grid axes.
  * The square covers the previous 384x256 world-grid footprint after rotation, at the same sample density. */
-export const PREVIEW = { width: 128, height: 128, stride: 4, x: -256, y: -256 } as const;
+export const PREVIEW = { width: 128, height: 128, stride: 12, x: -768, y: -768 } as const;
 export interface WorldPreview { seed: number; tiles: Uint16Array; heights: Int16Array }
 /** World tile sampled by a thumbnail pixel; also the inverse/picking contract for preview consumers. */
 export function previewWorldAt(x: number, y: number): { x: number; y: number } {

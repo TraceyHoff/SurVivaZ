@@ -325,7 +325,7 @@ describe("ADR-360 AI drives drawn vehicles", () => {
 
 describe("ADR-360 schema", () => {
   it("no new component: the world schema hash is unchanged from ADR-359", () => {
-    expect(makeWorld().getSchemaHash()).toBe(0x92e6f70a); // ADR-411: TerrainEdit.dig i8 -> i16 (no new component)
+    expect(makeWorld().getSchemaHash()).toBe(0x2ec1a43d); // ADR-426: skills salt only — dock_craft + shipyard_craft appended to skills.json (no component changed; old saves keep their node bits)
   });
   it("the drawn drive speed is sim-local: a resource, cleared on exit, never a component", () => {
     const { w, p } = setup(); const { m, v } = rig(w, p);

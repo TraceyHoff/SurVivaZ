@@ -163,8 +163,8 @@ export interface QueueJobView { slot: number; recipe: number; name: string; coun
 export interface OwedView { item: number; name: string; count: number; crafterName: string }
 /** ADR-136: `station` = which list this is (0 = on your person / hand only); `elsewhere` = recipes hidden here, per station kind (hint text). */
 export interface CraftingView { station: number; stationName: string; recipes: RecipeView[]; queue: QueueJobView[]; owed: OwedView[]; maxCount: number; elsewhere: { station: number; name: string; count: number }[] }
-/** Display names per StationKind (0 hand … 5 garage). */
-export const STATION_NAMES: Readonly<Record<number, string>> = { 0: "By hand", 1: "Campfire / stove", 2: "Workbench", 3: "Furnace", 4: "Anvil / forge", 5: "Garage" };
+/** Display names per StationKind (0 hand … 5 garage, 6 dock, 7 shipyard). */
+export const STATION_NAMES: Readonly<Record<number, string>> = { 0: "By hand", 1: "Campfire / stove", 2: "Workbench", 3: "Furnace", 4: "Anvil / forge", 5: "Garage", 6: "Dock", 7: "Shipyard" };
 // ---- container panel (ADR-098: up to 96 slots, paged) ------------------------------------------------
 /** Slots per page in the container panel (one page = the old 24-slot box). */
 export const CONTAINER_PAGE_SIZE = 24;

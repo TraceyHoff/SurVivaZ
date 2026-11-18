@@ -48,7 +48,7 @@ describe("ADR-255 water features (lake + river + pond)", () => {
       const rp = riverPoint(L, 10);
       expect(isW(g.tileAt(Math.floor(rp.x), Math.floor(rp.y)))).toBe(true);
       const s = surveyWaterFeatures(seed, (x, y) => g.tileAt(x, y), isWaterId, WATER_FEATURE_RADIUS);
-      expect(s.forced).toEqual({ lake: true, river: true, pond: true });
+      expect(s.forced).toEqual({ lake: true, river: true, pond: true, greatLake: false }); // ADR-424: region zero has no great lake
       expect(s.lakes).toBeGreaterThanOrEqual(1);
       expect(s.rivers).toBeGreaterThanOrEqual(1);
       expect(s.ponds).toBeGreaterThanOrEqual(1);

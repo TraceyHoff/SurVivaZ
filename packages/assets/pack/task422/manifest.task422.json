@@ -1,0 +1,129 @@
+{
+ "$comment": "ADR-422: dedicated tier-2 motorboat art (motorboat, pontoon, speedboat). The atlases have NO image files of their own: their pixels are painted at runtime by apps/client/src/task421-art.ts (software rasterizer -> blob URL, the Task 34 / ADR-361 pattern) and the sources override in view.ts points the registry at those blob URLs, so the image/ktx2 paths below are never fetched. They point at a real pack atlas only because the pack test requires every manifest atlas to name a PNG + KTX2 twin that exist on disk. Vehicle layout: 4 cols x 6 rows of the def's frame (two rows per throttle phase 0-2 \u2014 0 idle, 1 full throttle, 2 cruise \u2014 Art order E,SE,S,SW,W,NW,N,NE in row-major order); frame(phase, dir) = phase*8 + dir, so the idle animation is frames [8] (full throttle) and the wake animation cycles [0, 8, 16] at 4 fps. resolveVehicleArt binds these by def id (sprite key == def id, first animation 8 directions, veh_art_* atlas = native scale).",
+ "atlases": [
+  {
+   "columns": 4,
+   "frameH": 194,
+   "frameW": 328,
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "key": "veh_art_motorboat",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "rows": 6
+  },
+  {
+   "columns": 4,
+   "frameH": 232,
+   "frameW": 405,
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "key": "veh_art_pontoon",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "rows": 6
+  },
+  {
+   "columns": 4,
+   "frameH": 204,
+   "frameW": 348,
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "key": "veh_art_speedboat",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "rows": 6
+  }
+ ],
+ "name": "survivaz-task422",
+ "sprites": [
+  {
+   "anchor": {
+    "x": 0.5,
+    "y": 0.567
+   },
+   "animations": {
+    "idle": {
+     "dirStride": 1,
+     "directions": 8,
+     "fps": 1,
+     "frames": [
+      8
+     ],
+     "loop": false
+    },
+    "wake": {
+     "dirStride": 1,
+     "directions": 8,
+     "fps": 4,
+     "frames": [
+      0,
+      8,
+      16
+     ],
+     "loop": true
+    }
+   },
+   "atlas": "veh_art_motorboat",
+   "category": "vehicle",
+   "key": "motorboat"
+  },
+  {
+   "anchor": {
+    "x": 0.5,
+    "y": 0.556
+   },
+   "animations": {
+    "idle": {
+     "dirStride": 1,
+     "directions": 8,
+     "fps": 1,
+     "frames": [
+      8
+     ],
+     "loop": false
+    },
+    "wake": {
+     "dirStride": 1,
+     "directions": 8,
+     "fps": 4,
+     "frames": [
+      0,
+      8,
+      16
+     ],
+     "loop": true
+    }
+   },
+   "atlas": "veh_art_pontoon",
+   "category": "vehicle",
+   "key": "pontoon"
+  },
+  {
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5637
+   },
+   "animations": {
+    "idle": {
+     "dirStride": 1,
+     "directions": 8,
+     "fps": 1,
+     "frames": [
+      8
+     ],
+     "loop": false
+    },
+    "wake": {
+     "dirStride": 1,
+     "directions": 8,
+     "fps": 4,
+     "frames": [
+      0,
+      8,
+      16
+     ],
+     "loop": true
+    }
+   },
+   "atlas": "veh_art_speedboat",
+   "category": "vehicle",
+   "key": "speedboat"
+  }
+ ],
+ "version": 1
+}

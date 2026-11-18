@@ -94,12 +94,14 @@ function blocked(world: World, tx: number, ty: number): boolean {
 /**
  * Raise (dir > 0) or lower (dir < 0) the tile (tx,ty) one level with a shovel. Authority writes; dryRun only validates.
  * Lowering water is refused (fill it by raising instead); raising water turns it into earth at its level.
+ * skipReach (ADR-419): the ramp command checks reach once for the foot tile and grades the line from there —
+ * a single shovel edit must never use it.
  */
-export function editTerrain(world: World, e: Entity, tx: number, ty: number, dir: number, dryRun = false): TerrainFail {
+export function editTerrain(world: World, e: Entity, tx: number, ty: number, dir: number, dryRun = false, skipReach = false): TerrainFail {
   tx = Math.floor(tx); ty = Math.floor(ty); const t = world.getResource(TerrainRes);
   if (!t || !t.setRawHeight || !t.setTile || (t.loaded && !t.loaded(tx, ty))) return TerrainFail.NotLoaded;
   if (!hasShovel(world, e)) return TerrainFail.NoShovel;
-  const body = world.get(e, Transform); if (body && Math.hypot(body.x - tx - 0.5, body.y - ty - 0.5) > TERRAIN.reach + 0.75) return TerrainFail.TooFar;
+  const body = world.get(e, Transform); if (!skipReach && body && Math.hypot(body.x - tx - 0.5, body.y - ty - 0.5) > TERRAIN.reach + 0.75) return TerrainFail.TooFar;
   if (!hasPrivilege(world, e, tx + 0.5, ty + 0.5)) return TerrainFail.NoPrivilege;
   const id = t.tileAt(tx, ty); if (id === 0) return TerrainFail.NotLoaded;
   const h = raw(t, tx, ty); const water = isWaterId(id);

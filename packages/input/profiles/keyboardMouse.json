@@ -217,6 +217,10 @@
     "control": "key.KeyH"
    },
    {
+    "action": "Terrain.Ramp",
+    "control": "key.KeyT"
+   },
+   {
     "action": "ToggleDemolish",
     "control": "key.Delete"
    },

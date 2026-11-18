@@ -23,7 +23,9 @@ export const enum WearSlot { Head = 0, Torso = 1, Legs = 2, Feet = 3, Hands = 4,
 export const WEAR_SLOTS = 8;
 export const BODY_WEAR_SLOTS = 6;
 export const enum ToolKind { None = 0, Axe = 1, Pickaxe = 2, Shovel = 3, Knife = 4, Brush = 5 }
-export const enum StationKind { None = 0, Campfire = 1, Workbench = 2, Furnace = 3, Anvil = 4, Garage = 5 }
+export const enum StationKind { None = 0, Campfire = 1, Workbench = 2, Furnace = 3, Anvil = 4, Garage = 5,
+  /** ADR-420: deep-water boatbuilding stations (dock tier 1, shipyard tier 2). */
+  Dock = 6, Shipyard = 7 }
 export const enum Placement { Cell = 0, Edge = 1, Opening = 2, Free = 3, Tri = 4 }
 /** BuildingGrid socket kinds. */
 export const enum SocketKind { Edge = 1, Door = 2, Window = 3, Hatch = 4 }
@@ -31,7 +33,7 @@ export const enum SocketKind { Edge = 1, Door = 2, Window = 3, Hatch = 4 }
 const CATEGORY: Record<string, ItemCategory> = { resource: ItemCategory.Resource, food: ItemCategory.Food, tool: ItemCategory.Tool, placeable: ItemCategory.Placeable, weapon: ItemCategory.Weapon, clothing: ItemCategory.Clothing, armor: ItemCategory.Armor, ammo: ItemCategory.Ammo, explosive: ItemCategory.Explosive };
 const WEAR: Record<string, WearSlot> = { head: WearSlot.Head, torso: WearSlot.Torso, legs: WearSlot.Legs, feet: WearSlot.Feet, hands: WearSlot.Hands, back: WearSlot.Back, offhand: WearSlot.OffHand, accessory: WearSlot.Accessory };
 const TOOL: Record<string, ToolKind> = { none: ToolKind.None, axe: ToolKind.Axe, pickaxe: ToolKind.Pickaxe, shovel: ToolKind.Shovel, knife: ToolKind.Knife, brush: ToolKind.Brush };
-const STATION: Record<string, StationKind> = { none: StationKind.None, campfire: StationKind.Campfire, workbench: StationKind.Workbench, furnace: StationKind.Furnace, anvil: StationKind.Anvil, garage: StationKind.Garage };
+const STATION: Record<string, StationKind> = { none: StationKind.None, campfire: StationKind.Campfire, workbench: StationKind.Workbench, furnace: StationKind.Furnace, anvil: StationKind.Anvil, garage: StationKind.Garage, dock: StationKind.Dock, shipyard: StationKind.Shipyard };
 const WEATHER: Record<string, WeatherKind> = { clear: WeatherKind.Clear, rain: WeatherKind.Rain, storm: WeatherKind.Storm, snow: WeatherKind.Snow, fog: WeatherKind.Fog, overcast: WeatherKind.Overcast, heat: WeatherKind.Heat, blizzard: WeatherKind.Blizzard, windy: WeatherKind.Windy };
 export const WEATHER_KEYS: readonly string[] = Object.keys(WEATHER);
 const PLACEMENT: Record<string, Placement> = { cell: Placement.Cell, edge: Placement.Edge, opening: Placement.Opening, free: Placement.Free, tri: Placement.Tri };
@@ -191,6 +193,8 @@ export interface PieceDef extends BuildPieceDef, Visual {
   readonly small: boolean; readonly surfaceHeight: number;
   /** Snap hint for free pieces: "" (sub-tile grid) or "vertex" (tile corners, corner pieces). */
   readonly snap: "" | "vertex";
+  /** ADR-420: water this piece must stand in ("" = land rules; "deep" = every footprint tile deep water, "any" = any water). */
+  readonly requiresWater: "" | "deep" | "any";
   /** Ground slope tolerance override (raised/stilted foundations); -1 = building.maxSlope. */
   readonly maxSlope: number;
   /** Lowest material tier allowed (new modular pieces: 1 = wood, no twig). */
@@ -335,6 +339,8 @@ export interface RawPiece extends RawVisual {
   stall?: { listings: number; clanOnly?: boolean };
   features?: PieceFeatures;
   rotSteps?: number; small?: boolean; surface?: { height: number }; category?: string; snap?: "vertex"; shape?: "L"; maxSlope?: number; minTier?: number; extraCost?: { item: string; count: number; fromTier?: number }[]; family?: string;
+  /** ADR-420: "deep" | "any" — the piece stands in water instead of on land (placement must be "free", ground true). */
+  requiresWater?: "deep" | "any";
 }
 export interface RawZombie extends RawVisual { key: string; hp: number; speed: number; damage: number; structureDamage: number; attackRange: number; attackCooldownSeconds: number; sightRange: number; hearingMul: number; variants: number; tint?: [number, number, number]; light?: ZombieLightDef }
 export interface RawDisease { key: string; name: string; short: string; color: string; contagious?: boolean; durationSeconds: number; hpDps?: number; hungerMul?: number; thirstMul?: number; staminaDrainPerSec?: number; moveMul?: number; cure?: string | null }
@@ -613,6 +619,7 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
       accepts: (p.accepts ?? []).map((k) => itemRef(k, `${where}.accepts`)),
       stall: p.stall ? { listings: p.stall.listings, clanOnly: p.stall.clanOnly ?? false } : null, features: p.features ?? {},
       rotSteps: p.rotSteps ?? 0, small: p.small ?? false, surfaceHeight: p.surface?.height ?? 0, snap: p.snap ?? "", shape: p.shape ?? "", maxSlope: p.maxSlope ?? -1, minTier: p.minTier ?? 0, family: p.family ?? "", starter: p.starter ?? false, pickup: p.pickup ?? false,
+      requiresWater: p.requiresWater ?? "",
       extraCost: (p.extraCost ?? []).map((c) => ({ item: itemRef(c.item, where), count: c.count, fromTier: c.fromTier ?? 0 })),
     });
     if (placement === Placement.Tri && (p.footprint && (p.footprint.w !== 1 || p.footprint.h !== 1))) err(`${where}: tri pieces are 1x1`);
@@ -620,6 +627,10 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
     if (p.rotSteps !== undefined && !(Number.isInteger(p.rotSteps) && p.rotSteps >= 1 && p.rotSteps <= 16)) err(`${where}.rotSteps must be 1..16`);
     if (p.minTier !== undefined && !(p.minTier >= 0 && p.minTier < tiers.length)) err(`${where}.minTier out of range`);
     if (p.stall && (p.stall.listings !== (p.container ?? 0))) err(`${where}.stall.listings must equal container`);
+    // ADR-420: water pieces stand on the surface (free placement, ground support) instead of on land.
+    if (p.requiresWater !== undefined && p.requiresWater !== "deep" && p.requiresWater !== "any") err(`${where}.requiresWater must be "deep" or "any"`);
+    if (p.requiresWater && p.placement !== "free") err(`${where}.requiresWater needs placement "free"`);
+    if (p.requiresWater && !p.ground) err(`${where}.requiresWater needs ground true (water-surface support)`);
     // ADR-355: accepts is a container-only allow-list; each key is resolved (and validated) by itemRef above.
     if (p.accepts?.length && !(p.container ?? 0)) err(`${where}.accepts needs a container`);
     for (const a of p.features?.turret?.ammo ?? []) itemRef(a, `${where}.features.turret.ammo`);

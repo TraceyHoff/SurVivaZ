@@ -119,6 +119,7 @@ export * from "./clutter.js";
 export * from "./sprite-fallback.js";
 export * from "./roads.js";
 export * from "./terrain.js";
+export * from "./ramp.js"; // ADR-419: ramp planning + gameplay.terrainRamp
 export * from "./signs.js";
 export * from "./hordes.js";
 export * from "./pets.js"; // ADR-145

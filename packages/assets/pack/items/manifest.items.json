@@ -15878,6 +15878,40 @@
    }
   },
   {
+   "key": "build_dock",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      302
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_shipyard",
+   "category": "ui",
+   "atlas": "items_build",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      303
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
    "key": "build_ore_store",
    "category": "ui",
    "atlas": "items_build",

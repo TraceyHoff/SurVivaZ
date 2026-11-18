@@ -3,7 +3,8 @@
  * with a progress bar, then the main menu (Singleplayer / Multiplayer / Settings).
  * Navigation: mouse, touch (buttons), keyboard (arrows/WASD/Tab, Enter/Space, Esc) and gamepad (d-pad/stick, A, B).
  */
-import { sampleWorldPreview, worldPreviewSvg, randomWorldSeed } from "@engine/world";
+import { PREVIEW, REGION_SIZE, sampleWorldPreview, worldPreviewSvg, randomWorldSeed } from "@engine/world";
+import { defaultDefs } from "@engine/gameplay";
 import { parseWorldSeed } from "./world-seed.js";
 import { localizeTemps, saveTempUnit } from "./hud-temp.js";
 import { deleteConfirm, deleteLocalProgress, listLocalSaves, type LocalSaveKind } from "./delete-progress.js";
@@ -301,7 +302,16 @@ export class BootUI {
         const chosen = document.createElement("p"); chosen.dataset["role"] = "chosen-seed"; chosen.setAttribute("aria-live", "polite");
         const preview = document.createElement("img"); preview.className = "world-preview"; preview.dataset["role"] = "world-preview";
         preview.alt = "Seeded terrain preview: blue water, green lowlands, shaded hills and cliffs";
-        const note = document.createElement("p"); note.className = "preview-note"; note.textContent = "Starter region · 512 × 512 tiles · North ↑. Shading shows relief. World streams beyond this view.";
+        const note = document.createElement("p"); note.className = "preview-note";
+        // ADR-425: map-size note, built from the same constants worldgen uses — never a hardcoded
+        // number, so the text drifts with the world instead of against it. Preview extent =
+        // PREVIEW.width x PREVIEW.stride tiles across (one starter region); the walk-across time
+        // is the region extent at the player walk speed (movement.json, tiles/s) — there is no
+        // metres-per-tile constant anywhere in the game, so no distance in metres is claimed.
+        // The preview is one region only: the world streams on beyond it with no fixed edge.
+        const previewExtent = PREVIEW.width * PREVIEW.stride;
+        const walkMinutes = Math.max(1, Math.round(REGION_SIZE / defaultDefs().movement.walkSpeed / 60));
+        note.textContent = `Starter region · ${previewExtent} × ${previewExtent} tiles · about ${walkMinutes} minutes' walk across · North ↑. Shading shows relief. This is one region — the world streams on beyond it, with no fixed edge.`;
         let previewTimer = 0;
         const draw = (value: number): void => {
           preview.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(worldPreviewSvg(sampleWorldPreview(value)))}`;

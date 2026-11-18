@@ -1,6 +1,6 @@
 // ADR-263/297/411: shovel terrain editing (-300..326), flowing water, underground darkness / 60°F / growth.
 import { describe, expect, it } from "vitest";
-import { setSeason, Weather, type Entity, type World } from "@engine/core";
+import { setSeason, Transform, Weather, type Entity, type World } from "@engine/core";
 import { TileMap, isFlowWater, renderTileHeight, terrainLevel, WATER_TILE } from "@engine/world";
 import * as G from "../src/index.js";
 import { makeWorld, steps } from "./helpers.js";
@@ -230,5 +230,23 @@ describe("ADR-263 underground", () => {
     const w = makeWorld(); const map = field(w, 5); G.setTerrainDig(w, 2, 2, -3);
     expect(map.getChunk(0, 0)!.getHeight(2, 2)).toBe(2); expect(map.getChunk(0, 0)!.getHeight(3, 2)).toBe(5);
     const sets = map.tileChanges(); expect(sets.some((s) => s.heights)).toBe(true); // TileSync resends the chunk in full
+  });
+});
+
+describe("ADR-419 ramps conserve soil like single shovel edits", () => {
+  it("an up-ramp costs 6 soil; digging its tiles flat returns every unit", () => {
+    const w = makeWorld(); field(w, 2); const p = G.spawnPlayer(w, { x: 0.5, y: 0.5, maxWeight: 0 }); hold(w, p, "stone_shovel");
+    G.addItem(w, p, id("soil"), 6);
+    const up = G.planRamp(w, 0, 0, 1, 0, 3); expect(up.ok).toBe(true); if (!up.ok) return;
+    expect(G.gradeRamp(w, p, up.plan)).toBe(G.TerrainFail.None);
+    expect(G.countItem(w, p, id("soil"))).toBe(0);
+    // A staircase already IS the down-ramp, so flattening it is plain digging: 1+2+3 digs.
+    // (The bot stands at the foot; tiles 2..3 are out of single-edit reach, so walk along.)
+    for (let i = 0; i < 3; i++) {
+      w.set(p, Transform, { x: i + 0.5, y: 0.5 });
+      for (let k = 0; k < i + 1; k++) expect(G.editTerrain(w, p, i + 1, 0, -1)).toBe(G.TerrainFail.None); // tile i+1 sits i+1 above flat
+    }
+    expect([hAt(w, 1, 0), hAt(w, 2, 0), hAt(w, 3, 0)]).toEqual([2, 2, 2]);
+    expect(G.countItem(w, p, id("soil"))).toBe(6);
   });
 });

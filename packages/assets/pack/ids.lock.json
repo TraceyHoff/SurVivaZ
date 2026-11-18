@@ -6322,7 +6322,9 @@
     "gt_snow_slope_wedge_3": 6320,
     "gt_snow_slope_wedge_3_fall": 6321,
     "gt_snow_slope_wedge_3_spring": 6322,
-    "gt_snow_slope_wedge_3_winter": 6323
+    "gt_snow_slope_wedge_3_winter": 6323,
+    "build_dock": 6324,
+    "build_shipyard": 6325
   },
   "sounds": {
     "amb_rain": 1,

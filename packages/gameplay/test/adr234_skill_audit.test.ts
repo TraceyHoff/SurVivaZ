@@ -190,7 +190,7 @@ function audit(i: number): string[] {
 
 describe("ADR-234 skill-tree audit: every node's effect is applied server-side at its described magnitude", () => {
   it("covers all nodes and only known effect kinds", () => {
-    expect(NODES.length).toBe(140); // ADR-319 / ADR-320: + Horsemanship, Saddlery 1-4
+    expect(NODES.length).toBe(142); // ADR-319 / ADR-320: + Horsemanship, Saddlery 1-4; ADR-426: + Dock, Shipyard
     for (const n of NODES) {
       const e = n.effects; const kinds = [...Object.keys(e.mods ?? {}), ...(e.perk ? [e.perk] : []), ...(e.skill ? ["skill"] : []), ...(e.unlock ?? [])];
       expect(kinds.length, `${n.key} has an effect`).toBeGreaterThan(0);

@@ -2070,6 +2070,323 @@
    "drawn": {
     "pullMul": 1.2
    }
+  },
+  {
+   "id": "raft",
+   "class": "boat",
+   "size": "m",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 0.4,
+     "y": 0.4,
+     "z": 0.25
+    },
+    {
+     "x": 0.4,
+     "y": -0.4,
+     "z": 0.25
+    }
+   ],
+   "mass": 120,
+   "maxSpeed": 2.2,
+   "accel": 1.2,
+   "brake": 2.0,
+   "turn": 1.6,
+   "grip": 0.85,
+   "fuel": null,
+   "stamina": {
+    "perSecond": 0.6
+   },
+   "health": 150,
+   "storage": {
+    "slots": 12,
+    "maxWeight": 600
+   },
+   "hitches": [],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 2.4,
+    "width": 1.6
+   },
+   "collider": {
+    "radius": 0.9
+   }
+  },
+  {
+   "id": "canoe",
+   "class": "boat",
+   "size": "s",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 0.6,
+     "y": 0,
+     "z": 0.25
+    },
+    {
+     "x": -0.6,
+     "y": 0,
+     "z": 0.25
+    }
+   ],
+   "mass": 60,
+   "maxSpeed": 4.2,
+   "accel": 2.0,
+   "brake": 2.5,
+   "turn": 2.2,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": {
+    "perSecond": 1.0
+   },
+   "health": 100,
+   "storage": {
+    "slots": 4,
+    "maxWeight": 120
+   },
+   "hitches": [],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 3.0,
+    "width": 0.9
+   },
+   "collider": {
+    "radius": 0.7
+   }
+  },
+  {
+   "id": "rowboat",
+   "class": "boat",
+   "size": "m",
+   "seats": 4,
+   "seatAnchors": [
+    {
+     "x": 0.9,
+     "y": 0,
+     "z": 0.25
+    },
+    {
+     "x": 0.0,
+     "y": 0.35,
+     "z": 0.25
+    },
+    {
+     "x": 0.0,
+     "y": -0.35,
+     "z": 0.25
+    },
+    {
+     "x": -0.9,
+     "y": 0,
+     "z": 0.25
+    }
+   ],
+   "mass": 140,
+   "maxSpeed": 3.2,
+   "accel": 1.6,
+   "brake": 2.2,
+   "turn": 1.8,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": {
+    "perSecond": 1.2
+   },
+   "health": 200,
+   "storage": {
+    "slots": 8,
+    "maxWeight": 300
+   },
+   "hitches": [],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 3.4,
+    "width": 1.4
+   },
+   "collider": {
+    "radius": 0.95
+   }
+  },
+  {
+   "id": "motorboat",
+   "class": "boat",
+   "size": "m",
+   "seats": 4,
+   "seatAnchors": [
+    {
+     "x": 1.2,
+     "y": 0.45,
+     "z": 0.25
+    },
+    {
+     "x": 1.2,
+     "y": -0.45,
+     "z": 0.25
+    },
+    {
+     "x": 0.3,
+     "y": 0.45,
+     "z": 0.25
+    },
+    {
+     "x": 0.3,
+     "y": -0.45,
+     "z": 0.25
+    }
+   ],
+   "mass": 420,
+   "maxSpeed": 7.5,
+   "accel": 4.5,
+   "brake": 5,
+   "turn": 1.9,
+   "grip": 0.85,
+   "fuel": {
+    "capacity": 40,
+    "perSecond": 0.12
+   },
+   "stamina": null,
+   "health": 320,
+   "storage": {
+    "slots": 6,
+    "maxWeight": 200
+   },
+   "hitches": [],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 4.2,
+    "width": 1.8
+   },
+   "collider": {
+    "radius": 1.0
+   }
+  },
+  {
+   "id": "pontoon",
+   "class": "boat",
+   "size": "l",
+   "seats": 8,
+   "seatAnchors": [
+    {
+     "x": 2.0,
+     "y": 0.55,
+     "z": 0.25
+    },
+    {
+     "x": 2.0,
+     "y": -0.55,
+     "z": 0.25
+    },
+    {
+     "x": 1.0,
+     "y": 0.55,
+     "z": 0.25
+    },
+    {
+     "x": 1.0,
+     "y": -0.55,
+     "z": 0.25
+    },
+    {
+     "x": 0.0,
+     "y": 0.55,
+     "z": 0.25
+    },
+    {
+     "x": 0.0,
+     "y": -0.55,
+     "z": 0.25
+    },
+    {
+     "x": -1.0,
+     "y": 0.55,
+     "z": 0.25
+    },
+    {
+     "x": -1.0,
+     "y": -0.55,
+     "z": 0.25
+    }
+   ],
+   "mass": 1300,
+   "maxSpeed": 5.0,
+   "accel": 2.5,
+   "brake": 3.5,
+   "turn": 1.2,
+   "grip": 0.9,
+   "fuel": {
+    "capacity": 90,
+    "perSecond": 0.1
+   },
+   "stamina": null,
+   "health": 550,
+   "storage": {
+    "slots": 18,
+    "maxWeight": 1500
+   },
+   "hitches": [],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 6.0,
+    "width": 2.4
+   },
+   "collider": {
+    "radius": 1.2
+   }
+  },
+  {
+   "id": "speedboat",
+   "class": "boat",
+   "size": "m",
+   "seats": 2,
+   "seatAnchors": [
+    {
+     "x": 1.5,
+     "y": 0.45,
+     "z": 0.25
+    },
+    {
+     "x": 1.5,
+     "y": -0.45,
+     "z": 0.25
+    }
+   ],
+   "mass": 600,
+   "maxSpeed": 11.0,
+   "accel": 7,
+   "brake": 7,
+   "turn": 2.4,
+   "grip": 0.8,
+   "fuel": {
+    "capacity": 45,
+    "perSecond": 0.28
+   },
+   "stamina": null,
+   "health": 260,
+   "storage": {
+    "slots": 2,
+    "maxWeight": 60
+   },
+   "hitches": [],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 4.8,
+    "width": 1.8
+   },
+   "collider": {
+    "radius": 1.0
+   }
   }
  ]
 }

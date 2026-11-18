@@ -509,7 +509,13 @@
     "vehicle_kit_wagon_small_covered": 507,
     "wagon_frame": 508,
     "wooden_wheel": 509,
-    "harness": 510
+    "harness": 510,
+    "vehicle_kit_canoe": 511,
+    "vehicle_kit_raft": 512,
+    "vehicle_kit_rowboat": 513,
+    "vehicle_kit_motorboat": 514,
+    "vehicle_kit_pontoon": 515,
+    "vehicle_kit_speedboat": 516
   },
   "resources": {
     "fallen_branches": 1,
@@ -1003,7 +1009,13 @@
     "vehicle_kit_wagon_small_covered": 393,
     "wagon_frame": 394,
     "wooden_wheel": 395,
-    "harness": 396
+    "harness": 396,
+    "vehicle_kit_canoe": 397,
+    "vehicle_kit_raft": 398,
+    "vehicle_kit_rowboat": 399,
+    "vehicle_kit_motorboat": 400,
+    "vehicle_kit_pontoon": 401,
+    "vehicle_kit_speedboat": 402
   },
   "pieces": {
     "anvil": 1,
@@ -1201,7 +1213,9 @@
     "stone_store": 193,
     "roof_cottage": 194,
     "roof_gambrel": 195,
-    "roof_shed": 196
+    "roof_shed": 196,
+    "dock": 197,
+    "shipyard": 198
   },
   "zombies": {
     "zombie_brute": 1,

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  ProceduralGenerator, CHUNK_SIZE, WATER_FEATURE_RADIUS, HEIGHT_MAX,
+  ProceduralGenerator, CHUNK_SIZE, WATER_FEATURE_RADIUS, HEIGHT_MAX, REGION_SIZE,
   waterFeatureLayout, waterFeatureAt, elevatedLakeDist,
   flowWaterRaw, renderTileHeight, terrainLevel, waterDepthAt, WaterDepth, isWaterId,
   sampleWorldPreview,
@@ -108,12 +108,13 @@ describe("ADR-386 noise-aware siting: no sea contact, full land shore", () => {
     for (const seed of seeds(40)) {
       const g = new ProceduralGenerator({ seed });
       for (const [rx, ry] of [[2, -1], [-3, 2], [1, 1]] as const) {
-        const L = g.regionLayout(rx * 512, ry * 512);
+        // ADR-423: regions are REGION_SIZE tiles (was 512).
+        const L = g.regionLayout(rx * REGION_SIZE, ry * REGION_SIZE);
         const el = L?.elevatedLake;
         if (!L || !el) { skipped++; continue; }
         sited++;
         const sys = systemTiles(L, el);
-        const ox = rx * 512, oy = ry * 512;
+        const ox = rx * REGION_SIZE, oy = ry * REGION_SIZE;
         const cx = Math.floor(el.x), cy = Math.floor(el.y);
         for (let y = cy - el.r - 2; y <= cy + el.r + 2; y++) for (let x = cx - el.r - 2; x <= cx + el.r + 2; x++) {
           const d = Math.hypot(x + 0.5 - el.x, y + 0.5 - el.y);

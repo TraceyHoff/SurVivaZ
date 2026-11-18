@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  ProceduralGenerator, CHUNK_SIZE, HEIGHT_MAX, WATER_FEATURE_RADIUS,
+  ProceduralGenerator, CHUNK_SIZE, HEIGHT_MAX, WATER_FEATURE_RADIUS, REGION_SIZE,
   waterFeatureLayout, waterFeatureAt, elevatedLakeAt, elevatedLakeDist,
   flowWaterRaw, renderTileHeight, terrainLevel, waterDepthAt, WaterDepth, isWaterId,
   surveyWaterFeatures, sampleWorldPreview, computeSpawnPoints,
@@ -197,7 +197,7 @@ describe("ADR-383 elevated lake tiles, surface and bowl", () => {
     for (const seed of seeds(12)) {
       const g = new ProceduralGenerator({ seed });
       const s = surveyWaterFeatures(seed, (x, y) => g.tileAt(x, y), isWaterId, WATER_FEATURE_RADIUS);
-      expect(s.forced).toEqual({ lake: true, river: true, pond: true });
+      expect(s.forced).toEqual({ lake: true, river: true, pond: true, greatLake: false }); // ADR-424: region zero has no great lake
       expect(s.lakes).toBeGreaterThanOrEqual(1);
     }
   });
@@ -223,11 +223,12 @@ describe("ADR-383 elevated lake tiles, surface and bowl", () => {
     let sited = 0;
     for (const [rx, ry] of [[2, -1], [-3, 2]] as const) {
       // ADR-386: the region's SITED layout, not the hash baseline.
-      const rl = g.regionLayout(rx * 512, ry * 512)!;
+      // ADR-423: regions are REGION_SIZE tiles (was 512).
+      const rl = g.regionLayout(rx * REGION_SIZE, ry * REGION_SIZE)!;
       const el = rl.elevatedLake;
       if (!el) continue;
       sited++;
-      const tx = rx * 512 + Math.floor(el.x), ty = ry * 512 + Math.floor(el.y);
+      const tx = rx * REGION_SIZE + Math.floor(el.x), ty = ry * REGION_SIZE + Math.floor(el.y);
       const s = g.sampleAt(tx, ty);
       expect(isWaterId(s.tile)).toBe(true);
       expect(renderTileHeight(s.tile, s.height)).toBe(el.level);

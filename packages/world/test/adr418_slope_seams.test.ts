@@ -286,3 +286,32 @@ describe("ADR-418 slope seams: cliff quad vs tilted neighbour edge (blue gaps)",
     expect(cliffEdgeSpan(t, 5, n, 4, 0).emitted).toBe(false); // correctly suppressed: the tilted top meets N exactly
   });
 });
+
+describe("ADR-419 ramps stay sealed through the sweep", () => {
+  it("a graded ramp profile (5,4,3,2 along +x) seals every shared edge for all surrounding heights", () => {
+    // Ramp tiles (1,0) h=4 and (2,0) h=3 share an edge; the four tiles touching that edge's
+    // vertices vary over 2..4 (below, level, above the low tile). A ramp must never open a seam:
+    // its axis steps are exactly 1, so the cliff span (or its correct suppression on a slope
+    // side) must cover the shared edge in all 81 combinations.
+    let checked = 0, violations = 0;
+    for (const a of [2, 3, 4]) for (const b of [2, 3, 4]) for (const c of [2, 3, 4]) for (const d of [2, 3, 4]) {
+      const h: H = (x, y) =>
+        y === 0 && x >= 0 && x <= 3 ? 5 - x : // the ramp line itself
+        x === 1 && y === 1 ? a : x === 2 && y === 1 ? b : x === 1 && y === -1 ? c : x === 2 && y === -1 ? d : 5;
+      const t = classifyGroundShape(nbAt(h, 1, 0));
+      const n = classifyGroundShape(nbAt(h, 2, 0));
+      const tEnds = edgeEnds(t, 4, 0);
+      const nEnds = [cornerHeights(n, 3)[0], cornerHeights(n, 3)[3]] as [number, number];
+      const cliff = cliffEdgeSpan(t, 4, n, 3, 0);
+      checked++;
+      const sealed = cliff.emitted
+        ? cliff.bottom[0] <= nEnds[0] && cliff.bottom[1] <= nEnds[1] && cliff.top[0] >= tEnds[0] && cliff.top[1] >= tEnds[1]
+        : tEnds[0] === nEnds[0] && tEnds[1] === nEnds[1];
+      if (!sealed) violations++;
+      // The graded axis itself never steps 2+: the two ramp tiles differ by exactly 1.
+      expect(Math.abs(h(1, 0) - h(2, 0))).toBe(1);
+    }
+    expect(checked).toBe(81);
+    expect(violations).toBe(0);
+  });
+});

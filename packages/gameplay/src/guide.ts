@@ -19,6 +19,7 @@
  * fact already resolved to a display string. ADR-364 resolves the icon keys to art.
  */
 import { DEFAULT_TICK_HZ } from "@engine/core";
+import { REGION_SIZE } from "@engine/world";
 import guideRaw from "../data/guide.json";
 import farmingRaw from "../data/farming.json";
 import petsRaw from "../data/pets.json";
@@ -39,11 +40,12 @@ import { CARE_CURE_SECONDS, FLU_AFTER_SECONDS, diseaseIcon } from "./diseases.js
 import { temperatureTier, wetnessStage } from "./exposure-stages.js";
 import { FROST_KILL_F, LATE_FALL_DAYS } from "./farming.js";
 import { MOUNT_SPECIES, MOUNT_TUNING, SADDLES, mountSpeciesOfKey } from "./mount_defs.js";
+import { RAMP_MAX_DELTA, RAMP_MAX_EDITS } from "./ramp.js";
 import { WANTED_ITEM_KEYS } from "./recruitment.js";
 import { SAFE_SPAWN_RADIUS } from "./spawn_points.js";
 import { FIRE_HEAT_MAX_C, FIRE_HEAT_TAU_S, FREEZING_C, WET_INSULATION_LOSS } from "./systems/environment.js";
 import { SALT_CONSUME_TICKS } from "./systems/spoilage.js";
-import { drawnSpeedCap, VEHICLE_DEFS, vehicleDefId } from "./vehicles.js";
+import { drawnSpeedCap, storageCapacity, VEHICLE_DEFS, vehicleDef, vehicleDefId } from "./vehicles.js";
 
 // ---- content model ----------------------------------------------------------------------------------
 
@@ -132,6 +134,8 @@ const FACT_ICONS: Readonly<Record<string, GuideRowIcon>> = {
   "cooking.campfireRecipeCount": guide("piece:campfire"),
   "building.claimCost": guide("piece:claim_totem"),
   "building.claimRadiusTiles": guide("piece:claim_totem"),
+  "building.dockCost": guide("piece:dock"),
+  "building.shipyardCost": guide("piece:shipyard"),
   "animals.troughRangeTiles": guide("piece:feeding_trough"),
   "storage.oreAccepts": guide("piece:ore_store"),
   "storage.cropAcceptsCount": guide("piece:crop_store"),
@@ -387,6 +391,13 @@ export const GUIDE_FACTS: Readonly<Record<string, FactResolver>> = {
   "building.containerReachTiles": () => defaultDefs().building.containerReach,
   "building.repairBlockedSeconds": () => defaultDefs().building.repairBlockedSeconds,
   "building.demolishRefund": () => defaultDefs().building.demolishRefund,
+  "building.dockCost": () => pieceByKey("dock")?.cost,
+  "building.shipyardCost": () => pieceByKey("shipyard")?.cost,
+  // terrain ramps (src/ramp.ts, ADR-419)
+  "terrain.rampMaxDelta": () => RAMP_MAX_DELTA,
+  "terrain.rampMaxEdits": () => RAMP_MAX_EDITS,
+  // world size (world/generator.ts, ADR-423)
+  "world.regionSizeTiles": () => REGION_SIZE,
   // AI humans (src/recruitment.ts, data/ai_journey.json, data/ai_defence.json, src/spawn_points.ts)
   "ai.wantedPoolCount": () => WANTED_ITEM_KEYS.length,
   "ai.travelLongTripTiles": () => journey.longTripTiles,
@@ -423,6 +434,16 @@ export const GUIDE_FACTS: Readonly<Record<string, FactResolver>> = {
   "vehicles.wagonLargeGallopCap": () => horseGallopCap("wagon_large"),
   "vehicles.carriageSeats": () => VEHICLE_DEFS[vehicleDefId("carriage") - 1]?.seats,
   "vehicles.wagonLargeStorageSlots": () => VEHICLE_DEFS[vehicleDefId("wagon_large") - 1]?.storage.slots,
+  // boats (data/vehicles.json + data/vehicle_storage.json, ADR-421)
+  "vehicles.boatCount": () => VEHICLE_DEFS.filter((d) => d.class === "boat").length,
+  "vehicles.canoeSpeed": () => vehicleDef(vehicleDefId("canoe"))?.maxSpeed,
+  "vehicles.raftStorageSlots": () => storageCapacity(vehicleDef(vehicleDefId("raft"))!).slots,
+  "vehicles.rowboatSeats": () => vehicleDef(vehicleDefId("rowboat"))?.seats,
+  // tier-2 motorboats (ADR-422)
+  "vehicles.motorboatSpeed": () => vehicleDef(vehicleDefId("motorboat"))?.maxSpeed,
+  "vehicles.pontoonStorageSlots": () => storageCapacity(vehicleDef(vehicleDefId("pontoon"))!).slots,
+  "vehicles.speedboatSpeed": () => vehicleDef(vehicleDefId("speedboat"))?.maxSpeed,
+  "vehicles.motorboatFuelCapacity": () => vehicleDef(vehicleDefId("motorboat"))?.fuel?.capacity,
   // farming (data/farming.json, src/farming.ts)
   "farming.plantableCount": () => farming.plantables.length,
   "farming.growMinSeconds": () => Math.min(...farming.plantables.map((p) => p.growSeconds)),

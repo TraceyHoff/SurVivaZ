@@ -697,6 +697,60 @@
       "maxStack": 1,
       "weight": 8,
       "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_raft",
+      "sprite": "item_vehicle_kit_raft",
+      "name": "Raft Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_canoe",
+      "sprite": "item_vehicle_kit_canoe",
+      "name": "Canoe Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_rowboat",
+      "sprite": "item_vehicle_kit_rowboat",
+      "name": "Rowboat Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_motorboat",
+      "sprite": "item_vehicle_kit_motorboat",
+      "name": "Motorboat Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_pontoon",
+      "sprite": "item_vehicle_kit_pontoon",
+      "name": "Pontoon Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_speedboat",
+      "sprite": "item_vehicle_kit_speedboat",
+      "name": "Speedboat Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
     }
   ]
 }

@@ -1,0 +1,109 @@
+{
+ "$comment": "ADR-420: dedicated dock / shipyard art. The atlases have NO image files of their own: their pixels are painted at runtime by apps/client/src/task420-art.ts (software rasterizer -> blob URL, the Task 34 / ADR-356 pattern) and the sources override in view.ts points the registry at those blob URLs, so the image/ktx2 paths below are never fetched. They point at a real pack atlas only because the pack test requires every manifest atlas to name a PNG + KTX2 twin that exist on disk. Atlas layout is a plain grid (frame() math): 4 cols x 2 rows of 128px, cols = damage stages 0-3, rows = rotation 0 (front) / 1 (side). building.frames uses the same rows: frames[rot][stage].",
+ "name": "survivaz-task420",
+ "atlases": [
+  {
+   "key": "decor_dock",
+   "image": "../nature/atlases/nature_icons.png",
+   "ktx2": "../nature/atlases/nature_icons.ktx2",
+   "frameW": 128,
+   "frameH": 128,
+   "columns": 4,
+   "rows": 2
+  },
+  {
+   "key": "decor_shipyard",
+   "image": "../nature/atlases/nature_icons.png",
+   "ktx2": "../nature/atlases/nature_icons.ktx2",
+   "frameW": 128,
+   "frameH": 128,
+   "columns": 4,
+   "rows": 2
+  }
+ ],
+ "sprites": [
+  {
+   "key": "dec_dock",
+   "category": "building",
+   "atlas": "decor_dock",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.78
+   },
+   "animations": {
+    "idle": {
+     "fps": 1,
+     "frames": [
+      0
+     ]
+    }
+   },
+   "building": {
+    "crackOverlay": "bld_crack",
+    "footprint": {
+     "w": 3,
+     "h": 2
+    },
+    "frames": [
+     [
+      0,
+      1,
+      2,
+      3
+     ],
+     [
+      4,
+      5,
+      6,
+      7
+     ]
+    ],
+    "layer": 2,
+    "piece": "dock"
+   },
+   "rotationArt": "mirror"
+  },
+  {
+   "key": "dec_shipyard",
+   "category": "building",
+   "atlas": "decor_shipyard",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.78
+   },
+   "animations": {
+    "idle": {
+     "fps": 1,
+     "frames": [
+      0
+     ]
+    }
+   },
+   "building": {
+    "crackOverlay": "bld_crack",
+    "footprint": {
+     "w": 4,
+     "h": 3
+    },
+    "frames": [
+     [
+      0,
+      1,
+      2,
+      3
+     ],
+     [
+      4,
+      5,
+      6,
+      7
+     ]
+    ],
+    "layer": 2,
+    "piece": "shipyard"
+   },
+   "rotationArt": "mirror"
+  }
+ ],
+ "version": 1
+}

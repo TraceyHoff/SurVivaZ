@@ -1,4 +1,13 @@
 {
   "$comment": "Crafting station keys -> numeric StationKind (source of truth for station keys; @engine/assets loadRecipes resolves recipe 'station' through this). Append only; ids are stable.",
-  "stations": { "none": 0, "campfire": 1, "workbench": 2, "furnace": 3, "anvil": 4, "garage": 5 }
+  "stations": {
+    "none": 0,
+    "campfire": 1,
+    "workbench": 2,
+    "furnace": 3,
+    "anvil": 4,
+    "garage": 5,
+    "dock": 6,
+    "shipyard": 7
+  }
 }

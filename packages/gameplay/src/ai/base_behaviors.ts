@@ -1,7 +1,8 @@
 import { MOUNT_BOTS } from "../mount_defs.js";
 import { isUnderground } from "../terrain_depth.js";
 import { walkerWaypoint } from "../systems/creature_nav.js";
-import { planTerrainBase } from "./terrain_base.js";
+import { planTerrainBase, findRampOnRoute } from "./terrain_base.js";
+import { WORN_PATH_TRIPS } from "./worn_paths.js"; // ADR-419: same "frequent route" threshold that wears a path (ADR-413)
 /**
  * ADR-252: base life for AI humans, driven by the planner (planner.ts). Every behaviour here only moves the bot and
  * emits the action strings a human client sends (craft / build / copen / cdeposit / cwithdraw / cclose / fire / door /
@@ -100,11 +101,22 @@ export function fillPlanSensors(world: World, self: Entity, view: AgentWorldView
   }
   if (mem.earth && base && (mem.earth.x !== base.x || mem.earth.y !== base.y)) delete mem.earth;
   const earthActive = mem.earth && !mem.earth.done && !mem.earth.abandoned;
+  // ADR-419: a frequent route (trips >= 3, the worn-path threshold) whose straight line crosses a >= 2-level
+  // step gets a ramp plan — the bot grades it (planner "ramp" goal, after earthworks) instead of climbing
+  // a cliff on every trip. One live plan at a time; a finished / abandoned plan is replaced on the next trip.
+  if (base && (!mem.ramp || mem.ramp.done || mem.ramp.abandoned)) {
+    const route = (mem.wornRoutes ?? []).find((r) => r.trips >= WORN_PATH_TRIPS);
+    if (route) {
+      const ramp = findRampOnRoute(world, self, { x: route.ax, y: route.ay }, { x: route.bx, y: route.by });
+      if (ramp) { mem.ramp = ramp; markAiDirty(a, tick); }
+      else if (mem.ramp) delete mem.ramp;
+    }
+  }
   const sg = a.bb.get<{ key: string } | null>("saddleGoal"); // ADR-323: the AI's saddle material chain (mount_behaviors.saddleGoalPass)
   // ADR-341: threat level + defence memory for the planner's defence goal (the sensor records the
   // events; the level here is from the previous sense pass — the same lag as every other sensor).
   const dmem = defenceMemoryOf(a); const threat = assessThreat(dmem.events, tick).level;
-  const plan = makePlan({ ...(sg ? { priority: [{ key: sg.key, count: 1 }], maxDepth: MOUNT_BOTS.planMaxDepth } : {}), ...(mem.earth ? { earth: mem.earth } : {}), world, self, defs, ...(base ? { base } : {}), ...(homeBs ? { bs: homeBs } : {}), ...(ruin ? { ruinBase: ruin } : {}), threat, defenceMem: dmem, fails: mem.fails, hungry, freezing, evening, winter, ...(mem.snooze ? { snooze: mem.snooze } : {}) }); view.plan = plan; if (earthActive) markAiDirty(a, tick); a.bb.set("planGoal", plan.goal); a.bb.set("planStep", plan.step);
+  const plan = makePlan({ ...(sg ? { priority: [{ key: sg.key, count: 1 }], maxDepth: MOUNT_BOTS.planMaxDepth } : {}), ...(mem.earth ? { earth: mem.earth } : {}), ...(mem.ramp ? { ramp: mem.ramp } : {}), world, self, defs, ...(base ? { base } : {}), ...(homeBs ? { bs: homeBs } : {}), ...(ruin ? { ruinBase: ruin } : {}), threat, defenceMem: dmem, fails: mem.fails, hungry, freezing, evening, winter, ...(mem.snooze ? { snooze: mem.snooze } : {}) }); view.plan = plan; if (earthActive) markAiDirty(a, tick); a.bb.set("planGoal", plan.goal); a.bb.set("planStep", plan.step);
   { // patience: a goal with no step and no leaf gathered for GOAL_PATIENCE ticks is snoozed half a day (persisted), like a player giving up on reeds
     let leafN = 0; for (let i = 0; i < slots.items.length; i++) if (slots.items[i] && plan.leaves.includes(slots.items[i]!)) leafN += slots.counts[i] ?? 0;
     const gs = a.bb.get("goalSeen") as { g: string; last: number; n: number } | undefined;
@@ -330,6 +342,10 @@ export function baseBehaviors(): GameBehavior[] {
         if (s.k === "terrain") {
           if (goTo(c, o, s.stand.x, s.stand.y) > .55) { if (stuckOn(c, s.stand.x, s.stand.y)) return fail(); return; }
           stop(o); if (cooled(c, "earthAt", 20)) { o.actions.push(`terrain:${s.x}:${s.y}:${s.dir}`); c.bb.set("earthAt", c.self.tick); } return;
+        }
+        if (s.k === "ramp") {
+          if (goTo(c, o, s.stand.x, s.stand.y) > .55) { if (stuckOn(c, s.stand.x, s.stand.y)) return fail(); return; }
+          stop(o); if (cooled(c, "earthAt", 20)) { o.actions.push(`ramp:${s.x}:${s.y}:${s.dx}:${s.dy}:${s.delta}`); c.bb.set("earthAt", c.self.tick); } return;
         }
         if (s.k === "light") {
           const wood = plannerIndex(gdefs(c)).item.get("wood"); if (!wood) return fail();

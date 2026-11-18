@@ -15,6 +15,7 @@
  * All handlers are validate/handle commands (ADR-092): players and bots use the same path.
  */
 import { defineCommand, fnv1a, PlayerId, Transform, type CommandHandlers, type Entity, type World } from "@engine/core";
+import { WaterDepth } from "@engine/world";
 import raw from "../data/vehicle_crafting.json";
 import { Dead, Vehicle, VehicleCondition } from "./components.js";
 import { gameplayDefs } from "./config.js";
@@ -25,7 +26,8 @@ import { hasSkillUnlock, skillMul } from "./skills/tree.js";
 import { itemRepairUnlocked } from "./building/place.js";
 import { readSlots, writeSlots } from "./inventory.js";
 import { addStationProvider, stationInRange } from "./systems/crafting.js";
-import { addVehicleStationHook, drawnDriven, drawnTowCap, driveDrawnVehicle, isParked, nearbyVehicleStationKinds, spawnVehicle, vehicleDefId, vehicleDefOf, VEHICLE_DEFS, type VehicleClass } from "./vehicles.js";
+import { addVehicleStationHook, drawnDriven, drawnTowCap, driveDrawnVehicle, isBoatDef, isParked, nearbyVehicleStationKinds, spawnVehicle, vehicleDef, vehicleDefId, vehicleDefOf, VEHICLE_DEFS, type VehicleClass } from "./vehicles.js";
+import { waterDepth } from "./systems/movement.js";
 import { DrawnDriveRes, DrawnDrivenRes, RideTowCapRes } from "./systems/movement.js";
 
 export interface VehicleCraftRules {
@@ -99,6 +101,9 @@ export function validateDeploy(world: World, actor: Entity, slot: number, x: num
   const s = slotOf(world, actor, slot); if (!s) return "empty_slot";
   if (!kitVehicle(world, s.item)) return "not_kit";
   const p = pos(world, actor); if (!p || !Number.isFinite(x) || !Number.isFinite(y) || Math.hypot(p.x - x, p.y - y) > VEHICLE_CRAFT.deploy.reach) return "too_far";
+  // ADR-421: boat kits deploy on water only (shallow or deep) — a kit dropped on land is refused, not beached.
+  const def = vehicleDef(vehicleDefId(kitVehicle(world, s.item)!));
+  if (def && isBoatDef(def) && waterDepth(world, x, y) === WaterDepth.None) return "not_water";
   return undefined;
 }
 /** Server: consume the kit and spawn its vehicle (crafter recorded). Returns the vehicle or a rejection reason. */

@@ -5,6 +5,7 @@
  *
  * Validation order: UnknownPiece, BadTier, LevelLimit, SkillLocked, OutOfRange, NoPrivilege, ZoneFull, Terrain, Occupied,
  * NoSocket, Blocked, NoSupport, NeedClaim, CannotAfford. ADR-315: ClaimOverlap (a flag's disk over another claim) follows NoPrivilege. ADR-211: CornerSlot (straight wall in an outer corner slot) follows Occupied.
+ * ADR-420: the Terrain position also holds the inverted water check for water-required pieces (NeedsDeepWater).
  */
 import { entityIndex, Membership, Transform, type Entity, type World } from "@engine/core";
 /** ADR-230: number of clan palettes Art ships (assets clanPalettes 1..16); clan ids wrap onto them. */
@@ -12,7 +13,7 @@ export const CLAN_PALETTE_COUNT = 16;
 /** BuildPiece.tint for a clan: 1..CLAN_PALETTE_COUNT index into assets clanPalettes (ADR-077; wrapped since ADR-230). */
 import { spawnCrop } from "../farming.js";
 export const clanTintIndex = (clanId: number): number => clanId > 0 ? 1 + ((clanId - 1) % CLAN_PALETTE_COUNT) : 0;
-import { isWaterId, installSpatialIndex, SUBTILE, WaterDepth, waterDepthAt } from "@engine/world";
+import { isWaterId, installSpatialIndex, SUBTILE, WaterDepth, waterDepthAt, WATER_SURFACE_HEIGHT } from "@engine/world";
 import {
   AttachKind, BuildPiece, Container, ContainerViewers, CraftingStation, DoorState, EdgeSide, Emitter, Fuel, Health,
   PieceLink, PieceStability, PrivilegeZone, Tribe, Worker, Zombie,
@@ -99,7 +100,7 @@ export function snapPlacement(world: World, req: PlaceRequest): Snapped | BuildF
   const tier = def.tiered ? req.tier : def.fixedTier;
   if (def.tiered && !(tier >= def.minTier && tier < defs.tiers.length)) return BuildFail.BadTier;
   const variant = req.variant < def.variants ? req.variant : 0;
-  const idx = structures(world); const z = req.level; const lh = defs.building.levelHeight;
+  const idx = structures(world); const z = def.requiresWater ? WATER_SURFACE_HEIGHT : req.level; const lh = defs.building.levelHeight;
   let slot: Slot; let parent: Entity | 0 = 0; let px: number | undefined, py: number | undefined;
   switch (def.placement) {
     case Placement.Cell: { const r = req.rot & 3; const [tx, ty] = anchorFor(def, req.x, req.y, r); slot = { tx, ty, z, side: EdgeSide.None, rot: r }; break; }
@@ -239,8 +240,11 @@ export function ensurePersonalTribe(world: World, e: Entity): number {
   else world.add(e, Tribe, { id: tribe });
   return tribe;
 }
-/** Base-building pieces (not the Claim Flag itself, and not market stalls with their own land rules). */
-export const needsClaim = (def: PieceDef): boolean => def.privilegeRadius <= 0 && !def.stall;
+/** Base-building pieces (not the Claim Flag itself, and not market stalls with their own land rules). ADR-420:
+ *  water-required pieces are claim-exempt — water has no Claim Flag, so requiring one would make docks
+ *  unplaceable. They are public structures: anyone may use the station, and privilege still blocks foreign
+ *  claim disks (there are none on open water). */
+export const needsClaim = (def: PieceDef): boolean => def.privilegeRadius <= 0 && !def.stall && !def.requiresWater;
 
 /** A wall piece for ceiling support: wall-family or corner wall, not a wall-mounted decor piece. */
 const isWallDef = (def: PieceDef | undefined): boolean =>
@@ -319,13 +323,26 @@ export function validatePlacement(world: World, builder: Entity, sn: Snapped, op
   const tiles = def.placement === Placement.Cell || def.placement === Placement.Free ? idx.grid.footprintTiles(def.id, slot.tx, slot.ty, gridRot(def, slot.rot)) : def.placement === Placement.Tri ? [[slot.tx, slot.ty] as [number, number]] : [];
   const terrain = world.getResource(TerrainRes);
   const onGround = slot.z === 0 && def.snap !== "vertex" && (def.groundOnly || (def.ground && !tiles.some(([x, y]) => idx.isDeck(idx.deck(x, y, 0)))));
+  // ADR-420: without terrain the water under a dock / shipyard cannot be verified — refuse rather
+  // than let a water piece land on unverified ground (the live game always has terrain installed).
+  if (def.requiresWater && !terrain) return BuildFail.NeedsDeepWater;
   if (terrain && onGround) {
-    let lo = Infinity, hi = -Infinity;
-    for (const [x, y] of tiles) {
-      if (defs.worldgen.unbuildableTiles.has(terrain.tileAt(x, y)) && waterDepthAt(terrain.tileAt, x, y, defs.movement.shallowRadius) !== WaterDepth.Shallow) return BuildFail.Terrain; // ADR-181: shallow is buildable, deep is not
-      const h = terrain.heightAt(x, y); lo = Math.min(lo, h); hi = Math.max(hi, h);
+    if (def.requiresWater) {
+      // ADR-420: inverted water rule — a dock / shipyard REQUIRES water under every footprint tile
+      // (deep for both today), instead of the generic rule below that forbids deep water. Land and
+      // shallow shore fail with NeedsDeepWater; water has no slope, so no slope check applies.
+      for (const [x, y] of tiles) {
+        const depth = waterDepthAt(terrain.tileAt, x, y, defs.movement.shallowRadius);
+        if (def.requiresWater === "deep" ? depth !== WaterDepth.Deep : depth === WaterDepth.None) return BuildFail.NeedsDeepWater;
+      }
+    } else {
+      let lo = Infinity, hi = -Infinity;
+      for (const [x, y] of tiles) {
+        if (defs.worldgen.unbuildableTiles.has(terrain.tileAt(x, y)) && waterDepthAt(terrain.tileAt, x, y, defs.movement.shallowRadius) !== WaterDepth.Shallow) return BuildFail.Terrain; // ADR-181: shallow is buildable, deep is not
+        const h = terrain.heightAt(x, y); lo = Math.min(lo, h); hi = Math.max(hi, h);
+      }
+      if (hi - lo > (def.maxSlope >= 0 ? def.maxSlope : b.maxSlope)) return BuildFail.Terrain;
     }
-    if (hi - lo > (def.maxSlope >= 0 ? def.maxSlope : b.maxSlope)) return BuildFail.Terrain;
   }
   // ADR-265: terrain face, not a wall socket. Check BOTH landing tiles and their claims.
   if (def.features.terrainLadder) {

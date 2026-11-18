@@ -158,14 +158,14 @@ describe("ADR-387 guide fact-row icons", () => {
     }
   });
 
-  it("pins the coverage: 133 fact rows, 65 with icons (19 file, 15 condition, 31 guide)", () => {
+  it("pins the coverage: 146 fact rows, 67 with icons (19 file, 15 condition, 33 guide)", () => {
     const rows = allFactRows();
-    expect(rows.length).toBe(133);
+    expect(rows.length).toBe(146);
     const withIcon = rows.filter((r) => r.icon);
-    expect(withIcon.length).toBe(65);
+    expect(withIcon.length).toBe(67);
     expect(withIcon.filter((r) => r.icon!.kind === "file").length).toBe(19);
     expect(withIcon.filter((r) => r.icon!.kind === "condition").length).toBe(15);
-    expect(withIcon.filter((r) => r.icon!.kind === "guide").length).toBe(31);
+    expect(withIcon.filter((r) => r.icon!.kind === "guide").length).toBe(33);
     // rows without an icon describe a number, not a thing — spot-check the shape of the gap list
     const noIcon = rows.filter((r) => !r.icon).map((r) => r.label);
     expect(noIcon).not.toContain("Spring temperatures"); // ADR-400: spring has ic_blossom now

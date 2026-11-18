@@ -7,6 +7,7 @@
 import { autoSprintReady } from "./systems/auto-sprint.js";
 import { ROAD_COMMANDS } from "./roads.js";
 import { TERRAIN_COMMANDS } from "./terrain.js";
+import { RAMP_COMMANDS, TerrainRampCmd } from "./ramp.js";
 import { slotItem } from "./inventory.js";
 import { gameplayDefs } from "./config.js";
 import { SIGN_COMMANDS } from "./signs.js";
@@ -106,6 +107,8 @@ export const COMMAND_RATES: Readonly<Record<string, number>> = {
   ...Object.fromEntries(DYE_COMMANDS.map((d) => [d.name, 10])),
   [ReclaimCmd.name]: 20,
   [MoveCmd.name]: 8,
+  /** ADR-419: one ramp (up to 16 tiles / 96 edits) per command — 2/s is generous for a bulk edit. */
+  [TerrainRampCmd.name]: 2,
 };
 
 export function registerGameplayCommands(reg: CommandRegistry = new CommandRegistry()): CommandRegistry {
@@ -139,6 +142,7 @@ export function registerGameplayCommands(reg: CommandRegistry = new CommandRegis
   for (const [d] of MOVE_COMMANDS) reg.register(d); // ADR-318: append-only move
   for (const d of MOUNT_COMMANDS) reg.register(d); // ADR-319 / ADR-320: append-only mounts + saddles
   for (const d of ROPE_COMMANDS) reg.register(d); // ADR-351: append-only rope leading
+  for (const d of RAMP_COMMANDS) reg.register(d); // ADR-419: append-only ramp grading (last: older ids keep their wire index)
   return reg;
 }
 

@@ -52,7 +52,7 @@ export interface CrossingBot {
   stamina: number; staminaMax: number;
   cold: boolean;
 }
-export type CrossingDecision = "ford" | "swim" | "ride" | "around" | "wait";
+export type CrossingDecision = "ford" | "swim" | "ride" | "around" | "wait" | "boat";
 
 const T = travelRaw as unknown as { minHp: number; minNeeds: number };
 
@@ -124,8 +124,17 @@ export function crossingSafe(profile: WaterProfile, bot: CrossingBot, speeds: Cr
 }
 
 /** The full decision: ford / swim / ride when safe, wait when the bot is in bad shape, around when the
- *  water itself is uncrossable for this bot (or its mount). */
-export function decideCrossing(profile: WaterProfile, bot: CrossingBot, speeds: CrossingSpeeds, data: WaterData = WATER_DATA): CrossingDecision {
+ *  water itself is uncrossable for this bot (or its mount). ADR-421: when `opts.boatAvailable` is set and
+ *  the leg holds deep water, a fit bot takes the boat instead of swimming — a boat crosses a deep run of
+ *  any length, so the swim length cap does not apply; the bot still needs the same fitness floors (warm,
+ *  fed, watered, unhurt, enough stamina to paddle), just not the swim stamina the deep water would cost.
+ *  Callers that do not pass the option keep the old five-way decision exactly. */
+export function decideCrossing(profile: WaterProfile, bot: CrossingBot, speeds: CrossingSpeeds, data: WaterData = WATER_DATA, opts?: { boatAvailable?: boolean }): CrossingDecision {
+  if (opts?.boatAvailable && profile.deep > 0 && !bot.riding) {
+    if (!bot.cold && bot.hp >= T.minHp && bot.hunger >= T.minNeeds && bot.thirst >= T.minNeeds
+      && bot.stamina / Math.max(1, bot.staminaMax) >= data.minStamina) return "boat";
+    // An unfit bot with a boat waits (like the swim path) instead of boarding exhausted.
+  }
   const structural = structuralCrossing(profile, bot.riding, bot.mountSwims, data);
   if (structural === "around") return "around";
   return crossingSafe(profile, bot, speeds, data) ? structural : "wait";
