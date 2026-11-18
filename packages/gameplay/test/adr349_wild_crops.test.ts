@@ -75,7 +75,11 @@ describe("ADR-349: fruit trees and crops visible in the world", () => {
       const wild = [...counts.entries()].filter(([k]) => isWild(k)).reduce((a, [, v]) => a + v, 0);
       const fruit = [...counts.entries()].filter(([k]) => isFruit(k)).reduce((a, [, v]) => a + v, 0);
       const total = [...counts.values()].reduce((a, b) => a + b, 0);
-      expect(wild, `seed ${seed} wild plants`).toBeGreaterThanOrEqual(380);
+      // ADR-431: the wild floor is 340, not 380 — the berry rebalancing (berry_bush x14 in the grass band,
+      // for the dye -> Claim Flag chain) trades ~7% of the other wild plants' count for berry density
+      // (worst seed 353, down from ~419 at x1). The scatter is still plentiful and every kind appears
+      // (the per-kind assertions below are the real guard); 340 still catches a wild-crop spawn break.
+      expect(wild, `seed ${seed} wild plants`).toBeGreaterThanOrEqual(340);
       expect(fruit, `seed ${seed} fruit trees`).toBeGreaterThanOrEqual(100);
       expect(wild / total, `seed ${seed} wild share`).toBeGreaterThan(0.25);
       for (const k of [...Object.keys(WILD_TO_CROP), "wild_garden"]) expect(counts.get(k) ?? 0, `seed ${seed} ${k}`).toBeGreaterThan(0);

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TimeOfDay, Transform, World, timeOfDay } from "@engine/core";
-import { BuildPiece, PieceOwner, gameplayDefs, spawnPoints } from "@engine/gameplay";
+import { BuildPiece, PieceOwner, defaultDefs, gameplayDefs, spawnPoints, worldgenBands } from "@engine/gameplay";
 import { LoopbackNetwork, NetClient } from "@engine/net";
 import { ProceduralGenerator, computeSpawnPoints } from "@engine/world";
 import { createGameServer, applyMoveInput, installDemoWorld, DEMO_COMMANDS, DEMO_EVENTS } from "../src/main.js";
@@ -30,7 +30,11 @@ describe("world start (ADR-106)", { timeout: 30_000 }, () => {
   });
   it("exposes the seed's four spawn points and spreads joining players over all of them", async () => {
     const { gs, tick, connect } = await setup(77);
-    const want = computeSpawnPoints(new ProceduralGenerator({ seed: 77 }));
+    // ADR-428: the server builds its generator with the production worldgen bands, so the expected
+    // points come from that generator — the old default-bands expectation encoded the pre-428
+    // wiring (a fossil-only world). The algorithm is unchanged; the points move because the
+    // clear-patch search now sees the wild nodes that actually spawn.
+    const want = computeSpawnPoints(new ProceduralGenerator({ seed: 77, bands: worldgenBands(defaultDefs()) }));
     expect(gs.spawnPoints).toEqual(want); expect(spawnPoints(gs.world)).toEqual(want);
     for (let i = 0; i < 4; i++) { await connect(); tick(2); }
     const near = new Set<number>();

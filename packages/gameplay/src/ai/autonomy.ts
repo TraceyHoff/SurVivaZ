@@ -178,6 +178,8 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
   { // ADR-323: liked food for taming / feeding the mount that no allowed storage holds -> forage it with the normal gather pick
     const mn = a.bb.get<number[]>("mountNeeds"); if (mn?.length) { for (const id of mn) { needs.add(id); jobItems?.add(id); } view.needs = [...needs]; } }
   // gather target from memory (bounded), skipping banned / empty / tool-locked nodes; wanted yields win within ~20 tiles
+  // ADR-431: free pack slots (0..addLimit), for the nearly-full-pack guard below.
+  let freePack = 0; for (let i = 0; i < slots.addLimit; i++) if (!slots.items[i] || !slots.counts[i]) freePack++;
   const ban = bans(a.bb); const tool = heldTool(world, self, defs); let best: GoalSensors["gatherNode"], bs = Infinity;
   // ADR-217: best tool of each kind in the bag (trees are worked with the axe, not fists) -> switch to it for that node
   const carried = new Map<number, { slot: number; tier: number }>();
@@ -206,9 +208,26 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
       }
       const wanted = def.yields.some((y) => needs.has(y.item));
       if (!wanted && needs.size && def.yields[0] && have(def.yields[0].item) >= 8) continue; // stocked up: explore for what the goal needs
+      // ADR-431: a pack with no free slot cannot take a craft output — the dye for the claim flag jammed the
+      // craft queue (head paused on outputFits, 4 duplicate dye jobs, queue_full) once gathering filled all 16
+      // pack slots with one stack of each wild species. Count EVERY yield that would take a new pack slot:
+      // a willow yields wood (already carried, so a first-yield-only check passes) plus a new sapling and a
+      // new bark — two new slots per tree — and a wild onion yields onion + onion_seeds the same way. A node
+      // whose yields would take a new slot is scored worse (5 tiles per new slot: the bot prefers a tree
+      // whose yields stack), and is skipped outright only when the pack is literally full — a hard reserve
+      // blocked the very stone the bot needed, because a rubble_pile's secondary yields (scrap, nails,
+      // cloth) take new slots too. The seed-drop escape in the junk rule frees a slot for plan items when
+      // the pack is full; a node whose yields all stack is always gatherable, and the plants stay in the
+      // world (they regrow) for later.
+      const newSlots = def.yields.reduce((n, y) => n + (have(y.item) === 0 ? 1 : 0), 0);
+      // ADR-431: skip a node outright only when the pack is literally full AND nothing it yields stacks —
+      // a stone node whose secondary (flint) is new still gives the stone the bot needs (it stacks; the
+      // flint is lost), so blocking it on the secondary starved the campfire. The seed-drop escape in the
+      // junk rule frees a slot for plan items when the pack is full and a leaf is unmet.
+      if (newSlots > 0 && freePack === 0 && !def.yields.some((y) => have(y.item) > 0)) continue;
       // ADR-217: a wanted node's pull scales with how much of the needed items one swing is worth (an axe on a tree beats
       // picking twigs for an odd log; punching a tree only drops its first yield, at reduced rate and slower)
-      const s = Math.hypot(p.x - t.x, p.y - t.y) - (wanted ? 20 * Math.min(1, wantedYield(defs, def, needs, bare)) : 0);
+      const s = Math.hypot(p.x - t.x, p.y - t.y) - (wanted ? 20 * Math.min(1, wantedYield(defs, def, needs, bare)) : 0) + newSlots * 5;
       if (s < bs || (s === bs && best && p.id < best.id)) { bs = s; best = { id: p.id, x: p.x, y: p.y, wanted }; bestNeeds = bagTool !== undefined && bagTool.tier >= def.minTier ? bagTool : undefined; }
     }
     if (!best) break; // no candidate left (all banned / empty / tool-locked / unreachable)
@@ -296,7 +315,14 @@ const night = (p: string): number => (p === "night" ? 1 : p === "dusk" ? 0.6 : 0
 export function instantChores(c: Ctx, o: { actions: string[] }): void {
   const w = c.world, t = c.self.tick; c.bb.set("hungerSeen", c.self.hunger);
   if (w.equipSlot !== undefined && t - c.bb.num("equipAt", -1e9) >= 100) { o.actions.push(`equip:${w.equipSlot}`); c.bb.set("equipAt", t); }
-  if (w.craftRecipe !== undefined && t - c.bb.num("craftedAt", -1e9) >= Math.max(100, w.craftTicks ?? 0)) { const n = w.craftCount ?? 1; o.actions.push(n > 1 ? `craft:${w.craftRecipe}:${n}` : `craft:${w.craftRecipe}`); c.bb.set("craftedAt", t); if (w.plan) armCraft(c); }
+  // ADR-431: never queue a second job for the same craft while one is already pending (craftPend, armed by
+  // armCraft when the first was pushed) — instantChores re-pushed dye every 100 ticks and filled all 4 queue
+  // slots with identical jobs, so a later craft could not even be attempted (queue_full). A pending job expires
+  // on its own (craftPend.until), after which a retry is allowed; a different output is never suppressed.
+  const pend = c.bb.get<{ item: number; until: number }>("craftPend");
+  const next = c.bb.get<{ item: number }>("craftNext");
+  const dupCraft = pend !== undefined && next !== undefined && pend.item === next.item && t < pend.until;
+  if (w.craftRecipe !== undefined && !dupCraft && t - c.bb.num("craftedAt", -1e9) >= Math.max(100, w.craftTicks ?? 0)) { const n = w.craftCount ?? 1; o.actions.push(n > 1 ? `craft:${w.craftRecipe}:${n}` : `craft:${w.craftRecipe}`); c.bb.set("craftedAt", t); if (w.plan) armCraft(c); }
   // Task 25: dye it (the sensor only sets view.dye while the bot holds a dye + brush and still wants today's colour;
   // the command re-validates brush + dye server-side, so a stale sensor can never spend a dye the bot no longer has).
   if (w.dye !== undefined && t - c.bb.num("dyedAt", -1e9) >= 200) { o.actions.push(`dye:${w.dye.kind}:${w.dye.slot}:${w.dye.palette}:${w.dye.index}`); c.bb.set("dyedAt", t); }

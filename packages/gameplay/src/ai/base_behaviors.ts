@@ -17,12 +17,12 @@ import { storageDepositActions, storageWithdrawActions, mayTakeFromStorageAt, ne
 import { timeOfDay, sunFractionOf, Transform, type Agent, type AgentContext, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
-import { Animal, AttachKind, BotHome, BuildPiece, Container, Dead, Fuel, LootBag, NO_SLOT, StanceMode, Survival, Viewing, Worker, Worn } from "../components.js";
+import { Animal, AttachKind, BotHome, BuildPiece, Container, Dead, Fuel, LootBag, NO_SLOT, ResourceNode, StanceMode, Survival, Viewing, Worker, Worn } from "../components.js";
 import { canUseBaseStorage } from "../building/actions.js";
 import { resolveAttachment } from "../building/links.js";
 import { countItem, hasBrushInHotbar, readSlots, slotFreshness } from "../inventory.js";
 import { spoilStageIndex, spoilStages } from "../food.js";
-import { StationKind, type GameDefs } from "../defs.js";
+import { StationKind, ToolKind, type GameDefs } from "../defs.js";
 import { animalDefs } from "../population.js";
 import { plantableBySeed } from "../farming.js";
 /** ADR-252 / ADR-247: a plantable seed / sapling (kept and stashed, never dropped as junk). */
@@ -31,7 +31,7 @@ import { isWinter, BASE_SLOTS, DOOR_IN, DOOR_OUT, HEARTH_SIT, aiMemoryOf, baseHo
 import { assessThreat, defenceMemoryOf } from "./defence_plan.js"; // ADR-341: threat level + memory for the planner's defence goal (leaf module: no input.ts cycle)
 import { stuckOn } from "./autonomy.js";
 import { ruinHomeAnchor } from "./claim_build.js"; // ADR-340: adopted ruin home anchors the planner (the autonomy <-> claim_build cycle already exists)
-import { UpgradeCmd } from "../input.js";
+import { GatherCmd, UpgradeCmd } from "../input.js";
 import type { AgentOutputWithCommands } from "./agent_output.js";
 
 export interface PlanSensors {
@@ -117,6 +117,17 @@ export function fillPlanSensors(world: World, self: Entity, view: AgentWorldView
   // events; the level here is from the previous sense pass — the same lag as every other sensor).
   const dmem = defenceMemoryOf(a); const threat = assessThreat(dmem.events, tick).level;
   const plan = makePlan({ ...(sg ? { priority: [{ key: sg.key, count: 1 }], maxDepth: MOUNT_BOTS.planMaxDepth } : {}), ...(mem.earth ? { earth: mem.earth } : {}), ...(mem.ramp ? { ramp: mem.ramp } : {}), world, self, defs, ...(base ? { base } : {}), ...(homeBs ? { bs: homeBs } : {}), ...(ruin ? { ruinBase: ruin } : {}), threat, defenceMem: dmem, fails: mem.fails, hungry, freezing, evening, winter, ...(mem.snooze ? { snooze: mem.snooze } : {}) }); view.plan = plan; if (earthActive) markAiDirty(a, tick); a.bb.set("planGoal", plan.goal); a.bb.set("planStep", plan.step);
+  // ADR-431: a clear step harvests a node — hold the tool that node needs (the axe for a fruit tree), so
+  // instantChores equips it instead of whatever the gather sensor picked for a different target.
+  if (plan.step?.k === "clear") {
+    const kind = world.getField(plan.step.node, ResourceNode, "kind");
+    const def = kind !== undefined ? defs.resources.get(kind) : undefined;
+    if (def && def.requiredTool !== ToolKind.None) {
+      let slot = -1, tier = -1;
+      for (let i = 0; i < slots.items.length; i++) { const tl = slots.items[i] && slots.counts[i] ? defs.items.get(slots.items[i]!)?.tool : undefined; if (tl && tl.kind === def.requiredTool && tl.tier > tier) { slot = i; tier = tl.tier; } }
+      if (slot >= 0 && tier >= def.minTier) view.equipSlot = slot;
+    }
+  }
   { // patience: a goal with no step and no leaf gathered for GOAL_PATIENCE ticks is snoozed half a day (persisted), like a player giving up on reeds
     let leafN = 0; for (let i = 0; i < slots.items.length; i++) if (slots.items[i] && plan.leaves.includes(slots.items[i]!)) leafN += slots.counts[i] ?? 0;
     const gs = a.bb.get("goalSeen") as { g: string; last: number; n: number } | undefined;
@@ -167,7 +178,17 @@ export function fillPlanSensors(world: World, self: Entity, view: AgentWorldView
       // Task 25: dye is purposeful material while the bot holds a paint brush (it will be consumed by the dye action,
       // never junk-dropped in a loop); a brush-less bot keeps the Task 16 behaviour (dye is junk).
       if (it === ix.item.get("dye")?.id && hasBrushInHotbar(world, self)) continue;
-      view.junk = { item: it, count: slots.counts[i]! }; break; } }
+      view.junk = { item: it, count: slots.counts[i]! }; break; }
+    // ADR-431: make room — a pack full of seeds / useful clutter blocks the plan (the bot cannot pick up the
+    // stone its campfire needs, and the gather guard cannot fix a pack that is already full). When the pack is
+    // completely full and a plan leaf is unmet, drop one seed (it regrows in the world; plan.keep is still
+    // never dropped) so the bot can take the plan item. One slot at a time, only while the plan is blocked.
+    // A craft step counts too: the torch's inputs (sticks, fiber) were all held, so no leaf was unmet, yet
+    // the torch output itself had nowhere to go — the bot sat on a full pack and never wore the torch.
+    const stepNeedsSlot = plan.step?.k === "craft" && (() => { const r = defs.recipes.get(plan.step.recipe); return !!r && countItem(world, self, r.output.item) === 0; })();
+    if (free === 0 && !view.junk && (plan.leaves.some((id) => countItem(world, self, id) === 0) || stepNeedsSlot)) {
+      for (let i = 0; i < slots.addLimit; i++) { const it = slots.items[i]!; if (!it || !slots.counts[i] || plan.keep.has(it) || !isSeedItem(defs, it)) continue;
+        view.junk = { item: it, count: slots.counts[i]! }; break; } } }
   // stash: bag items the plan does not need (never tools / weapons / worn / food stock / fire wood)
   if (bs?.storage && bs.storage.free > 0) {
     const worn = new Set<number>(); const wi = world.getArray(self, Worn, "item"); if (wi) for (const x of wi) if (x) worn.add(x);
@@ -342,6 +363,27 @@ export function baseBehaviors(): GameBehavior[] {
         if (s.k === "terrain") {
           if (goTo(c, o, s.stand.x, s.stand.y) > .55) { if (stuckOn(c, s.stand.x, s.stand.y)) return fail(); return; }
           stop(o); if (cooled(c, "earthAt", 20)) { o.actions.push(`terrain:${s.x}:${s.y}:${s.dir}`); c.bb.set("earthAt", c.self.tick); } return;
+        }
+        if (s.k === "clear") {
+          // ADR-431: harvest the node blocking an earthworks tile (quarry or pad cell) before digging it —
+          // the targeted GatherCmd is the same one farmRun uses (action strings never reach the server
+          // for bots; only o.commands do). The node regrows in place, so the dig follows at once.
+          const w = worldOf(c)!; const n = w.get(s.node, ResourceNode);
+          if (!w.isAlive(s.node) || !n || (n.amount ?? 0) <= 0) return false; // gone: re-plan, the edit proceeds
+          const tp = w.get(s.node, Transform); const nx = tp?.x ?? s.x + .5, ny = tp?.y ?? s.y + .5;
+          if (goTo(c, o, nx, ny) > 1.2) { if (stuckOn(c, nx, ny)) return fail(); return; }
+          stop(o);
+          // 240-tick ban escape, mirroring gatherRun / farmRun: a node that will not deplete (wrong tool,
+          // full pack, unreachable) abandons the earthworks instead of stalling the bot forever.
+          const clearId = c.bb.num("clearNode", -1), clearAt = c.bb.num("clearAt", -1);
+          if (clearId === s.node && c.self.tick - clearAt > 240) {
+            const m = aiMemoryOf(c.agent);
+            for (const p of [m.earth, m.hireEarth]) if (p && s.x >= p.x - 4 && s.x <= p.x + 1 && s.y >= p.y && s.y <= p.y + 3) p.abandoned = true;
+            markAiDirty(c.agent, c.self.tick); return false;
+          }
+          if (clearId !== s.node) { c.bb.set("clearNode", s.node); c.bb.set("clearAt", c.self.tick); }
+          if (cooled(c, "clearGatherAt", 20)) { const oc = o as unknown as AgentOutputWithCommands; (oc.commands ??= []).push({ type: GatherCmd.name, payload: { target: s.node } }); c.bb.set("clearGatherAt", c.self.tick); }
+          return;
         }
         if (s.k === "ramp") {
           if (goTo(c, o, s.stand.x, s.stand.y) > .55) { if (stuckOn(c, s.stand.x, s.stand.y)) return fail(); return; }

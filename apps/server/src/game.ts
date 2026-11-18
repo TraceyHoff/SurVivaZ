@@ -8,7 +8,7 @@ import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSig
 /** Authoritative game server: world + gameplay + streaming chunks + persistence + NetServer sessions. */
 import { ChannelRegistry, CommandRejected, DEFAULT_TICK_HZ, FixedLoop, installCommandHandlers, cosmeticsHashes, type CosmeticCatalogLike, Membership, Owner, PlayerId, Season, SEASON_COUNT, TimeOfDay, Transform, World, type Entity, type PermissionsRes } from "@engine/core";
 import { CHUNK_SIZE, ChunkManager, ProceduralGenerator, computeSpawnPoints, chunkKeyOf, type BuildingGrid, type PopulationSpawner } from "@engine/world";
-import { computeAiSpawnPoints, pickAiSpawnPoint, setAiSpawnPoints, spawnPoints, addTemporarySafeSpawnPoint, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, drainAbandonedStamps, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
+import { computeAiSpawnPoints, pickAiSpawnPoint, setAiSpawnPoints, spawnPoints, addTemporarySafeSpawnPoint, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, drainAbandonedStamps, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, worldgenBands, computeWildCropTopUp, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
   appearanceServerHooks, applyReplication, installStallBuyHook, installViewBonus, setHitValidator, installPvp, PVP, installBedRespawn, installCraftQueue, installExpressionCommands, installVehicleCommands, installVehicleCraftCommands, installVehicleGuard, requestEmote, CraftQueue, CraftQueuesRes, playerNames, stallListing, listingRevision, stallOf, tillOf, StallHeader, StallOwnerKind, installMapMarkerCommands, MapMarker } from "@engine/gameplay";
 import { AppearanceServer, ChatServer, NameSync, NetServer, StallResult, StallServer, TileSync, validateHit, type ClientSession, type ServerTransport, type StallHooks } from "@engine/net";
 import { createAgentStore, type AgentIdentityStore } from "./agents.js";
@@ -48,8 +48,6 @@ export function restoreSeason(world: World, meta: { seasonOffsetDays?: number; s
   } else world.set(world.environment, Season, { offsetDays: meta.seasonOffsetDays });
 }
 export const CLAN_BLOB = "gameplay.clans";
-/** ProceduralGenerator node kinds -> gameplay resource keys (see DEFAULT_BANDS comments in @engine/world). */
-const NODE_RESOURCES: Record<number, string> = { 1: "fallen_branches", 2: "fiber_grass", 3: "berry_bush", 4: "loose_rocks", 5: "tree", 6: "boulder", 7: "iron_vein" };
 /** Legacy origin spawn (camera fallback only). Players and bots spawn at `spawnPoints(world)` (ADR-106). */
 export const SPAWN = { x: 16, y: 16 };
 
@@ -164,7 +162,11 @@ export function createGameServer(o: GameServerOptions): GameServer {
   // Clan rank masks / goals / contributions (gameplay ClanState) persist as the world blob "gameplay.clans", written on change.
   { const b = o.store?.readBlob(CLAN_BLOB); if (b) { try { loadClanState(world, decodeClanState(b.bytes)); } catch (e) { log(`persist: clan state unreadable: ${String(e)}`); } } }
   if (o.store) { const store = o.store; clanState(world).onChange = () => { if (closing) return; void store.write({ blobs: [{ key: CLAN_BLOB, format: 1, bytes: encodeClanState(clanState(world)), tick: world.tick }] }).catch((e) => log(`persist: clan save failed: ${String(e)}`)); }; }
-  const generator = new ProceduralGenerator({ seed });
+  // ADR-428: the production generator runs the real worldgen bands (worldgen.json via gameplay defs).
+  // Without `bands` it fell back to DEFAULT_BANDS (7 fossil kinds) and no wild crop / fruit tree
+  // could ever spawn in a live world, on either the embedded or the dedicated server.
+  const defs = gameplayDefs(world);
+  const generator = new ProceduralGenerator({ seed, bands: worldgenBands(defs) });
   // Four far-apart starter-biome spawn points, deterministic per seed (ADR-106).
   setSpawnPoints(world, o.spawnPoints?.length ? o.spawnPoints : computeSpawnPoints(generator));
   // ADR-325: AI humans spawn over world-wide seeded points (built lazily on the first bot spawn); explicit spawnPoints
@@ -178,6 +180,9 @@ export function createGameServer(o: GameServerOptions): GameServer {
     player: { exclude: [PlayerIntent] },
     // ADR-134: stored chunks keep their own (possibly depleted/relocated) nodes; only pre-persistence rows regenerate.
     regenerateNodes: (w, ents) => !ents.some((e) => w.has(e, ResourceNode) || w.has(e, NodeRegrow)),
+    // ADR-429: stored chunks generated before the banded generator get the wild-crop / fruit-tree
+    // kinds they are missing (one per kind, deterministic, idempotent — see wildCropTopUp.ts).
+    topUpNodes: (w, chunk, ents) => computeWildCropTopUp(w, chunk, ents, generator.nodesInChunk(chunk.cx, chunk.cy)),
     social: permissions,
     extraMeta: () => { const r = worldRules(world); return { hordes: r.hordes ? 1 : 0, hordeGraceDays: r.hordeGraceDays, aiHumans: r.aiHumans ? 1 : 0 }; },
     ...(o.catalog ? { appearance: { catalog: o.catalog } } : {}),
@@ -189,10 +194,10 @@ export function createGameServer(o: GameServerOptions): GameServer {
   // updates stop at ~2 loads (~1.6 ms) and a site chunk ends its update. maxLoadsPerUpdate stays 4 as the
   // hard cap for cheap chunks. Load radius, cache size, unload margin and FIFO order unchanged.
   const chunks = new ChunkManager({ provider: persist?.provider ?? generator, loadRadius, unloadMargin: 1, cacheSize: 64, maxLoadsPerUpdate: 4, maxLoadTimeMs: 2 });
-  const defs = gameplayDefs(world);
-  const resIds = new Map<number, number>();
-  for (const [kind, key] of Object.entries(NODE_RESOURCES)) { try { resIds.set(Number(kind), defs.resourceId(key)); } catch { /* resource renamed: skip */ } }
-  chunks.onLoad((_c, nodes) => { for (const n of nodes) { const id = resIds.get(n.kind); if (id !== undefined) spawnResourceNode(world, id, n.tx + 0.5, n.ty + 0.5); } stampAbandonedChunk(world, _c.key); });
+  // ADR-428: node kinds are resource ids (worldgenBands), so spawn every kind the defs know — the old
+  // 7-entry NODE_RESOURCES allowlist silently dropped every wild crop and fruit tree the generator
+  // placed. Abandoned-site stamping on chunk load is preserved.
+  chunks.onLoad((_c, nodes) => { for (const n of nodes) if (defs.resources.has(n.kind)) spawnResourceNode(world, n.kind, n.tx + 0.5, n.ty + 0.5); stampAbandonedChunk(world, _c.key); });
 
   const mode = gameModeConfig(o.mode ?? "multiplayer", !!o.virtualPlayers, worldRules(world).aiHumans);
   const players = new Map<number, Player>();

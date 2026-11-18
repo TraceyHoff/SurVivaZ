@@ -265,7 +265,13 @@ export function pickBaseSite(world: World, self: Entity, near: { x: number; y: n
   const ok = (bx: number, by: number): boolean => {
     if (!siteClaimOk(world, self, bx, by, flagR)) return false;
     for (let y = -1; y <= 4; y++) for (let x = -2; x <= 4; x++) if (nearWater(world, bx + x + 0.5, by + y + 0.5)) return false;
-    for (const e of sp.queryRect(bx - 3, by - 2, bx + 5, by + 5)) if (world.has(e, ResourceNode) || world.has(e, BuildPiece)) return false;
+    // ADR-431: a ResourceNode vetoes only the 2x2 foundation footprint, not the whole 9x8 yard.
+    // Nodes block neither placement (validatePlacement) nor movement, and in a crop-scattered
+    // world almost no 9x8 patch is node-free — the old yard-wide veto meant bots could never
+    // claim a site at all (ADR-252 base/bed/sleep + ADR-385 re-target all failed once wild crops
+    // actually spawned). BuildPieces still veto the whole yard.
+    for (const e of sp.queryRect(bx - 3, by - 2, bx + 5, by + 5)) if (world.has(e, BuildPiece)) return false;
+    for (const e of sp.queryRect(bx, by, bx + 2, by + 2)) if (world.has(e, ResourceNode)) return false;
     for (const e of sp.queryRadius(bx + 1, by + 1, 9)) if (world.has(e, BuildPiece)) return false;
     for (const [x, y] of [[0, 0], [1, 0], [0, 1], [1, 1]]) { const sn = snapPlacement(world, { piece: f.id, x: bx + x! + 0.5, y: by + y! + 0.5, level: 0, rot: 0, tier: 0, variant: 0 });
       if (typeof sn === "number" || validatePlacement(world, self, sn, { ignoreCost: true, ignoreRange: true, ignoreClaim: true }) !== 0) return false; }
@@ -299,6 +305,8 @@ export type Step =
   | { k: "terrain"; x: number; y: number; dir: number; stand: { x: number; y: number } }
   /** ADR-419: grade a whole ramp in one command (TerrainRampCmd via the "ramp:..." action). */
   | { k: "ramp"; x: number; y: number; dx: number; dy: number; delta: number; stand: { x: number; y: number } }
+  /** ADR-431: harvest the node on an earthworks tile first, then dig (base_work issues a targeted GatherCmd). */
+  | { k: "clear"; x: number; y: number; node: Entity }
   | { k: "light"; piece: Entity }
   | { k: "withdraw"; item: number; count: number }
   | { k: "craft"; recipe: number; count: number; station: StationKind; ticks: number }
@@ -479,7 +487,7 @@ export function makePlan(p: PlanInput): Plan {
       if (!hasShovel(world, self)) { r.obtainTool(ToolKind.Shovel, 1); }
       else {
         const work = nextTerrainWork(world, self, p.earth);
-        if (work?.k === "terrain") r.step = work;
+        if (work?.k === "terrain" || work?.k === "clear") r.step = work;
         else if (work?.k === "ladder" || work?.k === "light") {
           const key = work.k === "ladder" ? "ladder" : "campfire";
           // ADR-340: earth slots are relative to the earth anchor (= the planner base anchor); a ruin

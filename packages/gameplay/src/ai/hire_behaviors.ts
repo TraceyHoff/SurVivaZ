@@ -40,7 +40,7 @@ import { scanBase } from "./planner.js";
 import { nearestClaimHostile } from "../territory.js";
 import { workerAnchor, workerWorkAnchor, workerOrderTarget, workerSelections, workerRecipes } from "../recruitment.js";
 import { playerEntity } from "../pets.js";
-import { UseCmd } from "../input.js";
+import { GatherCmd, UseCmd } from "../input.js";
 import { StationKind, type GameDefs } from "../defs.js";
 import type { AgentOutputWithCommands } from "./agent_output.js";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
@@ -109,6 +109,12 @@ export function computeFarmSensor(world: World, self: Entity, defs: GameDefs, an
   const seedItem = seedSlot >= 0 ? slots!.items[seedSlot]! : 0;
   const seedCount = seedItem ? countItem(world, self, seedItem) : 0;
   const cropKeys = new Set(FARMING.plantables.map((p) => p.becomes));
+  /** ADR-430: every plantable's `wild` nodes too — a hired farm worker (and an unhired gardener, who shares
+   *  this sensor) harvests wild plants near the anchor, not just the farmed `becomes` nodes. Yields are
+   *  unchanged: a wild node still drops only its own species' seed and produce (ADR-247); the farm path
+   *  just stops skipping them. `wild_garden` belongs to no plantable's `wild` list (a mixed garden, no
+   *  single species' seed), so it stays a general-gather target, not a farm one. */
+  const wildKeys = new Set(FARMING.plantables.flatMap((p) => p.wild));
   // ADR-385: harvest candidates in anchor distance order (nearest first); the pick
   // below takes the first one the bot can actually reach from where it stands.
   const harvestCands: { id: number; x: number; y: number; d: number }[] = [];
@@ -123,7 +129,7 @@ export function computeFarmSensor(world: World, self: Entity, defs: GameDefs, an
       // ADR-385: a banned harvest target (farmRun banned it after getting stuck) is never
       // re-picked while the ban holds; the nearest few are collected for the reachability
       // pick below instead of taking the nearest sight unseen.
-      if (key && cropKeys.has(key) && !banned?.(e)) {
+      if (key && (cropKeys.has(key) || wildKeys.has(key)) && !banned?.(e)) {
         const c = { id: e, x: t.x, y: t.y, d }; let i = harvestCands.length;
         while (i > 0 && harvestCands[i - 1]!.d > d) i--;
         if (i < 4) harvestCands.splice(i, 0, c);
@@ -371,7 +377,23 @@ function farmRun(c: Ctx, o: AgentOutput): boolean | void { const f = c.world.far
   // terrain edited under it) is banned like a gather node, so the farm sensor re-picks the next
   // reachable one instead of freezing against the obstacle forever.
   if (goTo(c, o, target.x, target.y) > 1.2) { if (stuckOn(c, target.x, target.y)) { banNode(c, target.id); return false; } return; } stop(o);
-  if (f.harvest) { o.actions.push("gather"); return false; } // mature crop node: gather it like any node
+  if (f.harvest) {
+    // ADR-431: a harvest target worked for 240 ticks without depleting is banned like the gather
+    // behaviour's (a tool-locked node the bot cannot cut, a node whose swings all fail) — the farm
+    // sensor re-picks the next reachable candidate instead of pressing it forever.
+    const hid = c.bb.num("farmGatherId", -1), hat = c.bb.num("farmGatherAt", -1);
+    if (hid !== f.harvest.id || hat < 0) { c.bb.set("farmGatherId", f.harvest.id); c.bb.set("farmGatherAt", c.self.tick); }
+    else if (c.self.tick - hat > 240) { banNode(c, f.harvest.id); c.bb.set("farmGatherId", -1); return false; }
+    // ADR-431: gather the farm target itself, not whatever node is nearest. The bare Primary gather
+    // resolves server-side to the nearest node in 2.25 tiles, so a nearer tool-locked node (an animal
+    // carcass needing a knife, 0.41 tiles away) shadowed the farm target forever: WrongTool every tick,
+    // 4,579 times in the ADR-252 probe, while the herb patch 1.07 tiles away never lost a point. The
+    // GatherCmd goes through the same net-command path as the till UseCmd below (throttled to one per
+    // 20 ticks: the fastest node cooldown, well under the 20/s command rate); the bare Primary bit stays
+    // as the fallback when the command is dropped.
+    if (cooled(c, "farmGatherCmdAt", 20)) { const oc = o as unknown as AgentOutputWithCommands; (oc.commands ??= []).push({ type: GatherCmd.name, payload: { target: f.harvest.id } }); c.bb.set("farmGatherCmdAt", c.self.tick); }
+    o.actions.push("gather"); return false;
+  } // mature crop node: gather it like any node
   const t = f.tend!; // water a thirsty crop / plant a seed on tilled soil (Use on the slot's item)
   if (cooled(c, "farmUseAt", 20)) { const oc = o as unknown as AgentOutputWithCommands; (oc.commands ??= []).push({ type: UseCmd.name, payload: { slot: t.slot } }); c.bb.set("farmUseAt", c.self.tick); }
   return false; }
@@ -396,8 +418,10 @@ export function hireBehaviors(): GameBehavior[] {
         // berry bush near the base is a permanent harvest target (it regrows), so an ungated garden starves
         // the home build: the bot harvests instead of gathering foundation materials or building. Garden
         // only fills idle gaps (no plan step, no wanted gathering trip), e.g. blocked/snoozed goals or the
-        // endgame — the home comes first, the garden second.
-        { name: "plot", curve: step01, input: (c) => (c.world.farm && !c.world.hire && !c.world.plan?.step && !c.world.tripWanted ? 1 : 0) },
+        // endgame — the home comes first, the garden second. ADR-431: a KNOWN wanted gather node is not an
+        // idle gap either — the plan needs that node's yield, so gather (not garden) runs for it; without
+        // this the garden outscored gather (0.98 vs 0.75) and the bot stood on its farm target forever.
+        { name: "plot", curve: step01, input: (c) => (c.world.farm && !c.world.hire && !c.world.plan?.step && !c.world.tripWanted && !c.world.gatherNode?.wanted ? 1 : 0) },
         { name: "calm", curve: step01, input: (c) => (c.memory.nearest("zombie", c.self.x, c.self.y, 0.3) ? 0 : 1) }],
       run: farmRun },
     { name: "work_maintain", inertia: 0.5, traits: { industriousness: 0.8 }, considerations: [

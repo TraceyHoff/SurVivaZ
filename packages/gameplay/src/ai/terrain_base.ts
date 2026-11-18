@@ -1,7 +1,7 @@
 /** ADR-266: finite, persisted earthworks for a NEW 2x2 shelter. No edits beneath an existing building. */
 import { Transform, type Entity, type World } from "@engine/core";
-import { isWaterId } from "@engine/world";
-import { AttachKind, EdgeSide, Fuel } from "../components.js";
+import { installSpatialIndex, isWaterId } from "@engine/world";
+import { AttachKind, Dead, EdgeSide, Fuel, ResourceNode } from "../components.js";
 import { hasPrivilege, snapPlacement, validatePlacement } from "../building/place.js";
 import { structures } from "../building/structure.js";
 import { resolveAttachment } from "../building/links.js";
@@ -23,7 +23,10 @@ export type TerrainWork = { k: "terrain"; x: number; y: number; dir: number; sta
   | { k: "ramp"; x: number; y: number; dx: number; dy: number; delta: number; stand: { x: number; y: number } }
   | { k: "ladder"; x: number; y: number }
   | { k: "light"; x: number; y: number }
-  | { k: "fuel"; piece: Entity };
+  | { k: "fuel"; piece: Entity }
+  /** ADR-431: harvest the wild plant / tree standing on the tile first, then dig — a node on a quarry or
+   *  pad cell blocks the edit (TerrainFail.Occupied) and used to abandon the whole earthworks. */
+  | { k: "clear"; x: number; y: number; node: Entity };
 
 /**
  * ADR-419: a graded ramp the bot builds to smooth its own route. `dest` is the
@@ -129,6 +132,16 @@ export function planTerrainBase(world: World, self: Entity, b: { x: number; y: n
   return { x, y, kind, height, quarry };
 }
 
+/** The live ResourceNode standing on tile (tx,ty), if any — the blocker behind an Occupied edit. */
+export function nodeOnTile(world: World, tx: number, ty: number): Entity | undefined {
+  const idx = installSpatialIndex(world); idx.update();
+  for (const o of idx.queryRadius(tx + 0.5, ty + 0.5, 0.75)) {
+    if (!world.isAlive(o) || world.has(o, Dead) || !world.has(o, ResourceNode)) continue;
+    const p = world.get(o, Transform); if (p && Math.floor(p.x) === tx && Math.floor(p.y) === ty) return o;
+  }
+  return undefined;
+}
+
 /** One command-sized step. A quarry is bounded too (max 12 Soil); exhausted/blocked plans stop, never move to a new hill. */
 export function nextTerrainWork(world: World, self: Entity, p: TerrainBasePlan): TerrainWork | undefined {
   if (p.done || p.abandoned || !hasShovel(world, self)) return undefined;
@@ -156,6 +169,9 @@ export function nextTerrainWork(world: World, self: Entity, p: TerrainBasePlan):
     for (const q of p.quarry) if (t.heightAt(q.x, q.y) > q.bottom && terrainDigAt(world, q.x, q.y) > -3) {
       const why = editTerrain(world, self, q.x, q.y, -1, true);
       if (why === TerrainFail.InventoryFull) fullBag = true;
+      // ADR-431: a wild plant on a quarry cell is cleared (harvested) instead of abandoning the pad — with
+      // 70 wild kinds now spawning, 2 blocked quarry cells already starve an 8-soil pad (6 < 8).
+      if (why === TerrainFail.Occupied) { const node = nodeOnTile(world, q.x, q.y); if (node !== undefined) return { k: "clear", x: q.x, y: q.y, node }; }
       if (why === TerrainFail.None || why === TerrainFail.TooFar) return { k: "terrain", x: q.x, y: q.y, dir: -1, stand: { x: p.x - .5, y: p.y + 2.5 } };
     }
     if (!fullBag) p.abandoned = true; return undefined; // pause for ordinary surplus stashing when capacity is temporary
@@ -165,6 +181,8 @@ export function nextTerrainWork(world: World, self: Entity, p: TerrainBasePlan):
     const x = p.x + dx, y = p.y + dy, h = t.heightAt(x, y); if (h === p.height) continue;
     const dir = h < p.height ? 1 : -1;
     const why = editTerrain(world, self, x, y, dir, true);
+    // ADR-431: same clear-first rule for a node on the pad / pit cell itself.
+    if (why === TerrainFail.Occupied) { const node = nodeOnTile(world, x, y); if (node !== undefined) return { k: "clear", x, y, node }; }
     if (why !== TerrainFail.None && why !== TerrainFail.TooFar) { if (why !== TerrainFail.InventoryFull) p.abandoned = true; return undefined; }
     return { k: "terrain", x, y, dir, stand };
   }

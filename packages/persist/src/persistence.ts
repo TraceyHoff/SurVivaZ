@@ -1,5 +1,5 @@
 import { entityIndex, migrateSkinTone, Owner, Season, TimeOfDay, Transform, type ComponentStore, type Entity, type World } from "@engine/core";
-import { ChunkMembership, decodeChunk, encodeChunk, parseChunkKey, chunkKeyOf, type BuildingGrid, type ChunkKey, type AsyncChunkProvider, type ChunkManager, type ChunkProvider, type GeneratedChunk } from "@engine/world";
+import { ChunkMembership, decodeChunk, encodeChunk, parseChunkKey, chunkKeyOf, type BuildingGrid, type Chunk, type ChunkKey, type AsyncChunkProvider, type ChunkManager, type ChunkProvider, type GeneratedChunk, type NodePlacement } from "@engine/world";
 import { decodePlayerInto, encodePlayer, PLAYER_VERSION, type PlayerCodecOptions, type PlayerRestoreResult } from "./playerCodec.js";
 import { SocialSaver, type SocialState } from "./social.js";
 import { ensureAppearance, type AppearanceRepair } from "./appearance.js";
@@ -65,6 +65,15 @@ export interface WorldPersistenceOptions {
    * saved before nodes were persisted, i.e. with no node/regrow entity, so depletion survives restarts).
    */
   regenerateNodes?: boolean | ((world: World, entities: readonly Entity[]) => boolean);
+  /**
+   * ADR-429: when a stored chunk keeps its own nodes (regenerateNodes false for that chunk), fill in the
+   * wild-crop / fruit-tree kinds its generation predates: return extra node placements to hand to onLoad
+   * with the chunk (they spawn and persist exactly like generated nodes). Only called for stored chunks
+   * whose nodes are NOT regenerated; a fresh chunk (or a regenerated one) never calls it. The callback
+   * must be deterministic and idempotent — kinds it added and saved are present on the next load, so a
+   * second call returns nothing further.
+   */
+  topUpNodes?: (world: World, chunk: Chunk, entities: readonly Entity[]) => NodePlacement[];
   player?: PlayerCodecOptions;
   /**
    * Component schema migrations applied to stored chunk rows (and, unless `player.migrations` is set, player records)
@@ -103,6 +112,8 @@ export interface PersistenceStats {
   maxTickMs: number;
   chunksLoadedFromStore: number;
   chunksGenerated: number;
+  /** ADR-429: node placements returned by the topUpNodes hook, across all stored-chunk loads. */
+  topUpNodesAdded: number;
   chunksSavedOnUnload: number;
   playersSaved: number;
   decodeErrors: number;
@@ -154,7 +165,7 @@ export class WorldPersistence {
   private reads = new Map<ChunkKey, Promise<GeneratedChunk | undefined>>();
   readonly stats: PersistenceStats = {
     dirtyChunks: 0, roundsCompleted: 0, lastRoundChunks: 0, lastRoundTicks: 0, lastRoundEncodeMs: 0, lastTickMs: 0, maxTickMs: 0,
-    chunksLoadedFromStore: 0, chunksGenerated: 0, chunksSavedOnUnload: 0, playersSaved: 0, decodeErrors: 0,
+    chunksLoadedFromStore: 0, chunksGenerated: 0, topUpNodesAdded: 0, chunksSavedOnUnload: 0, playersSaved: 0, decodeErrors: 0,
     migratedChunks: 0, skinTonesMigrated: 0, asyncReads: 0, asyncLateDropped: 0, socialSaves: 0,
   };
   private chunks: ChunkManager | undefined;
@@ -300,7 +311,19 @@ export class WorldPersistence {
         this.loadSidecars(cx, cy, d.chunk.key, d.entities);
         const rg = this.opts.regenerateNodes;
         const regen = typeof rg === "function" ? rg(this.world, d.entities) : rg !== false;
-        const nodes = regen ? gen.load(cx, cy)?.nodes ?? [] : [];
+        // ADR-429: a stored chunk that keeps its own nodes gets the wild-crop / fruit-tree kinds its
+        // generation predates; a regenerated chunk already has the generator's full (correct-band) set.
+        // The top-up nodes spawn in onLoad (postSim, after persist.track), so their change bits are
+        // cleared before track() ever sees them — mark the chunk dirty here, or the first top-up would
+        // never be saved and every load would re-add the same nodes. The next load then finds the
+        // kinds present and the hook returns nothing (idempotent).
+        let nodes: NodePlacement[];
+        if (regen) nodes = gen.load(cx, cy)?.nodes ?? [];
+        else {
+          nodes = this.opts.topUpNodes?.(this.world, d.chunk, d.entities) ?? [];
+          this.stats.topUpNodesAdded += nodes.length;
+          if (nodes.length) this.markDirty(d.chunk.key);
+        }
         return { chunk: d.chunk, nodes };
       } catch (err) {
         this.stats.decodeErrors++; this.readOnly.add(rec.key);

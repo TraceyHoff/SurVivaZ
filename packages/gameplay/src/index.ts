@@ -17,6 +17,7 @@ export * from "./install.js";
 export * from "./replication.js";
 export * from "./realism.js";
 export * from "./world.js";
+export * from "./wildCropTopUp.js"; // ADR-429
 export * from "./systems/environment.js";
 export * from "./systems/vitals.js";
 export * from "./systems/diseases.js";

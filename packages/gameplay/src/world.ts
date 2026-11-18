@@ -9,9 +9,12 @@ import { gameplayDefs, isAuthority } from "./config.js";
 import type { GameDefs } from "./defs.js";
 import { spawnResourceNode } from "./spawn.js"; // not ./install.js: that edge made an ESM cycle (CROP_EVERY TDZ, ADR-115)
 
-/** Bands for `new ProceduralGenerator({ seed, bands: worldgenBands(defs) })` (node kinds = resource ids). */
+/** Bands for `new ProceduralGenerator({ seed, bands: worldgenBands(defs) })` (node kinds = resource ids).
+ * ADR-428: temp / humidity are forwarded too — the generator's snow rule reads baseClimate, which
+ * defaults a missing band temp to 15°C, so dropping them would warm the rock band 8°C -> 15°C and
+ * flip cold-peak snow tiles (6) back to bare rock (5) in the live world. */
 export function worldgenBands(defs: GameDefs): NonNullable<ProceduralOptions["bands"]> {
-  return defs.worldgen.bands.map((b) => ({ max: b.max, tile: b.tile, nodeKinds: [...b.nodes], nodeChance: b.nodeChance }));
+  return defs.worldgen.bands.map((b) => ({ max: b.max, tile: b.tile, nodeKinds: [...b.nodes], nodeChance: b.nodeChance, temp: b.temp, humidity: b.humidity }));
 }
 
 export interface Terrain { tileAt(tx: number, ty: number): number; heightAt(tx: number, ty: number): number;
