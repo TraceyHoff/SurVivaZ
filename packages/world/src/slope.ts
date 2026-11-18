@@ -110,6 +110,57 @@ export function classifyGroundShape(n: GroundNeighbourhood): GroundShape {
 }
 
 /**
+ * ADR-418: cliff-quad span for one edge, following BOTH top faces. The old mesh cliff (tilemap.ts) was a
+ * flat rectangle from this tile's height down to the neighbour's FLAT height, but the neighbour's top
+ * edge along the shared boundary can be TILTED: a corner of the neighbour drops toward a third tile
+ * 2+ levels below this tile (slope.ts:86-91 drops a corner only when the vertex minimum is exactly
+ * h-1, so the high tile's corner stays up while the 1-below neighbour's corner drops). The flat
+ * bottom then stops short of the neighbour's low endpoint and leaves a triangular hole in the plane
+ * of the shared edge — up to 1 level (16 px) tall — through which the sky clear colour shows (the
+ * blue gaps in the screenshot). The same flat top left a fin above the tilted top whenever this
+ * tile's own edge corner dropped. The span therefore carries both edges: `top` is this tile's edge
+ * heights at the edge's two corners (GROUND_SHAPE_SIDE_CORNERS order) and `bottom` is the
+ * neighbour's edge heights at the SAME two vertices, so the quad is a trapezoid (two triangles, all
+ * four points in the edge plane) that meets both top faces exactly. A neighbour with no shape
+ * (water — always flat — or void) contributes its flat height on both ends. `emitted` is false on a
+ * slope side (the tilted tops already meet) and when the neighbour is not lower; it can never be a
+ * degenerate quad otherwise (top == bottom on both ends would be a slope side).
+ *
+ * NEIGHBOUR_EDGE_CORNERS[edge] is the neighbour's corner indices at the shared vertices, in the
+ * same traversal order as GROUND_SHAPE_SIDE_CORNERS[edge]: +x [0,3], -x [1,2], +y [1,0], -y [3,2].
+ * The y-edges read reversed because the neighbour's corner order runs the other way along the edge.
+ */
+export const NEIGHBOUR_EDGE_CORNERS: readonly (readonly [number, number])[] = [[0, 3], [1, 2], [1, 0], [3, 2]];
+
+export interface CliffEdgeSpan {
+  /** False when no cliff is needed (neighbour not lower, or a slope side). */
+  emitted: boolean;
+  /** This tile's top-edge heights at the edge's two corners (GROUND_SHAPE_SIDE_CORNERS order). */
+  top: [number, number];
+  /** The neighbour's top-edge heights at the same two vertices (same order). */
+  bottom: [number, number];
+}
+
+export function cliffEdgeSpan(
+  own: GroundShape | undefined, ownH: number,
+  neighbour: GroundShape | undefined, neighbourH: number,
+  edge: number,
+): CliffEdgeSpan {
+  const [c0, c1] = GROUND_SHAPE_SIDE_CORNERS[edge]!;
+  const ownDrops = own?.cornerDrops ?? [0, 0, 0, 0];
+  const top: [number, number] = [ownH - ownDrops[c0]!, ownH - ownDrops[c1]!];
+  let bottom: [number, number];
+  if (neighbour) {
+    const [n0, n1] = NEIGHBOUR_EDGE_CORNERS[edge]!;
+    bottom = [neighbourH - neighbour.cornerDrops[n0]!, neighbourH - neighbour.cornerDrops[n1]!];
+  } else {
+    bottom = [neighbourH, neighbourH];
+  }
+  const emitted = neighbourH < ownH && !(own?.slopeSides.includes(edge) ?? false);
+  return { emitted, top, bottom };
+}
+
+/**
  * ADR-410 art selector for a sloped tile, or undefined when the tile keeps its flat top (flat, stepped,
  * valley, peak, guarded wedge, or a ramp whose slope side kept its cliff face). `dir` is in the shape's
  * own axes — the renderer passes a view-space shape, so dirs are view-space (see the contract above).

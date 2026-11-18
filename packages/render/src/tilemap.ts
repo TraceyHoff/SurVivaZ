@@ -5,7 +5,7 @@
  * Meshes are rebuilt only when a chunk's `version` (or a neighbour's) changes. Chunks outside
  * the camera rect are culled (one draw call per visible chunk).
  */
-import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, tileToChunk, tileToLocal, renderTileHeight, waterCornerTint, classifyGroundShape, type TileMap, type Chunk, type IsoConfig } from "@engine/world";
+import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, tileToChunk, tileToLocal, renderTileHeight, waterCornerTint, classifyGroundShape, cliffEdgeSpan, type TileMap, type Chunk, type IsoConfig, type GroundShape } from "@engine/world";
 import { SEASON_GROUND_GLSL } from "./season.js";
 import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/util.js";
 import type { Rect } from "./camera.js";
@@ -231,12 +231,33 @@ export class TilemapRenderer {
       // Cliff faces on every side whose neighbour is lower (ADR-253/254): far faces keep a dim silhouette (CLIFF_HIDDEN_SHADE).
       // ADR-386: a water tile's face is a waterfall face (flag +4) when it drops >= WATERFALL_MIN_DROP levels.
       // ADR-409: no cliff face on a slope side — the tilted top already meets the low neighbour there.
+      // ADR-418: the quad follows both top faces (cliffEdgeSpan): its top edge is this tile's edge
+      // (a dropped corner lowers it, so no fin pokes above the tilted top) and its bottom edge is
+      // the neighbour's edge (a corner the neighbour dropped toward a third tile lowers it, so no
+      // triangular hole opens to the sky). The neighbour shape is classified lazily, only on an
+      // edge that actually emits a cliff; water / void neighbours stay flat.
       const side = SIDE[id] ?? pal;
       const slope = (edge: number): boolean => !!shape && shape.slopeSides.includes(edge); // edge order: +x 0, -x 1, +y 2, -y 3
-      if (bx < zt && !slope(0)) quad([[x + 1, y, zt], [x + 1, y + 1, zt], [x + 1, y + 1, bx], [x + 1, y, bx]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PX, zt, bx));
-      if (by < zt && !slope(2)) quad([[x, y + 1, zt], [x + 1, y + 1, zt], [x + 1, y + 1, by], [x, y + 1, by]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PY, zt, by));
-      if (bnx < zt && !slope(1)) quad([[x, y + 1, zt], [x, y, zt], [x, y, bnx], [x, y + 1, bnx]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NX, zt, bnx));
-      if (bny < zt && !slope(3)) quad([[x + 1, y, zt], [x, y, zt], [x, y, bny], [x + 1, y, bny]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NY, zt, bny));
+      const shapeAt = (nx: number, ny: number): GroundShape | undefined => {
+        if (tileIsWater(map, nx, ny)) return undefined;
+        const h = low(nx, ny); if (h <= NO_TILE_HEIGHT) return undefined;
+        return classifyGroundShape({ h, edge: [low(nx + 1, ny), low(nx - 1, ny), low(nx, ny + 1), low(nx, ny - 1)], diag: [low(nx + 1, ny - 1), low(nx + 1, ny + 1), low(nx - 1, ny + 1), low(nx - 1, ny - 1)] });
+      };
+      // Span pairs are in GROUND_SHAPE_SIDE_CORNERS[edge] order; each quad below re-orders them
+      // into its own vertex order ([topA, topB, botB, botA] around the face).
+      const span = (edge: number, nH: number, nx: number, ny: number): { top: [number, number]; bottom: [number, number] } | undefined => {
+        if (nH >= zt || slope(edge)) return undefined;
+        const s = cliffEdgeSpan(shape, zt, shapeAt(nx, ny), nH, edge);
+        return s.emitted ? s : undefined;
+      };
+      const spx = span(0, bx, x + 1, y);
+      if (spx) quad([[x + 1, y, spx.top[0]], [x + 1, y + 1, spx.top[1]], [x + 1, y + 1, spx.bottom[1]], [x + 1, y, spx.bottom[0]]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PX, zt, bx));
+      const spy = span(2, by, x, y + 1);
+      if (spy) quad([[x, y + 1, spy.top[1]], [x + 1, y + 1, spy.top[0]], [x + 1, y + 1, spy.bottom[0]], [x, y + 1, spy.bottom[1]]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PY, zt, by));
+      const snx = span(1, bnx, x - 1, y);
+      if (snx) quad([[x, y + 1, snx.top[1]], [x, y, snx.top[0]], [x, y, snx.bottom[0]], [x, y + 1, snx.bottom[1]]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NX, zt, bnx));
+      const sny = span(3, bny, x, y - 1);
+      if (sny) quad([[x + 1, y, sny.top[1]], [x, y, sny.top[0]], [x, y, sny.bottom[0]], [x + 1, y, sny.bottom[1]]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NY, zt, bny));
     }
     const n = verts.length / 3;
     const buf = new ArrayBuffer(n * 16); const f = new Float32Array(buf); const u8 = new Uint8Array(buf);

@@ -16,6 +16,7 @@
 import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, renderTileHeight, waterShoreTint, waterCornerTint, classifyGroundShape, groundSlopeArt, SHAPE_EDGE_TO_UV, type TileMap, type Chunk, type IsoConfig } from "@engine/world";
 import { SEASON_GROUND_GLSL } from "./season.js";
 import { terrainDropEdges, DROP_EDGE_GLSL } from "./dropEdges.js";
+import { TERRAIN_TILE_TABLE_GLSL, TERRAIN_TILE_VERTEX_COUNT } from "./terrainTileTriangulation.js";
 import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/util.js";
 import { WATERFALL_MIN_DROP } from "./tilemap.js";
 import { planWaterfallArt, waterfallArtResident, isWaterfallSheetAt, VIEW_PLUS_X, VIEW_PLUS_Y, WATERFALL_OVERLAY_MODE } from "./waterfallTiles.js";
@@ -36,6 +37,7 @@ ${GLSL_COMMON}
 uniform highp sampler2D uFrames;
 uniform vec3 uIso; uniform float uZFactor, uTime;
 uniform vec2 uRot; // ADR-253 view rotation (cos, sin): instances are view-space; vWorld rotates back for the world-anchored noise
+${TERRAIN_TILE_TABLE_GLSL}
 out vec2 vView;
 out vec3 vUvRaw; flat out int vLayer; flat out vec4 vRect; out vec2 vLocal; out vec2 vWorld; flat out vec4 vInfo; flat out vec4 vCorn; flat out vec2 vOrg; flat out vec3 vArt; flat out float vKey; // vInfo: w, h, skirtMask, water; vArt: anchor px, art mode
 void main() {
@@ -43,21 +45,32 @@ void main() {
   int entry = int(aA.w + 0.5) + int(mod(floor(uTime * aB.y + aB.w), float(frames)));
   ivec2 tc = ivec2((entry % 1024) * 2, entry / 1024);
   vec4 uvr = texelFetch(uFrames, tc, 0); vec4 dim = texelFetch(uFrames, tc + ivec2(1, 0), 0);
-  vec2 c = vec2(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1));
+  // ADR-418: the instance is 30 vertices (10 triangles, terrainTileTriangulation.ts): the diamond is
+  // triangulated exactly like the mesh top face (N,E,S),(N,S,W), so its corners sit on the mesh; the
+  // frame corners keep the bilinear drop so the skirt hangs as before. tv.z is 0 for a frame corner
+  // (tv.xy = its frame fraction) and 1 for a diamond corner (tv.xy = its offset from the anchor in
+  // uIso units). Flat tiles are unaffected (all four corner bits zero).
+  vec3 tv = ADR418_T[gl_VertexID];
   // ADR-389: mask bit 8 = flipX (Art's py/ny are mirrors of px/nx). Flip UVs, local x and the anchor.
   float flip = float((int(aB.z + 0.5) & 8) != 0);
-  vec2 cu = vec2(mix(c.x, 1.0 - c.x, flip), c.y);
-  vec2 px = cu * dim.xy; // frame px
   vec2 anchor = vec2(mix(aC.x, dim.x - aC.x, flip), aC.y);
+  vec2 g = tv.z > 0.5 ? (aC.xy + tv.xy * uIso.xy) / dim.xy : tv.xy; // geometric frame fraction (unmirrored)
+  vec2 cu = vec2(mix(g.x, 1.0 - g.x, flip), g.y);
+  vec2 px = cu * dim.xy; // frame px
   // ADR-409: ground slopes — aB.z bits 16/32/64/128 are the view-space corner drops (u-,v-),(u+,v-),
-  // (u+,v+),(u-,v+); the diamond tilts by bilinear interpolation over the frame so its corners meet the
-  // mesh top face and the neighbour tops. Flat tiles are unaffected (all four bits zero).
+  // (u+,v+),(u-,v+). Frame corners tilt by bilinear interpolation over the frame (as before);
+  // diamond corners take their own corner's drop, so the diamond IS the mesh top face.
   int sm = int(aB.z + 0.5);
   float sc00 = float((sm & 16) != 0), sc10 = float((sm & 32) != 0), sc11 = float((sm & 64) != 0), sc01 = float((sm & 128) != 0);
   vec2 sd = (px - anchor) / uIso.xy;
   float sfu = clamp((sd.x + sd.y) * 0.5 + 0.5, 0.0, 1.0);
   float sfv = clamp((sd.y - sd.x) * 0.5 + 0.5, 0.0, 1.0);
-  float sdrop = mix(mix(sc00, sc10, sfu), mix(sc01, sc11, sfu), sfv);
+  float sdropBilinear = mix(mix(sc00, sc10, sfu), mix(sc01, sc11, sfu), sfv);
+  // The drop at a diamond corner is the mesh corner height at that corner's SCREEN position: under
+  // flip the screen position mirrors, so E/W swap (the mesh itself never mirrors).
+  vec2 so = vec2(tv.x * (1.0 - 2.0 * flip), tv.y);
+  float sdropCorner = so.x > 0.5 ? sc10 : so.x < -0.5 ? sc01 : so.y < -0.5 ? sc00 : sc11;
+  float sdrop = tv.z > 0.5 ? sdropCorner : sdropBilinear;
   float sdropAvg = (sc00 + sc10 + sc11 + sc01) * 0.25;
   float zt = aA.z - sdrop;
   vUvRaw = vec3(mix(uvr.xy, uvr.zw, cu), dim.z); vLayer = int(dim.z + 0.5); vRect = uvr; vLocal = px; vInfo = vec4(dim.xy, aB.z, aC.z); vCorn = aD; vOrg = aA.xy - 0.5; vArt = vec3(anchor, aC.w);
@@ -377,12 +390,12 @@ export class TileTerrain {
       const sf = perChunk?.(c.key) ?? surface;
       gl.uniform1f(u.uWet ?? null, sf.wet); gl.uniform1f(u.uSnow ?? null, sf.snow);
       gl.uniform1f(u.uArtSnow ?? null, gtSnow(art, sf.snow, this.season[2]));
-      if (t.count) { gl.bindVertexArray(t.vao); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, t.count); stats.drawCalls++; }
+      if (t.count) { gl.bindVertexArray(t.vao); gl.drawArraysInstanced(gl.TRIANGLES, 0, TERRAIN_TILE_VERTEX_COUNT, t.count); stats.drawCalls++; }
       if (t.overlayCount && t.overlayVao) {
         // Impact overlays (pool / lip) only: one extra instanced draw on chunks that have a fall, blended
         // over the dest/source water that was already drawn. Blend stays off for every other ground tile.
         gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        gl.bindVertexArray(t.overlayVao); gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, t.overlayCount); stats.drawCalls++;
+        gl.bindVertexArray(t.overlayVao); gl.drawArraysInstanced(gl.TRIANGLES, 0, TERRAIN_TILE_VERTEX_COUNT, t.overlayCount); stats.drawCalls++;
         gl.disable(gl.BLEND);
       }
     }

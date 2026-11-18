@@ -16,7 +16,7 @@
  * passes them in. The 2D polygons are tile-local px, origin = the diamond centre at height 0
  * (C2D centres tile (x, y) on the view point (x, y)); y down, 16 px per terrain level (DEFAULT_ISO).
  */
-import { CHUNK_SIZE, DEFAULT_ISO, SLOPE_VOID, classifyGroundShape, isWaterId, renderTileHeight, tileToChunk, tileToLocal, type TileMap } from "@engine/world";
+import { CHUNK_SIZE, DEFAULT_ISO, SLOPE_VOID, classifyGroundShape, cliffEdgeSpan, GROUND_SHAPE_SIDE_CORNERS, isWaterId, renderTileHeight, tileToChunk, tileToLocal, type TileMap } from "@engine/world";
 
 /** A 2D point in tile-local px. */
 export type C2DVec = [number, number];
@@ -73,10 +73,36 @@ export function c2dGroundGeometry(z: number, low: (dx: number, dy: number) => nu
   const faces: C2DGroundGeom["faces"] = [];
   // Edge -> its two top corners (T=0, R=1, B=2, L=3): +u is R-B, -u is T-L, +v is L-B, -v is T-R.
   const edgeCorners: readonly (readonly [0 | 1 | 2 | 3, 0 | 1 | 2 | 3])[] = [[1, 2], [0, 3], [3, 2], [0, 1]];
+  // ADR-418: a cliff face follows both top faces, exactly like the mesh (cliffEdgeSpan): its top
+  // edge is this tile's edge (a dropped corner lowers it — the old flat top painted a cliff-coloured
+  // triangle over the tilted top on near faces, which draw after the top) and its bottom edge is
+  // the neighbour's edge (a corner the neighbour dropped toward a third tile lowers it — the old
+  // flat bottom left a triangular gap under the face). The neighbour shape is classified from the
+  // same low() lookup at its own neighbourhood offsets; a water neighbour (fractional height: the
+  // 0.25 inset — land heights are integers) is flat by definition, so it is never classified.
+  const DIRS: readonly (readonly [number, number])[] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
   for (let s = 0; s < 4; s++) {
     const n = rawE[s]!; if (n === undefined || n >= z || shape.slopeSides.includes(s)) continue;
+    const [dx, dy] = DIRS[s]!;
+    const nShape = Number.isInteger(n)
+      ? classifyGroundShape({
+          h: n,
+          edge: [e(dx + 1, dy), e(dx - 1, dy), e(dx, dy + 1), e(dx, dy - 1)],
+          diag: [e(dx + 1, dy - 1), e(dx + 1, dy + 1), e(dx - 1, dy + 1), e(dx - 1, dy - 1)],
+        })
+      : undefined;
+    const span = cliffEdgeSpan(shape, z, nShape, n, s);
+    if (!span.emitted) continue;
+    // span.top / span.bottom are keyed by GROUND_SHAPE_SIDE_CORNERS[s]; re-key by this face's
+    // corner order (edgeCorners[s] differs only on +v, where it runs [3,2] instead of [2,3]).
+    const [sc0, sc1] = GROUND_SHAPE_SIDE_CORNERS[s]!;
+    const at = (ci: 0 | 1 | 2 | 3, arr: [number, number]): number => (ci === sc0 ? arr[0]! : arr[1]!);
     const [c0, c1] = edgeCorners[s]!;
-    faces.push({ poly: [corner(c0, z), corner(c1, z), corner(c1, n), corner(c0, n)], side: s as C2DSide, low: n });
+    faces.push({
+      poly: [corner(c0, at(c0, span.top)), corner(c1, at(c1, span.top)), corner(c1, at(c1, span.bottom)), corner(c0, at(c0, span.bottom))],
+      side: s as C2DSide,
+      low: Math.min(span.bottom[0], span.bottom[1]),
+    });
   }
   return { top, faces, minLow: faces.reduce((m, f) => Math.min(m, f.low), z) };
 }
