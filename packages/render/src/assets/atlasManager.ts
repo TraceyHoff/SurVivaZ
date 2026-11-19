@@ -287,6 +287,16 @@ export const RESIDENT_CREATURE_RE = /^(pets|nature_critters)_/;
 /** ADR-246: gt_ ground pages (manifest residency "stream") load resident + hot on >= RESIDENT_CREATURE_MIN_MB budgets: in the
  *  stream pool's ETC1S x0.25 slots every 68x52 cell became a flat colour diamond (a visible tile grid, no texture). */
 export const RESIDENT_GROUND_RE = /^gt_/;
+/** ADR-438: the small streamed plant sheets (wild / farmed crops, sprouts, saplings) load resident on
+ *  >= RESIDENT_CREATURE_MIN_MB budgets, same precedent as creatures / ground: the stream pool holds
+ *  4 slots on a 128 MB budget for 131 stream pages, so the crop page was usually evicted and
+ *  every plant drew the soft `placeholder_sprout` blob instead of its own art. */
+export const RESIDENT_PLANT_RE = /^nature_(crops|sprouts|saplings)$/;
+/** ADR-438: the small always-visible world atlases that the third pin tier keeps at 1x (see fitBudget):
+ *  berry bushes / shrubs / trees (resources, resources_tall, resources_huge, nature_trees), the
+ *  resident plant sheets, and the zombie sheets. Small on purpose: the whole set packs into one
+ *  extra real layer (see fitsPacked), so it fits where the FIDELITY + VISIBLE_PIN sets cannot. */
+export const CORE_PIN_RE = /^(resources(_tall|_huge)?|nature_(trees|crops|sprouts|saplings)|zombies(_|$))/;
 /** ADR-237: creature, character and zombie sheets (small pixel art, magnified ~2-4x on a dpr-3 phone) keep x1 when the
  *  budget halves the hot tier: the rest of the hot art takes the x0.5, these never become 2x-magnified mush (mobile only
  *  ever ran them at x0.5 / the stream pool's x0.25 - "animals blurry on mobile, sharp on desktop"). */
@@ -1074,18 +1084,46 @@ export class AtlasManager {
     // resident creature sheets, which follow once drawn via retier) stay x1 while
     // the rest of the hot tier is halved - tried first at every hot scale, dropped only when even that does not fit
     const visPin = list.map((a) => !a.cold && VISIBLE_PIN_RE.test(a.key) && this.groundPinOk(a.key));
-    const pinned = list.map((a, i) => visPin[i]! || (!a.cold && FIDELITY_ATLAS_RE.test(a.key) && (this.recentlyUsed.size ? this.recentlyUsed.has(a.key) : !RESIDENT_CREATURE_RE.test(a.key))));
-    let pin = 0; // 2 = creature + visible pins, 1 = ADR-251 visible pins only (furniture / drawn-season gt), 0 = none
-    const scaleOf = (i: number, h: number, c: number): number => { const a = list[i]!; return Math.min(caps[i]!, a.cold ? c : (pin === 2 ? pinned[i] : pin === 1 && visPin[i]) ? 1 : h); };
+    // ADR-438: the small core pin set (berry bushes, trees, plant sheets, zombies). Like visPin it never
+    // depends on recentlyUsed: these are world art, drawn whenever the player is in the world. The core
+    // set joins BOTH bigger tiers (a pin=2 win must not leave the bushes/trees/zombies behind) and is
+    // also tried alone as pin=3 when the bigger tiers do not fit.
+    const corePin = list.map((a) => !a.cold && CORE_PIN_RE.test(a.key));
+    const pinned = list.map((a, i) => visPin[i]! || corePin[i]! || (!a.cold && FIDELITY_ATLAS_RE.test(a.key) && (this.recentlyUsed.size ? this.recentlyUsed.has(a.key) : !RESIDENT_CREATURE_RE.test(a.key))));
+    const visCorePin = list.map((_, i) => visPin[i]! || corePin[i]!);
+    let pin = 0; // 2 = creature + visible + core pins, 1 = ADR-251 visible + ADR-438 core pins, 3 = ADR-438 core pins only, 0 = none
+    const scaleOf = (i: number, h: number, c: number): number => { const a = list[i]!; const p = pin === 2 ? pinned[i] : pin === 1 ? visCorePin[i] : pin === 3 ? corePin[i] : false; return Math.min(caps[i]!, a.cold ? c : p ? 1 : h); };
     const dims = (h: number, c: number) => list.map((a, i) => { const k = scaleOf(i, h, c); return { ...a, img: { width: Math.max(1, Math.floor(a.img!.width * k)), height: Math.max(1, Math.floor(a.img!.height * k)) } as ImageLike }; });
     const fits1 = (h: number, budget: number): number | null => {
       const anyCold = list.some((a) => a.cold);
       for (let c = h; c >= MIN_ATLAS_DOWNSCALE; c /= 2) { this.pack(dims(h, c)); if (this.planEstimate(list) <= budget) return c; if (!anyCold) break; }
       return null;
     };
+    /**
+     * ADR-438: the core-pin attempt is judged on the PACKED (MaxRects) layer count, not the shelf
+     * estimate fits1 uses. The shelf estimate is planning headroom (it stops the tighter MaxRects
+     * placement being refilled), and it charges the core set 7 layers (168 MB) where the packer
+     * really needs 5 (120 MB <= the 128 MB phone budget). Spending that headroom on the core
+     * set is the trade: the real GPU total stays inside the budget, and the upload OOM retry
+     * still halves the hot tier on a real driver refusal. Only the small core set gets this
+     * treatment — the pin=2 / pin=1 sets genuinely do not fit even packed (12 / 7 layers).
+     */
+    const fitsPacked = (h: number, budget: number): number | null => {
+      const anyCold = list.some((a) => a.cold);
+      for (let c = h; c >= MIN_ATLAS_DOWNSCALE; c /= 2) {
+        this.pack(dims(h, c));
+        // pack() sets this.layers to the MaxRects count; a stubbed pack (unit tests) leaves it 0 — fall back
+        // to the planning estimate there, so the core tier cannot spuriously "fit" without a real packing.
+        const est = this.layers > 0 ? this.layerBytes(list) * this.layers : this.planEstimate(list);
+        if (est <= budget) return c;
+        if (!anyCold) break;
+      }
+      return null;
+    };
     const fits = (h: number, budget: number): number | null => {
       if (h < 1 && pinned.some(Boolean)) { pin = 2; const c = fits1(h, budget); if (c !== null) return c; }
-      if (h < 1 && visPin.some(Boolean) && visPin.some((v, i) => v !== pinned[i])) { pin = 1; const c = fits1(h, budget); if (c !== null) return c; }
+      if (h < 1 && visCorePin.some(Boolean) && visCorePin.some((v, i) => v !== pinned[i])) { pin = 1; const c = fits1(h, budget); if (c !== null) return c; }
+      if (h < 1 && corePin.some(Boolean)) { pin = 3; const c = fitsPacked(h, budget); if (c !== null) return c; }
       pin = 0; return fits1(h, budget);
     };
     // Blur-safe order: visible (hot) art keeps full res. Memory comes from (1) shrinking cold atlases, (2) a smaller
@@ -1094,7 +1132,7 @@ export class AtlasManager {
     let best: [number, number] | null = null; let keptReserve = reserveBytes; let demoted = 0;
     for (const r of [reserveBytes, keepBytes + (reserveBytes - keepBytes) / 2, keepBytes + (reserveBytes - keepBytes) / 4, keepBytes]) { const c = fits(1, full - r); if (c !== null) { best = [1, c]; keptReserve = r; break; } }
     if (!best && this.recentlyUsed.size) {
-      const idle = list.filter((a, i) => !a.cold && !visPin[i] && !this.recentlyUsed.has(a.key) && !CRISP_ATLAS_RE.test(a.key)) /* ADR-145: creature sheets stay full res; pinned visible art (ground/furniture/buildings) is never demoted to cold, or its 1x pin would be overridden by the cold scale */.sort((a, b) => (BUILD_ATLAS_RE.test(a.key) ? 1 : 0) - (BUILD_ATLAS_RE.test(b.key) ? 1 : 0) || b.img!.width * b.img!.height - a.img!.width * a.img!.height); // ADR-211: building art last
+      const idle = list.filter((a, i) => !a.cold && !visPin[i] && !this.recentlyUsed.has(a.key) && !CRISP_ATLAS_RE.test(a.key) && !CORE_PIN_RE.test(a.key)) /* ADR-145: creature sheets stay full res; pinned visible art (ground/furniture/buildings) is never demoted to cold, or its 1x pin would be overridden by the cold scale; ADR-438: the core pin set is never demoted either (a cold atlas cannot be pinned, and the re-tier round-trip would blur a bush/tree/zombie the player walks up to) */.sort((a, b) => (BUILD_ATLAS_RE.test(a.key) ? 1 : 0) - (BUILD_ATLAS_RE.test(b.key) ? 1 : 0) || b.img!.width * b.img!.height - a.img!.width * a.img!.height); // ADR-211: building art last
       for (const a of idle) { a.cold = true; demoted++; const c = fits(1, full - keepBytes); if (c !== null) { best = [1, c]; keptReserve = keepBytes; break; } }
     }
     if (!best) {
@@ -1113,7 +1151,7 @@ export class AtlasManager {
     const [h, c] = best ?? [MIN_ATLAS_DOWNSCALE, MIN_ATLAS_DOWNSCALE];
     this.downscale = h; this.coldDownscale = c;
     if (!best) pin = 0;
-    this.pinnedKeys = new Set(pin ? list.filter((_, i) => (pin === 2 ? pinned : visPin)[i]).map((a) => a.key) : []);
+    this.pinnedKeys = new Set(pin ? list.filter((_, i) => (pin === 2 ? pinned : pin === 1 ? visCorePin : corePin)[i]).map((a) => a.key) : []);
     this.fitInfo = { reserveMB: Math.round(keptReserve / 1048576), reserveWantedMB: Math.round(reserveBytes / 1048576), demoted, pinned: [...this.pinnedKeys] };
     this.pack(dims(h, c));
     if (h < 1) {
@@ -1131,7 +1169,7 @@ export class AtlasManager {
     }
     for (const a of list) {
       const e = wear.get(a.key); const info = { bodies: bodies.has(a.key), wearShare: e && e[1] ? e[0] / e[1] : 0 };
-      a.cold = !this.recentlyUsed.has(a.key) && !(this.residentCreatures && (RESIDENT_CREATURE_RE.test(a.key) || RESIDENT_GROUND_RE.test(a.key))) /* ADR-156: resident creature sheets are hot (never x0.125 mosaics) */ && (this.atlasTier ?? defaultAtlasTier)(a.key, info) === "cold";
+      a.cold = !this.recentlyUsed.has(a.key) && !(this.residentCreatures && (RESIDENT_CREATURE_RE.test(a.key) || RESIDENT_GROUND_RE.test(a.key) || RESIDENT_PLANT_RE.test(a.key) || CORE_PIN_RE.test(a.key))) /* ADR-156: resident creature sheets are hot (never x0.125 mosaics); ADR-438: the plant sheets and the core pin set are hot too (a cold atlas cannot be pinned, and `resources_huge` would otherwise default cold via COLD_ATLAS_RE's `_huge`) */ && (this.atlasTier ?? defaultAtlasTier)(a.key, info) === "cold";
     }
   }
   private registryForTier: AssetRegistry | null = null;
@@ -2104,7 +2142,7 @@ export function atlasPoolSets(registry: AssetRegistry, sources: ReadonlyMap<stri
   // bodies (page geometry from the manifest: columns x rows x frame size per page, any number of pages) go compressed when KTX2 is available: KTX2 colour + tint mask KTX2
   // (@2x: pages[].ktx2 + pages[].masksKtx2.tintmask) at the scale poolScales picks; paged in eagerly at rebuild, never evicted
   const bodyPages0 = bodyAtlasKeys(registry); // ADR-240: body sheets (v2 sample ships them "stream") stay in the character pools
-  const streamKeys = new Set<string>(); if (f.streamSheets) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && a.residency === "stream" && !lazyKeys.has(a.key) && !bodyPages0.has(a.key) && !vehKeys.has(a.key) && !bldKeys.has(a.key) && !legacy.has(a.key) && !(f.residentCreatures && (RESIDENT_CREATURE_RE.test(a.key) || RESIDENT_GROUND_RE.test(a.key))) && !/^(blob|data):/.test(src.url)) streamKeys.add(a.key); }
+  const streamKeys = new Set<string>(); if (f.streamSheets) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && a.residency === "stream" && !lazyKeys.has(a.key) && !bodyPages0.has(a.key) && !vehKeys.has(a.key) && !bldKeys.has(a.key) && !legacy.has(a.key) && !(f.residentCreatures && (RESIDENT_CREATURE_RE.test(a.key) || RESIDENT_GROUND_RE.test(a.key) || RESIDENT_PLANT_RE.test(a.key))) && !/^(blob|data):/.test(src.url)) streamKeys.add(a.key); } // ADR-438: plant sheets load resident (see RESIDENT_PLANT_RE)
   const bodyPages = bodyAtlasKeys(registry);
   const bodyKeys = new Set<string>(); if (f.ktx2 && f.streamWearables) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src?.ktx2 && bodyPages.has(a.key) && !lazyKeys.has(a.key) && !vehKeys.has(a.key) && !bldKeys.has(a.key) && !streamKeys.has(a.key) && !/^(blob|data):/.test(src.url)) bodyKeys.add(a.key); }
   return { lazyKeys, legacy, vehKeys, bldKeys, streamKeys, bodyKeys, bodyPages };

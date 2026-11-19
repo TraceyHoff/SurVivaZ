@@ -1,13 +1,12 @@
 /**
- * Delete progress (ADR-099): the confirm dialog shared by the main menu (BootUI) and the in-game Settings panel
+ * Delete progress (ADR-099, ADR-436): the confirm dialog shared by the main menu (BootUI) and the in-game Settings panel
  * (GameMenus/UINav), plus the browser-side wipes (singleplayer world DB, P2P hosted world DB, optional settings).
  *
- * Confirm = type DELETE and press Delete, OR hold the "Hold to delete" button for HOLD_MS (mouse/touch press, Enter/Space
- * held, or gamepad A held while it is focused). Nothing is deleted on a single tap/click/A press.
+ * Confirm = hold the "Hold to delete" button for HOLD_MS (mouse/touch press, Enter/Space held, or gamepad A held while
+ * it is focused). There is no typed confirmation and no Delete button: the hold is the single path on every input type,
+ * so keyboard, touch and gamepad all delete the same way. Nothing is deleted on a single tap/click/A press.
  */
 import { gamepadKeyControl, navPad, padHeld } from "./pad-input.js";
-import { bindTypingFullscreenExit } from "./fullscreen.js";
-export const DELETE_WORD = "DELETE";
 export const HOLD_MS = 1500;
 /** localStorage keys reset only when the player opts in ("Also reset settings"). */
 export const SETTINGS_KEYS = ["engine-settings", "engine.input.bindings", "survivaz.render.quality"] as const;
@@ -36,20 +35,18 @@ export function deleteConfirm(o: DeleteConfirmOptions): DeleteConfirm {
   const pads = o.getGamepads ?? (() => [...(navigator.getGamepads?.() ?? [])]);
   const el = document.createElement("div"); el.dataset["role"] = "delete-confirm"; el.style.cssText = "display:flex;flex-direction:column;gap:8px";
   const msg = document.createElement("p"); msg.textContent = o.message;
+  const hint = document.createElement("p"); hint.dataset["role"] = "delete-hint"; hint.style.cssText = "opacity:.8"; hint.textContent = `Hold the button for ${HOLD_MS / 1000} seconds to delete. A tap never deletes.`;
   const status = document.createElement("p"); status.dataset["role"] = "delete-status"; status.setAttribute("aria-live", "polite");
   const reset = document.createElement("input"); reset.type = "checkbox"; reset.dataset["role"] = "reset-settings";
   const rl = document.createElement("label"); rl.append(reset, " Also reset settings (HUD, bots, key bindings)");
-  const word = document.createElement("input"); word.dataset["role"] = "confirm-word"; word.placeholder = `Type ${DELETE_WORD}`; word.autocomplete = "off"; word.spellcheck = false; word.setAttribute("aria-label", `Type ${DELETE_WORD} to confirm`); bindTypingFullscreenExit(word); // Task 20: same fullscreen IME rule as the creator/menu fields
-  const del = document.createElement("button"); del.type = "button"; del.dataset["action"] = "confirm-delete"; del.dataset["role"] = "submit"; /* UINav: Enter in the text field */ del.textContent = "Delete"; del.className = "alt"; del.setAttribute("aria-disabled", "true");
   const hold = document.createElement("button"); hold.type = "button"; hold.dataset["action"] = "hold-delete"; hold.dataset["hold"] = "1"; hold.textContent = "Hold to delete";
   const cancel = document.createElement("button"); cancel.type = "button"; cancel.dataset["action"] = "cancel-delete"; cancel.textContent = "Cancel"; cancel.className = "alt";
-  if (o.actions) { o.actions.append(del, hold); el.append(msg, ...(o.settingsOption ? [rl] : []), word, status); }
-  else el.append(msg, ...(o.settingsOption ? [rl] : []), word, del, hold, cancel, status);
+  if (o.actions) { o.actions.append(hold); el.append(msg, hint, ...(o.settingsOption ? [rl] : []), status); }
+  else el.append(msg, hint, ...(o.settingsOption ? [rl] : []), hold, cancel, status);
 
   let shown = false, done = false, busy = false, holdFrom: number | undefined, keyHeld = false, pointerHeld = false, raf = 0, destroyed = false;
   const can = (): boolean => o.canConfirm?.() ?? true;
-  const ok = (): boolean => can() && word.value.trim().toUpperCase() === DELETE_WORD;
-  const sync = (): void => { const c = can(); del.disabled = !c; hold.disabled = !c; del.setAttribute("aria-disabled", String(!ok())); if (!c) { keyHeld = false; pointerHeld = false; } };
+  const sync = (): void => { const c = can(); hold.disabled = !c; if (!c) { keyHeld = false; pointerHeld = false; } };
   const confirm = async (): Promise<void> => {
     if (done || busy) return; busy = true; status.textContent = "Deleting…"; holdFrom = undefined; paint(0);
     try { status.textContent = await o.onConfirm({ resetSettings: reset.checked }); done = true; }
@@ -70,9 +67,6 @@ export function deleteConfirm(o: DeleteConfirmOptions): DeleteConfirm {
     else { holdFrom ??= now(); const f = Math.min(1, (now() - holdFrom) / HOLD_MS); paint(f); if (f >= 1) void confirm(); }
     if (!o.manualTick) raf = frame(tick);
   };
-  word.addEventListener("input", sync);
-  word.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); if (ok()) void confirm(); } });
-  del.addEventListener("click", () => { if (ok()) void confirm(); else { status.textContent = `Type ${DELETE_WORD} first, or hold the button.`; word.focus(); } });
   hold.addEventListener("click", (e) => { e.preventDefault(); }); // a tap / single A press never deletes
   hold.addEventListener("pointerdown", (e) => { e.preventDefault(); pointerHeld = true; hold.focus(); });
   for (const t of ["pointerup", "pointerleave", "pointercancel"]) hold.addEventListener(t, () => { pointerHeld = false; });

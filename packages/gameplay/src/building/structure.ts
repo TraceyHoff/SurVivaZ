@@ -37,6 +37,9 @@ export function lCornerArms(vx: number, vy: number, rot: number): [LArm, LArm] {
 }
 export const isLCorner = (def: PieceDef | undefined): boolean => def?.shape === "L";
 
+/** ADR-440: one boundary edge of a flood-filled room (the edge piece the fill stopped at). */
+export interface RoomBoundaryEdge { tx: number; ty: number; side: EdgeSide; piece: Entity }
+
 /** fx/fy: exact centroid of tri pieces (tx/ty = the tile containing it). */
 export interface Slot { tx: number; ty: number; z: number; side: EdgeSide; rot: number; fx?: number; fy?: number }
 
@@ -263,6 +266,34 @@ export class StructureIndex {
   /** Door open state lookup (DoorState lives on the door's attachment entity). Set by the doors module. */
   doorOpen: (door: Entity) => boolean = () => false;
   private encCache = new Map<number, { enclosed: boolean; size: number }>(); private encVersion = -1;
+  private bndCache = new Map<number, { edges: RoomBoundaryEdge[]; size: number } | undefined>(); private bndVersion = -1;
+  /**
+   * ADR-440: boundary edges of the flood-filled room containing (tx, ty) at level z — the edge pieces the fill
+   * stopped at — or undefined when the region is open (not enclosed). Same flood fill as edgeEnclosure, cached
+   * per structure version (door toggles bump the version, so a toggled door re-fills at once).
+   */
+  roomBoundary(tx: number, ty: number, z: number, maxCells = 256): { edges: RoomBoundaryEdge[]; size: number } | undefined {
+    if (this.bndVersion !== this.version) { this.bndCache.clear(); this.bndVersion = this.version; }
+    const key = edgeKey(tx, ty, z, EdgeSide.North); if (this.bndCache.has(key)) return this.bndCache.get(key);
+    const seen = new Set<number>([key]); const stack: [number, number][] = [[tx, ty]]; let open = false;
+    const edges: RoomBoundaryEdge[] = []; const seenEdge = new Set<number>();
+    while (stack.length && !open) {
+      const [x, y] = stack.pop()!;
+      const nb: [number, number, number, number, EdgeSide][] = [[x, y - 1, x, y, EdgeSide.North], [x, y + 1, x, y + 1, EdgeSide.North], [x - 1, y, x, y, EdgeSide.West], [x + 1, y, x + 1, y, EdgeSide.West]];
+      for (const [nx, ny, ex, ey, side] of nb) {
+        const e = this.edge(ex, ey, z, side);
+        if (this.edgeBlocker(ex, ey, z, side) || (e && this.def(e)?.opening === 3)) {
+          if (e) { const ek = edgeKey(ex, ey, z, side); if (!seenEdge.has(ek)) { seenEdge.add(ek); edges.push({ tx: ex, ty: ey, side, piece: e }); } }
+          continue;
+        }
+        const k = edgeKey(nx, ny, z, EdgeSide.North); if (seen.has(k)) continue;
+        seen.add(k); if (seen.size > maxCells) { open = true; break; } stack.push([nx, ny]);
+      }
+    }
+    const r = open ? undefined : { edges, size: seen.size };
+    if (!open) for (const k of seen) this.bndCache.set(k, r); else this.bndCache.set(key, r);
+    return r;
+  }
   /** Flood fill over tiles at level z bounded by blocking edge walls / closed doors (thin walls are not grid cells). */
   edgeEnclosure(tx: number, ty: number, z: number, maxCells = 256): { enclosed: boolean; size: number } {
     if (this.encVersion !== this.version) { this.encCache.clear(); this.encVersion = this.version; }

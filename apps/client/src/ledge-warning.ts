@@ -1,7 +1,7 @@
 /** ADR-306: a downward drop arrow on camera-hidden ledges, colored by fall damage vs current HP. ADR-313: looks ahead along the travel heading (speed x 2 s) so a sprinting player sees the ledge in time to stop. */
 import { DEFAULT_TICK_HZ, PrevTransform, Transform, lerp, type Entity, type World } from "@engine/core";
 import { Dead, Health, StructureIndexRes, TerrainRes, ladderBetween, shaftAwareHeight, terrainFallDamage } from "@engine/gameplay";
-import { fromView, viewQuarter, worldToScreen } from "@engine/world";
+import { fromView, isWaterId, renderTileHeight, viewQuarter, worldToScreen } from "@engine/world";
 import { camIso, type CameraLike } from "./world-tools.js";
 
 export const LEDGE_COLORS = { safe: "#3DCC6A", hurt: "#F0C040", lethal: "#E23B3B" } as const;
@@ -26,6 +26,31 @@ export interface LedgeHint {
   x: number; y: number; dx: number; dy: number;
   /** ADR-313: tiles from the player to the rim along the travel heading (0 = standing on the rim). */
   dist?: number;
+}
+
+/**
+ * ADR-439: the height the player SEES at (tx, ty) for a ledge warning. Gameplay heights store a water
+ * tile's bed level — the same smooth field as the shore next to it, so a shore cliff reads as no drop —
+ * while water RENDERS at its surface: flat 0 for natural water (ADR-182), its own level for flowed
+ * water (ADR-263/297/411). A ledge onto water must be measured to the surface, or the arrow + number
+ * never appear at a shoreline; the same correction stops a swimmer's bed height inventing a drop onto
+ * higher land next door. Land tiles read their gameplay height unchanged. Without tileAt the caller
+ * cannot tell water from land, so the gameplay height is used unchanged (the old behaviour); without
+ * rawHeightAt the stored level cannot be decoded, so the gameplay height is used too.
+ */
+export function ledgeSurfaceHeight(o: {
+  heightAt: (tx: number, ty: number) => number;
+} & LedgeTileInfo, tx: number, ty: number): number {
+  const h = o.heightAt(tx, ty);
+  if (!o.tileAt || !isWaterId(o.tileAt(tx, ty))) return h;
+  const raw = o.rawHeightAt?.(tx, ty);
+  return raw === undefined ? h : renderTileHeight(o.tileAt(tx, ty), raw);
+}
+
+/** Tile lookups a ledge height source may carry so ADR-439 can measure drops to the water surface. */
+export interface LedgeTileInfo {
+  tileAt?: ((tx: number, ty: number) => number) | undefined;
+  rawHeightAt?: ((tx: number, ty: number) => number) | undefined;
 }
 
 /** ADR-313: seconds of travel the warning looks ahead (sprint 4.64 t/s -> ~10 tiles, walk 2.9 t/s -> ~7 tiles). */
@@ -55,12 +80,14 @@ export function pickLedgeHint(o: {
   facing?: number;
   ladderBetween?: (tx: number, ty: number, nx: number, ny: number) => boolean;
   near?: number;
-}): LedgeHint | undefined {
+} & LedgeTileInfo): LedgeHint | undefined {
   const near = o.near ?? 0.55, tx = Math.floor(o.x), ty = Math.floor(o.y), fx = o.x - tx, fy = o.y - ty;
-  const h0 = o.heightAt(tx, ty);
+  // ADR-439: measure to the water surface where the tile is water (see ledgeSurfaceHeight).
+  const heightAt = (ax: number, ay: number): number => ledgeSurfaceHeight(o, ax, ay);
+  const h0 = heightAt(tx, ty);
   let best: LedgeHint | undefined, bestScore = -Infinity;
   for (const { dx, dy } of hiddenDropDirs(o.viewQ)) {
-    const raw = h0 - o.heightAt(tx + dx, ty + dy); if (raw < 1 - 1e-6) continue;
+    const raw = h0 - heightAt(tx + dx, ty + dy); if (raw < 1 - 1e-6) continue;
     const drop = Math.max(1, Math.round(raw));
     const onRim = (dx < 0 && fx <= near) || (dx > 0 && fx >= 1 - near) || (dy < 0 && fy <= near) || (dy > 0 && fy >= 1 - near);
     const toward = o.facing !== undefined && Math.cos(o.facing) * dx + Math.sin(o.facing) * dy > 0.25;
@@ -86,9 +113,10 @@ export function pickLedgeHints(o: {
   facing?: number; heading?: number; range?: number;
   ladderBetween?: (tx: number, ty: number, nx: number, ny: number) => boolean;
   near?: number; max?: number;
-}): LedgeHint[] {
+} & LedgeTileInfo): LedgeHint[] {
   const cache = new Map<number, number>();
-  const H = (tx: number, ty: number): number => { const k = (tx + 32768) * 65536 + (ty + 32768); let v = cache.get(k); if (v === undefined) cache.set(k, (v = o.heightAt(tx, ty))); return v; };
+  // ADR-439: the cache holds surface heights (water -> its surface, land unchanged).
+  const H = (tx: number, ty: number): number => { const k = (tx + 32768) * 65536 + (ty + 32768); let v = cache.get(k); if (v === undefined) cache.set(k, (v = ledgeSurfaceHeight(o, tx, ty))); return v; };
   // One arrow per stretch of rim: hints on the same hidden side within LEDGE_MERGE tiles of each other collapse
   // into the nearest one, so a straight cliff line shows one arrow, not three.
   const out: LedgeHint[] = [];
@@ -96,7 +124,8 @@ export function pickLedgeHints(o: {
     const i = out.findIndex((q) => q.dx === h.dx && q.dy === h.dy && Math.hypot(q.x - h.x, q.y - h.y) <= LEDGE_MERGE);
     if (i < 0) out.push(h); else if ((h.dist ?? 0) < (out[i]!.dist ?? 0)) out[i] = h;
   };
-  const rim = pickLedgeHint({ ...o, heightAt: H });
+  // H already applies the ADR-439 surface conversion, so the rim check must not apply it a second time.
+  const rim = pickLedgeHint({ ...o, heightAt: H, tileAt: undefined, rawHeightAt: undefined });
   if (rim) add(rim);
   const heading = o.heading ?? o.facing;
   const range = o.range ?? LEDGE_MIN_RANGE;
@@ -156,6 +185,11 @@ export function ledgeDraws(w: World, player: Entity | undefined, cam: CameraLike
     x, y, viewQ: camIso(cam).view ?? 0, facing: t.facing ?? 0, heading, range,
     hp: w.getField(player, Health, "hp") ?? 100,
     heightAt: (tx, ty) => shaftAwareHeight(w, terrain, tx, ty, player),
+    // ADR-439: pass the tile lookups so drops onto water are measured to the water surface.
+    // The replica TerrainRes forwards rawHeightAt (replica-terrain.ts); without it the helper
+    // falls back to the gameplay height, i.e. the old behaviour.
+    tileAt: (tx, ty) => terrain.tileAt(tx, ty),
+    rawHeightAt: terrain.rawHeightAt ? (tx, ty) => terrain.rawHeightAt!(tx, ty) : undefined,
     ladderBetween: (ax, ay, bx, by) => ladderBetween(idx, ax, ay, bx, by),
   });
   if (!hints.length) return [];

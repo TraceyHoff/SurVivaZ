@@ -17,7 +17,7 @@ import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks, WeatherKind, isSnowing, type EnvironmentTuning, type VitalsTuning, type WeatherDef } from "../defs.js";
 import { DayPhase, DayPhaseChanged, emit, WeatherChanged } from "../events.js";
 import { EmitterKind, isRaining } from "../realism.js";
-import { shelterAt, type Shelter } from "../building/shelter.js";
+import { shelterAt, roomOpennessAt, type Shelter } from "../building/shelter.js";
 import { waterproofOf } from "../combat/arms.js";
 import { dryWetness } from "../exposure-stages.js";
 import { inWater } from "./movement.js";
@@ -249,14 +249,27 @@ export function heatAt(world: World, x: number, y: number, z = 0): number {
  * centre, linear falloff over 4 tiles) warms a small sealed room to a cozy ~15C above the clamped indoor base;
  * a fireplace (22C / 5 tiles) warms a little more, a torch stand (4C / 1.5 tiles) barely registers.
  * Time constant: 63% of the way in 2 minutes, ~95% in 6 minutes; the same rate cooling when the fire goes out.
+ * ADR-440: open windows / doors ventilate the room — the target and the time constant both scale by the
+ * ventilation factor (1 / (1 + 3 * openness)), so a leaky room settles lower and faster, but its initial warming
+ * slope (target / tau) never exceeds the sealed room's.
  */
 export const FIRE_HEAT_TAU_S = 120;
 /** Cap on the smoothed room-heat contribution (deg C): a room full of fires tops out 15C above its indoor base. */
 export const FIRE_HEAT_MAX_C = 15;
+/** ADR-440: ventilation gain — openness o scales the room's heat exchange by 1 / (1 + 3o). */
+export const VENT_TAU_GAIN = 3;
+/** ADR-440: ventilation factor of a room openness 0 (sealed) .. 1 (fully open): 1 sealed, 1/4 fully open. */
+export function roomHeatVentFactor(openness: number): number {
+  return 1 / (1 + VENT_TAU_GAIN * Math.min(1, Math.max(0, openness)));
+}
+/** ADR-440: effective RoomHeat time constant (s) at an openness: 120 s sealed, 30 s fully open. */
+export function roomHeatTau(openness: number): number {
+  return FIRE_HEAT_TAU_S * roomHeatVentFactor(openness);
+}
 /** Exponential approach of `current` toward `target` over `dt` seconds (pure; shared by the exposure system). */
-export function approachRoomHeat(current: number, target: number, dt: number): number {
+export function approachRoomHeat(current: number, target: number, dt: number, tauS: number = FIRE_HEAT_TAU_S): number {
   if (!(dt > 0)) return current;
-  return current + (target - current) * (1 - Math.exp(-dt / FIRE_HEAT_TAU_S));
+  return current + (target - current) * (1 - Math.exp(-dt / tauS));
 }
 /** Legacy 0–10°F climate references; ADR-277 removed direct air-temperature damage. */
 export const COLD_DAMAGE_LO_C = ((0 - 32) * 5) / 9;
@@ -302,9 +315,13 @@ export function exposureSystem(world: World, dt: number): void {
     // Task 24: inside a fully enclosed room the fire's heat is not instant — the room itself warms over
     // minutes (RoomHeat, eased toward the live fire heat; walls occlude, so only fires in the same room
     // count) and cools back down when the fire goes out. Outdoors the instant heat still applies as before.
+    // ADR-440: ventilation — open windows / doors lower the room's heat target and shorten its time constant
+    // (both scale by the same factor, so a leaky room never warms faster than a sealed one at first); an open
+    // room or roofless spot holds no heat, and stored heat vents away fast when a door or shutter is opened.
     const enclosed = sh.exposure === 0;
     const prevHeat = hasRoomHeat ? (world.getField(e, RoomHeat, "heat") ?? 0) : 0;
-    const roomHeat = approachRoomHeat(prevHeat, enclosed ? Math.min(heat, FIRE_HEAT_MAX_C) : 0, dt);
+    const vent = roomHeatVentFactor(roomOpennessAt(world, x, y, z));
+    const roomHeat = approachRoomHeat(prevHeat, enclosed ? Math.min(heat, FIRE_HEAT_MAX_C) * vent : 0, dt, FIRE_HEAT_TAU_S * vent);
     // Write on any change (at equilibrium approachRoomHeat returns the current value exactly, so this stops
     // on its own). A fixed epsilon here would freeze the tail: the per-call delta shrinks with the value.
     if (hasRoomHeat && roomHeat !== prevHeat) {

@@ -406,7 +406,7 @@ export class BootUI {
         const save = (): void => { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as object), bots: Math.max(0, Math.min(12, Number(bots.value) || 0)), showHud: hud.checked, fullscreen: fs.checked, hordes: hz.checked, hordeGraceDays: Math.max(0, Math.min(30, Number(gd.value) || 0)), aiHumans: ah.checked, hostCap: Math.max(2, Math.min(32, Math.round(Number(cap.value)) || 12)), ...tu.patch() })); main(); };
         this.screen([["Save", save], ["Back", main, "alt"]], main, `<h2>Settings</h2>`, l7, l1, l1b, l2, l3, l4, l5, l6, manage);
       };
-      // Delete progress (ADR-099): pick what to delete from this device, then type DELETE or hold to confirm.
+      // Delete progress (ADR-099, ADR-436): pick what to delete from this device, then hold to confirm.
       const slot = opts.slot ?? "1";
       const saves = (): void => {
         const box = document.createElement("div"); box.dataset["role"] = "save-picker"; box.style.cssText = "display:flex;flex-direction:column;gap:6px";
@@ -416,7 +416,7 @@ export class BootUI {
         const all = document.createElement("input"); all.type = "checkbox"; all.dataset["save"] = "everything";
         const allL = document.createElement("label"); allL.append(all, " Delete everything (also forgets this device's player identity)");
         all.addEventListener("change", () => { for (const b of boxes.values()) b.checked = all.checked; c.refresh(); });
-        // Sticky footer (always visible while the picker scrolls): Back + Delete + Hold to delete.
+        // Sticky footer (always visible while the picker scrolls): Back + Hold to delete.
         const footer = document.createElement("div"); footer.dataset["role"] = "sticky-footer"; footer.className = "sticky-footer";
         const picked = (): boolean => all.checked || [...boxes.values()].some((b) => b.checked);
         const c = deleteConfirm({ message: "Pick what to delete above. This can't be undone.", settingsOption: false, onCancel: main, actions: footer, canConfirm: picked,

@@ -13,17 +13,30 @@ beforeEach(() => { document.body.innerHTML = `<div id="game-root"><canvas id="ga
 describe("confirm flow (keyboard / gamepad / touch)", () => {
   let menus: GameMenus | undefined;
   afterEach(() => menus?.destroy());
-  test("Settings → Delete save is reachable with UINav; typed DELETE + Enter confirms; wrong word doesn't", async () => {
+  test("Settings → Delete save is reachable with UINav; there is no typed confirmation — hold-to-delete is the only path, and a tap never deletes", async () => {
     const run = vi.fn(async () => "deleted");
     menus = new GameMenus({ root: uiRoot(), onQuit: () => {}, pollGamepads: false, deleteProgress: () => ({ label: "Delete save", message: "m", settingsOption: true, run }) });
     menus.open("settings");
     const btn = Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Delete save")!; expect(btn).toBeDefined();
     btn.focus(); key("Enter"); expect(menus.nav.top).toBe("delete-progress");
-    const word = q<HTMLInputElement>("[data-role=confirm-word]"); expect(menus.nav.focusables()).toContain(word);
-    word.focus(); word.value = "nope"; key("Enter"); await Promise.resolve(); expect(run).not.toHaveBeenCalled();
-    word.value = "delete"; word.dispatchEvent(new Event("input")); key("Enter"); await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1));
-    expect(run).toHaveBeenCalledWith({ resetSettings: false });
-    await vi.waitFor(() => expect(q("[data-role=delete-status]").textContent).toBe("deleted"));
+    const box = q<HTMLElement>("[data-role=delete-confirm]");
+    expect(box.querySelector("[data-role=confirm-word]")).toBeNull(); // ADR-436: no type-DELETE input
+    expect(box.querySelector("[data-action=confirm-delete]")).toBeNull(); // ADR-436: no Delete button
+    expect(box.querySelector("input:not([type=checkbox])")).toBeNull(); // no text input of any kind
+    const hold = box.querySelector<HTMLButtonElement>("[data-action=hold-delete]")!;
+    expect(menus.nav.focusables()).toContain(hold);
+    expect(box.querySelector("[data-role=delete-hint]")?.textContent).toContain("1.5 seconds");
+    hold.click(); await Promise.resolve(); expect(run).not.toHaveBeenCalled(); // a tap never deletes
+  });
+  test("no typed path remains and the hold is still a deliberate 1500 ms hold", () => {
+    expect(HOLD_MS).toBe(1500); // ADR-436: threshold not shortened to make the test easy
+    const c = deleteConfirm({ message: "m", settingsOption: true, onConfirm: async () => "ok", onCancel: () => {}, manualTick: true });
+    document.body.append(c.el);
+    expect(c.el.querySelector("[data-role=confirm-word]")).toBeNull();
+    expect(c.el.querySelector("[data-action=confirm-delete]")).toBeNull();
+    expect(c.el.querySelectorAll("input")).toHaveLength(1); // only the "Also reset settings" checkbox
+    expect(c.el.querySelector("[data-action=hold-delete]")).toBeTruthy();
+    c.destroy();
   });
   test("Cancel closes; hold button: a tap never deletes, holding Enter/Space, pointer or gamepad A for HOLD_MS does", async () => {
     let t = 0; const pads = [{ buttons: [{ pressed: false }], axes: [] as number[] }];

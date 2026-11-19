@@ -13,10 +13,12 @@
 //   to a real sprite id through `resolveSprite` + the merged registry.
 // - The 24 ADR-349 wild plants draw with their farmed `crop_*` art, which lives on the
 //   `stream`-residency `nature_crops` atlas: the registry contains the atlas, and
-//   `sourcesFromManifest` (the exact call view.ts makes at boot) includes it — but a streamed
-//   atlas only pages in near the camera, and WebGL2 shows `placeholder_sprout` until then
-//   (Canvas2D shows nothing). That page-in is the one gap this test can only pin, not prove:
-//   the user's eyes on the live build are the check that a wild plant actually appears.
+//   `sourcesFromManifest` (the exact call view.ts makes at boot) includes it. ADR-438
+//   loads the small plant sheets resident on >= 128 MB budgets (AtlasManager
+//   RESIDENT_PLANT_RE, the ADR-156/246 precedent), so WebGL2 no longer shows
+//   `placeholder_sprout` for a crop while its stream page loads — the page-in gap this
+//   test used to pin is closed by that change; the user's eyes on the live build are
+//   still the check that a wild plant actually looks crisp.
 // - Fruit trees resolve on resident `nature_trees` (no page-in gap), classify as `tall`
 //   (view.ts: the key ends with `_tree` -> tall scale + occluder + sway), and their idle
 //   frame differs from the depleted frame (fruit is in the idle art). No fruit overlay /
@@ -66,13 +68,13 @@ describe("ADR-430 wild plants resolve to a real sprite (shared view.classify pat
     expect(byAtlas.get("nature_trees"), "trees on nature_trees").toContain("apple_tree");
   });
 
-  it("nature_crops is a streamed atlas with a placeholder (page-in gap, pinned not proven) and sourcesFromManifest includes it", async () => {
+  it("nature_crops is declared stream in the manifest (ADR-438 loads it resident: no placeholder page-in gap) and sourcesFromManifest includes it", async () => {
     const { result } = await loadMergedPackManifest();
     const registry = result.registry;
     const crops = registry.atlases.get("nature_crops");
     expect(crops, "nature_crops in the merged registry").toBeDefined();
-    expect(crops!.residency).toBe("stream");
-    expect(crops!.placeholder).toBe("placeholder_sprout"); // WebGL2 draws this until the page loads; Canvas2D draws nothing
+    expect(crops!.residency).toBe("stream"); // manifest declaration unchanged; the renderer overrides it (RESIDENT_PLANT_RE)
+    expect(crops!.placeholder).toBe("placeholder_sprout"); // fallback if a < 128 MB budget ever streams it again
     const trees = registry.atlases.get("nature_trees");
     expect(trees!.residency ?? "resident").toBe("resident"); // fruit trees have no page-in gap
     // The exact boot call (view.ts): every registry atlas gets an image source.
