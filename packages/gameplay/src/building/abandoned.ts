@@ -986,11 +986,17 @@ export function stampAbandonedSite(world: World, originX: number, originY: numbe
   }
   if (nearSpawn(plan.originX, plan.originY, plan.width, plan.height)) return skipped;
   // ADR-384: a footprint straddling tile levels is SKIPPED, not stamped crooked and not
-  // relocated (relocation was tried and removed — see siteTerrainOk). A busy footprint
-  // resumes in place (a restart cut it off mid-stamp, so it is grandfathered: the site
-  // already standing completes as-is rather than being torn down for a terrain change).
-  // A spawn exclusion still skips outright.
-  if (!resumed && !siteTerrainOk(world, plan.originX, plan.originY, plan.width, plan.height)) return skipped;
+  // relocated (relocation was tried and removed — see siteTerrainOk). ADR-435: the gate
+  // also runs on a resumed stamp. The old resume bypass ("grandfathered: the site
+  // already standing completes as-is") assumed the terrain under a partial stamp could
+  // not have changed, but it can — a shovel edit after the stamp started, or a partial
+  // stamp left over from the ADR-382→384 window when a 1–2 level spread was still
+  // allowed. A straddling resume skips the REMAINDER only: the pieces already placed
+  // stand, unmarked (the same outcome as the contested-footprint abort above) — nothing
+  // is torn down, and a COMPLETE grandfathered site is unaffected anyway because
+  // siteExistsAt returns first, before the resume is even attempted. A spawn exclusion
+  // still skips outright.
+  if (!siteTerrainOk(world, plan.originX, plan.originY, plan.width, plan.height)) return skipped;
   const key = stampKey(plan.originX, plan.originY);
   const pending = queueOf(world).get(key);
   if (pending) return pending.result;

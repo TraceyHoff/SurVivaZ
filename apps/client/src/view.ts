@@ -158,17 +158,68 @@ function tileHeightAt(tiles: TileMap, tx: number, ty: number): number | undefine
  * regeneration, no persist/schema change, and generation/placement are untouched (a placement-time nudge
  * would desync Transform from the derived slot and leave old ruins floating). Story lift / decor offset
  * handling is pieceGroundZ's, unchanged.
+ *
+ * ADR-433: the ADR-412 comment above is true at the bottom and false at the top. A lower neighbour
+ * sinking the base IS a gap when a roof/floor deck sits above the wall: the wall top is base + one
+ * floor (3 levels) while the deck above sits on the footprint's own tile, so a one-level drop outside
+ * opens a one-level (16 px) see-through gap between wall top and roof seat (ADR-432). `min` satisfies
+ * ADR-412 but breaks the roof pair; `max` satisfies the roof pair but re-opens ADR-412. The fix needs
+ * inside/outside information, and facing cannot supply it: stamped straight walls all carry rot 0
+ * (`packages/gameplay/src/building/abandoned.ts` walls()), so Transform.facing encodes only the edge
+ * orientation (a North-edge wall faces 0 or PI, a West-edge wall PI/2 — `slotTransform` in
+ * `packages/gameplay/src/building/structure.ts`), and a house's north and south walls share side North
+ * and facing 0 with the inside on opposite sides. PieceSlot knows the edge side but is sim-local and
+ * never replicated, so the client cannot use it either. The only inside signal the client has is deck
+ * adjacency: a deck piece (foundation / floor / roof family) on a tile marks that tile as inside the
+ * building. So this function takes an optional `decks` set (keys from `deckTileKey`, built by the
+ * render loop from the pieces it already iterates): among the touching tiles, prefer one carrying a
+ * deck at level+1 — the deck the wall top must meet, roof or floor above — else one carrying a deck
+ * at the wall's own level — the deck it stands on, e.g. walls placed before their roof — and take the
+ * MAX height among the preferred tiles; with no decked touching tile, fall back to the ADR-412 min.
+ * The max matters only where two decked tiles at different heights touch one anchor: a vertex on a
+ * step line, or a party wall decked on both sides at different levels. No single wall top can meet
+ * both roof heights there; max meets the higher roof (the gap it would leave is the see-through
+ * defect being fixed) and the lower roof's step reads as the corner post continuing past it. With
+ * no `decks` argument the behaviour is exactly ADR-412's min, so every bare call — including all
+ * ADR-412 pins and a freestanding wall with no deck above — is unchanged. A wall whose inside tile
+ * is LOWER than outside still grounds on the inside tile: it stands on inside ground and the higher
+ * outside ground buries its lower portion like a retaining wall.
  */
-export function pieceBoundaryGroundZ(tiles: TileMap | undefined, x: number, y: number, z: number, lh: number): number {
+/** ADR-433: numeric key for a deck tile (tx, ty, level): exact in a float64 for |tx|,|ty| < 2^20, level < 2^11. */
+export function deckTileKey(tx: number, ty: number, level: number): number {
+  const OFF = 1 << 20;
+  return (tx + OFF) + (ty + OFF) * (1 << 21) + level * (1 << 42);
+}
+/** ADR-433: the deck-set key for one placed piece, or undefined when it is not a deck piece. Deck
+ * families are foundation / floor / roof (`family` in pieces.json — foundations, floors, all roof
+ * forms, including ramp / stilt / triangle variants); walls, doors, furniture, stations and decor
+ * never contribute. The level is the piece's story, round(z / lh). */
+export function deckKeyFor(family: string | undefined, x: number, y: number, z: number, lh: number): number | undefined {
+  if (family !== "foundation" && family !== "floor" && family !== "roof") return undefined;
+  return deckTileKey(Math.floor(x), Math.floor(y), Math.round(z / (lh || 1)));
+}
+export function pieceBoundaryGroundZ(tiles: TileMap | undefined, x: number, y: number, z: number, lh: number, decks?: ReadonlySet<number>): number {
   const step = lh || 1; const floor = Math.round(z / step) * step; const off = z - floor;
   if (!tiles) return off; // no tiles → sim z stripped of story, like pieceGroundZ(undefined, …)
   const onX = Math.abs(x - Math.round(x)) < 1e-4, onY = Math.abs(y - Math.round(y)) < 1e-4;
   if (!onX && !onY) return groundZ(tiles, x, y, 0) + off;
   const xs = onX ? [Math.round(x) - 1, Math.round(x)] : [Math.floor(x)];
   const ys = onY ? [Math.round(y) - 1, Math.round(y)] : [Math.floor(y)];
-  let h: number | undefined;
-  for (const ty of ys) for (const tx of xs) { const th = tileHeightAt(tiles, tx, ty); if (th !== undefined) h = h === undefined ? th : Math.min(h, th); }
+  const level = Math.round(z / step); // the wall's story: the deck above it is at level + 1
+  let h: number | undefined; // ADR-412 min over touching tiles (fallback: no decked tile, or no decks given)
+  let upper: number | undefined; // ADR-433 max over touching tiles carrying a deck at level + 1
+  let own: number | undefined; // ADR-433 max over touching tiles carrying a deck at this level
+  for (const ty of ys) for (const tx of xs) {
+    const th = tileHeightAt(tiles, tx, ty); if (th === undefined) continue;
+    h = h === undefined ? th : Math.min(h, th);
+    if (decks !== undefined) {
+      if (decks.has(deckTileKey(tx, ty, level + 1))) upper = upper === undefined ? th : Math.max(upper, th);
+      else if (decks.has(deckTileKey(tx, ty, level))) own = own === undefined ? th : Math.max(own, th);
+    }
+  }
   if (h === undefined) return groundZ(tiles, x, y, 0) + off; // no resident tile touched: same as before
+  if (upper !== undefined) return upper + off; // the deck above fixes the wall top: base = inside height
+  if (own !== undefined) return own + off; // no deck above yet: stand on the deck the wall stands on
   return h + off; // groundZ(…, 0) semantics: the raw height (max(0, h) for h >= 0, h for a pit)
 }
 /** ADR-299: pin a shaft hatch (and anyone standing on its lid) to the surrounding rim instead of the pit floor. */
@@ -522,6 +573,9 @@ export class IsoView {
    *  pieces (rotSteps 16) are shown at the nearest quarter turn, triangles (12) on their exact art row (pieceArtRow); Tri/Free
    *  pieces pivot at the exact snapped x/y; variant goes by name (defs variantNames). */
   private lastTiles: TileMap | undefined;
+  /** ADR-433: deck tiles (foundation / floor / roof) placed in the net world, rebuilt every render frame
+   *  from the GPiece pass below — the inside signal for boundary-piece grounding. Reused, never reallocated. */
+  private deckKeys = new Set<number>();
   /** ADR-196: world z the ghost is drawn at (terrain-lifted), for the snap overlay. */
   ghostZ: number | undefined;
   private presentedPivot: { x: number; y: number; z: number } | undefined;
@@ -540,7 +594,11 @@ export class IsoView {
     // ADR-142: lifted onto the terrain step like the placed piece (view mirror `ground`); at z=0 it sank under raised ground
     // ADR-412: boundary-anchored pieces (walls, corners) ground on the lowest touching tile, not the neighbour — a wall
     // ghost previewed against raised ground must sit on the structure's own tile, like the placed piece.
-    const baseZ = pieceBoundaryGroundZ(this.lastTiles, p.x, p.y, p.z, gameplayDefs(net).building.levelHeight);
+    // ADR-433: pass the deck set (previous frame's render; syncGhost runs before render in main.ts, so a deck
+    // placed this frame reaches the ghost next frame — one frame of the old min grounding, invisible in practice;
+    // the first frame has an empty set and also falls back to min). A wall ghost previewed against a dropped
+    // outside neighbour now sits on its inside tile, like the placed piece, so the preview shows no gap either.
+    const baseZ = pieceBoundaryGroundZ(this.lastTiles, p.x, p.y, p.z, gameplayDefs(net).building.levelHeight, this.deckKeys);
     // Overlay uses the drawn world z (story restored); the ghost entity keeps the stripped base so sprites.ts
     // `floorToTerrainZ(level, Transform.z)` does not double the story again.
     this.ghostZ = floorToTerrainZ(p.level, baseZ);
@@ -670,18 +728,26 @@ export class IsoView {
     let defs: ReturnType<typeof gameplayDefs> | undefined; try { defs = gameplayDefs(net); } catch { defs = undefined; }
     const seen = this.seen; seen.clear();
     // the sim moves on the z=0 plane; lift entities onto the terrain step they stand on (tile height = world z)
-    this.lastTiles = tiles; resetGroundCache(); const ground = (x: number, y: number, z: number): number => groundZ(tiles, x, y, z);
+    this.lastTiles = tiles; resetGroundCache(); this.deckKeys.clear(); const ground = (x: number, y: number, z: number): number => groundZ(tiles, x, y, z);
     const lhv = (defs as unknown as { building?: { levelHeight?: number } } | undefined)?.building?.levelHeight ?? 3;
     // ADR-162: a piece raised above its level floor (decor on a table) keeps that lift over terrain steps
     const groundPiece = (x: number, y: number, z: number): number => pieceGroundZ(tiles, x, y, z, lhv);
     // ADR-412: build pieces ground on the lowest tile touching a boundary anchor (walls, corners); walkers keep pieceGroundZ.
-    const groundBoundaryPiece = (x: number, y: number, z: number): number => pieceBoundaryGroundZ(tiles, x, y, z, lhv);
+    // ADR-433: the boundary lift takes the deck set, so a wall with a deck above it grounds on its inside tile and its
+    // top meets the roof — the Canvas2D fallback reads the same lifted Transform.z (canvas2d.ts gatherPieces), so
+    // this one lift covers WebGL2, Canvas2D/Xbox and the ghost; no second, Canvas2D-only fix exists.
+    const groundBoundaryPiece = (x: number, y: number, z: number): number => pieceBoundaryGroundZ(tiles, x, y, z, lhv, this.deckKeys);
     const hatchTiles = new Set<string>();
     if (defs && net.isRegistered(GPiece)) {
       for (const pe of net.query([GPiece, Transform])) {
         const pd = defs.pieces.get(net.getField(pe, GPiece, "type")!);
-        if (!pd?.features.shaftHatch) continue;
+        // ADR-433: deck tiles for boundary grounding, from the same pass that already iterates every piece
+        // (no extra query, one numeric Set.add per deck piece). The set is rebuilt every frame, so shovel
+        // edits and demolitions are picked up immediately — the grounding is derived, never persisted.
         const pt = net.get(pe, Transform)!;
+        const dk = deckKeyFor(pd?.family, pt.x, pt.y, pt.z, lhv);
+        if (dk !== undefined) this.deckKeys.add(dk);
+        if (!pd?.features.shaftHatch) continue;
         hatchTiles.add(`${Math.floor(pt.x)},${Math.floor(pt.y)}`);
       }
     }

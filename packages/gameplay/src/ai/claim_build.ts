@@ -17,7 +17,9 @@
  *   ruin:  claim flag -> reclaim the site -> repair damaged pieces -> rebuild missing
  *          pieces from the site's planned layout (planAbandonedSite is a pure function
  *          of (seed, origin, kind, rot), so the layout is recoverable at runtime; the
- *          rotation is found by matching live pieces) -> done. When the layout cannot
+ *          rotation is found by matching live pieces) -> done. ADR-435: the rebuild is
+ *          skipped when the footprint straddles tile levels (siteTerrainOk) — the ruin
+ *          stays a ruin rather than being rebuilt crooked. When the layout cannot
  *          be matched at all (no live piece matches any rotation), the footprint is
  *          rebuilt as a 2x2 hut (BASE_SLOTS).
  *   new:   claim flag -> hand the site to the planner (mem.base = anchor; the planner's
@@ -41,7 +43,7 @@ import { GameplayConfig, gameplayDefs } from "../config.js";
 import { countItem } from "../inventory.js";
 import { maxHpOf } from "../building/integrity.js";
 import { hasOwnClaim, pieceCost, pieceUnlocked, snapPlacement, validatePlacement } from "../building/place.js";
-import { planAbandonedSite, siteUnclaimed, type AbandonedKindId, type PlannedPiece, type PlannedSite } from "../building/abandoned.js";
+import { planAbandonedSite, siteTerrainOk, siteUnclaimed, type AbandonedKindId, type PlannedPiece, type PlannedSite } from "../building/abandoned.js";
 import { aiMemoryOf, BASE_SLOTS, BUILD_STAND, bumpStat, claimBaseSite, markAiDirty, pickBaseSite, plannerIndex, scanBase, siteClaimOk, STATION_SLOTS, type Step } from "./planner.js";
 import { agentWorld, goTo } from "./base_behaviors.js";
 import { pieceAt, stuckOn } from "./autonomy.js";
@@ -442,6 +444,19 @@ export function planClaimRuin(world: World, self: Entity, marker: Entity, fails:
     }
     target.stage = "repair";
     return planOut("claim_ruin", target, { step: { k: "repair", piece }, keep: new Set(missingMaterials(world, self, def, bp.tier, scale).map((m) => m.item)), doneSlots });
+  }
+  // ADR-435: a footprint that straddles tile levels is never rebuilt — the replayed
+  // plan would stamp the missing pieces crooked across the step, the same defect
+  // ADR-384 gates at stamp time. The ruin stays a ruin: flag / reclaim / repair above
+  // are unaffected (they place no new pieces), so a standing grandfathered ruin can
+  // still be claimed and kept up, just not completed across a step. The fallback hut
+  // (layout.fallback, missing = BASE_SLOTS) is covered too — it is missing pieces on
+  // the same footprint. Returning blocked (not done) keeps the bot's claim target; it
+  // retries the check each sense tick, so a later shovel levelling of the footprint
+  // re-opens the rebuild.
+  if (layout.missing.length > 0 && !siteTerrainOk(world, ox, oy, w, h)) {
+    target.stage = "rebuild";
+    return planOut("claim_ruin", target, { blocked: ["terrain-straddle"], doneSlots });
   }
   // rebuild: first missing structural piece in phase order (deck -> wall -> opening -> stair -> fence -> roof)
   const missing = [...layout.missing].sort((a, b) => a.level - b.level || PHASE[a.role]! - PHASE[b.role]! || a.y - b.y || a.x - b.x);
