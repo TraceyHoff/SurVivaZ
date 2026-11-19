@@ -3,8 +3,10 @@
  *
  * A wants layer that runs ONLY when the bot is otherwise idle — never displacing survival needs, job work,
  * or the saddle chain. Hired bots pursue personal wants only under the ADR-327 idle gate (view.hire.idle);
- * unhired bots only when makePlan would return "idle" (view.plan.goal === "idle") with no danger near and
- * needs met. Every behaviour here only moves the bot and emits the action strings / commands a human client
+ * unhired bots only when makePlan would return "idle" (view.plan.goal === "idle") — or, ADR-445, when the
+ * bot has a finished shelter and its plan sits on a deferrable post-shelter comfort goal (furnishing,
+ * comfort wear, late progression), whose gather / hand-craft are deferred with it and re-planned next
+ * sense pass. Every behaviour here only moves the bot and emits the action strings / commands a human client
  * sends (eat / craft / gather / Use / wave emote); the server validates reach, recipes and costs as for players.
  *
  * Determinism: personality is derived, never rolled at runtime — the core traits come from the bot's identity
@@ -43,8 +45,14 @@ export interface LifePersonality {
 }
 export interface LifeMood { label: MoodLabel; social: number; explore: number; rest: number }
 export interface LifeWantDef { id: string; kind: LifeWantKind; weight: number; traits: Partial<Record<"sociability" | "industriousness" | "bravery" | "curiosity" | "greed", number>>; cooldownTicks: number }
+/** ADR-445: a long-term aspiration — one short want, repeated `targetCount` times. Progress is
+ *  derived from the want's completion count, so no extra counter can drift; completing the
+ *  aspiration is recorded in LifeState.aspirations and the next aspiration takes over. */
+export interface LifeAspirationDef { id: string; want: string; targetCount: number; weight: number; traits: Partial<Record<"sociability" | "industriousness" | "bravery" | "curiosity" | "greed", number>> }
 export interface LifeWantTarget {
   id: string; kind: LifeWantKind; mood: MoodLabel;
+  /** ADR-445: the long-term aspiration active while this want was picked (its want, when set). */
+  aspiration?: string;
   target?: { x: number; y: number }; slot?: number; recipe?: number; item?: number;
 }
 export interface LifeSensors { lifeWant?: LifeWantTarget; lifeMood?: LifeMood }
@@ -54,6 +62,8 @@ export interface LifeRecent { tick: number; lastSocialTick: number; lastAttacked
 export interface LifeState {
   v: 1; bornTick: number; activeWant?: string;
   completed: Record<string, { count: number; tick: number }>; snooze: Record<string, number>;
+  /** ADR-445: completed long-term aspirations (id -> tick), persisted like want progress. */
+  aspirations: Record<string, { tick: number }>;
   lastSocialTick: number; lastAttackedTick: number; restStartedTick?: number;
 }
 
@@ -63,11 +73,12 @@ const num = (v: unknown, d = 0): number => (typeof v === "number" && Number.isFi
 
 // ---------------- data ----------------
 interface LifeData {
-  gating: { arriveTiles: number; attackedRecentTicks: number; cheerfulAfterTicks: number; dangerTiles: number; lonelyAfterTicks: number; minHp: number; minHunger: number; minThirst: number; restTicks: number; restlessAfterTicks: number; socialRangeTiles: number; socialTiles: number; wantCooldownTicks: number; waterSearchCap: number; waterSearchTiles: number };
+  gating: { arriveTiles: number; attackedRecentTicks: number; cheerfulAfterTicks: number; dangerTiles: number; lonelyAfterTicks: number; minHp: number; minHunger: number; minThirst: number; restTicks: number; restlessAfterTicks: number; socialRangeTiles: number; socialTiles: number; wantCooldownTicks: number; waterSearchCap: number; waterSearchStride: number; waterSearchTiles: number };
   favouriteFoods: readonly string[]; keepsakes: readonly string[];
   mood: { cheerfulBonus: number; lonelySocialBonus: number; restlessExploreBonus: number; wearyRestBonus: number };
   rhythms: Record<LifeRhythm, { phases: readonly LifePhase[] }>;
   wants: readonly LifeWantDef[];
+  aspirations: readonly LifeAspirationDef[];
 }
 const PHASES: readonly LifePhase[] = ["night", "dawn", "day", "dusk"];
 const KINDS: readonly LifeWantKind[] = ["eat_favourite", "craft_keepsake", "visit_water", "socialize", "tend_garden", "rest"];
@@ -79,7 +90,7 @@ export function lifeData(): LifeData {
   const d = raw as unknown as Record<string, unknown>;
   const err: string[] = [];
   const g = d.gating as Record<string, unknown> | undefined;
-  const numKeys = ["arriveTiles", "attackedRecentTicks", "cheerfulAfterTicks", "dangerTiles", "lonelyAfterTicks", "minHp", "minHunger", "minThirst", "restTicks", "restlessAfterTicks", "socialRangeTiles", "socialTiles", "wantCooldownTicks", "waterSearchCap", "waterSearchTiles"];
+  const numKeys = ["arriveTiles", "attackedRecentTicks", "cheerfulAfterTicks", "dangerTiles", "lonelyAfterTicks", "minHp", "minHunger", "minThirst", "restTicks", "restlessAfterTicks", "socialRangeTiles", "socialTiles", "wantCooldownTicks", "waterSearchCap", "waterSearchStride", "waterSearchTiles"];
   if (!g || numKeys.some((k) => typeof g[k] !== "number")) err.push("gating must carry every numeric knob");
   const strList = (v: unknown): v is readonly string[] => Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string");
   if (!strList(d.favouriteFoods)) err.push("favouriteFoods must be a non-empty string list");
@@ -100,7 +111,14 @@ export function lifeData(): LifeData {
     if (w.traits && Object.keys(w.traits).some((k) => !TRAIT_KEYS.includes(k as (typeof TRAIT_KEYS)[number]) || typeof (w.traits as Record<string, unknown>)[k] !== "number")) err.push(`want ${String(w.id)} traits must use personality trait names`);
   }
   if (err.length) throw new Error(`ai_life.json invalid: ${err.join("; ")}`);
-  lifeDataCache = { gating: g as unknown as LifeData["gating"], favouriteFoods: d.favouriteFoods as readonly string[], keepsakes: d.keepsakes as readonly string[], mood: m as unknown as LifeData["mood"], rhythms: rhythms as LifeData["rhythms"], wants: wants as readonly LifeWantDef[] };
+  const aspirations = d.aspirations as LifeAspirationDef[] | undefined;
+  if (!Array.isArray(aspirations) || !aspirations.length) err.push("aspirations must be a non-empty list");
+  else for (const a of aspirations) {
+    if (typeof a.id !== "string" || typeof a.want !== "string" || !wants!.some((w) => w.id === a.want) || !Number.isInteger(a.targetCount) || a.targetCount < 1 || typeof a.weight !== "number") err.push(`aspiration ${String(a.id)} must have id / a known want / targetCount >= 1 / weight`);
+    if (a.traits && Object.keys(a.traits).some((k) => !TRAIT_KEYS.includes(k as (typeof TRAIT_KEYS)[number]) || typeof (a.traits as Record<string, unknown>)[k] !== "number")) err.push(`aspiration ${String(a.id)} traits must use personality trait names`);
+  }
+  if (err.length) throw new Error(`ai_life.json invalid: ${err.join("; ")}`);
+  lifeDataCache = { gating: g as unknown as LifeData["gating"], favouriteFoods: d.favouriteFoods as readonly string[], keepsakes: d.keepsakes as readonly string[], mood: m as unknown as LifeData["mood"], rhythms: rhythms as LifeData["rhythms"], wants: wants as readonly LifeWantDef[], aspirations: aspirations as readonly LifeAspirationDef[] };
   return lifeDataCache;
 }
 
@@ -157,10 +175,18 @@ export function lifeStateOf(agent: Agent, tick = 0): LifeState {
   }
   const snooze: LifeState["snooze"] = {};
   if (raw && typeof raw.snooze === "object" && raw.snooze) for (const [k, v] of Object.entries(raw.snooze)) if (known.has(k) && typeof v === "number") snooze[k] = v;
+  const aspKnown = new Set(lifeData().aspirations.map((a) => a.id));
+  const aspirations: LifeState["aspirations"] = {};
+  if (raw && typeof (raw as Partial<LifeState>).aspirations === "object" && (raw as Partial<LifeState>).aspirations) {
+    for (const [k, v] of Object.entries((raw as Partial<LifeState>).aspirations!)) {
+      if (!aspKnown.has(k) || !v || typeof v !== "object") continue;
+      aspirations[k] = { tick: num(v.tick) };
+    }
+  }
   const st: LifeState = {
     v: 1, bornTick: num(raw?.bornTick, tick),
     ...(raw?.activeWant && known.has(raw.activeWant) ? { activeWant: raw.activeWant } : {}),
-    completed, snooze,
+    completed, snooze, aspirations,
     lastSocialTick: num(raw?.lastSocialTick, num(raw?.bornTick, tick)),
     lastAttackedTick: num(raw?.lastAttackedTick, -1e9),
     ...(typeof raw?.restStartedTick === "number" ? { restStartedTick: raw.restStartedTick } : {}),
@@ -178,12 +204,29 @@ export function flushAiLife(agents: Iterable<Agent>, put: LifePut, tick: number,
   }
   return out;
 }
-/** Record a want completion (count + tick), clear the active want, mark dirty. */
+/** Record a want completion (count + tick), clear the active want, mark dirty. Completing the
+ *  active aspiration's want `targetCount` times completes the aspiration too. */
 export function completeWant(agent: Agent, wantId: string, tick: number): void {
   const st = lifeStateOf(agent, tick); const c = st.completed[wantId] ?? { count: 0, tick };
   st.completed[wantId] = { count: c.count + 1, tick };
   if (st.activeWant === wantId) delete st.activeWant;
   delete st.restStartedTick; markAiLifeDirty(agent, tick);
+  const asp = lifeData().aspirations.find((a) => a.want === wantId);
+  if (asp && st.completed[wantId]!.count >= asp.targetCount && !st.aspirations[asp.id]) {
+    st.aspirations[asp.id] = { tick };
+  }
+}
+/** The bot's current long-term aspiration: highest trait affinity among the incomplete ones
+ *  (data order breaks ties), or undefined when every aspiration is done. Deterministic per bot. */
+export function aspirationOf(agent: Agent, st: LifeState): LifeAspirationDef | undefined {
+  const p = personalityOf(agent);
+  let best: LifeAspirationDef | undefined; let bestScore = -1;
+  for (const a of lifeData().aspirations) {
+    if (st.aspirations[a.id]) continue;
+    const score = traitAffinity(p, a);
+    if (score > bestScore) { bestScore = score; best = a; }
+  }
+  return best;
 }
 /** Park a want until `tick + ticks` (stuck target / unreachable water): it scores 0 until then. */
 export function snoozeWant(agent: Agent, wantId: string, tick: number, ticks = 1200): void {
@@ -210,12 +253,19 @@ const slotOf = (world: World, self: Entity, item: number): number => {
   for (let i = 0; i < slots.items.length; i++) if (slots.items[i] === item && slots.counts[i]) return i;
   return -1;
 };
-/** Nearest water-adjacent tile to `home` (spiral rings, capped): the scenic-spot target. */
+/** Nearest water-adjacent tile to `home` (spiral rings, capped): the scenic-spot target.
+ *  ADR-445: the radius was 24 tiles and seed 42 has no water near spawn in it, so the want
+ *  near-never fired. Now 64 tiles on a coarse stride (`waterSearchStride`): lakes and rivers
+ *  are many tiles wide, so sampling every 3rd tile still finds them, and the probe cap bounds
+ *  the cost (~1,900 probes worst case instead of ~16,600). The found tile is approximate —
+ *  up to a couple of tiles from the true nearest — which is fine for a scenic spot. */
 export function nearestWaterTile(world: World, home: { x: number; y: number }): { x: number; y: number } | undefined {
   const g = lifeData().gating; const cx = Math.floor(home.x), cy = Math.floor(home.y); let checked = 0;
+  const stride = Math.max(1, g.waterSearchStride);
   for (let r = 0; r <= g.waterSearchTiles; r++) {
     for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
       if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      if ((cx + dx) % stride !== 0 || (cy + dy) % stride !== 0) continue;
       if (++checked > g.waterSearchCap) return undefined;
       const x = cx + dx + 0.5, y = cy + dy + 0.5;
       if (nearWater(world, x, y)) return { x, y };
@@ -226,8 +276,8 @@ export function nearestWaterTile(world: World, home: { x: number; y: number }): 
 
 // ---------------- want selection ----------------
 export interface PickOpts { phase?: LifePhase; tick?: number }
-const traitAffinity = (p: LifePersonality, w: LifeWantDef): number => {
-  const entries = Object.entries(w.traits) as [keyof LifeWantDef["traits"], number][];
+const traitAffinity = (p: LifePersonality, w: { traits: Partial<Record<"sociability" | "industriousness" | "bravery" | "curiosity" | "greed", number>> }): number => {
+  const entries = Object.entries(w.traits) as [keyof NonNullable<LifeWantDef["traits"]>, number][];
   if (!entries.length) return 0.5;
   let sum = 0, wsum = 0;
   for (const [k, wt] of entries) { sum += wt * ((p[k as keyof LifePersonality] as number) - 0.5); wsum += Math.abs(wt); }
@@ -260,6 +310,7 @@ export function pickWithMood(agent: Agent, world: World, view: AgentWorldView & 
   const d = lifeData(); const g = d.gating;
   const mood = deriveMood(p, vitals ?? vitalsOf(world, agent.bb.get<Entity>("selfEntity")), { tick, lastSocialTick: st.lastSocialTick, lastAttackedTick: st.lastAttackedTick, lastWantTick: lastWantTick(st) });
   const self = agent.bb.get<Entity>("selfEntity");
+  const aspiration = aspirationOf(agent, st);
   let best: LifeWantTarget | null = null; let bestScore = 0;
   for (const w of d.wants) {
     const done = st.completed[w.id];
@@ -268,6 +319,9 @@ export function pickWithMood(agent: Agent, world: World, view: AgentWorldView & 
     const affinity = traitAffinity(p, w);
     const nudge = w.kind === "socialize" ? mood.social : w.kind === "visit_water" ? mood.explore : w.kind === "rest" ? mood.rest : 0;
     let score = w.weight * (0.35 + 0.65 * affinity) * (1 + nudge);
+    // ADR-445: the active aspiration steers the pick toward its want (its weight is the bonus),
+    // so a bot works toward one long-term goal instead of drifting between short wants.
+    if (aspiration && aspiration.want === w.id) score *= 1 + aspiration.weight;
     if (st.activeWant === w.id) score *= 1.5;
     let target: LifeWantTarget | undefined;
     if (w.kind === "eat_favourite") {
@@ -304,7 +358,10 @@ export function pickWithMood(agent: Agent, world: World, view: AgentWorldView & 
     } else {
       target = { id: w.id, kind: w.kind, mood: mood.label, target: { x: view.home.x, y: view.home.y } };
     }
-    if (target && score > bestScore) { bestScore = score; best = target; }
+    if (target && score > bestScore) {
+      bestScore = score;
+      best = aspiration ? { ...target, aspiration: aspiration.id } : target;
+    }
   }
   return best;
 }
@@ -326,16 +383,43 @@ export const needsMetForLife = (v: IdleInput): boolean => {
   return v.hunger >= g.minHunger && v.thirst >= g.minThirst && v.hp >= g.minHp && !v.cold;
 };
 /**
+ * ADR-445: is this plan goal deferrable for personal wants? The post-shelter ladder — furnishing,
+ * comfort wear (not the torch: it keeps zombies off at night), tools / materials / progression
+ * after the bed. NOT deferrable: the shelter core (tools, campfire, storage, workbench, torch,
+ * earthworks, ramp, base, hearth, bed), defence (a threat is live), or food / fuel / water chores
+ * (cook, cooked_meat, water_flask, wood — the early wood goal is campfire fuel and the late one
+ * shares its name, so wood is never deferred). A deferred goal is re-planned every sense pass,
+ * so the want only borrows genuinely idle time; nothing is consumed or lost by waiting.
+ */
+export function isComfortGoal(goal: string | undefined): boolean {
+  if (!goal) return false;
+  if (goal.startsWith("furnish:")) return true;
+  if (goal.startsWith("wear:") && goal !== "wear:torch") return true;
+  return COMFORT_GOALS.has(goal);
+}
+const COMFORT_GOALS: ReadonlySet<string> = new Set([
+  "animal_feed", "knife", "stone_spear", "shovel", "furnace", "charcoal", "bronze_ingot",
+  "anvil", "dock", "shipyard", "axe2", "pickaxe2", "bronze_spear", "upgrade",
+]);
+/** A finished shelter: the hut is complete, or a bed / hearth stands (ruin homes have no BASE_SLOTS). */
+export const hasShelter = (view: AgentWorldView): boolean =>
+  view.bs?.complete === true || view.bs?.bed !== undefined || view.bs?.hearth !== undefined;
+/**
  * May this bot run personal wants right now? Hired: the ADR-327 flag only (its needs/danger checks already
- * live in hireSaddleNeedsMet). Unhired: the planner is idle (no step/leaves/hunt), nothing the bot still
- * has to do (no wanted gather, no craft/build, no trip, no travel route, no repair), no danger near, needs met.
+ * live in hireSaddleNeedsMet). Unhired, ADR-445: the planner is idle — or the bot has a finished shelter
+ * and its plan sits on a deferrable comfort goal, in which case the goal's gather / hand-craft are
+ * deferred with it (re-planned next sense pass). The home build, trips, travel, defence, repairs and
+ * pieces about to be placed (buildPlan) still block, and needs / danger still win.
  */
 export function isLifeIdle(world: World, self: Entity, view: AgentWorldView & LifeSensors, agent: Agent): boolean {
   if (view.hire?.idle === true) return true;
   if (view.hire !== undefined) return false; // hired but not idle: employer work (or Follow duty) comes first
   const plan = view.plan;
-  if (!plan || plan.goal !== "idle" || plan.step !== undefined || plan.leaves.length > 0 || plan.hunt.length > 0) return false;
-  if (view.tripWanted || view.gatherNode?.wanted || view.craftRecipe !== undefined || view.buildPlan !== undefined) return false;
+  const comfort = !!plan && isComfortGoal(plan.goal) && hasShelter(view);
+  if (!plan || (plan.goal !== "idle" && !comfort)) return false;
+  if (plan.goal === "idle" && (plan.step !== undefined || plan.leaves.length > 0 || plan.hunt.length > 0)) return false;
+  if (view.tripWanted || view.buildPlan !== undefined) return false;
+  if (!comfort && (view.gatherNode?.wanted || view.craftRecipe !== undefined)) return false;
   if (view.travel?.route !== undefined || view.defend !== undefined || view.repairTarget !== undefined) return false;
   if (view.cold) return false;
   const t = world.get(self, Transform); if (!t) return false;
@@ -410,7 +494,13 @@ export function lifeBehaviors(): GameBehavior[] {
     { name: "life_want", inertia: 0.1, traits: { sociability: 0.3 }, considerations: [
         { name: "want", curve: step01, input: (c) => ((c.world as AgentWorldView & LifeSensors).lifeWant ? 1 : 0) },
         { name: "calm", curve: step01, input: (c) => (c.memory.nearest("zombie", c.self.x, c.self.y, 0.3) ? 0 : 1) },
-        { name: "idle", curve: step01, input: (c) => (c.world.hire?.idle === true || c.world.plan?.goal === "idle" ? 1 : 0) }],
+        { name: "idle", curve: step01, input: (c) => {
+          // ADR-445: mirrors isLifeIdle's plan gate with view-only data (the sensor already
+          // checked needs / danger / trips / travel / defence / repair) — hired-idle, idle,
+          // or a finished shelter with a deferrable comfort goal.
+          const w = c.world as AgentWorldView & LifeSensors;
+          return w.hire?.idle === true || w.plan?.goal === "idle" || (hasShelter(w) && isComfortGoal(w.plan?.goal)) ? 1 : 0;
+        } }],
       run: (c, o) => {
         const w = (c.world as AgentWorldView & LifeSensors).lifeWant; if (!w) return false;
         const tick = c.self.tick;

@@ -20,6 +20,7 @@
     "gather": ["gonna grab some wood", "need more rocks", "these berries look ok"],
     "return_home": ["getting dark, heading back", "not staying out at night"],
     "rest": ["need some rest", "quiet night... hopefully"],
+    "sick_rest": ["feeling rough — resting by the fire", "caught something. need to rest a while", "not working till this cold passes"],
     "idle": ["anyone around?", "this place is too quiet"]
   }
 }

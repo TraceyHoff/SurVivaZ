@@ -510,17 +510,37 @@ export function baseBehaviors(): GameBehavior[] {
           if (containerSeq(c, o, sb.id, storageWithdrawActions(sb.id as Entity, wood, Math.min(REFUEL_DEPOSIT, stored)))) { mark(c, "withdraws"); return false; } return; }
         if (goTo(c, o, f.x, f.y) > 1.6) { if (stuckOn(c, f.x, f.y)) { c.bb.set("refuelAt", c.self.tick); return false; } return; } stop(o);
         if (containerSeq(c, o, f.id, storageDepositActions(f.id as Entity, wood, Math.min(REFUEL_DEPOSIT, bagWood)))) { mark(c, "refuels"); c.bb.set("refuelAt", c.self.tick); return false; } } },
+    // ADR-443: rain / snow wets (and, through wet clothes at half insulation, chills) — head inside the
+    // finished base while it falls instead of standing in it until already cold. A survival override like
+    // warm_up / cool_down (withHireDuty exempts it by name): it releases the moment the bot is sheltered
+    // or the rain stops, so the hire job / base work resumes at once. No finished base (or ruin home)
+    // nearby, no trip: nothing to shelter in, and a 60-tile walk through the rain is worse than waiting
+    // it out by a fire (warm_up covers that case).
+    { name: "seek_shelter", inertia: 0.6, considerations: [
+        { name: "raining", weight: 2.2, curve: step01, input: (c) => { const w = c.world.weather; if (!w?.raining) { c.bb.set("sheltering", false); return 0; }
+          const sheltered = (w.sheltered ?? 0) >= 0.5 || (c.world.base !== undefined && insideBase(c.world.base, c.self.x, c.self.y));
+          c.bb.set("sheltering", !sheltered); return sheltered ? 0 : 1; } },
+        { name: "hasShelter", curve: step01, input: (c) => (c.world.base && c.world.bs?.complete ? 1 : c.world.ruinBase ? 1 : 0) },
+        { name: "nearby", curve: step01, input: (c) => { const b = c.world.base ?? c.world.ruinBase; if (!b) return 0; return Math.hypot(b.x - c.self.x, b.y - c.self.y) < 60 ? 1 : 0; } }],
+      run: (c, o) => {
+        const b = c.world.base ?? c.world.ruinBase; if (!c.world.weather?.raining || !b) return false;
+        if ((c.world.base && insideBase(c.world.base, c.self.x, c.self.y)) || (c.world.weather.sheltered ?? 0) >= 0.5) { stop(o); c.bb.set("sheltering", false); return false; }
+        if (goTo(c, o, b.x + 1, b.y + 1, 1) < 0.6 || stuckOn(c, b.x + 1, b.y + 1, 200)) { stop(o); return false; }
+      } },
     // ADR-252: cold kills in ~70 s once the body is under 35 C; get warm first (lit fire > light the fire > roofed base > a camp fire on the spot)
     { name: "warm_up", inertia: 0.6, considerations: [
         { name: "chilled", weight: 2.2, curve: step01, input: (c) => { const ch = c.world.chill; if (!ch) return 0;
-          const on = (c.bb.get("warming") ? ch.body < 36.8 || (ch.felt < 10 && ch.body < 37) : ch.body < 36.2 || (ch.felt < 8 && ch.body < 36.6)) || (bankHours(c) && c.self.thirst > 0.45 && (c.self.hunger > 0.35 || c.world.food === undefined)); /* banking yields to drink / eat */ c.bb.set("warming", on); return on ? 1 : 0; } },
+          const wet = c.world.weather?.wetness ?? 0; // ADR-443: soaked clothes insulate half (Task 31) — dry off by a fire before the body is cold
+          const on = (c.bb.get("warming") ? ch.body < 36.8 || (ch.felt < 10 && ch.body < 37) || wet > 0.3 : ch.body < 36.2 || (ch.felt < 8 && ch.body < 36.6) || wet >= 0.6) || (bankHours(c) && c.self.thirst > 0.45 && (c.self.hunger > 0.35 || c.world.food === undefined)); /* banking yields to drink / eat */ c.bb.set("warming", on); return on ? 1 : 0; } },
         { name: "canWarm", curve: step01, input: (c) => (warmOption(c) ? 1 : 0) }], // nothing to warm at: the planner's emergency wood/stone goal (gather) takes over
       run: warmRun },
     // Heat kills as fast as cold (hyperthermia above 39 C): get to shade / the enclosed base first, water first if
     // thirst is critical — the enclosed base clamps felt temperature to the comfort band, so reaching it saves the bot.
     { name: "cool_down", inertia: 0.6, considerations: [
         { name: "overheated", weight: 2.2, curve: step01, input: (c) => { const ch = c.world.chill; if (!ch) return 0;
-          const on = c.bb.get("cooling") ? ch.body > 38.3 || (ch.felt > 34 && ch.body > 37.5) : ch.body > 38.6 || ch.felt > 36; c.bb.set("cooling", on); return on ? 1 : 0; } },
+          const on = c.bb.get("cooling") ? ch.body > 38.3 || (ch.felt > 34 && ch.body > 37.5) : ch.body > 38.6 || ch.felt > 36;
+          const keep = on && !(c.world.weather?.raining && ch.body <= 39); // ADR-443: rain already cools — no shade / water trip for it unless dangerously hot
+          c.bb.set("cooling", keep); return keep ? 1 : 0; } },
         { name: "canCool", curve: step01, input: (c) => (c.world.base || c.world.waterAt ? 1 : 0) }],
       run: (c, o) => {
         const w = c.world.waterAt;

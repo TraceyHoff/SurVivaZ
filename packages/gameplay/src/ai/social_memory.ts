@@ -4,9 +4,16 @@
  * plus party and clan membership memory. Pure and browser-safe: observeSocialMemory (called from buildAgentView) updates it from
  * the replica; flushSocialMemory writes dirty bots through a put(id, partial) sink (game.agents.put), debounced per bot.
  * Loading needs nothing extra: addBot merges game.agents.get(id) into the identity, and socialMemoryOf validates it.
+ *
+ * ADR-444: the memory also feeds behaviour back. observeSocialMemory records the events production can see — a hit
+ * the bot suffered (lastAttacker, ADR-194) notes "attacked", being hired notes "helped" — and mirrors the bot's
+ * relationships into the world TrustLedger, so the agent-less hire path (recruitment.ts) can price / refuse hires
+ * by remembered trust. A grudge fades: negative trust decays toward 0 on the lastSeen refresh, so one accidental
+ * hit never locks a player out permanently.
  */
-import { Membership, PlayerId, Transform, type Agent, type Entity, type World } from "@engine/core";
-import { ClanStatus } from "../components.js";
+import { defineResource, Membership, PlayerId, Transform, type Agent, type Entity, type World } from "@engine/core";
+import { ClanStatus, Worker } from "../components.js";
+import { lastAttacker } from "../combat/combat.js";
 
 export interface NotableEvent { tick: number; kind: SocialEventKind }
 export interface Relation { trust: number; affinity: number; lastSeen: number; notableEvents: NotableEvent[] }
@@ -22,7 +29,9 @@ export const SOCIAL_EVENTS = {
   left: { trust: -0.05, affinity: -0.1 },
 } as const;
 export type SocialEventKind = keyof typeof SOCIAL_EVENTS;
-export const SOCIAL_MEMORY = { maxEvents: 8, maxRelations: 64, seenEveryTicks: 20 * 10, writeDebounceTicks: 20 * 15 };
+/** ADR-444: forgiveness — on each lastSeen refresh (seenEveryTicks) negative trust keeps this fraction of
+ * itself (half-life ~2.3 min at 20 tps); below trustDecaySnap it snaps to 0. Positive trust never decays. */
+export const SOCIAL_MEMORY = { maxEvents: 8, maxRelations: 64, seenEveryTicks: 20 * 10, writeDebounceTicks: 20 * 15, trustDecayKeep: 0.95, trustDecaySnap: 0.01 };
 
 type SocialIdentity = Agent["identity"] & { social?: unknown };
 const clamp = (v: number): number => Math.max(-1, Math.min(1, v));
@@ -72,6 +81,29 @@ export function trustOf(agent: Agent, player: number): number {
 }
 
 /**
+ * ADR-444: world-side mirror of bot trust, so code with no Agent (the hire path) can read it. Keyed by the bot's
+ * stable PlayerId, never a recyclable entity id; rebuilt from the loaded record on first sight after a restart.
+ * Sim-local only (never networked / persisted) — game.agents stays the source of truth.
+ */
+export interface TrustLedger { byBot: Map<number, Map<number, number>> }
+export const TrustLedgerRes = defineResource<TrustLedger>("gameplay.TrustLedger");
+const syncTrustLedger = (world: World, botPid: number, m: SocialMemory): void => {
+  let ledger = world.getResource(TrustLedgerRes);
+  if (!ledger) { ledger = { byBot: new Map() }; world.setResource(TrustLedgerRes, ledger); }
+  const rel = new Map<number, number>();
+  for (const [k, r] of Object.entries(m.relationships)) rel.set(Number(k), r.trust);
+  ledger.byBot.set(botPid, rel);
+};
+/** Remembered trust of bot `bot` toward `player` (0 = unknown / neutral). */
+export function trustToward(world: World, bot: Entity, player: number): number {
+  if (!player) return 0;
+  const ledger = world.getResource(TrustLedgerRes); if (!ledger) return 0;
+  const botPid = world.isRegistered(PlayerId) && world.has(bot, PlayerId) ? world.getField(bot, PlayerId, "id") ?? 0 : 0;
+  if (!botPid) return 0;
+  return ledger.byBot.get(botPid)?.get(player) ?? 0;
+}
+
+/**
  * Updates memory from the bot's replica: party / clan joins and leaves (with "partied" / "clanmate" / "left" events for the
  * others in the group) and lastSeen for visible players (throttled). Called from buildAgentView.
  */
@@ -96,12 +128,53 @@ export function observeSocialMemory(world: World, self: Entity, agent: Agent): v
     if (joined) for (const p of others("clanId", clan)) noteSocialEvent(agent, p, "clanmate", tick);
     markDirty(agent, tick);
   }
+  // ADR-444: being hired is remembered as help (the player gave the bot its wanted item and work). The
+  // blackboard holds the last owner seen: a 0 -> player transition notes "helped" once. The first sight
+  // (a fresh agent after a restart, or a test agent) notes it only when the bot has no relation with the
+  // owner yet — a hire already noted before the save is not noted again on load. Runs BEFORE the attack
+  // observation below, so a hire-then-attack in the same unseen window nets in event order (+0.2, -0.5).
+  if (world.isRegistered(Worker) && world.has(self, Worker)) {
+    const owner = world.get(self, Worker)!.owner ?? 0;
+    const lastOwner = agent.bb.num("socialHireOwner", -1);
+    if (lastOwner === -1) {
+      if (owner !== 0 && !m.relationships[String(owner)]) noteSocialEvent(agent, owner, "helped", tick);
+      agent.bb.set("socialHireOwner", owner);
+    } else if (lastOwner !== owner) {
+      if (lastOwner === 0 && owner !== 0) noteSocialEvent(agent, owner, "helped", tick);
+      agent.bb.set("socialHireOwner", owner);
+    }
+  }
+  // ADR-444: a hit the bot suffered is remembered. lastAttacker (ADR-194) is the sim-local record of the last
+  // living attacker; the blackboard dedups by hit tick so one blow is noted once, however many ticks pass
+  // before the bot's next think. Zombies carry no PlayerId and are skipped; a dead attacker is skipped too
+  // (its entity id may be recycled, and a blow from the dead needs no grudge).
+  const hit = lastAttacker(world, self);
+  if (hit) {
+    const noted = agent.bb.num("socialLastAttackTick", -1);
+    if (hit.tick > noted) {
+      agent.bb.set("socialLastAttackTick", hit.tick);
+      if (world.isAlive(hit.e)) {
+        const apid = world.getField(hit.e, PlayerId, "id") ?? 0;
+        if (apid && apid !== me) noteSocialEvent(agent, apid, "attacked", hit.tick);
+      }
+    }
+  }
   if (!t) return;
   for (const e of world.query([PlayerId, Transform])) {
     if (e === self) continue; const p = world.getField(e, PlayerId, "id")!; if (!p || p === me) continue;
     const r = m.relationships[String(p)]; if (!r) continue; // only refresh people the bot already knows
-    if (tick - r.lastSeen >= SOCIAL_MEMORY.seenEveryTicks) { r.lastSeen = tick; markDirty(agent, tick); }
+    if (tick - r.lastSeen >= SOCIAL_MEMORY.seenEveryTicks) {
+      r.lastSeen = tick;
+      // ADR-444: grudges fade — negative trust decays toward 0 (see SOCIAL_MEMORY.trustDecayKeep), so a
+      // single accidental hit stops mattering after a few minutes and a double attack blocks hiring only
+      // briefly. Positive trust never decays: friendships persist, grudges do not.
+      if (r.trust < 0) { r.trust = clamp(r.trust * SOCIAL_MEMORY.trustDecayKeep); if (Math.abs(r.trust) < SOCIAL_MEMORY.trustDecaySnap) r.trust = 0; }
+      markDirty(agent, tick);
+    }
   }
+  // ADR-444: mirror into the world ledger (see TrustLedger) after every mutation above, so the hire path
+  // reads the same trust the agent just recorded.
+  if (me) syncTrustLedger(world, me, m);
 }
 
 export type AgentPut = (id: string, partial: { social: SocialMemory }) => unknown;

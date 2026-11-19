@@ -38,6 +38,7 @@ import { containerSeq, goTo, storageTargetFor } from "./base_behaviors.js";
 import { storageWithdrawActions } from "./storage_api.js";
 import { scanBase } from "./planner.js";
 import { nearestClaimHostile } from "../territory.js";
+import { trustOf } from "./social_memory.js"; // ADR-444: remembered trust in the owner scales follow / defend
 import { workerAnchor, workerWorkAnchor, workerOrderTarget, workerSelections, workerRecipes } from "../recruitment.js";
 import { playerEntity } from "../pets.js";
 import { GatherCmd, UseCmd } from "../input.js";
@@ -222,7 +223,11 @@ export function fillHireSensors(world: World, self: Entity, view: AgentWorldView
   const target = workerOrderTarget(world, self);
   const hasTarget = world.getField(self, WorkerOrder, "kind") === 2;
   delete view.defend; delete view.farm; delete view.repair;
-  view.hire = { job: w.job, owner: w.owner, ax: anchor.x, ay: anchor.y };
+  // ADR-444: the bot's remembered trust in its owner (0 when no agent ran the sensors) — a distrusted
+  // owner gets a reluctant guard (short defend radius) and a distant follower; a trusted owner gets the
+  // full radius and a close shadow.
+  const ownerTrust = agent ? trustOf(agent, w.owner) : 0;
+  view.hire = { job: w.job, owner: w.owner, ax: anchor.x, ay: anchor.y, trust: ownerTrust };
   view.home = anchor; view.base = base;
   const bs = scanBase(world, defs, base); view.bs = bs;
   delete view.plan; delete view.needs; delete view.tripWanted; delete view.buildPlan;
@@ -245,11 +250,12 @@ export function fillHireSensors(world: World, self: Entity, view: AgentWorldView
   }
   if (w.job === WorkerJob.Defend || w.job === WorkerJob.Follow) {
     const owner = playerEntity(world, w.owner); const tribe = owner ? tribeOf(world, owner) : 0;
+    const defendR = ownerTrust < 0 ? 4 : DEFEND_R; // ADR-444: a distrusted owner is guarded only up close
     let best: { id: number; x: number; y: number } | undefined;
-    const claimed = tribe ? nearestClaimHostile(world, anchor.x, anchor.y, DEFEND_R, tribe) : undefined;
+    const claimed = tribe ? nearestClaimHostile(world, anchor.x, anchor.y, defendR, tribe) : undefined;
     if (claimed !== undefined) { const t = world.get(claimed, Transform)!; best = { id: claimed, x: t.x, y: t.y }; }
-    else { let bd = DEFEND_R * DEFEND_R;
-      for (const z of installSpatialIndex(world).queryRadius(anchor.x, anchor.y, DEFEND_R)) {
+    else { let bd = defendR * defendR;
+      for (const z of installSpatialIndex(world).queryRadius(anchor.x, anchor.y, defendR)) {
         if (!world.has(z, Zombie) || world.has(z, Dead)) continue; const t = world.get(z, Transform); if (!t) continue;
         const d = (t.x - anchor.x) ** 2 + (t.y - anchor.y) ** 2; if (d < bd) { bd = d; best = { id: z, x: t.x, y: t.y }; }
       }
@@ -343,7 +349,7 @@ export function fillHireSensors(world: World, self: Entity, view: AgentWorldView
 /** Follow is a duty, not a suggestion to the social/building scheduler. Do not let a scheduled
  * night sleep or a greeting beat catching up, guarding, or a concrete survival trip. Other jobs are unchanged. */
 export function withHireDuty(b: GameBehavior): GameBehavior {
-  if (b.name.startsWith("work_") || ["flee", "eat", "drink", "drink_water", "warm_up", "cool_down", "seek_shelter"].includes(b.name)) return b;
+  if (b.name.startsWith("work_") || ["flee", "eat", "drink", "drink_water", "warm_up", "cool_down", "seek_shelter", "seek_care"].includes(b.name)) return b; // ADR-442: a sick bot rests even on Follow duty
   const [first, ...rest] = b.considerations; if (!first) return b;
   // Preserve the consideration count/weight: adding a neutral factor would change core's compensation
   // and unintentionally rescore every unhired bot. Pre-evaluate just the first curve, or gate it to zero.
@@ -453,7 +459,10 @@ export function hireBehaviors(): GameBehavior[] {
         { name: "following", curve: step01, input: hiredJob(WorkerJob.Follow) },
         { name: "fed", curve: step01, input: (c) => survivalBreak(c) ? 0 : 1 }],
       run: (c, o) => { instantChores(c, o); const h = c.world.hire; if (!h) return false;
-        if (Math.hypot(h.ax - c.self.x, h.ay - c.self.y) > 2.5) goTo(c, o, h.ax, h.ay); else stop(o); return false; } },
+        // ADR-444: trust sets how close the follower stays — a trusted owner gets a close shadow (1.5),
+        // a distrusted one is followed at arm's length (6), a neutral one at the usual 2.5.
+        const near = (h.trust ?? 0) >= 0.5 ? 1.5 : (h.trust ?? 0) < 0 ? 6 : 2.5;
+        if (Math.hypot(h.ax - c.self.x, h.ay - c.self.y) > near) goTo(c, o, h.ax, h.ay); else stop(o); return false; } },
     { name: "work_hold", inertia: 0.3, considerations: [
         { name: "hired", curve: { type: "linear", m: 0.45, b: 0 }, input: (c) => (c.world.hire && !(c.world.hire.job === WorkerJob.Follow && survivalBreak(c)) ? 1 : 0) }],
       run: (c, o) => { instantChores(c, o); const h = c.world.hire; if (!h) return false;

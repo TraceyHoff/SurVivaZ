@@ -228,7 +228,11 @@ export function survivalBehaviors(): GameBehavior[] {
   return [
     { name: "eat", inertia: 0, considerations: [
         { name: "hungry", curve: { type: "logistic", k: 12, mid: 0.55 }, input: (c) => 1 - c.self.hunger },
-        { name: "hasFood", curve: { type: "step", at: 0.5 }, input: (c) => (c.world.food !== undefined ? cooled(c.self.tick, c.bb.num("ateAt", -1e9), 40) : 0) }],
+        { name: "hasFood", curve: { type: "step", at: 0.5 }, input: (c) => (c.world.food !== undefined ? cooled(c.self.tick, c.bb.num("ateAt", -1e9), 40) : 0) },
+        // ADR-446: a pending shared meal suppresses lone eating (the meal behavior eats at the
+        // hearth instead). The sensor precomputes suppressLoneEat: only on a short walk to the
+        // hearth and above starvation hunger — far away or starving, bots eat alone as today.
+        { name: "noMealWaits", curve: { type: "step", at: 0.5 }, input: (c) => (c.world.sharedMeal?.suppressLoneEat ? 0 : 1) }],
       run: (c, o) => { if (c.world.food === undefined) return false; o.actions.push(`eat:${c.world.food}`); c.bb.set("ateAt", c.self.tick); return false; } },
     { name: "drink", inertia: 0, considerations: [
         { name: "thirsty", curve: { type: "logistic", k: 12, mid: 0.55 }, input: (c) => 1 - c.self.thirst },

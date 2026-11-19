@@ -58,7 +58,7 @@ import type { GameDefs } from "../defs.js";
 export const TRAVEL: Readonly<typeof raw> = raw;
 const T = raw;
 export type TravelKind = "explore" | "poi" | "trade" | "relocate" | "return" | "sent" | "resource";
-export interface TravelState { kind: TravelKind; x: number; y: number; since: number; route?: { x: number; y: number }[]; leg: number; origin: { x: number; y: number }; pending?: boolean; /** ADR-343: the wanted item ids a resource trip is for (the live need may change; fillTravelSensors ends the trip when none of these is still needed) */ items?: number[]; /** ADR-344: the resource-def id of the prospected destination node (gear is packed for this exact node) */ nodeKind?: number; /** ADR-344: provisions carried for a long trip (bag + packed at departure); unset = short trip, or preparation not yet resolved */ journey?: JourneyState; /** ADR-345: tick the bot started waiting at a bank for a dangerous crossing to become safe (cleared when it proceeds, re-plans, or the trip ends) */ waterWaitSince?: number }
+export interface TravelState { kind: TravelKind; x: number; y: number; since: number; route?: { x: number; y: number }[]; leg: number; origin: { x: number; y: number }; pending?: boolean; /** ADR-343: the wanted item ids a resource trip is for (the live need may change; fillTravelSensors ends the trip when none of these is still needed) */ items?: number[]; /** ADR-344: the resource-def id of the prospected destination node (gear is packed for this exact node) */ nodeKind?: number; /** ADR-344: provisions carried for a long trip (bag + packed at departure); unset = short trip, or preparation not yet resolved */ journey?: JourneyState; /** ADR-345: tick the bot started waiting at a bank for a dangerous crossing to become safe (cleared when it proceeds, re-plans, or the trip ends) */ waterWaitSince?: number; /** ADR-441: stuck-progress anchor — the bot's position and tick at the last 0.5-tile displacement (travelStuckCheck); cleared whenever the route changes, so a re-plan restarts the window from where the bot stands */ stuckAt?: number; stuckX?: number; stuckY?: number; /** ADR-441: tick travelRun last ran the stuck check — a gap means the behaviour was deselected (fleeing, off-screen hand-back), so the window restarts instead of firing on stale data */ stuckSeen?: number; /** ADR-441: stuck re-plans already spent on this trip (a new route resets it); the trip ends at 3 */ stuckRepaths?: number }
 export type TravelMode = "free" | "roam" | "stay" | "worker";
 /** ADR-344: what a bot still has to pack before it leaves (recomputed every sensor pass from live bag + storage counts, so each landed withdraw shrinks it). */
 export interface JourneyPrep { box: { id: Entity; x: number; y: number }; items: PackItem[]; estTicks: number; riding: boolean }
@@ -208,7 +208,7 @@ function rerouteAroundLeg(world: World, e: Entity, a: Agent, tr: TravelState, fr
   const r = requestRoute(world, a.identity.id, cur.x, cur.y, tr.x, tr.y, avoid);
   if (r === undefined) return true; // budget spent: keep the old route
   if (r === null) { endTravel(a, world.tick, false); return false; }
-  tr.route = r; tr.leg = 0; tr.origin = { x: cur.x, y: cur.y }; delete tr.waterWaitSince; markAiDirty(a, world.tick);
+  tr.route = r; tr.leg = 0; tr.origin = { x: cur.x, y: cur.y }; delete tr.waterWaitSince; resetTravelStuck(tr); markAiDirty(a, world.tick);
   return true;
 }
 /** ADR-345: structural water check of a route — every leg must be crossable on foot or by the bot's (eventual)
@@ -233,7 +233,7 @@ export function checkRouteWater(world: World, e: Entity, a: Agent, tr: TravelSta
     const r = requestRoute(world, a.identity.id, cur.x, cur.y, tr.x, tr.y, avoid);
     if (r === undefined) return true; // budget spent: keep the old route; the bank / leg-entry gate is the backstop
     if (r === null) break;
-    tr.route = r; tr.leg = 0; tr.origin = { x: cur.x, y: cur.y }; delete tr.waterWaitSince; markAiDirty(a, world.tick);
+    tr.route = r; tr.leg = 0; tr.origin = { x: cur.x, y: cur.y }; delete tr.waterWaitSince; resetTravelStuck(tr); markAiDirty(a, world.tick);
   }
   endTravel(a, world.tick, false); return false;
 }
@@ -433,7 +433,7 @@ export function fillTravelSensors(world: World, self: Entity, view: AgentWorldVi
   }
   const tr = m.travel; if (!tr) return;
   let justAssigned = false;
-  if (tr.pending) { const r = requestRoute(world, a.identity.id, t.x, t.y, tr.x, tr.y); if (r === null) { endTravel(a, tick, false); return; } if (r) { tr.route = r; tr.leg = 0; delete tr.pending; justAssigned = true; // ADR-413: a route travelled often enough wears a path, and the bot then walks the path
+  if (tr.pending) { const r = requestRoute(world, a.identity.id, t.x, t.y, tr.x, tr.y); if (r === null) { endTravel(a, tick, false); return; } if (r) { tr.route = r; tr.leg = 0; delete tr.pending; resetTravelStuck(tr); delete tr.stuckRepaths; justAssigned = true; // ADR-413: a route travelled often enough wears a path, and the bot then walks the path
     maybeFormWornPath(world, self, a, { x: t.x, y: t.y }, { x: tr.x, y: tr.y });
     const worn = wornPathWaypoints(world, { x: t.x, y: t.y }, { x: tr.x, y: tr.y });
     if (worn) { tr.route = worn; tr.leg = 0; }
@@ -626,11 +626,42 @@ function waterGate(c: Ctx, tr: TravelState, wp: { x: number; y: number }): boole
   if (c.self.tick - tr.waterWaitSince <= WATER_DATA.waitTicks) return false; // still waiting for recovery
   rerouteLeg(); return false; // waited long enough: go around instead
 }
+/** ADR-441: clear the stuck-progress anchor (a new route, a bank wait, or a re-plan restarts the window from where the bot stands). The re-plan counter is per-trip and is NOT cleared here — only a new trip's route assignment clears it. */
+function resetTravelStuck(tr: TravelState): void { delete tr.stuckAt; delete tr.stuckX; delete tr.stuckY; delete tr.stuckSeen; }
+/** ADR-441: displacement that counts as progress, and the longest gap between travelRun ticks that still counts as one continuous walk (a longer gap means the behaviour was deselected — fleeing, eating, off-screen — so the window restarts). */
+const STUCK_DISPLACEMENT = 0.5;
+/** ADR-441: the dead knob, wired up. `stuckRepathTicks` (travel.json, 200 ticks = 10 s) is the window in which a travelling bot must displace 0.5 tiles. Displacement — not distance-to-goal — is the measure: a bot on a legitimate detour (around a lake, through a door, swimming a long run) keeps moving and never trips it, however far its goal is, while a bot pushing at an uncrossable ridge displaces exactly 0.0. The slowest legitimate sustained movement (encumbered swim, ~0.45 tiles/s) still covers ~4.5 tiles in the window, so 0.5 tiles in 200 ticks is far below any real walk. Returns true once, when the window expires with no progress (the anchor is cleared, so the next call re-anchors). */
+export function travelStuckCheck(tr: TravelState, x: number, y: number, tick: number): boolean {
+  if (tr.stuckAt === undefined || tr.stuckX === undefined || tr.stuckY === undefined || tick < tr.stuckAt || (tr.stuckSeen !== undefined && tick - tr.stuckSeen > 20)) {
+    tr.stuckAt = tick; tr.stuckX = x; tr.stuckY = y; tr.stuckSeen = tick; return false;
+  }
+  tr.stuckSeen = tick;
+  if (Math.hypot(x - tr.stuckX, y - tr.stuckY) >= STUCK_DISPLACEMENT) { tr.stuckAt = tick; tr.stuckX = x; tr.stuckY = y; return false; }
+  if (tick - tr.stuckAt > T.stuckRepathTicks) { resetTravelStuck(tr); return true; }
+  return false;
+}
+const sameWaypoints = (a: readonly { x: number; y: number }[], b: readonly { x: number; y: number }[]): boolean =>
+  a.length === b.length && a.every((p, i) => p.x === b[i]!.x && p.y === b[i]!.y);
+/** ADR-441: what happens when the stuck check fires. Re-plan around the current leg first (the knob's name: stuckRepath) — a ridge the region planner can detour around is a detour, not a dead trip. True = keep walking this tick (the plan budget was spent, so the route is unchanged and the window restarts); false = stop and re-evaluate next tick (re-planned, or the trip ended). The trip ends when no route around exists, when the re-plan returns the same waypoints (the goal region is exempt from the avoid set, so a leg inside one region can never detour at region level — and the local nav has already failed), or after 3 stuck re-plans on one trip. Ending a failed resource trip bans its destination (endTravel), so the next prospect goes to the next-nearest source. */
+function travelStuckReplan(c: Ctx, tr: TravelState): boolean {
+  const w = agentWorld(c); if (!w) { resetTravelStuck(tr); return true; } // no world binding: fail open, keep walking
+  const e = c.agent.bb.num("selfEntity") as Entity;
+  const before = tr.route!;
+  const { from, to } = legEndpoints(tr);
+  if (!rerouteAroundLeg(w, e, c.agent, tr, from, to)) return false; // no route around: the trip ended
+  if (tr.route === before) { resetTravelStuck(tr); return true; } // budget spent: same route, retry next window
+  if (sameWaypoints(before, tr.route!)) { endTravel(c.agent, c.self.tick, false); return false; } // no detour exists at region level
+  const reps = (tr.stuckRepaths ?? 0) + 1; tr.stuckRepaths = reps;
+  resetTravelStuck(tr);
+  if (reps >= 3) { endTravel(c.agent, c.self.tick, false); return false; } // three stuck legs on one trip: the destination is not being reached
+  return false; // re-planned: re-evaluate next tick against the new route's waypoint
+}
 export function travelRun(c: Ctx, o: AgentOutput): boolean | void {
   const tr = c.world.travel; if (!tr?.route) return false;
   if (dist(c.self.x, c.self.y, tr.x, tr.y) <= T.arriveTiles) { endTravel(c.agent, c.self.tick, true); o.moveX = 0; o.moveY = 0; return false; }
   const wp = currentWaypoint(tr, c.self.x, c.self.y); if (!wp) return false;
-  if (!waterGate(c, tr, wp)) return false; // ADR-345: hold at the bank (or the trip was re-planned / ended)
+  if (!waterGate(c, tr, wp)) { resetTravelStuck(tr); return false; } // ADR-345: hold at the bank (or the trip was re-planned / ended). A bank wait (up to 1200 ticks) is legitimate stillness, not stuck time — the window restarts from here.
+  if (travelStuckCheck(tr, c.self.x, c.self.y, c.self.tick)) { if (!travelStuckReplan(c, tr)) return false; } // ADR-441: no progress in stuckRepathTicks — re-plan around the leg, or end the trip
   goTo(c, o as never, wp.x, wp.y, 0.9); // local nav per leg; the ADR-321 mount policy rides long legs
   // ADR-345: swimming costs stamina (deep water only — wading is walking). The pre-crossing stamina
   // estimate is the guarantee; this drain is the cost, so a bot at ~0 stamina keeps what little it has.
@@ -750,7 +781,7 @@ export function offscreenPlan(world: World, e: Entity, a: Agent, at: { x: number
   if (!m.travel && (m.sent || tick - m.travelAt >= T.travelCooldownTicks)) { m.travelAt = tick; const g = pickTravelGoal(world, e, a, m.base ?? at, !!m.base); if (g) { m.travel = { ...g, pending: true }; markAiDirty(a, tick); } }
   const tr = m.travel; if (!tr?.pending) return;
   const r = requestRoute(world, a.identity.id, at.x, at.y, tr.x, tr.y); if (r === null) { endTravel(a, tick, false); return; }
-  if (r) { tr.route = r; tr.leg = 0; delete tr.pending; // ADR-413: worn path, then walk it (same rule as the full-sim sensor pass)
+  if (r) { tr.route = r; tr.leg = 0; delete tr.pending; resetTravelStuck(tr); delete tr.stuckRepaths; // ADR-413: worn path, then walk it (same rule as the full-sim sensor pass)
     maybeFormWornPath(world, e, a, at, { x: tr.x, y: tr.y });
     const worn = wornPathWaypoints(world, at, { x: tr.x, y: tr.y });
     if (worn) { tr.route = worn; tr.leg = 0; }

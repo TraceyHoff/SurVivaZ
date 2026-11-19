@@ -174,7 +174,7 @@ export function plannerIndex(defs: GameDefs): Ix {
     else if (g.k === "piece" || g.k === "bed") { const p = ix.piece.get(g.k === "bed" ? BED_SLOT.key : g.key); if (p) for (const c of pieceCost(defs, p, 0)) addU(c.item); }
   }
   for (const sl of BASE_SLOTS) { const p = ix.piece.get(sl.key); if (p) for (const c of pieceCost(defs, p, 0)) addU(c.item); }
-  for (const k of ["wood", "raw_meat", "cooked_meat", "water_flask", "leather"]) addU(ix.item.get(k)?.id);
+  for (const k of ["wood", "raw_meat", "cooked_meat", "water_flask", "leather", "fur_coat", "fur_hat"]) addU(ix.item.get(k)?.id); // ADR-443: fur + its chain (pelt / hide / thread / flax) stay useful, never junk
   for (const id of ix.foods) U.add(id);
   for (let grew = true; grew;) { grew = false; for (const id of [...U]) for (const r of ix.recipes.get(id) ?? []) for (const g of r.ingredients) if (!U.has(g.item) && R.has(g.item)) { U.add(g.item); grew = true; } }
   ixCache.set(defs, ix); return ix;
@@ -468,6 +468,11 @@ export function makePlan(p: PlanInput): Plan {
   const pre: Goal[] = []; if (p.freezing) pre.push(...EMERGENCY); if (p.hungry) pre.push({ k: "cook" });
   if (p.winter && !p.evening) { const fire = p.bs?.stations.get(StationKind.Campfire); const inFire = fire ? Math.floor(fire.fuelTicks / 400) : 0; if (inFire < WINTER_WOOD) { if (!fire) pre.push(GOAL_LADDER[0]!, { k: "piece", key: "campfire" }); pre.push({ k: "item", key: "wood", count: Math.max(8, WINTER_WOOD - inFire) }); } }
   if (p.evening) { const fire = p.bs?.stations.get(StationKind.Campfire); const inFire = fire ? Math.floor(fire.fuelTicks / 400) : 0; if (inFire < NIGHT_WOOD) { if (!fire) pre.push(GOAL_LADDER[0]!, { k: "piece", key: "campfire" }); pre.push(...EVENING(inFire)); } } // ADR-252: a stone axe and the fire first (5 wood + 4 stone), then its night of fuel
+  // ADR-443: winter dress — fur hat + coat (7 + 3 = 10 insulation, the bar that blocks outdoor cold damage)
+  // jump the queue once the bot can actually make them (a workbench stands); before that the ladder builds
+  // the workbench first, so the goal is never dead weight. The Resolver crafts them through
+  // fur -> fur_pelt -> fur_hat / fur_coat, or hunts fur when the bag is empty.
+  if (p.winter && p.bs?.stations.has(StationKind.Workbench)) pre.push({ k: "wear", key: "fur_hat" }, { k: "wear", key: "fur_coat" });
   const prio: Goal[] = (p.priority ?? []).map((g) => ({ k: "item", key: g.key, count: g.count }));
   const ladder: readonly Goal[] = p.onlyPriority ? prio : prio.length && !p.terrainOnly && !p.shelterOnly ? [...pre, ...prio, ...GOAL_LADDER] : p.terrainOnly ? [{ k: "earthworks" }] : p.shelterOnly ? [{ k: "earthworks" }, { k: "base" }, { k: "hearth" }, { k: "bed" }] : pre.length ? [...pre, ...GOAL_LADDER] : GOAL_LADDER; const woodId = ix.item.get("wood")?.id;
   let held = false; // ADR-252: a locked build goal holds the later ones (campfire -> box -> workbench order); item / tool goals go on

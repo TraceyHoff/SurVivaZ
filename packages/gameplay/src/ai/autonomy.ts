@@ -8,14 +8,15 @@ import { fillHireSensors } from "./hire_behaviors.js";
  * Cost: sensors run only on think ticks (AgentController thinkBudget / thinkEvery time-slicing) and scan bounded sets
  * (the agent's memory, a 7x7 water probe grid when thirsty, pieces near home).
  */
-import { Transform, entityIndex, type Agent, type AgentContext, type Entity, type World } from "@engine/core";
+import { Transform, Weather, entityIndex, type Agent, type AgentContext, type Entity, type World } from "@engine/core";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
 import { AttachKind, BuildPiece, Equipment, Exposure, Fuel, NO_SLOT, ResourceNode, Survival, Worker, WorkerOrder, WorkerJob } from "../components.js";
 import { GameplayConfig } from "../config.js";
 import { countItem, readSlots } from "../inventory.js";
 import { bareHandsCan, heldTool } from "../systems/gathering.js";
 import { nearWater } from "../systems/vitals.js";
-import { ToolKind, type GameDefs, type ItemDef, type PieceDef, type RecipeDef, type ResourceDef } from "../defs.js";
+import { ToolKind, isSnowing, type GameDefs, type ItemDef, type PieceDef, type RecipeDef, type ResourceDef } from "../defs.js";
+import { isRaining } from "../realism.js";
 import { hasOwnClaim, pieceCost, pieceUnlocked } from "../building/place.js";
 import { StructureIndexRes } from "../building/structure.js";
 import { navReachable } from "../systems/creature_nav.js";
@@ -38,6 +39,10 @@ export interface GoalSensors {
   cold?: boolean;
   /** body / felt temperature (Survival.bodyTemp, Exposure.feltTemp) for warm_up */
   chill?: { body: number; felt: number };
+  /** ADR-443: wet precipitation overhead (rain / storm / snow / blizzard), the bot's wetness (0 dry .. 1 soaked)
+   *  and shelter percent (Exposure.sheltered 0..100) — for seek_shelter / warm_up, which previously had no
+   *  weather input at all and only reacted once the body was already cold. */
+  weather?: { raining: boolean; wetness: number; sheltered: number };
   /** the campfire at home (lit = Fuel.lit) */
   fire?: { id: number; x: number; y: number; lit: boolean };
   /** no campfire near home yet */
@@ -101,7 +106,7 @@ function homeScan(world: World, defs: GameDefs, hx: number, hy: number, fireType
   }
   if (m.size > 256) m.clear(); m.set(key, r); return r;
 }
-const SENSOR_KEYS = ["plan", "base", "bs", "ruinBase", "craftCount", "craftTicks", "huntTarget", "panel", "tripWanted", "surplus", "woodTotal", "stoneTotal", "junk", "winter", "craftRecipe", "buildPlan", "gatherNode", "gatherScanned", "waterAt", "equipSlot", "repairTarget", "reclaimTarget", "claimTarget", "claimPlan", "needs", "cold", "chill", "fire", "fireMissing", "woodSlot"] as const;
+const SENSOR_KEYS = ["plan", "base", "bs", "ruinBase", "craftCount", "craftTicks", "huntTarget", "panel", "tripWanted", "surplus", "woodTotal", "stoneTotal", "junk", "winter", "craftRecipe", "buildPlan", "gatherNode", "gatherScanned", "waterAt", "equipSlot", "repairTarget", "reclaimTarget", "claimTarget", "claimPlan", "needs", "cold", "chill", "weather", "fire", "fireMissing", "woodSlot"] as const;
 const sensed = new WeakMap<Agent, { tick: number; home: string; s: Partial<GoalSensors> }>();
 export function fillGoalSensors(world: World, self: Entity, view: AgentWorldView, a: Agent): void {
   const wk = world.get(self, Worker); const order = world.getArray(self, WorkerOrder, "selections");
@@ -140,6 +145,7 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
   }
   const body = world.getField(self, Survival, "bodyTemp") ?? 37; view.cold = body < COLD_BELOW;
   view.chill = { body, felt: world.getField(self, Exposure, "feltTemp") ?? 20 };
+  { const wv = world.env(Weather); view.weather = { raining: isRaining(wv.kind) || isSnowing(wv.kind), wetness: world.getField(self, Exposure, "wetness") ?? 0, sheltered: (world.getField(self, Exposure, "sheltered") ?? 0) / 100 }; }
   if (fe !== undefined) { const p = world.get(fe, Transform)!; view.fire = { id: fe, x: p.x, y: p.y, lit: (world.getField(resolveAttachment(world, fe, AttachKind.Fire) ?? fe, Fuel, "lit") ?? 0) > 0 }; } // Fuel lives on the fire attachment
   else view.fireMissing = true;
   fireCost(); // ADR-252: a base bot's planner owns the campfire (fireCost skips it)
@@ -327,7 +333,7 @@ export function instantChores(c: Ctx, o: { actions: string[] }): void {
   // the command re-validates brush + dye server-side, so a stale sensor can never spend a dye the bot no longer has).
   if (w.dye !== undefined && t - c.bb.num("dyedAt", -1e9) >= 200) { o.actions.push(`dye:${w.dye.kind}:${w.dye.slot}:${w.dye.palette}:${w.dye.index}`); c.bb.set("dyedAt", t); }
   if (w.junk && t - c.bb.num("dropAt", -1e9) >= 30) { o.actions.push(`drop:${w.junk.item}:${w.junk.count}`); c.bb.set("dropAt", t); } // ADR-252: a full bag drops what no goal uses
-  if (w.food !== undefined && c.self.hunger < 0.5 && t - c.bb.num("ateAt", -1e9) >= 40) { o.actions.push(`eat:${w.food}`); c.bb.set("ateAt", t); }
+  if (w.food !== undefined && c.self.hunger < 0.5 && t - c.bb.num("ateAt", -1e9) >= 40 && !w.sharedMeal?.suppressLoneEat) { o.actions.push(`eat:${w.food}`); c.bb.set("ateAt", t); } // ADR-446: a pending shared meal near the hearth eats together, not alone from the bag
   if (w.water !== undefined && c.self.thirst < 0.5 && t - c.bb.num("drankAt", -1e9) >= 40) { o.actions.push(`drink:${w.water}`); c.bb.set("drankAt", t); }
 }
 

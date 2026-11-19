@@ -37,6 +37,7 @@ import { LootSource } from "./loot_labels.js";
 import { indexEntity } from "./spawn.js";
 import { meetsSkill } from "./systems/crafting.js";
 import { StationKind } from "./defs.js";
+import { trustToward } from "./ai/social_memory.js"; // ADR-444: hire price / refusal by remembered trust
 import type { PieceDef } from "./defs.js";
 import type { NameLookup } from "./economy/provenance.js";
 
@@ -123,8 +124,8 @@ export function recruitmentSystem(world: World): void {
 }
 
 // ---- hire / job / dismiss ---------------------------------------------------------------------------
-export const enum WorkerFail { None = 0, NotFound = 1, TooFar = 2, AlreadyHired = 3, NoItem = 4, AiHumansOff = 5, NotOwner = 6, BadJob = 7, NotWorker = 8, BadDetails = 9 }
-export const WORKER_FAIL_REASONS = ["", "not_found", "too_far", "already_hired", "no_item", "ai_humans_off", "not_owner", "bad_job", "not_worker", "bad_worker_details"] as const;
+export const enum WorkerFail { None = 0, NotFound = 1, TooFar = 2, AlreadyHired = 3, NoItem = 4, AiHumansOff = 5, NotOwner = 6, BadJob = 7, NotWorker = 8, BadDetails = 9, Distrusted = 10 }
+export const WORKER_FAIL_REASONS = ["", "not_found", "too_far", "already_hired", "no_item", "ai_humans_off", "not_owner", "bad_job", "not_worker", "bad_worker_details", "distrusted"] as const;
 export const enum WorkerResult { Hired = 1, JobSet = 2, Released = 3, Relocated = 4 }
 export const WorkerEvent = ev<{ entity: Entity; worker: Entity; result: WorkerResult; value: number }>("gameplay.WorkerEvent");
 /** Toast copy for a WorkerEvent (client: main.ts). `value` is the wanted item id on hire, the job on JobSet. */
@@ -137,6 +138,19 @@ export function workerEventText(world: World, worker: Entity, result: WorkerResu
   return undefined;
 }
 
+/**
+ * ADR-444: hire price in wanted-item units by the bot's remembered trust in the hiring player (-1..1, from
+ * the TrustLedger — see ai/social_memory.ts). Bands, in order:
+ *   trust >= freeAt (0.5: party + clan + a hire, or three helps) — a trusted friend hires free;
+ *   trust < refuseBelow (-0.5: two attacks, or an attack plus a kick) — the bot refuses outright;
+ *   trust < surchargeBelow (0: one accidental hit) — wary, double price; the grudge fades (social memory
+ *   decays negative trust), so a single hit stops mattering after a few minutes and a refused player can
+ *   come back. Neutral trust (0..0.5) pays the standard 1 unit.
+ */
+export const TRUST_HIRE = { freeAt: 0.5, refuseBelow: -0.5, surchargeBelow: 0 } as const;
+export const hirePriceFor = (trust: number): number => (trust >= TRUST_HIRE.freeAt ? 0 : trust < TRUST_HIRE.surchargeBelow ? 2 : 1);
+export const hireRefused = (trust: number): boolean => trust < TRUST_HIRE.refuseBelow;
+
 /** Pure hire validation (no side effects; used by the command handler's validate step). */
 export function hireWorkerValidate(world: World, actor: Entity, target: Entity): WorkerFail {
   if (!aiHumansOn(world)) return WorkerFail.AiHumansOff;
@@ -145,7 +159,13 @@ export function hireWorkerValidate(world: World, actor: Entity, target: Entity):
   const w = world.get(target, Worker)!;
   if (w.owner !== 0) return WorkerFail.AlreadyHired;
   if (!near(world, actor, target, 40)) return WorkerFail.TooFar;
-  if (!w.wantedItem || countItem(world, actor, w.wantedItem) < 1) return WorkerFail.NoItem;
+  if (!w.wantedItem) return WorkerFail.NoItem;
+  // ADR-444: remembered trust prices the hire — a bot that was attacked refuses the attacker, and
+  // charges a wary player double; a trusted friend hires free. The refusal is checked before the
+  // item, so a distrusted player is told why, not just that they are short an item.
+  const trust = trustToward(world, target, pidOf(world, actor));
+  if (hireRefused(trust)) return WorkerFail.Distrusted;
+  if (countItem(world, actor, w.wantedItem) < hirePriceFor(trust)) return WorkerFail.NoItem;
   return WorkerFail.None;
 }
 
@@ -153,7 +173,8 @@ export function hireWorkerValidate(world: World, actor: Entity, target: Entity):
  * Hire `target` for `actor`: the wanted item is taken first, and only then is the owner set — a hire that cannot
  * pay, or that loses the race to another player, consumes nothing and changes nothing. On success the worker's
  * job starts at Gather, its anchor becomes the actor's position, and its Tribe becomes the actor's tribe so it
- * can work inside the actor's claim.
+ * can work inside the actor's claim. ADR-444: the price is the trust price (0 for a trusted friend, 2 for a
+ * wary player) — validate already checked it, so this re-reads the same ledger value.
  */
 export function hireWorker(world: World, actor: Entity, target: Entity): WorkerFail {
   const fail = hireWorkerValidate(world, actor, target); if (fail) return fail;
@@ -161,7 +182,8 @@ export function hireWorker(world: World, actor: Entity, target: Entity): WorkerF
   // Re-check the owner immediately before taking payment: two hires in the same tick are processed sequentially,
   // so the second sees owner !== 0 here and walks away with its item intact.
   if (w.owner !== 0) return WorkerFail.AlreadyHired;
-  if (!removeItem(world, actor, w.wantedItem, 1)) return WorkerFail.NoItem;
+  const price = hirePriceFor(trustToward(world, target, pidOf(world, actor)));
+  if (price > 0 && !removeItem(world, actor, w.wantedItem, price)) return WorkerFail.NoItem;
   const me = world.get(actor, Transform); const tribe = tribeOf(world, actor);
   world.set(target, Worker, { owner: pidOf(world, actor), job: WorkerJob.Gather, homeX: me?.x ?? w.homeX, homeY: me?.y ?? w.homeY });
   if (tribe !== 0) { if (world.has(target, Tribe)) world.set(target, Tribe, { id: tribe }); else world.add(target, Tribe, { id: tribe }); }
@@ -401,6 +423,9 @@ export function dismissWorker(world: World, actor: Entity, worker: Entity): Work
 export interface WorkerView {
   entity: Entity; name: string; wantedItem: number; wantedKey: string; wantedName: string;
   hasWanted: boolean; hasCount: number; hired: boolean; owner: number; owned: boolean; job: number; aiHumans: boolean; assignment: string; details: WorkerJobDetails;
+  /** ADR-444: the bot's remembered trust in the viewing player (-1..1), the hire price in wanted-item units
+   * (0 = free for a trusted friend, 2 = double for a wary player), and whether the bot refuses this player. */
+  trust: number; hireCost: number; hireRefused: boolean;
 }
 export function workerDetails(world: World, e: Entity): WorkerJobDetails {
   const o = world.get(e, WorkerOrder); if (!o) return {};
@@ -423,11 +448,15 @@ export function workerView(world: World, player: Entity, e: Entity, names?: Name
   const w = world.get(e, Worker)!; const defs = gameplayDefs(world);
   const d = w.wantedItem ? defs.items.get(w.wantedItem) : undefined;
   const pid = pidOf(world, e); const me = pidOf(world, player);
+  // ADR-444: the panel shows the trust price — a trusted friend hires free, a wary player pays double, a
+  // distrusted player is refused. hasWanted is measured against the price, so a free hire needs nothing.
+  const trust = trustToward(world, e, me); const hireCost = hirePriceFor(trust); const refused = hireRefused(trust);
   return {
     entity: e, name: names?.get(pid) ?? (pid ? `AI Human ${pid}` : "AI Human"),
     wantedItem: w.wantedItem, wantedKey: d?.key ?? "", wantedName: d?.name ?? "",
-    hasWanted: w.wantedItem !== 0 && countItem(world, player, w.wantedItem) > 0, hasCount: w.wantedItem ? countItem(world, player, w.wantedItem) : 0,
+    hasWanted: hireCost === 0 || (w.wantedItem !== 0 && countItem(world, player, w.wantedItem) >= hireCost), hasCount: w.wantedItem ? countItem(world, player, w.wantedItem) : 0,
     hired: w.owner !== 0, owner: w.owner, owned: w.owner !== 0 && w.owner === me, job: w.job, aiHumans: aiHumansOn(world), assignment: workerAssignment(world, e, names), details: workerDetails(world, e),
+    trust, hireCost, hireRefused: refused,
   };
 }
 /** Nearest hireable / hired AI human within interact range (2.5 + 0.5, like nearestPet). */
@@ -464,7 +493,7 @@ export const DismissWorkerCmd = defineCommand("gameplay.dismissWorker", { worker
 export const WORKER_COMMANDS: readonly CommandDef[] = [HireWorkerCmd, SetWorkerJobCmd, DismissWorkerCmd];
 export const WORKER_ENTITY_FIELDS: Readonly<Record<string, readonly string[]>> = { [HireWorkerCmd.name]: ["target"], [SetWorkerJobCmd.name]: ["worker", "target"], [DismissWorkerCmd.name]: ["worker"] };
 /** New reject reasons (not_found / too_far / no_item / not_owner already exist in COMMAND_REJECT_REASONS). */
-export const WORKER_REJECT_REASONS = ["not_worker", "already_hired", "ai_humans_off", "bad_job", "bad_worker_details"] as const;
+export const WORKER_REJECT_REASONS = ["not_worker", "already_hired", "ai_humans_off", "bad_job", "bad_worker_details", "distrusted"] as const;
 export function installWorkerCommands(world: World, handlers: CommandHandlers): void {
   const r = (f: WorkerFail): string | undefined => (f ? WORKER_FAIL_REASONS[f] : undefined);
   handlers.on(HireWorkerCmd, { validate: (v, c) => r(hireWorkerValidate(world, c.actor, v.target as Entity)), handle: (v, c) => { hireWorker(world, c.actor, v.target as Entity); } });

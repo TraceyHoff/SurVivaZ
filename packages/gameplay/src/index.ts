@@ -139,6 +139,8 @@ export * from "./ai/hire_behaviors.js"; // Task 22: hired-worker sensors + job b
 export * from "./ai/claim_build.js"; // ADR-337: claim / repair / rebuild abandoned structures, build own home
 export * from "./ai/defence.js"; // ADR-338: defend own claimed territory
 export * from "./ai/life.js"; // ADR-336: wants / personality / moods
+export * from "./ai/shared_meal.js"; // ADR-446: shared meals at the hearth
+export * from "./ai/sick_care.js"; // ADR-442: sick bots seek care and rest
 export * from "./inventory_ops.js"; // ADR-204
 export * from "./stance.js"; // ADR-244
 export * from "./building/terrain-hatch.js"; // ADR-299

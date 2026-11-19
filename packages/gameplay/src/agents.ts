@@ -26,7 +26,9 @@ import { claimBuildBehaviors, type ClaimView } from "./ai/claim_build.js"; // AD
 import { fillHireSensors, hireBehaviors, withHireDuty } from "./ai/hire_behaviors.js";
 import { fillDefenceSensors, defenceBehaviors, type DefenceSensors } from "./ai/defence.js"; // ADR-338: defend own claimed territory
 import { fillLifeSensors, lifeBehaviors, type LifeSensors } from "./ai/life.js"; // ADR-336: wants / personality / moods
+import { fillSharedMealSensors, sharedMealBehaviors, type SharedMealSensors } from "./ai/shared_meal.js"; // ADR-446: shared meals at the hearth
 import { fillRopeSensors, ropeBehaviors, type RopeSensors } from "./ai/rope_behaviors.js"; // ADR-351: lead farm animals home on a rope
+import { fillSickSensors, sickCareBehaviors, withSickRest, type SickSensors } from "./ai/sick_care.js"; // ADR-442: sick bots seek care and rest
 
 export interface AgentsData {
   archetypes: Record<string, { perception: PerceptionConfig; imperfections: Imperfections; schedule: ScheduleSlot[]; goals: string[]; chatMinSeconds: number }>;
@@ -35,7 +37,7 @@ export interface AgentsData {
 export const AGENTS_DATA: AgentsData = raw as unknown as AgentsData;
 
 export interface SeenThing { id: number; kind: "zombie" | "player" | "node" | "animal"; x: number; y: number }
-export interface AgentWorldView extends AgentSensors, GoalSensors, StanceSensors, PlanSensors, PartySensors, ClanSensors, VehicleSensors, MountSensors, TravelSensors, LifeSensors, DefenceSensors, RopeSensors, ClaimView {
+export interface AgentWorldView extends AgentSensors, GoalSensors, StanceSensors, PlanSensors, PartySensors, ClanSensors, VehicleSensors, MountSensors, TravelSensors, LifeSensors, SharedMealSensors, SickSensors, DefenceSensors, RopeSensors, ClaimView {
   seen: SeenThing[]; home: { x: number; y: number }; playerName: string;
   /** Optional sensors (0..1 / plans) the host fills from the bot's replica; missing = neutral. */
   invSpaceFree?: number; craftRecipe?: number; buildPlan?: { piece: number; x: number; y: number };
@@ -45,7 +47,10 @@ export interface AgentWorldView extends AgentSensors, GoalSensors, StanceSensors
   hire?: { job: number; owner: number; ax: number; ay: number; supply?: { item: number; count: number };
     /** ADR-327: no pending employer job work and survival needs met — the hired worker may run the
      *  saddle-material chain (fillHireSensors sets this; saddleGoalPass reads it). Absent = not idle. */
-    idle?: boolean };
+    idle?: boolean;
+    /** ADR-444: the bot's remembered trust in its owner (-1..1, 0 when no agent ran the sensors) — the
+     *  follow distance and the defend radius scale with it (see hire_behaviors). */
+    trust?: number };
   /** Task 25: dye this (hair / worn / held) — set by fillAgentSensors when the bot holds a dye, a paint brush in its
    *  hotbar, and a dye target; instantChores turns it into a `dye:<kind>:<slot>:<palette>:<index>` command. */
   dye?: { kind: number; slot: number; palette: number; index: number };
@@ -106,7 +111,7 @@ export function buildAgentView(world: World, self: Entity, a: Agent, home: { x: 
   }
   const tod = timeOfDay(world);
   const view: AgentWorldView = { seen, home, playerName }; fillAgentSensors(world, self, view, (sv?.hunger ?? 100) < 50); fillPartySensors(world, self, view); fillClanSensors(world, self, view); if ((treesOf(world, self) ?? []).some((t) => t.points > 0)) { // ADR-221: per-tree points since ADR-209 (global points is always 0)
-    const p = pickSkillNode(world, self, a.identity.traits); if (p !== undefined) view.skillPick = p; } fillVehicleSensors(world, self, view); fillStanceSensors(world, self, view); fillGoalSensors(world, self, view, a); fillHireSensors(world, self, view, a); fillDefenceSensors(world, self, view, a); fillMountSensors(world, self, view, a); fillRopeSensors(world, self, view, a); fillTravelSensors(world, self, view, a); observeSocialMemory(world, self, a); fillLifeSensors(world, self, view, a); // ADR-327: hire before mount — the saddle gate reads the hire sensors (idle flag) and the employer's base scan, both set by fillHireSensors. ADR-341: defence after hire — it records threat events and translates the planner's defence step (view.base / view.ruinBase / view.plan) into view.defenceTarget; it plans nothing itself. ADR-336: life LAST — it reads the final view.plan / view.hire.idle / view.travel / view.farm / view.mount
+    const p = pickSkillNode(world, self, a.identity.traits); if (p !== undefined) view.skillPick = p; } fillVehicleSensors(world, self, view); fillStanceSensors(world, self, view); fillGoalSensors(world, self, view, a); observeSocialMemory(world, self, a); fillHireSensors(world, self, view, a); fillDefenceSensors(world, self, view, a); fillMountSensors(world, self, view, a); fillRopeSensors(world, self, view, a); fillTravelSensors(world, self, view, a); fillLifeSensors(world, self, view, a); fillSharedMealSensors(world, self, view, a); fillSickSensors(world, self, view); // ADR-327: hire before mount — the saddle gate reads the hire sensors (idle flag) and the employer's base scan, both set by fillHireSensors. ADR-341: defence after hire — it records threat events and translates the planner's defence step (view.base / view.ruinBase / view.plan) into view.defenceTarget; it plans nothing itself. ADR-336: life LAST — it reads the final view.plan / view.hire.idle / view.travel / view.farm / view.mount. ADR-446: shared meal after life — it reads view.fire / view.food / view.bs / view.clanMembers / view.partyMates. ADR-444: social memory before hire — the hire sensors read the trust observeSocialMemory just recorded (an attack this tick already shortens the defend radius), not last tick's. ADR-442: sick care last — it reads only the world (careStatus + the Fuel scan), and nothing reads sickCare except seek_care / withSickRest.
   return {
     self: { x: t.x, y: t.y, facing, hp: hp ? hp.hp / Math.max(1, hp.max) : 1, hunger: (sv?.hunger ?? 100) / 100, thirst: (sv?.thirst ?? 100) / 100, stamina: sv ? sv.stamina / Math.max(1, sv.maxStamina) : 1, tick: world.tick, dayT: sunFractionOf(tod), phase: currentPhaseKey(world) },
     world: view,
@@ -192,9 +197,9 @@ export const skillPickBehavior: GameBehavior = { name: "skill_pick", inertia: 0,
   run: (c, o) => { o.actions.push(`skill:${c.world.skillPick}`); c.bb.set("skillPickAt", c.self.tick); return false; } };
 
 export function survivorRegistry(extra: readonly GameBehavior[] = []): BehaviorRegistry<AgentWorldView> {
-  const r = new BehaviorRegistry<AgentWorldView>(); for (const b of [...referenceBehaviors(), ...survivalBehaviors(), ...autonomyBehaviors(), ...claimBuildBehaviors(), ...partyBehaviors(), ...clanBehaviors(), ...vehicleBehaviors(), ...mountBehaviors(), ...travelBehaviors(), ...baseBehaviors(), ...hireBehaviors(), ...defenceBehaviors(), ...lifeBehaviors(), ...ropeBehaviors(), skillPickBehavior, ...extra]) {
+  const r = new BehaviorRegistry<AgentWorldView>(); for (const b of [...referenceBehaviors(), ...survivalBehaviors(), ...autonomyBehaviors(), ...claimBuildBehaviors(), ...partyBehaviors(), ...clanBehaviors(), ...vehicleBehaviors(), ...mountBehaviors(), ...travelBehaviors(), ...baseBehaviors(), ...hireBehaviors(), ...defenceBehaviors(), ...lifeBehaviors(), ...sharedMealBehaviors(), ...sickCareBehaviors(), ...ropeBehaviors(), skillPickBehavior, ...extra]) {
     const run = b.name === "sleep" ? (c: AgentContext<AgentWorldView>, o: Parameters<GameBehavior["run"]>[1]) => (c.world.base && c.world.hire?.job !== WorkerJob.Follow ? baseSleepRun(c, o) : b.run(c, o)) : b.run;
-    r.register(withBotUtility(withHireDuty({ ...b, run: (c, o) => { const res = run(c, o); stancePolicy(c, o, b.name); mountPolicy(c, o, b.name); return res; } }))); // ADR-252: sleep stillness + sneak crouch; ADR-321: auto mount / dismount
+    r.register(withBotUtility(withHireDuty(withSickRest({ ...b, run: (c, o) => { const res = run(c, o); stancePolicy(c, o, b.name); mountPolicy(c, o, b.name); return res; } })))); // ADR-252: sleep stillness + sneak crouch; ADR-321: auto mount / dismount; ADR-442: sick rest inside the hire-duty wrap, so a sick bot rests instead of working
   }
   return r;
 }
