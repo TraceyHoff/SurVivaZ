@@ -26,7 +26,12 @@ export type TerrainWork = { k: "terrain"; x: number; y: number; dir: number; sta
   | { k: "fuel"; piece: Entity }
   /** ADR-431: harvest the wild plant / tree standing on the tile first, then dig — a node on a quarry or
    *  pad cell blocks the edit (TerrainFail.Occupied) and used to abandon the whole earthworks. */
-  | { k: "clear"; x: number; y: number; node: Entity };
+  | { k: "clear"; x: number; y: number; node: Entity }
+  /** ADR-448: the dig / grade is blocked only because the bag has no free slot for the dug soil — make
+   *  room first. The planner maps this to a stash step (deposit the largest surplus stack); base_work
+   *  executes it. Carries no item: the planner picks the stack from the live bag, so a stack that
+   *  frees up (or fills up) between sense passes is never stale. */
+  | { k: "stash" };
 
 /**
  * ADR-419: a graded ramp the bot builds to smooth its own route. `dest` is the
@@ -101,7 +106,7 @@ export function nextRampWork(world: World, self: Entity, p: RampPlan): TerrainWo
       if (terrainDigAt(world, tx, ty) <= -3) continue;
       const why = editTerrain(world, self, tx, ty, -1, true);
       if (why === TerrainFail.None || why === TerrainFail.TooFar) return { k: "terrain", x: tx, y: ty, dir: -1, stand };
-      if (why === TerrainFail.InventoryFull) return undefined; // pause: bag full, stash first
+      if (why === TerrainFail.InventoryFull) return { k: "stash" }; // ADR-448: bag full, stash first (same as the pad/pit dig below)
     }
     p.abandoned = true; return undefined;
   }
@@ -109,7 +114,7 @@ export function nextRampWork(world: World, self: Entity, p: RampPlan): TerrainWo
   // TooFar here only means the bot is not at the stand yet — base_behaviors walks there first and the
   // server re-checks reach when the command lands (same as nextTerrainWork's TooFar steps).
   if (dry === TerrainFail.TooFar) return { k: "ramp", x: p.x, y: p.y, dx: p.dx, dy: p.dy, delta: p.delta, stand };
-  if (dry !== TerrainFail.None) { if (dry === TerrainFail.InventoryFull) return undefined; p.abandoned = true; return undefined; }
+  if (dry !== TerrainFail.None) { if (dry === TerrainFail.InventoryFull) return { k: "stash" }; p.abandoned = true; return undefined; }
   return { k: "ramp", x: p.x, y: p.y, dx: p.dx, dy: p.dy, delta: p.delta, stand };
 }
 
@@ -174,7 +179,9 @@ export function nextTerrainWork(world: World, self: Entity, p: TerrainBasePlan):
       if (why === TerrainFail.Occupied) { const node = nodeOnTile(world, q.x, q.y); if (node !== undefined) return { k: "clear", x: q.x, y: q.y, node }; }
       if (why === TerrainFail.None || why === TerrainFail.TooFar) return { k: "terrain", x: q.x, y: q.y, dir: -1, stand: { x: p.x - .5, y: p.y + 2.5 } };
     }
-    if (!fullBag) p.abandoned = true; return undefined; // pause for ordinary surplus stashing when capacity is temporary
+    if (!fullBag) p.abandoned = true;
+    else return { k: "stash" }; // ADR-448: every quarry cell is blocked only by the full bag — make room instead of stalling stepless (the old `return undefined` here was the ADR-252-live pit stall: the planner returned the earthworks goal with no step and no leaves, which gates the base goal forever)
+    return undefined;
   }
   // South row first, so the entrance ladder is always on completed terrain.
   for (const dy of [1, 0]) for (const dx of [0, 1]) {
@@ -183,7 +190,10 @@ export function nextTerrainWork(world: World, self: Entity, p: TerrainBasePlan):
     const why = editTerrain(world, self, x, y, dir, true);
     // ADR-431: same clear-first rule for a node on the pad / pit cell itself.
     if (why === TerrainFail.Occupied) { const node = nodeOnTile(world, x, y); if (node !== undefined) return { k: "clear", x, y, node }; }
-    if (why !== TerrainFail.None && why !== TerrainFail.TooFar) { if (why !== TerrainFail.InventoryFull) p.abandoned = true; return undefined; }
+    // ADR-448: the dig yields soil the bag cannot hold — stash a surplus stack first. Never abandon
+    // here: the plan is fine, only the bag is full, and abandoning would strand the base forever.
+    if (why === TerrainFail.InventoryFull) return { k: "stash" };
+    if (why !== TerrainFail.None && why !== TerrainFail.TooFar) { p.abandoned = true; return undefined; }
     return { k: "terrain", x, y, dir, stand };
   }
   if (!ladder) { p.abandoned = true; return undefined; } // the outside landing was changed: do not silently pick another entrance

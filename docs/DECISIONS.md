@@ -9442,3 +9442,87 @@ bench.test.ts wall-clock flake, which passes 1/1 alone). Totals: 4,956 passed / 
 / 9 skipped across 736 files. Pinned TypeScript 5.9.3 typecheck clean (11/11 projects).
 Coordinator re-ran every new test: 103/103 across 8 files (ADR-441 4, ADR-442 10,
 ADR-443 19, ADR-444 9, ADR-445 15, ADR-446 27, ADR-447 1, task22_recruitment 18).
+
+## ADR-448: A full bag must not stall a pit / ramp dig forever — stash a surplus stack first (SurVivaZ)
+
+**Correction to the ADR-447 record.** The ADR-447 entry says the pure ADR-441 base "fails
+ADR-252-live 6/8" and that the two failures are "a separate pre-existing defect, still open". That
+attribution was wrong: a read-only repro on a clean worktree at `4e088334` passes ADR-252-live 8/8,
+three times. The 2 failures reproduce only with the failed V2r worldgen variant (`3dc00855`)
+applied. The defect itself is real and layout-dependent — any future worldgen reshuffle can
+re-trigger it, which is why it is fixed here rather than dismissed with the variant.
+
+**Root cause (verified by probes before the fix).** Digging the pit yields 1 soil into the bot's
+bag. With a 16/16 full bag, `editTerrain` (`packages/gameplay/src/terrain.ts:100-121`) refuses
+with `TerrainFail.InventoryFull` (`exchangeItems`, `packages/gameplay/src/inventory.ts:205-211`),
+and `nextTerrainWork` (`packages/gameplay/src/ai/terrain_base.ts:146`, cell-dig loop line 186)
+returned `undefined` without abandoning and without any make-room step. The planner's earthworks
+branch (`packages/gameplay/src/ai/planner.ts:488-507`, line 506) then returned the earthworks goal
+with NO step and no leaves — which also gates the base goal by design, so no ladder, no foundation,
+no bed, forever. All recovery paths were closed: stash never won arbitration (box empty yet
+deposits=0 in 40k ticks), junk-drop could not help (everything in the bag is in the `useful` set,
+`planner.ts:168-180`), patience never fired (`GOAL_PATIENCE=6000`, `base_behaviors.ts:49,131-135`
+— eating a berry briefly frees a slot and resets the clock). The pad bot is immune (raising ground
+consumes soil). The stand is reachable — NOT a pathfinder / travel stall. The trigger is the V2r
+layout: its fruit trees ring the pit bot's base, so the bot gathers fruit until the bag fills.
+
+**Fix.** (1) `nextTerrainWork` returns a distinct `{ k: "stash" }` work item (no item attached —
+the planner picks the stack from the live bag, so a stack that frees or fills between sense passes
+is never stale) when the earthworks dig is blocked ONLY by `InventoryFull`: the cell-dig loop and
+the quarry loop (a full quarry used to return `undefined` with the comment "pause for ordinary
+surplus stashing" — the pause was permanent, since nothing ever stashed). `nextRampWork` gets the
+same treatment in its quarry loop and in the `gradeRamp` dry-run path. (2) The planner's
+earthworks and ramp branches map the work item to a step via new `pickStashStep` (exported,
+unit-pinned): the whole largest surplus stack — a partial deposit leaves the slot occupied, so it
+frees nothing — never a kept item (`plan.keep` + soil), a tool / weapon / worn item, and non-food
+first (food is only stashed when the bag holds nothing else expendable, and it lands in the base
+box, not on the ground, so the bot can withdraw it again); deterministic, ties break on the lowest
+item id; `undefined` when nothing is expendable, in which case the goal stays stepless exactly as
+before. (3) `base_work` executes the stash step like the `withdraw` step next to it: door-aware
+`goTo` to the nearest accepting store (`storageTargetFor`, deposit variant), then `containerSeq`
+with `storageDepositActions`. Deliberately NOT changed: `editTerrain` still refuses a full bag
+rather than dropping dug soil (the "a full bag never loses dug soil" invariant, `terrain.ts:116`);
+the planner's line-506 gate (never build foundations before earthworks completes) — the fix
+produces a step, it does not bypass the gate; ADR-433 deck-aware grounding, ADR-435 terrain gate,
+ADR-412 boundary grounding, ADR-382 route-around-structures (none implicated, untouched);
+ADR-441 stuck detection; `exchangeItems` preview semantics.
+
+**Verification.** New `packages/gameplay/test/adr448_full_bag_stash.test.ts` (4 tests): the pit dig
+on a full bag returns `{ k: "stash" }` (not `undefined`, plan not abandoned) and the planner maps it
+to a stash step that never names soil or the shovel; `pickStashStep` prefers the largest non-food
+stack, never a kept / tool / worn item, deterministic tie-break; the ramp grade on a full bag
+returns `{ k: "stash" }` too (the bot must stand at the foot first — `gradeRamp` checks reach
+before capacity, same walk-then-grade order `base_work` follows); end-to-end drive through
+stash → dig completes the pit (earth done, 12 digs, all four cells at target height and
+underground, ladder placed, pit campfire lit, 12 soil kept in the bag, the stashed wood in the box
+minus exactly what the ladder / campfire / fuel withdrew back out). Three ADR-265 tests updated
+for the intended behaviour change (a capacity-blocked plan now yields a stash step instead of a
+stepless goal; the junk sensor still identifies the dye, so a bot with no storage box keeps its old
+drop-junk escape). Neighbouring suites: adr252-live 8/8 (stock worldgen) + adr203 3/3 + gameplay
+adr252 / adr431 / adr382 / adr385 / adr343 / adr344 / adr345 / adr336 (life + wiring) / agents /
+survival_behaviors / task36_terrain / inventory / adr204 / adr349 / adr447, 190/190 across 18
+files. Pinned TypeScript 5.9.3 typecheck clean (gameplay package).
+
+**Honest cuts.** Stashing the whole wood stack when the entrance ladder still needs wood costs one
+withdraw round-trip per piece (ladder 4, campfire 5, fuel 4 — the drive test exercises all three);
+the bot recovers on its own, but a stash that spared the next piece's materials would skip the
+trips. With no storage box standing at all, the stash step has no target and the earthworks stays
+gated on the `workFail` cooldown exactly as before — the box goal precedes earthworks in the
+ladder, so this needs a base with no box only when the box was demolished or never built. A full
+box AND a full bag still stalls (the deposit moves what fits, then the step re-issues) — same dead
+end as before, now with a step instead of silence. Verified numerically only in the headless
+harness (no GL in the VM) — the user's eyes on the live build are the final check that a bot
+whose bag fills on a fruit run still finishes its pit base.
+
+**Coordinator batch gate (2026-11-19, HEAD `ea3dfb0e`).** Full `pnpm -r typecheck` clean
+(11/11 projects, pinned TypeScript 5.9.3); re-run in three slices: gameplay 2,348 passed / 0
+failed / 3 skipped (229 files passed, 2 skipped); apps (client+server) 1,223 passed / 1 failed /
+4 skipped (263 files) — the 1 failure is the known pre-existing `agents_persist.test.ts` timeout
+flake under full-suite load (5,000 ms timeout; passes alone); remaining packages 1,388 passed /
+2 failed / 2 skipped (243 files) — the 2 failures are the known pre-existing ones only
+(`pack.test.ts` KEYS.md absent from the sparse checkout, ENOENT; persist `bench.test.ts`
+wall-clock flake, 50.53 vs the 50 threshold, passes alone). Totals: 4,959 passed / 3 failed (all
+known pre-existing, each confirmed) / 9 skipped across 737 files. No test file failed to load.
+Coordinator re-ran the new tests: 4/4 (`adr448_full_bag_stash.test.ts`), plus the updated
+ADR-265 suite. V2r one-off verification: `adr252_ai_humans_live.test.ts` 8/8 with the failed V2r
+worldgen (`3dc00855`) applied in a scratch worktree at this commit — the layout trigger is closed.

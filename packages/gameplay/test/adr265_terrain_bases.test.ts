@@ -191,7 +191,8 @@ describe("ADR-266 finite autonomous terrain bases", () => {
   });
   it("pauses a finite plan on full bag/no shovel, refuses a foreign quarry, and protects BOTH tiles supporting an edge",()=>{
     const {w,p,d}=setup();const plan=planTerrainBase(w,p,{x:0,y:0},"pit")!;
-    w.set(p,G.Inventory,{maxWeight:.1});expect(nextTerrainWork(w,p,plan)).toBeUndefined();expect(plan.abandoned).not.toBe(true);
+    // ADR-448: a full bag no longer returns undefined — the dig becomes a stash step (make room, then dig).
+    w.set(p,G.Inventory,{maxWeight:.1});expect(nextTerrainWork(w,p,plan)).toEqual({k:"stash"});expect(plan.abandoned).not.toBe(true);
     w.set(p,G.Inventory,{maxWeight:0});expect(nextTerrainWork(w,p,plan)?.k).toBe("terrain");
     expect(G.terrainDigAt(w,0,1)).toBe(0);expect(G.countItem(w,p,d.itemId("soil"))).toBe(0);
     const {w:w2,p:p2,d:d2}=setup();const plan2=planTerrainBase(w2,p2,{x:0,y:0},"pad")!;
@@ -205,16 +206,24 @@ describe("ADR-266 finite autonomous terrain bases", () => {
     G.removeItem(w2,p2,d2.itemId("stone_shovel"),1);expect(G.editTerrain(w2,p2,1,1,-1)).toBe(G.TerrainFail.NoShovel);
   });
 
-  it("retains Soil even when a capacity-blocked earthworks plan has no action step",()=>{
+  it("retains Soil even when a capacity-blocked earthworks plan has no dig step — the step is a stash instead",()=>{
     const {w,p,d}=setup();const earth=planTerrainBase(w,p,{x:0,y:0},"pit")!;
     G.mapSlots(w,p,v=>{for(let i=0;i<v.addLimit;i++){const item=i===0?d.itemId("soil"):i===1?d.itemId("stone_shovel"):d.itemId("wood");v.put(i,item,d.items.get(item)!.maxStack,w.tick,d.items.get(item)!.maxDurability,0);}return true;});
     const plan=makePlan({world:w,self:p,defs:d,base:{x:0,y:0},bs:scanBase(w,d,{x:0,y:0}),fails:{},earth,terrainOnly:true});
-    expect(plan.goal).toBe("earthworks");expect(plan.step).toBeUndefined();expect(plan.keep.has(d.itemId("soil"))).toBe(true);expect(earth.abandoned).not.toBe(true);
+    // ADR-448: the capacity-blocked plan now yields a stash step (deposit a wood stack, then dig) instead
+    // of a stepless earthworks goal; the Soil itself is still kept, never stashed, never lost.
+    expect(plan.goal).toBe("earthworks");expect(plan.step).toEqual({k:"stash",item:d.itemId("wood"),count:G.countItem(w,p,d.itemId("wood"))});
+    expect(plan.keep.has(d.itemId("soil"))).toBe(true);expect(earth.abandoned).not.toBe(true);
   });
   it("full pack with an empty hotbar pauses digging and invokes existing junk cleanup to free an actual Soil slot",()=>{
     const {w,p,d}=setup();const a=G.makeAgent(G.makeAgentIdentity(1,1),1);aiMemoryOf(a).base={x:0,y:0};aiMemoryOf(a).earth=planTerrainBase(w,p,{x:0,y:0},"pit")!;
     G.mapSlots(w,p,v=>{for(let i=0;i<v.addLimit;i++){const item=i===0?d.itemId("dye"):i===1?d.itemId("stone_shovel"):d.itemId("wood");v.put(i,item,d.items.get(item)!.maxStack,w.tick,d.items.get(item)!.maxDurability,0);}return true;});
-    const plan=aiMemoryOf(a).earth!;expect(nextTerrainWork(w,p,plan)).toBeUndefined();expect(plan.abandoned).not.toBe(true);
+    const plan=aiMemoryOf(a).earth!;
+    // ADR-448: the dig itself is now a stash step (the largest surplus stack, dye or wood by the
+    // tie-break), not a stepless pause — the junk sensor below still identifies the dye, so a bot
+    // with no storage box still has its old drop-a-seed / drop-junk escape; the stash is simply
+    // the first resort when a box stands.
+    expect(nextTerrainWork(w,p,plan)).toEqual({k:"stash"});expect(plan.abandoned).not.toBe(true);
     const view:AgentWorldView={seen:[],home:{x:0,y:0},playerName:"owner"};w.register(Membership);G.fillAgentSensors(w,p,view);expect(view.invSpaceFree).toBe(0);fillPlanSensors(w,p,view,a,d,G.readSlots(w,p));expect(view.junk?.item).toBe(d.itemId("dye"));
     G.removeItem(w,p,view.junk!.item,view.junk!.count);expect(nextTerrainWork(w,p,plan)?.k).toBe("terrain");expect(G.countItem(w,p,d.itemId("soil"))).toBe(0);
   });
@@ -226,7 +235,10 @@ describe("ADR-266 finite autonomous terrain bases", () => {
     aiMemoryOf(a).hireEarth=planTerrainBase(w,p,{x:0,y:0},"pit")!;
     G.mapSlots(w,p,v=>{for(let i=0;i<v.addLimit;i++){const item=i===0?d.itemId("soil"):i===1?d.itemId("stone_shovel"):d.itemId("wood");v.put(i,item,d.items.get(item)!.maxStack,w.tick,d.items.get(item)!.maxDurability,0);}return true;});
     const view:AgentWorldView={seen:[],home:{x:0,y:0},playerName:"owner"};fillHireSensors(w,p,view,a);
-    expect(view.plan?.goal).toBe("earthworks");expect(view.plan?.step).toBeUndefined();
+    // ADR-448: the earthworks step is now a stash of the surplus wood (the largest non-kept stack),
+    // executed by base_work through the box that stands — the plan no longer waits stepless for the
+    // ordinary surplus-stash behaviour to win arbitration (the ADR-252-live stall: it never did).
+    expect(view.plan?.goal).toBe("earthworks");expect(view.plan?.step).toEqual({k:"stash",item:d.itemId("wood"),count:G.countItem(w,p,d.itemId("wood"))});
     expect(view.plan?.keep.has(d.itemId("soil"))).toBe(true);expect(view.surplus?.some(s=>s.item===d.itemId("soil"))).not.toBe(true);
     expect(view.surplus?.some(s=>s.item===d.itemId("wood")&&s.count>0)).toBe(true);expect(aiMemoryOf(a).hireEarth?.abandoned).not.toBe(true);
   });

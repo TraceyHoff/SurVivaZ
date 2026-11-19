@@ -307,6 +307,11 @@ export type Step =
   | { k: "ramp"; x: number; y: number; dx: number; dy: number; delta: number; stand: { x: number; y: number } }
   /** ADR-431: harvest the node on an earthworks tile first, then dig (base_work issues a targeted GatherCmd). */
   | { k: "clear"; x: number; y: number; node: Entity }
+  /** ADR-448: deposit the bot's whole largest surplus stack into base storage to free one bag slot, so a
+   *  full-bag earthworks / ramp dig can proceed. `count` is the whole stack: a partial deposit leaves the
+   *  slot occupied, so it frees nothing. Never a kept item (plan.keep / soil), a tool / weapon / worn
+   *  item, or — unless nothing else exists — food the bot eats from its bag. */
+  | { k: "stash"; item: number; count: number }
   | { k: "light"; piece: Entity }
   | { k: "withdraw"; item: number; count: number }
   | { k: "craft"; recipe: number; count: number; station: StationKind; ticks: number }
@@ -351,6 +356,24 @@ export const GOAL_LADDER: readonly Goal[] = [
 ];
 /** Fire wood a bot never spends on planks / sticks / pieces (a night's first fuel load). */
 export const WOOD_RESERVE = 8;
+/** ADR-448: the stash step for a full-bag earthworks / ramp dig. Largest surplus stack wins (one freed
+ *  slot per stash, whatever the stack holds); non-food first — a food stack is only stashed when the
+ *  bag holds nothing else expendable, and the food lands in the base box, not on the ground, so the bot
+ *  can withdraw it again. Deterministic: ties break on the lowest item id. Undefined when every stack
+ *  is kept, a tool / weapon / worn item, or the bag is empty — the caller then keeps the old stepless
+ *  earthworks goal rather than inventing a step. */
+export function pickStashStep(inv: Map<number, number>, keep: Set<number>, worn: Set<number>, defs: GameDefs): Step | undefined {
+  let best: { item: number; count: number; food: boolean } | undefined;
+  for (const [item, count] of inv) {
+    if (!count || keep.has(item) || worn.has(item)) continue;
+    const d = defs.items.get(item); if (!d || d.tool || d.weapon || d.wear) continue;
+    const food = !!d.food && d.food.health >= 0;
+    if (!best) best = { item, count, food };
+    else if (best.food !== food) { if (!food) best = { item, count, food }; }
+    else if (count > best.count || (count === best.count && item < best.item)) best = { item, count, food };
+  }
+  return best ? { k: "stash", item: best.item, count: best.count } : undefined;
+}
 /** Freezing with no fire and no wood: wood + stone for a campfire on the spot comes before anything else. */
 const EMERGENCY: readonly Goal[] = [{ k: "item", key: "wood", count: 8 }, { k: "item", key: "stone", count: 4 }];
 /** Late afternoon without a finished, heated base: stock a night of fuel first. */
@@ -493,6 +516,10 @@ export function makePlan(p: PlanInput): Plan {
       else {
         const work = nextTerrainWork(world, self, p.earth);
         if (work?.k === "terrain" || work?.k === "clear") r.step = work;
+        // ADR-448: a full bag blocks the dig, not the plan — stash the largest surplus stack into base
+        // storage and dig next sense pass. The gate below is untouched: with no stash candidate the goal
+        // still returns stepless and no foundation is laid before the earthworks completes.
+        else if (work?.k === "stash") { const s = pickStashStep(inv, new Set([...r.keep, ...keepAll]), worn, defs); if (s) r.step = s; }
         else if (work?.k === "ladder" || work?.k === "light") {
           const key = work.k === "ladder" ? "ladder" : "campfire";
           // ADR-340: earth slots are relative to the earth anchor (= the planner base anchor); a ruin
@@ -514,6 +541,8 @@ export function makePlan(p: PlanInput): Plan {
         const work = nextRampWork(world, self, p.ramp);
         if (work?.k === "ramp") r.step = work;
         else if (work?.k === "terrain") r.step = work; // quarry soil for the ramp first
+        // ADR-448: same full-bag treatment as the earthworks dig — stash first, grade next pass.
+        else if (work?.k === "stash") { const s = pickStashStep(inv, new Set([...r.keep, ...keepAll]), worn, defs); if (s) r.step = s; }
       }
       if (r.step || r.leaves.size || r.hunt.size) return out(g, r);
       if (!p.ramp.done && !p.ramp.abandoned) return out(g, r); // ramp first, then the rest of the ladder

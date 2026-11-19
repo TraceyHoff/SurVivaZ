@@ -410,6 +410,9 @@ export function baseBehaviors(): GameBehavior[] {
           // forever (the workbench blocks the last stretch, and nothing else moves it while gated on workFail).
           if (goTo(c, o, sb.x, sb.y) > 2.2) { if (stuckOn(c, sb.x, sb.y)) return fail(); return; } stop(o);
           if (containerSeq(c, o, sb.id, storageWithdrawActions(sb.id as Entity, s.item, s.count))) { mark(c, "withdraws"); return false; } return; }
+        if (s.k === "stash") { const sb = storageTargetFor(c, s.item, false); if (!sb) return fail(); // ADR-448: no storage in reach — without a box there is nowhere to put the stack, so the earthworks stays gated on the workFail cooldown until a box stands (same stepless wait as before, but bounded: the box goal precedes earthworks in the ladder)
+          if (goTo(c, o, sb.x, sb.y) > 2.2) { if (stuckOn(c, sb.x, sb.y)) return fail(); return; } stop(o);
+          if (containerSeq(c, o, sb.id, storageDepositActions(sb.id as Entity, s.item, s.count))) { mark(c, "deposits"); return false; } return; }
         if (s.k === "craft") { const st = bs?.stations.get(s.station); if (!st) return fail();
           const wait = c.bb.num("craftUntil", -1); if (wait > c.self.tick) { if (Math.hypot(st.x - c.self.x, st.y - c.self.y) > 2) goTo(c, o, st.x, st.y); else stop(o); return; }
           if (goTo(c, o, st.x, st.y) > 1.7) { if (stuckOn(c, st.x, st.y)) return fail(); return; } stop(o);
