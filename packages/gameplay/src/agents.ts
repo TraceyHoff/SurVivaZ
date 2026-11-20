@@ -48,6 +48,9 @@ export interface AgentWorldView extends AgentSensors, GoalSensors, StanceSensors
     /** ADR-327: no pending employer job work and survival needs met — the hired worker may run the
      *  saddle-material chain (fillHireSensors sets this; saddleGoalPass reads it). Absent = not idle. */
     idle?: boolean;
+    /** ADR-481: a spare full liquid container the hired worker may place at the home anchor (item id;
+     *  fillHireSensors sets this when two or more full containers are carried — one stays for drinking). */
+    spareContainer?: number;
     /** ADR-444: the bot's remembered trust in its owner (-1..1, 0 when no agent ran the sensors) — the
      *  follow distance and the defend radius scale with it (see hire_behaviors). */
     trust?: number };

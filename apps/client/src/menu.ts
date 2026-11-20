@@ -13,6 +13,9 @@ import { mountUi } from "./ui-root.js";
 import { bindTypingFullscreenExit, enterFullscreen } from "./fullscreen.js";
 import { BackHistory, focusVisible, markNavFocus } from "./back-history.js";
 import { buildGuidePanel } from "./guide-panel.js";
+import { audioSettingsRows, type AudioControls } from "./audio/settings-ui.js";
+import { fxSettingsRows, type FxControls } from "./fx/settings-ui.js";
+import { DEFAULT_QUALITY_PRESET, loadPreset, parsePreset, savePreset, QUALITY_PRESETS, type QualityPreset } from "@engine/render";
 import { iconUrl } from "./game-icons.js";
 import { GUIDE_BOOK_ICON_FILE } from "./guide-art.js";
 import { navPad, PadEdges, padKeyEdge, traceAction, type PadControl } from "./pad-input.js";
@@ -271,7 +274,7 @@ export class BootUI {
   /** notice: shown once on the main screen (e.g. "Host ended the session"), hook `.boot [data-role=notice]`. */
   /** slot: ?player slot whose browser saves "Manage saves" deletes (ADR-099). */
   /** page: open straight on a sub-page (ADR-236: a multiplayer session ending returns to the Multiplayer page). */
-  menu(opts: { hostedStatic: boolean; defaultUrl: string; notice?: string; slot?: string; page?: "multiplayer"; mp?: MultiplayerPageOpts; savedSeed?: (mode: "singleplayer" | "host") => Promise<number | undefined>; initialSeed?: string }): Promise<MenuChoice> {
+  menu(opts: { hostedStatic: boolean; defaultUrl: string; notice?: string; slot?: string; page?: "multiplayer"; mp?: MultiplayerPageOpts; savedSeed?: (mode: "singleplayer" | "host") => Promise<number | undefined>; initialSeed?: string; /** ADR-483: the in-game settings rows, shown in the start menu Settings too (same builders as game-menus.ts) */ audio?: AudioControls; fx?: FxControls; setQuality?: (p: QualityPreset) => void; qualityInfo?: () => { autoLabel(): string; detected?: { name: string; klass: string; remembered: boolean } | undefined } | undefined }): Promise<MenuChoice> {
     this.tipsOn(false); // the menu is not a loading screen
     this.root.dataset["boot"] = "menu";
     return new Promise((resolve) => {
@@ -402,9 +405,27 @@ export class BootUI {
         const gd = document.createElement("input"); gd.type = "number"; gd.min = "0"; gd.max = "30"; gd.step = "0.5"; gd.value = String(s.hordeGraceDays ?? 3); gd.style.width = "70px"; gd.dataset["setting"] = "hordeGraceDays"; bindTypingFullscreenExit(gd);
         const l6 = document.createElement("label"); l6.append("Horde grace period (in-game days)", gd);
         const tu = tempUnitControl(s); const l7 = tu.el; // ADR-243: near the top, gamepad/touch toggle
+        // ADR-483: the in-game-only rows, brought to the start menu. Graphics/audio/FX live-apply
+        // (same as in-game); the three toggles are plain engine-settings booleans saved on Save.
+        const th = document.createElement("input"); th.type = "checkbox"; th.checked = s.toolHints !== false; th.dataset["key"] = "tool-hints"; // ADR-126
+        const l8 = document.createElement("label"); l8.append("Show tool needed near resources", th);
+        const nt = document.createElement("input"); nt.type = "checkbox"; nt.checked = s.nameTags !== false; nt.dataset["key"] = "name-tags"; // ADR-173
+        const l9 = document.createElement("label"); l9.append("Show player names", nt);
+        const lw = document.createElement("input"); lw.type = "checkbox"; lw.checked = s.ledgeWarnings !== false; lw.dataset["key"] = "ledge-warnings"; // ADR-306
+        const l10 = document.createElement("label"); l10.append("Hidden ledge warnings", lw);
+        const q = document.createElement("select"); q.dataset["key"] = "graphics-quality";
+        const qi = opts.qualityInfo?.(); // ADR-116: Auto shows what it picked; the detected device tier is listed below
+        for (const p of QUALITY_PRESETS) { const o = document.createElement("option"); o.value = p; o.textContent = p === "auto" ? (qi ? `${qi.autoLabel()} — adaptive` : "Auto (adaptive)") : p[0]!.toUpperCase() + p.slice(1); q.append(o); }
+        q.value = loadPreset();
+        q.addEventListener("change", () => { const qp = parsePreset(q.value) ?? DEFAULT_QUALITY_PRESET; savePreset(qp); opts.setQuality?.(qp); });
+        const l11 = document.createElement("label"); l11.append("Graphics quality", q);
+        if (qi?.detected) { const d = document.createElement("small"); d.dataset["role"] = "detected-tier"; d.style.cssText = "display:block;opacity:.75";
+          d.textContent = `Detected: ${qi.detected.name[0]!.toUpperCase()}${qi.detected.name.slice(1)} (${qi.detected.klass}${qi.detected.remembered ? ", remembered" : ""})`; l11.append(d); }
+        const fxRows = opts.fx ? fxSettingsRows(opts.fx) : undefined;
+        const audioRows = opts.audio ? audioSettingsRows(opts.audio) : undefined;
         const manage = document.createElement("button"); manage.className = "alt"; manage.textContent = "Delete progress…"; manage.dataset["action"] = "manage-saves"; manage.addEventListener("click", saves);
-        const save = (): void => { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as object), bots: Math.max(0, Math.min(12, Number(bots.value) || 0)), showHud: hud.checked, fullscreen: fs.checked, hordes: hz.checked, hordeGraceDays: Math.max(0, Math.min(30, Number(gd.value) || 0)), aiHumans: ah.checked, hostCap: Math.max(2, Math.min(32, Math.round(Number(cap.value)) || 12)), ...tu.patch() })); main(); };
-        this.screen([["Save", save], ["Back", main, "alt"]], main, `<h2>Settings</h2>`, l7, l1, l1b, l2, l3, l4, l5, l6, manage);
+        const save = (): void => { const qp = parsePreset(q.value) ?? DEFAULT_QUALITY_PRESET; savePreset(qp); localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as object), bots: Math.max(0, Math.min(12, Number(bots.value) || 0)), showHud: hud.checked, fullscreen: fs.checked, toolHints: th.checked, nameTags: nt.checked, ledgeWarnings: lw.checked, hordes: hz.checked, hordeGraceDays: Math.max(0, Math.min(30, Number(gd.value) || 0)), aiHumans: ah.checked, hostCap: Math.max(2, Math.min(32, Math.round(Number(cap.value)) || 12)), ...tu.patch() })); main(); };
+        this.screen([["Save", save], ["Back", main, "alt"]], main, `<h2>Settings</h2>`, l7, l1, l1b, l2, l3, l4, l5, l6, l8, l9, l10, l11, ...(fxRows ? [fxRows] : []), ...(audioRows ? [audioRows] : []), manage);
       };
       // Delete progress (ADR-099, ADR-436): pick what to delete from this device, then hold to confirm.
       const slot = opts.slot ?? "1";

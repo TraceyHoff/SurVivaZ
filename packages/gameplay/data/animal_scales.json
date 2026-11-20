@@ -1,0 +1,16 @@
+{
+  "$comment": "ADR-485 live-art draw scales for ambient animals (client view-side only, no sim change, cannot desync). The pack's own art is the base: deer draws 42 px tall and anchors the readable scale (a true-scale rabbit would be 7 px, a bee under 1 px), so each entry is the multiplier that brings that species' live art to its readable height - measured per-sprite drawn heights in the live pack, not true scale. Species absent here draw at 1. Small animals (rabbit, chicken, fox, cats, dogs, duck, goose, squirrel, hare, turtle, snake, crow, parrot, ferret, bee, owl) are left at 1: they already sit in the deliberate readability band. Mounts (horse/donkey/yak) are NOT here: they draw on true-scale mount sheets. Babies stay adult-sized.",
+  "scales": {
+    "animal_alpaca": 0.85,
+    "animal_bear": 1.65,
+    "animal_bison": 1.85,
+    "animal_boar": 1.35,
+    "animal_cow": 1.65,
+    "animal_elk": 0.9,
+    "animal_moose": 1.4,
+    "animal_pig": 1.25,
+    "animal_red_deer": 1.2,
+    "animal_sheep": 1.2,
+    "animal_wolf": 0.9
+  }
+}

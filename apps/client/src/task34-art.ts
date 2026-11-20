@@ -4,8 +4,9 @@
 // declared in the pack/task34 fragment (layout only), and turned into blob URLs by task34AtlasSources() — the
 // packages/render/src/vehicles/atlas.ts pattern — which view.ts merges into the atlas sources before setRegistry.
 // The art is NEW pixels: the bee is a striped insect, the owl has a round face disc + ear tufts + wide eyes, the
-// Apiary is a stacked wooden hive. Nothing here tints or scales an existing sheet (the Task 32 crow reuse is gone:
-// sprite_fallbacks.json no longer maps animal_bee / animal_owl to animal_crow).
+// Apiary is a stacked wooden hive. Nothing here tints or scales an existing sheet (the Task 32 crow reuse is gone
+// as the primary art: the bee/owl draw their dedicated painted art; sprite_fallbacks.json maps animal_bee /
+// animal_owl to animal_crow only as an ADR-485 safety net, used if the painted art is ever missing).
 import type { AtlasSource } from "@engine/render";
 
 /** Atlas keys this module paints (also the fragment's atlas keys). */

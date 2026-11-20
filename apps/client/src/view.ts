@@ -36,7 +36,7 @@ import { HitReact, NodeRegrow, hitDirRad, Equipment, Worn, SlotDye, INVENTORY_SL
 import { Mount, Riding, isHarnessed } from "@engine/gameplay";
 import { harnessOverlayKey, idleGrazing, LAYER_KEY, MOUNT_GAIT_ANIM, MOUNT_SHEET_WILD, mountActOf, mountForeKey, mountGait, mountSpriteKeyOf, riderPose, riderStartTick, saddleOverlayKey, screenNeutralShift, swimClipPx, type MountAct } from "./mount-render.js";
 import { AssetRegistry as AssetRegistryClass } from "@engine/assets";
-import { gameplayDefs, rotationSteps, rotParts, animalDefs, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, StoreFill, isStorePieceKey, type ResolvedSprite } from "@engine/gameplay";
+import { gameplayDefs, rotationSteps, rotParts, animalDefs, animalDrawScale, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, StoreFill, isStorePieceKey, type ResolvedSprite } from "@engine/gameplay";
 
 /** Render-side schemas the renderer's bindings expect (view World only). */
 const VAnim = defineComponent("ViewAnimState", { state: "u8", startTick: "u32" });
@@ -1248,7 +1248,14 @@ export class IsoView {
       // ADR-319: a tamed mount draws on its dedicated true-scale sheet (mount_<art>, scale 1); wild animals keep their own sheet
       const mk = net.isRegistered(Mount) && net.has(e, Mount) ? this.rs(mountSpriteKeyOf(net.getField(e, Mount, "species") ?? 0)) : undefined;
       const r = mk ?? this.rs(k?.spriteKey);
-      if (r) { const sc = r.scale; return { sprite: r.id, animated: true, shadow: 0.8, ...(r.tint ? { tint: r.tint } : {}), ...(sc !== 1 ? { scale: sc, onCreate: sc } : {}) }; }
+      if (r) {
+        // ADR-485: live-art draw scale — only when the resolved art IS the species' own key (real art)
+        // and it is not a mount sheet (mounts are already true-scale). A fallback resolution already
+        // carries its own corrected scale from sprite_fallbacks.json, so it must not be multiplied again.
+        const live = !mk && r.key === k?.spriteKey ? animalDrawScale(k?.key) : 1;
+        const sc = r.scale * live;
+        return { sprite: r.id, animated: true, shadow: 0.8, ...(r.tint ? { tint: r.tint } : {}), ...(sc !== 1 ? { scale: sc, onCreate: sc } : {}) };
+      }
       const ph = this.sid(`animal_${k?.key ?? ""}`) ?? this.sid("player"); // species key fallback; base sprite only if the pack lacks animal art
       return ph === undefined ? undefined : { sprite: ph, animated: true, shadow: 0.6, ...(this.sid(`animal_${k?.key ?? ""}`) === undefined ? { scale: 0.55, onCreate: 0.55 } : {}) };
     }

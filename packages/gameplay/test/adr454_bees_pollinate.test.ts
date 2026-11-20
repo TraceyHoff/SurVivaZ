@@ -1,7 +1,8 @@
 /**
  * ADR-454: bees pollinate — a planted crop (matured into a crop_* node with GrownPlant) harvested within
- * 5 tiles of an Apiary yields +1 on the first yield only. No stacking across apiaries; wild nodes get
- * nothing; an Apiary out of range gets nothing.
+ * 15 tiles of an Apiary yields +1 on the first yield only. No stacking across apiaries; wild nodes get
+ * nothing; an Apiary out of range gets nothing. ADR-482 raised the radius from 5 to 15 (farming.json);
+ * the out-of-range case below was re-based from 10 tiles to 16 tiles accordingly.
  *
  * Determinism: every case builds the same entities in the same order (player, claim, two apiaries, one
  * crop node) and only moves the apiaries, so the gather RNG stream is identical and the base roll is
@@ -59,9 +60,9 @@ describe("ADR-454 bees pollinate", () => {
     expect(near).toBe(base + 1);
   });
 
-  it("Apiary out of range (10 tiles) gives no bonus", () => {
+  it("Apiary out of range (16 tiles) gives no bonus", () => {
     const base = harvest([{ x: 20, y: 0 }, { x: 25, y: 0 }], true);
-    const far = harvest([{ x: 11, y: 0 }, { x: 25, y: 0 }], true);
+    const far = harvest([{ x: 17, y: 0 }, { x: 25, y: 0 }], true);
     expect(far).toBe(base);
   });
 

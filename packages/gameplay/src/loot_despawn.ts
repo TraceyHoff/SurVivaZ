@@ -13,14 +13,17 @@
  * Clients read the replicated fields for the last-`fadeSeconds` sprite fade + a dust puff on removal.
  */
 import type { Entity, World } from "@engine/core";
-import { Transform } from "@engine/core";
+import { Transform, Weather } from "@engine/core";
 import raw from "../data/pvp.json";
 import { Container, LootBag } from "./components.js";
-import { isAuthority } from "./config.js";
+import { gameplayDefs, isAuthority } from "./config.js";
 import { secondsToTicks } from "./defs.js";
 import { emit, ev } from "./events.js";
+import { fillContainer } from "./food.js";
 import { listSlots } from "./inventory.js";
 import { LootSource, type LootSourceId } from "./loot_labels.js";
+import { isRaining } from "./realism.js";
+import { shelterAt } from "./building/shelter.js";
 
 export interface DespawnTuning {
   droppedSeconds: number; deathBagSeconds: number; thrownSeconds: number; creatureLootSeconds: number; stallBagSeconds: number;
@@ -42,6 +45,12 @@ const LIFE: Record<LootBagKind, () => number> = {
 export function lootBagInit(world: World, owner: number, life: LootBagKind, source: LootSourceId): { owner: number; despawnAtTick: number; spawnTick: number; kind: number; emptiedTick: number } {
   const now = world.tick >>> 0;
   return { owner, despawnAtTick: Math.min(PERMANENT_DESPAWN - 1, now + T(LIFE[life]())), spawnTick: now, kind: source || LootSource.Dropped, emptiedTick: 0 };
+}
+/** ADR-481: init for a placed liquid container — permanent (never times out; the bag vanishes the moment
+ * it is emptied, like the sandbox crate), kind Placed so labels / the cap / rain fill can find it. */
+export function placedBagInit(world: World, owner: number): { owner: number; despawnAtTick: number; spawnTick: number; kind: number; emptiedTick: number } {
+  const now = world.tick >>> 0;
+  return { owner, despawnAtTick: PERMANENT_DESPAWN, spawnTick: now, kind: LootSource.Placed, emptiedTick: 0 };
 }
 export interface LootBagTimes { spawnTick: number; despawnAtTick: number; emptiedTick: number; kind: number; owner: number }
 export const isPermanentBag = (b: { despawnAtTick: number }): boolean => b.despawnAtTick >>> 0 === PERMANENT_DESPAWN;
@@ -73,6 +82,22 @@ export function despawnFadeAlpha(b: LootBagTimes, tick: number, floor = 0.25): n
 export const LootBagDespawned = ev<{ bag: Entity; x: number; y: number; z: number; kind: number; reason: "expired" | "emptied" }>("gameplay.LootBagDespawned");
 
 const isEmpty = (world: World, b: Entity): boolean => world.has(b, Container) && listSlots(world, b).every((s) => !s.item || !s.count);
+/** ADR-481: one deterministic rain-fill roll for a placed bag (one pass = 1 s). Same +1 sip per
+ * rainFillSecondsPerSip as a carried container (ADR-452); shelterAt gives the bag's rain exposure,
+ * so a roofed bag stays dry. Held containers are untouched here. */
+function rainFillPlacedBag(world: World, bag: Entity): void {
+  if (!world.isRegistered(Weather)) return;
+  const w = world.env(Weather);
+  if (!isRaining(w.kind)) return;
+  const t = world.get(bag, Transform); if (!t) return;
+  if (shelterAt(world, t.x, t.y, t.z, w.windDir).rain <= 0) return;
+  const defs = gameplayDefs(world);
+  if (world.rngFor("rainfill", bag).next() >= 1 / defs.environment.rainFillSecondsPerSip) return;
+  for (const sl of listSlots(world, bag)) {
+    const max = defs.items.get(sl.item)?.sips ?? 0;
+    if (max > 0 && sl.durability < max) { fillContainer(world, bag, sl.slot, 1); break; }
+  }
+}
 /** postSim "gameplay.lootBags" (every 20 ticks): emptied bookkeeping, expiry, then the ground cap. */
 export function lootBagDespawnSystem(world: World): void {
   if (!isAuthority(world) || world.isReplaying) return;
@@ -84,6 +109,7 @@ export function lootBagDespawnSystem(world: World): void {
     else if (!empty && lb.emptiedTick) { lb.emptiedTick = 0; world.setField(b, LootBag, "emptiedTick", 0); } // refilled: grace cancelled
     const exp = bagExpiryTick(lb);
     if (exp < PERMANENT_DESPAWN && now >= exp) { despawn(world, b, lb.kind, lb.emptiedTick && exp !== lb.despawnAtTick ? "emptied" : "expired"); continue; }
+    if (lb.kind === LootSource.Placed) rainFillPlacedBag(world, b); // ADR-481: rain fills a placed container
     if (isPermanentBag(lb) || exp - now <= T(DESPAWN.fadeSeconds)) continue; // permanent / already on its way out
     live.push({ b, spawn: bagSpawnTick(lb), prot: capProtected(lb, now) });
   }

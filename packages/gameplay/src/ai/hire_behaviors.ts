@@ -40,7 +40,7 @@ import { scanBase } from "./planner.js";
 import { nearestClaimHostile } from "../territory.js";
 import { affinityOf, SOCIAL_AFFINITY, trustOf } from "./social_memory.js"; // ADR-444: remembered trust in the owner scales follow / defend; ADR-478: affinity scales the guard radius too
 import { workerAnchor, workerWorkAnchor, workerOrderTarget, workerSelections, workerRecipes } from "../recruitment.js";
-import { playerEntity } from "../pets.js";
+import { PlaceItemCmd, playerEntity } from "../pets.js";
 import { GatherCmd, UseCmd } from "../input.js";
 import { StationKind, type GameDefs } from "../defs.js";
 import type { AgentOutputWithCommands } from "./agent_output.js";
@@ -204,6 +204,20 @@ function hireSaddleIdle(world: World, self: Entity, view: AgentWorldView, agent:
   return !hireWorkPending(world, self, view, defs, saddleLeaves) && hireSaddleNeedsMet(world, self, agent);
 }
 
+/** ADR-481: the spare full liquid container a hired worker may place at the home anchor — the item id of
+ * the first full container once two or more full ones are carried (one stays for drinking, so a worker
+ * with a single flask never places it). Undefined when fewer than two full containers are carried. */
+function spareFullContainerId(world: World, self: Entity, defs: GameDefs): number | undefined {
+  let slots: ReturnType<typeof readSlots>; try { slots = readSlots(world, self); } catch { return undefined; }
+  let full = 0, first = 0;
+  for (let i = 0; i < slots.slotCount; i++) {
+    const it = slots.item(i); if (!it || !slots.count(i)) continue;
+    const sips = defs.items.get(it)?.sips ?? 0;
+    if (sips > 0 && slots.durability(i) >= sips) { if (!first) first = it; full += slots.count(i); if (full >= 2) return first; }
+  }
+  return undefined;
+}
+
 export function fillHireSensors(world: World, self: Entity, view: AgentWorldView, agent?: Agent): void {
   if (!world.has(self, Worker)) return;
   const w = world.get(self, Worker)!;
@@ -230,6 +244,10 @@ export function fillHireSensors(world: World, self: Entity, view: AgentWorldView
   const ownerTrust = agent ? trustOf(agent, w.owner) : 0;
   const ownerAffinity = agent ? affinityOf(agent, w.owner) : 0;
   view.hire = { job: w.job, owner: w.owner, ax: anchor.x, ay: anchor.y, trust: ownerTrust };
+  // ADR-481: a spare full liquid container (two or more full — one stays for drinking) the worker may
+  // place at the home anchor; the place_container behaviour reads this signal.
+  const spare = spareFullContainerId(world, self, defs);
+  if (spare !== undefined) view.hire.spareContainer = spare;
   view.home = anchor; view.base = base;
   const bs = scanBase(world, defs, base); view.bs = bs;
   delete view.plan; delete view.needs; delete view.tripWanted; delete view.buildPlan;
@@ -472,5 +490,20 @@ export function hireBehaviors(): GameBehavior[] {
         { name: "hired", curve: { type: "linear", m: 0.45, b: 0 }, input: (c) => (c.world.hire && !(c.world.hire.job === WorkerJob.Follow && survivalBreak(c)) ? 1 : 0) }],
       run: (c, o) => { instantChores(c, o); const h = c.world.hire; if (!h) return false;
         if (Math.hypot(h.ax - c.self.x, h.ay - c.self.y) > 4) { goTo(c, o, h.ax, h.ay); return; } stop(o); return false; } },
+    // ADR-481: a hired worker carrying a spare full liquid container (two or more full — one stays for
+    // drinking) places the spare at the home anchor, to the ground — no box needed (the stash behaviour
+    // still handles ordinary surplus into storage). The PlaceItemCmd goes through the same net-command
+    // path as the farm UseCmd above; the server re-validates item / container / cap.
+    { name: "place_container", inertia: 0.3, traits: { industriousness: 0.5 }, considerations: [
+        { name: "hired", curve: step01, input: (c) => (c.world.hire ? 1 : 0) },
+        { name: "spare", curve: step01, input: (c) => (c.world.hire?.spareContainer ? 1 : 0) },
+        { name: "nearBase", curve: { type: "inverse" }, input: (c) => { const h = c.world.hire; return h ? Math.min(1, Math.hypot(h.ax - c.self.x, h.ay - c.self.y) / 24) : 1; } }],
+      run: (c, o) => { const h = c.world.hire; if (!h) return false;
+        const item = h.spareContainer; if (!item) return false;
+        if (goTo(c, o, h.ax, h.ay) > 2) { if (stuckOn(c, h.ax, h.ay)) return false; return; } stop(o);
+        if (!cooled(c, "placeContainerAt", 100)) return;
+        const oc = o as unknown as AgentOutputWithCommands;
+        (oc.commands ??= []).push({ type: PlaceItemCmd.name, payload: { item } });
+        c.bb.set("placeContainerAt", c.self.tick); return false; } },
   ];
 }

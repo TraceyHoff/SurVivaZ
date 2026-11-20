@@ -8,7 +8,7 @@ import { Container, LootBag, LootSummary } from "./components.js";
 import { isAuthority } from "./config.js";
 import { listSlots } from "./inventory.js";
 
-export const LootSource = { Unknown: 0, Zombie: 1, Animal: 2, Death: 3, Dropped: 4, Crate: 5 } as const;
+export const LootSource = { Unknown: 0, Zombie: 1, Animal: 2, Death: 3, Dropped: 4, Crate: 5, Placed: 6 } as const; // ADR-481: a liquid container placed on the ground (permanent bag)
 export type LootSourceId = (typeof LootSource)[keyof typeof LootSource];
 /** Server recompute period (ticks) for LootSummary; also refreshed when first seen. */
 export const LOOT_SUMMARY_EVERY = 10;

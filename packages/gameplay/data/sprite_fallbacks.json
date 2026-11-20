@@ -489,104 +489,104 @@
       "to": [
         "animal_deer"
       ],
-      "scale": 1.15
+      "scale": 0.95
     },
     "animal_red_deer": {
       "to": [
         "animal_deer"
       ],
       "tint": "#e0a080",
-      "scale": 1.05
+      "scale": 0.95
     },
     "animal_elk": {
       "to": [
         "animal_deer"
       ],
       "tint": "#c09070",
-      "scale": 1.3
+      "scale": 1.03
     },
     "animal_moose": {
       "to": [
         "animal_deer"
       ],
       "tint": "#806050",
-      "scale": 1.5
+      "scale": 1.41
     },
     "animal_bear": {
       "to": [
         "animal_boar"
       ],
       "tint": "#705038",
-      "scale": 1.5
+      "scale": 1.93
     },
     "animal_fox": {
       "to": [
         "animal_wolf"
       ],
       "tint": "#ff9050",
-      "scale": 0.7
+      "scale": 0.4
     },
     "animal_hare": {
       "to": [
         "animal_rabbit"
       ],
       "tint": "#e0d0b0",
-      "scale": 1.2
+      "scale": 0.34
     },
     "animal_squirrel": {
       "to": [
         "animal_rabbit"
       ],
       "tint": "#c07040",
-      "scale": 0.75
+      "scale": 0.28
     },
     "animal_turkey": {
       "to": [
         "animal_chicken"
       ],
       "tint": "#a07050",
-      "scale": 1.4
+      "scale": 1.21
     },
     "animal_duck": {
       "to": [
         "animal_chicken"
       ],
       "tint": "#a0c090",
-      "scale": 0.9
+      "scale": 0.47
     },
     "animal_goose": {
       "to": [
         "animal_chicken"
       ],
-      "scale": 1.2
+      "scale": 0.95
     },
     "animal_goat": {
       "to": [
         "animal_deer"
       ],
       "tint": "#e0d8c8",
-      "scale": 0.8
+      "scale": 0.57
     },
     "animal_sheep": {
       "to": [
         "animal_boar"
       ],
       "tint": "#f0f0e8",
-      "scale": 0.9
+      "scale": 1.16
     },
     "animal_cow": {
       "to": [
         "animal_boar"
       ],
       "tint": "#b09070",
-      "scale": 1.5
+      "scale": 1.87
     },
     "animal_bison": {
       "to": [
         "animal_boar"
       ],
       "tint": "#604028",
-      "scale": 1.6
+      "scale": 2.33
     },
     "animal_snake": {
       "to": [
@@ -598,32 +598,121 @@
     "animal_deer": {
       "to": [
         "animal_boar"
-      ]
+      ],
+      "scale": 1.74
     },
     "animal_wolf": {
       "to": [
         "animal_boar"
       ],
-      "tint": "#a0a0a0"
+      "tint": "#a0a0a0",
+      "scale": 1.1
     },
     "animal_turtle": {
       "to": [
         "animal_boar"
       ],
       "tint": "#557a3a",
-      "scale": 0.85
+      "scale": 0.26
     },
     "animal_pig": {
       "to": [
         "animal_boar"
       ],
-      "tint": "#f0a0b0"
+      "tint": "#f0a0b0",
+      "scale": 1.16
     },
     "animal_alpaca": {
       "to": [
         "animal_deer"
       ],
-      "tint": "#f0e8d8"
+      "tint": "#f0e8d8",
+      "scale": 0.71
+    },
+    "animal_dog_dachshund": {
+      "to": [
+        "animal_wolf"
+      ],
+      "scale": 0.25
+    },
+    "animal_dog_beagle": {
+      "to": [
+        "animal_wolf"
+      ],
+      "scale": 0.4
+    },
+    "animal_dog_lab": {
+      "to": [
+        "animal_wolf"
+      ],
+      "scale": 0.59
+    },
+    "animal_dog_husky": {
+      "to": [
+        "animal_wolf"
+      ],
+      "scale": 0.59
+    },
+    "animal_dog_shepherd": {
+      "to": [
+        "animal_wolf"
+      ],
+      "scale": 0.59
+    },
+    "animal_cat_tabby": {
+      "to": [
+        "animal_fox"
+      ],
+      "tint": "#c09060",
+      "scale": 0.62
+    },
+    "animal_cat_black": {
+      "to": [
+        "animal_fox"
+      ],
+      "tint": "#404040",
+      "scale": 0.62
+    },
+    "animal_cat_siamese": {
+      "to": [
+        "animal_fox"
+      ],
+      "tint": "#d8c8b0",
+      "scale": 0.62
+    },
+    "animal_parrot": {
+      "to": [
+        "animal_crow"
+      ],
+      "tint": "#60a860",
+      "scale": 0.5
+    },
+    "animal_crow": {
+      "to": [
+        "animal_owl"
+      ],
+      "tint": "#404040",
+      "scale": 0.31
+    },
+    "animal_ferret": {
+      "to": [
+        "animal_squirrel"
+      ],
+      "tint": "#c8b090",
+      "scale": 0.35
+    },
+    "animal_owl": {
+      "to": [
+        "animal_crow"
+      ],
+      "scale": 0.7
+    },
+    "animal_bee": {
+      "to": [
+        "animal_crow"
+      ],
+      "tint": "#e0c040",
+      "scale": 0.1
     },
     "clutter_grass_tuft_a": {
       "to": [

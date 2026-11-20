@@ -30,6 +30,7 @@ import { creatureStep, type TileBlocked } from "./systems/creature_nav.js";
 import { nearestClaimHostile, tamedOwnerTribe, TERRITORY_BITE, TERRITORY_DEFEND_RANGE } from "./territory.js";
 import { installSpatialIndex } from "@engine/world";
 import { populationData, resolveBehavior, toSpawnEntries, type AggroMode, type GameMode, type LootEntry } from "./ai/population.js";
+import scalesRaw from "../data/animal_scales.json";
 import { Died } from "./events.js";
 import { inSpawnSafeRadius } from "./spawn_points.js";
 
@@ -59,6 +60,19 @@ export const animalDefs = (): readonly AnimalDef[] => (animalsCache ??= Object.e
       aggro: b.aggro, attack: b.attack, loot: b.loot, drops: b.loot.map((l) => l.item) };
   }));
 export const animalKindOf = (key: string): number => { const i = animalDefs().findIndex((a) => a.key === key); if (i < 0) throw new Error(`unknown animal ${key}`); return i; };
+/** ADR-485: live-art draw scales (data/animal_scales.json) — view-side only, no sim change. */
+export interface AnimalScaleData { scales: Record<string, number> }
+export const ANIMAL_SCALES = scalesRaw as unknown as AnimalScaleData;
+/** ADR-485: the configured live-art scale for an animal key, or undefined when the table has no entry. */
+export function animalScale(key: string | undefined): number | undefined {
+  if (!key) return undefined;
+  const s = ANIMAL_SCALES.scales[key];
+  return typeof s === "number" && Number.isFinite(s) && s > 0 ? s : undefined;
+}
+/** ADR-485: the effective live-art draw scale for an animal key (1 = no correction). */
+export function animalDrawScale(key: string | undefined): number {
+  return animalScale(key) ?? 1;
+}
 /** Data-driven defaults (data/spawns.json). */
 export const POPULATION_DATA = { get intervalSeconds(): number { return populationData().spawns.intervalSeconds; }, spawns: (mode: GameMode) => toSpawnEntries(mode) };
 

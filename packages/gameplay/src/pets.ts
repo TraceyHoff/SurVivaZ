@@ -9,12 +9,12 @@
  * Pet + Tamed + Container are persistent; Health is rebuilt from Pet.hp + level after a load.
  */
 import { LootSource, tagLootSource } from "./loot_labels.js";
-import { lootBagInit } from "./loot_despawn.js";
+import { lootBagInit, placedBagInit } from "./loot_despawn.js";
 import { defineCommand, DEFAULT_TICK_HZ, entityIndex, PlayerId, Transform, type CommandDef, type CommandHandlers, type Entity, type World } from "@engine/core";
 import raw from "../data/pets.json";
 import {
   Anim, Animal, AnimalSkills, AnimState, BuildPiece, Container, ContainerViewers, Dead, Health, Inventory, LootBag, Pet, PET_NAME_MAX, PetBrain, PetCmd, PetGuard, PetStatus, PetStatusComp, PieceOwner,
-  Survival, Tamed, Tribe, TroughOwner, Zombie,
+  Survival, Tamed, Tribe, TroughOwner, Worker, Zombie,
 } from "./components.js";
 import { pieceOf } from "./building/links.js";
 import { nearestClaimHostile } from "./territory.js";
@@ -238,18 +238,59 @@ export function dropItem(world: World, e: Entity, item: number, count: number): 
     .add(bag, LootBag, lootBagInit(world, pidOf(world, e), "dropped", LootSource.Dropped));
   transferItem(world, e, bag, item, n); tagLootSource(world, bag, LootSource.Dropped); indexEntity(world, bag); return bag;
 }
+// ---- placing liquid containers on the ground (ADR-481) ----------------------------------------------
+/** Per-player cap on placed containers: permanent bags are cap-exempt (loot_despawn), so without a cap
+ * unbounded placement would bloat the save. */
+export const PLACED_CONTAINER_CAP = 8;
+/** ADR-481: a liquid container is any item with sips > 0 (the fill lives in the slot's durability). */
+export function isLiquidContainer(world: World, item: number): boolean {
+  return (gameplayDefs(world).items.get(item)?.sips ?? 0) > 0;
+}
+/** ADR-481: the cap owner of a place — the player's own pid, or a hired bot's employer (a bot places for
+ * its owner, so its placements count against the owner's cap). Unhired / ownerless actors count as 0. */
+export function placedBagOwnerId(world: World, e: Entity): number {
+  const pid = pidOf(world, e); if (pid) return pid;
+  if (world.isRegistered(Worker) && world.has(e, Worker)) return world.getField(e, Worker, "owner") ?? 0;
+  return 0;
+}
+/** ADR-481: how many placed-container bags `owner` already has on the ground. */
+export function countPlacedBags(world: World, owner: number): number {
+  let n = 0;
+  for (const b of world.query([LootBag])) { const lb = world.get(b, LootBag)!; if (lb.kind === LootSource.Placed && lb.owner === owner) n++; }
+  return n;
+}
+/** ADR-481: why a place would be refused (undefined = allowed). */
+export function placeItemValidate(world: World, e: Entity, item: number): string | undefined {
+  if (countItem(world, e, item) <= 0) return "no_item";
+  if (!isLiquidContainer(world, item)) return "not_container";
+  if (countPlacedBags(world, placedBagOwnerId(world, e)) >= PLACED_CONTAINER_CAP) return "cap_reached";
+  return undefined;
+}
+/** ADR-481: place one liquid container on the ground as a permanent bag — no decay, no claim totem (the
+ * loot-bag route never consults claims, unlike pieces). One container per bag (slotCount 1); anyone may
+ * pick it back up (only death bags are owner-locked); the bag vanishes the moment it is emptied. */
+export function placeItem(world: World, e: Entity, item: number): Entity | undefined {
+  if (placeItemValidate(world, e, item)) return undefined;
+  const t = world.get(e, Transform); if (!t) return undefined;
+  const bag = world.create(); const ang = t.facing ?? 0;
+  world.add(bag, Transform, { x: t.x + Math.cos(ang) * 0.6, y: t.y + Math.sin(ang) * 0.6, z: t.z }).add(bag, Container, { slotCount: 1 }).add(bag, ContainerViewers)
+    .add(bag, LootBag, placedBagInit(world, placedBagOwnerId(world, e)));
+  transferItem(world, e, bag, item, 1); tagLootSource(world, bag, LootSource.Placed); indexEntity(world, bag); return bag;
+}
 // ---- commands -----------------------------------------------------------------------------------------
 export const PetOfferCmd = defineCommand("gameplay.petOffer", { target: "u32", item: "u16" });
 export const PetCommandCmd = defineCommand("gameplay.petCommand", { pet: "u32", cmd: "u8" });
 export const PetRenameCmd = defineCommand("gameplay.petRename", { pet: "u32", len: "u8", text: { type: "u8", length: PET_NAME_MAX } });
 export const DropItemCmd = defineCommand("gameplay.dropItem", { item: "u16", count: "u16" });
+/** ADR-481: place one liquid container on the ground (see placeItem). */
+export const PlaceItemCmd = defineCommand("gameplay.placeItem", { item: "u16" });
 /**
  * Task 14: assign a pet to guard a target. kind: 1 = world location (x, y; target is ignored on the server but
  * must still carry a resolvable NetId on the wire, so clients send the pet itself), 2 = entity (target).
  * Appended to PET_COMMANDS so the existing bridge (protocol.ts ...PET_COMMANDS) picks it up.
  */
 export const PetGuardCmd = defineCommand("gameplay.petGuard", { pet: "u32", kind: "u8", target: "u32", x: "f32", y: "f32" });
-export const PET_COMMANDS: readonly CommandDef[] = [PetOfferCmd, PetCommandCmd, PetRenameCmd, DropItemCmd, PetGuardCmd];
+export const PET_COMMANDS: readonly CommandDef[] = [PetOfferCmd, PetCommandCmd, PetRenameCmd, DropItemCmd, PetGuardCmd, PlaceItemCmd];
 export const PET_ENTITY_FIELDS: Readonly<Record<string, readonly string[]>> = { [PetOfferCmd.name]: ["target"], [PetCommandCmd.name]: ["pet"], [PetRenameCmd.name]: ["pet"], [PetGuardCmd.name]: ["pet", "target"] };
 export const PET_REJECT_REASONS = ["not_pet", "not_treat", "not_food", "bad_target"] as const;
 export const encodePetName = (name: string): { len: number; text: number[] } => {
@@ -264,6 +305,7 @@ export function installPetCommands(world: World, handlers: CommandHandlers): voi
   handlers.on(PetGuardCmd, { validate: (v, c) => r(setGuardValidate(world, c.actor, v.pet as Entity, v.kind, v.target as Entity, v.x, v.y)), handle: (v, c) => { setGuard(world, c.actor, v.pet as Entity, v.kind, v.target as Entity, v.x, v.y); } });
   handlers.on(PetRenameCmd, { validate: (v, c) => r(owned(c.actor, v.pet as Entity)), handle: (v: { pet: number; len: number; text: ArrayLike<number> }, c) => { renamePet(world, c.actor, v.pet as Entity, decode(v.len, v.text)); } });
   handlers.on(DropItemCmd, { validate: (v, c) => (countItem(world, c.actor, v.item) > 0 ? undefined : "no_item"), handle: (v, c) => { dropItem(world, c.actor, v.item, v.count); } });
+  handlers.on(PlaceItemCmd, { validate: (v, c) => placeItemValidate(world, c.actor, v.item), handle: (v, c) => { placeItem(world, c.actor, v.item); } });
 }
 // ---- runtime hooks --------------------------------------------------------------------------------------
 interface Aggro { attacker: Entity; tick: number }

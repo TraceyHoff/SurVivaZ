@@ -10879,3 +10879,192 @@ absent; on fixed code the mesh rebuilds and the quad is present with the exact t
 does not prove this was the only stale-mesh path in the game, only that this path reproduces the
 photo's exact triangle shape and is closed. Tracey's phone test on the live build is still the
 check that the blue gap is gone in real play.
+
+## ADR-481: Place a liquid container on the ground — a permanent bag, no claim totem (SurVivaZ)
+
+**Context.** Tracey's 2026-11-20 request (1): a Place option for liquid containers in inventory so
+players and AI humans can place them on the ground outside in the open world without the item
+decaying or disappearing for being on the ground, and without requiring a claim totem. Scoping
+found the pieces already existed: a permanent LootBag ships (never despawns, cap-exempt); dropped
+stacks vanish on a 180 s timer, not spoilage; the claim gate applies to pieces, never drops; rain
+fill is held-only by construction (ADR-452). The work is wiring those pieces together, not a new
+storage system.
+
+**Decision.** A Place button sits next to Drop in the inventory panel
+(`apps/client/src/gameplay-panels.ts`), shown for liquid containers only (`sips > 0`) — a plain
+focusable button like Drop, so touch, D-pad and keys work alike. It sends `PlaceItemCmd`
+(`gameplay.placeItem`), handled by `placeItem()` (`packages/gameplay/src/pets.ts`): one liquid
+container goes into a new permanent LootBag at the actor's feet (`placedBagInit`,
+`despawnAtTick = PERMANENT_DESPAWN`, kind `LootSource.Placed` = 6, one container per bag with
+`slotCount` 1). No claim totem is required — the loot-bag route never consults claims, and this is
+deliberately not routed through pieces. Anyone may pick a placed container back up (only death
+bags are owner-locked); the bag vanishes the moment it is emptied, by the existing permanent-bag
+rule. Per-player cap 8 (`PLACED_CONTAINER_CAP`): permanent bags are cap-exempt in the despawn
+system, so unbounded placement would bloat the save; a hired bot's placements count against its
+employer's cap (`placedBagOwnerId`: the player's pid, else the bot's `Worker.owner`). Rain fill YES
+in v1: the 20-tick loot pass (`lootBagDespawnSystem`) rolls the same +1 sip per
+`rainFillSecondsPerSip` (45) for placed bags, using `shelterAt` for the bag's rain exposure, so a
+roofed bag stays dry; held-container behaviour is unchanged, and a boiled container reverts to raw
+on refill via `fillContainer`, as in ADR-452. AI trigger: a hired bot carrying a spare full
+container (two or more full — one stays for drinking) places it at the home anchor via the
+`place_container` behaviour (`packages/gameplay/src/ai/hire_behaviors.ts`, sensor
+`view.hire.spareContainer`), sending `PlaceItemCmd` through the net-command path; the server
+re-validates item, container and cap. No map markers. Empty containers are placeable. This closes
+ADR-452's open gap for placed bags only; storage containers stay out of scope.
+
+**Verification.** `packages/gameplay/test/adr481_place_containers.test.ts` 13/13 and
+`apps/client/test/adr481_place_containers.test.ts` 2/2 (15/15): permanent-bag fields, one container
+per bag, the player loses the container; a placed bag outlives a dropped bag past `droppedSeconds`;
+a non-container is refused (`not_container`); the per-player cap holds at 8 (`cap_reached`, the
+9th container stays in the pack); picking the container back up empties the bag and it vanishes
+immediately with an `emptied` event; rain fills a placed container in 900 s of rain, not in clear
+weather, not under a roof; a boiled container reverts to raw on rain refill; `PlaceItemCmd` is
+registered in `PET_COMMANDS` and dispatches through the real handler (rejecting a non-container);
+a hired bot's place counts against its employer's cap; the hire sensor reports a spare only with
+two full containers; the `place_container` behaviour pushes `PlaceItemCmd` at the anchor and
+nothing with no spare. Revert check: 14/15 fail on pre-change code (the label assertion passes
+either way — the fallback branch already names single-stack bags).
+
+**Honest cuts.** The AI trigger fires only for hired bots with two or more full containers; an
+unhired bot never places, and a bot with a single flask never gives it up. The place lands at the
+actor's feet (0.6 tiles ahead) — there is no aiming. Rain fill is probabilistic (~1 sip per 45 s
+of rain), so a placed container fills slowly. The live play-test — place, rain, pick up, and a
+hired bot placing at its base — still needs Tracey's phone test.
+
+## ADR-482: Bees pollinate 15 tiles from the apiary (SurVivaZ)
+
+**Context.** Tracey's 2026-11-20 request (2): bees in apiaries pollinate 15 tiles in every
+direction from the apiary. ADR-454 shipped radius 5.
+
+**Decision.** `packages/gameplay/data/farming.json` pollination radius 5 → 15. The check is a
+Euclidean circle over the cached apiary list, so there is no tile scan. Everything else is
+unchanged: +1 bonus, first yield only, planted crops only, no stacking, wild crops excluded.
+Honey-deposit range stays 10 — Tracey did not answer that decision, so the fiction gap is
+recorded, not resolved: a bee may now pollinate a crop it never deposits honey near. No guide
+surfacing.
+
+**Verification.** `packages/gameplay/test/adr454_bees_pollinate.test.ts` 5/5 (the stale 10-tile
+out-of-range case re-based to 16 tiles) and `packages/gameplay/test/adr482_bees_pollinate_15.test.ts`
+6/6: axis 15 in / 16 out, diagonal (11,11) in / (12,11) out (circle, not square), two apiaries at
+11–15 tiles still +1, wild crops excluded, `apiaryWithin` unit boundary at radius 15. Revert
+check: at radius 5, 3/6 adr482 tests fail (the three boundary tests); the other 3 pass as negative
+controls.
+
+**Honest cuts.** Honey deposits still land within 10 tiles while pollination reaches 15. No phone
+test yet.
+
+## ADR-483: In-game settings are available in the start menu settings (SurVivaZ)
+
+**Context.** Tracey's 2026-11-20 request (3): the in-game settings made available in the start
+menu settings as well. The menu Settings screen already existed; the in-game-only rows did not.
+
+**Decision.** `apps/client/src/menu.ts` `settings()` gains the graphics-quality `<select>`
+(`QUALITY_PRESETS`, `loadPreset()`, live-applies on change via `savePreset` + `setQuality`,
+persist-only fallback when no renderer exists, detected-tier line when `qualityInfo` provides it),
+the three toggles (toolHints / nameTags / ledgeWarnings, same labels and `data-key`s as in-game),
+and the audio + FX rows via the existing standalone builders (`audioSettingsRows`,
+`fxSettingsRows`). `menu(opts)` takes optional `audio`, `fx`, `setQuality`, `qualityInfo` (same
+types as `GameMenusOptions`); `apps/client/src/main.ts` `boot.menu({...})` passes the mixer, the
+same FX adapter as the GameMenus wiring, `setQuality` into the renderer preset, and the same
+`qualityInfo` cast. Apply timing: graphics, audio and FX live-apply in the menu, the rest on
+Save / next start. Save now also persists the three toggles — this also fixes a pre-existing
+menu-save gap, where the old full-replace save dropped toolHints / nameTags / ledgeWarnings
+entirely. World-rules readout, tutorial replay and the error log stay in-game only (they need a
+live world / debug tool). Scope is existing settings only: no keybindings / language UI, which
+exists nowhere and would be new work, not ADR-483. `GameMenus` itself cannot mount in the menu —
+the standalone builders only.
+
+**Verification.** `apps/client/test/adr483_menu_settings.test.ts` 6/6: rows present; a graphics
+change live-applies and persists (`survivaz.render.quality`); audio volume / mute apply live
+through the passed controls; the FX cycle applies live; Save persists the three toggles into
+`engine-settings`; without opts the screen still works with persist-only quality. Revert check:
+6/6 fail on pre-change `menu.ts` / `main.ts`.
+
+**Honest cuts.** Mixer / FX safety in the menu on a real phone still needs Tracey's phone test —
+the gate must confirm it if possible. The three toggles apply on Save / next start, not live.
+
+## ADR-484: AI humans are not shrunk — no bug found, no fix built (SurVivaZ)
+
+**Context.** Tracey's 2026-11-20 request (4): make AI humans normal sized if they are shrunk — and
+her 2026-11-20 phone photo 2, a little person in the lower left who cannot be interacted with,
+measuring ~53 px against her character's ~112 px in the same shot.
+
+**Decision.** NO FIX — no bug was found. Players and bots share one draw path (`view.ts`
+`classify`), scale defaults to 1, there is no per-entity scale and no child system: bots are NOT
+shrunk. Poses (crouch / sit / sleep / swim) make a real human measure ~half-height at scale 1,
+which is the likely explanation for the photo. The figure is almost certainly an unhired AI human
+bot in the exact default player outfit (brown bob + green sprout, red shirt, blue trousers —
+verified pixel-for-pixel against the packed player sprite; no child NPCs exist in code); it
+"cannot be interacted with" because the hire panel only opens within 3 tiles
+(`recruitment.ts:463`) and she was ~10 tiles away. The hardening is done once inside ADR-485, so
+a missing art key degrades to a similar animal instead of the 0.55x bare-player fallback. No code
+was changed for this ADR.
+
+**Verification.** Code inspection only — there is no bug to regress against, so there is no test.
+What would prove it: the walk-up Use test (walk within ~3 tiles and press Use — the hire panel
+opening means it is a bot), a side-by-side idle screenshot, a `?diag` capture.
+
+**Honest cuts.** The ~0.5x measurement is still unexplained by any code path: if the panel opens
+but the figure stays half-size, that is a second bug, still open. Still awaiting Tracey's walk-up
+Use test answer.
+
+## ADR-485: Animals draw at realistic readable sizes (SurVivaZ)
+
+**Context.** Tracey's 2026-11-20 request (5): make sure all animals are realistically scaled in
+size with the world and players / AI humans. The scoping tree had no pack, so the first step was
+measuring the live pack at f40445b5: only 3 of 40 species have own art in TexturePacker atlases
+(deer 64 px cell, boar 48 px, wolf 48 px); the other 37 resolve via `nature/manifest.nature.json`
+(explicit per-direction trimmed rects), task34 runtime-painted art (bee ~22x13 px, owl ~26x38 px)
+or mount sheets (horse / donkey / yak, already true-scale at 52 px = 1.75 m). Measured drawn
+heights (idle direction-0 frame 0): deer 42, boar 23, wolf 30, bear 28, bison 30, cow 27, moose 45,
+elk 50, stag 48, red_deer 35, alpaca 36, pig 22, sheep 23, goat 26, turkey 28, goose 22, fox 26,
+rabbit 26, cats 27, dogs 25–37, chicken 22, duck 16, crow 21, parrot 24, turtle 20 px. Large
+animals draw ~0.6x true height (bear, bison, cow); small animals sit in a deliberate readability
+band (16–37 px) with mostly-correct relative order. The SCOPE.md fallback ratios assumed base art
+was true-scale, which is false — every fallback scale below is recomputed from the measured drawn
+heights (base art: boar 23, deer 42, wolf 30, rabbit 26, chicken 22 px).
+
+**Decision.** Three data-only parts, all client view-side, no sim change, cannot desync. (a)
+Fallback corrections in `packages/gameplay/data/sprite_fallbacks.json`: deer→boar 1.74,
+stag→deer 0.95, red_deer→deer 0.95, elk→deer 1.03, moose→deer 1.41, bear→boar 1.93, fox→wolf 0.40,
+hare→rabbit 0.34, squirrel→rabbit 0.28, turkey→chicken 1.21, duck→chicken 0.47, goose→chicken
+0.95, goat→deer 0.57, sheep→boar 1.16, cow→boar 1.87, bison→boar 2.33, turtle→boar 0.26,
+pig→boar 1.16, alpaca→deer 0.71, wolf→boar 1.10. Snake stays at 0.6: a uniform scale cannot fix a
+long, low animal. Horse / donkey / yak are untouched (mount sheets already true-scale). (b)
+Safety net for the 13 species with no own art and no fallback entry, so a missing art key degrades
+to a similar animal instead of the 0.55x bare-player fallback: dogs→wolf (dachshund 0.25, beagle
+0.40, lab / husky / shepherd 0.59), cats→fox 0.62 with tints, parrot→crow 0.50, crow→owl 0.31,
+ferret→squirrel 0.35, owl→crow 0.70, bee→crow 0.10. Bee and owl have dedicated task34 runtime art,
+so those two entries fire only if the paint path is ever missing (the `task34-art.ts` comment is
+updated to say so). Boar, chicken and rabbit have own art and no fallback entry: if that art ever
+goes missing they still hit the 0.55x bare-player fallback — deliberate, there is nothing similar
+to fall back to. (c) Live-art table `packages/gameplay/data/animal_scales.json` (11 species,
+deer-anchored readable policy with deer at 42 px: bear 1.65, bison 1.85, cow 1.65, moose 1.4,
+boar 1.35, elk 0.9, wolf 0.9, pig 1.25, sheep 1.2, red_deer 1.2, alpaca 0.85) with
+`animalScale()` / `animalDrawScale()` in `packages/gameplay/src/population.ts`, applied by one
+multiply in `apps/client/src/view.ts` `classify()`'s animal branch — live-art only (the resolved
+key must equal the species' own key) and non-mount only (mounts are already true-scale). A
+fallback resolution already carries its own corrected scale from `sprite_fallbacks.json` and must
+not be multiplied again. Proportions are readable-game, not true-to-life: a true-scale rabbit is
+7 px and a bee under 1 px, so bee and owl stay deliberately over-scale. Babies stay adult-sized.
+The dead double-prefix `animal_animal_crow` in `view.ts:1252-1253` was NOT touched — fixing it
+would change behaviour; it is a decision, not a drive-by. No sheet was found painted the wrong
+size, so no sheets were repainted.
+
+**Verification.** `packages/gameplay/test/adr485_animal_scale.test.ts` 6/6: the live table's exact
+values and defaults (1 / undefined for unlisted species); table keys are real animals with no
+mounts and no bee / owl; all 20 fallback corrections resolve to the measured target at the
+corrected scale (snake pinned at 0.6); all 13 safety-net entries resolve, with the cat tints and
+the chained cat→fox→wolf composition (0.62 x 0.40); every animal key with a fallback entry
+resolves when its own art is missing, with the boar / chicken / rabbit exception pinned; the
+live-art drawn heights come out in the right relative order (bear > boar, bison > cow, moose >
+elk, boar > wolf, red deer ~ deer, alpaca < deer). Revert check: 6/6 fail on pre-change code.
+`adr110-fallbacks` still 5/5.
+
+**Honest cuts.** The `view.ts` multiply has no isolated test: no harness in the repo reaches the
+private `classify` method, so it is verified by typecheck and review — Tracey's eyes on the live
+build are the check that animals look right. Fallback scales are true-scale-based while live
+scales are readable-policy-based (~5% apart, within the pixel-measurement noise), so a species'
+drawn size shifts by that much if its art goes missing and the fallback fires. The pixel heights
+were measured on the f40445b5 pack: if a sheet is repainted at a different size, the table must
+be re-measured.

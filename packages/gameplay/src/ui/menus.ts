@@ -1,7 +1,7 @@
 import { SelectHotbarCmd } from "../input.js";
 import { wetDrySeconds } from "../exposure-stages.js";
 import { ContainerToSlotCmd, MoveSlotCmd, SplitStackCmd } from "../inventory_ops.js";
-import { DropItemCmd, encodePetName, nearestPet, petName, PetResult, PetCommandCmd, PetGuardCmd, PetOfferCmd, PetRenameCmd } from "../pets.js";
+import { DropItemCmd, PlaceItemCmd, encodePetName, nearestPet, petName, PetResult, PetCommandCmd, PetGuardCmd, PetOfferCmd, PetRenameCmd } from "../pets.js";
 import { RopeLeadCmd } from "../rope_commands.js";
 import { ROPE_EVENT_TEXT, type RopeResult } from "../rope.js";
 import { AnimalSkillCmd } from "../animal_skills.js";
@@ -651,6 +651,8 @@ export const animalSkillIntent = (animal: Entity, node: number): MenuIntent => i
 export const readyIntent = (): MenuIntent => intent(ReadyCmd, {});
 export const petRenameIntent = (pet: Entity, name: string): MenuIntent => intent(PetRenameCmd, { pet, ...encodePetName(name) } as never, ["pet"]);
 export const dropItemIntent = (item: number, count: number): MenuIntent => intent(DropItemCmd, { item, count });
+/** ADR-481: place one liquid container on the ground (permanent bag, no claim). */
+export const placeItemIntent = (item: number): MenuIntent => intent(PlaceItemCmd, { item });
 /** ADR-136: nearest crafting station (placed piece or spawned) within its own range of the player; opens its crafting panel on Interact. */
 export function nearestStation(c: MenuCtx): { station: Entity; kind: number } | undefined {
   const w = c.world; const me = w.get(c.player, Transform); if (!me) return undefined;

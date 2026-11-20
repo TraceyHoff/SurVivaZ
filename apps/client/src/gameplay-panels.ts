@@ -25,7 +25,7 @@ import { hasDisease, iconForItem, ROADS, clanTintIndex,
   progressionView, unlockSkillIntent, respecSkillsIntent, SKILL_REJECT_TEXT, useIntent, drinkWaterIntent, nearWater,
   SKILLS, equipIntent, wearIntent, equipmentView, boilIntent, nearLitCampfire, holdingTorch, itemRepairIntent, itemRepairView,
   mountView, mountRideIntent, mountDismountIntent, mountFeedIntent, mountSaddleIntent, mountUnsaddleIntent, mountRepairIntent, mountHarnessIntent, mountUnharnessIntent, mountHitchIntent, mountUnhitchIntent, MOUNT_SPECIES,
-  petView, petsOf, petOfferIntent, petCommandIntent, petGuardIntent, animalSkillIntent, animalSkillView, petStatusLabel, dropItemIntent, splitStackIntent, moveSlotIntent, containerToSlotIntent, slotToContainerIntent, defaultSplit, HOTBAR_SIZE, PACK_SLOTS, HOTBAR_OFFSET, PET_HELP, petName, petSpecies, Pet, Animal, BuildPiece, Tamed,
+  petView, petsOf, petOfferIntent, petCommandIntent, petGuardIntent, animalSkillIntent, animalSkillView, petStatusLabel, dropItemIntent, placeItemIntent, splitStackIntent, moveSlotIntent, containerToSlotIntent, slotToContainerIntent, defaultSplit, HOTBAR_SIZE, PACK_SLOTS, HOTBAR_OFFSET, PET_HELP, petName, petSpecies, Pet, Animal, BuildPiece, Tamed,
   ropeLeadIntent, ropeEquipped,
   workerView, WORKER_JOBS, WORKER_JOB_LABELS, WORKER_JOB_HELP, WORKER_HELP, hireWorkerIntent, dismissWorkerIntent,
   treeShortName, treeIndex, readSlots, SPRITE_FALLBACKS, characterSheetView, dyeView, dyeIntent, wetnessStage,
@@ -471,6 +471,9 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
           if (s.count >= 2) row.append(btn("Split", `split-${s.slot}`, () => startArrange("split", 0, s.slot), { alt: true, role: "split-start" }));
           row.append(btn("To hotbar", `tohb-${s.slot}`, () => startArrange("hotbar", 0, s.slot), { alt: true, role: "hotbar-start" }), pickRow({ kind: "p", slot: s.slot }, s.name));
           if (!s.equipped && !cv) row.append(btn("Drop", `drop-${s.slot}`, () => { invUi.sel = -1; send(dropItemIntent(s.item, s.count), `Dropped ${s.name} ×${s.count}.`); }, { alt: true, role: "drop" }));
+          // ADR-481: place a liquid container on the ground (permanent bag, no claim) — a plain
+          // focusable button like Drop, so touch, D-pad and keys work alike; liquid containers only.
+          if (!s.equipped && !cv && (gameplayDefs(c.world).items.get(s.item)?.sips ?? 0) > 0) row.append(btn("Place", `place-${s.slot}`, () => { invUi.sel = -1; send(placeItemIntent(s.item), `Placed ${s.name}.`); }, { alt: true, role: "place" }));
           det.append(row);
         }
         if (wet && !cv) { const w = grid(); w.dataset["role"] = "consume"; w.append(btn("Drink water", "use-water", () => send(drinkWaterIntent(), "You drink from the water."), { role: "use", alt: true, data: { use: "drink" } })); det.append(w); }

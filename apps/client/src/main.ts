@@ -690,7 +690,13 @@ if (creatorShot) {
         try { const seed = store.readMeta()?.seed; menuWorldSeed = seed; return seed; }
         finally { await store.close(); }
       },
-      mp: { hostCap: `${hc.cap}${hc.mobile ? " (mobile host)" : ""}` } });
+      mp: { hostCap: `${hc.cap}${hc.mobile ? " (mobile host)" : ""}` },
+      // ADR-483: the start menu Settings shows the in-game rows too — same audio/FX/quality
+      // controls GameMenus wires in (main.ts:219), so they live-apply here as well.
+      audio: audio.mixer,
+      fx: { get: () => fxLayer.settings(), set: (v) => { saveFx(v); fxLayer.apply(v); }, click: () => audio.ui("ui.click") },
+      setQuality: (p) => iso?.renderer.setQualityPreset(p),
+      qualityInfo: () => (iso && "quality" in iso.renderer ? (iso.renderer as { quality: { autoLabel(): string; detected?: { name: string; klass: string; remembered: boolean } | undefined } }).quality : undefined) });
     if (choice.kind === "singleplayer" || choice.kind === "host") menuWorldSeed = choice.seed ?? menuWorldSeed;
     boot.hide();
     const kind: CharacterSaveKind = choice.kind === "singleplayer" ? "singleplayer" : choice.kind === "host" ? "hosted" : "remote";
