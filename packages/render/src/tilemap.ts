@@ -166,12 +166,21 @@ export class TilemapRenderer {
   }
 
   /** Combined version stamp of a chunk and the 8 neighbours whose heights affect its cliff faces and
-   *  ADR-409 slope corners (ADR-253: all sides; diagonals feed the shared-vertex corner drops). */
+   *  ADR-409 slope corners (ADR-253: all sides; diagonals feed the shared-vertex corner drops).
+   *  ADR-480: exact 32-bit Math.imul mixing, the same pattern as TileTerrain.stamp — the
+   *  previous float-polynomial hash (~1.2e21 even in a fresh world, where a double's spacing
+   *  is 2^18) rounded away a +1 increment at the tail, so a diagonal chunk loading or being
+   *  edited did NOT change the stamp, sync() skipped the rebuild, and a stale corner drop
+   *  left a side face open to the sky (a triangular blue gap). A +1 at any of the 9
+   *  positions always changes this stamp, at any version (31 is odd, so 31^k is odd). */
   private stamp(map: TileMap, c: Chunk): number {
-    const v = (d: Chunk | undefined): number => (d ? d.version + 1 : 0);
-    const a = map.getChunk(c.cx + 1, c.cy), b = map.getChunk(c.cx, c.cy + 1), a2 = map.getChunk(c.cx - 1, c.cy), b2 = map.getChunk(c.cx, c.cy - 1);
-    const d1 = map.getChunk(c.cx + 1, c.cy + 1), d2 = map.getChunk(c.cx - 1, c.cy + 1), d3 = map.getChunk(c.cx + 1, c.cy - 1), d4 = map.getChunk(c.cx - 1, c.cy - 1);
-    return (((((((c.version * 1009 + v(a)) * 1013 + v(b)) * 1019 + v(a2)) * 1021 + v(b2)) * 1031 + v(d1)) * 1033 + v(d2)) * 1039 + v(d3)) * 1049 + v(d4);
+    let s = c.version;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      if (!dx && !dy) continue;
+      const n = map.getChunk(c.cx + dx, c.cy + dy);
+      s = (Math.imul(s, 31) + (n ? n.version + 1 : 0)) | 0;
+    }
+    return s;
   }
 
   private build(map: TileMap, c: Chunk, old?: ChunkMesh): ChunkMesh {

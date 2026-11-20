@@ -10841,3 +10841,41 @@ downwind and crawls upwind. `apps/client/test/adr479_sailboat_art.test.ts` 6/6: 
 (under the 2048 cap), frame 300x228 matching the fragment, 8 distinct direction cells, sail
 phases differ, dark-plum outline present, sail-cloth pixels present, fragment declares the atlas
 + sprite with `sail` animation, kit menu icon non-blank, geometry matches `vehicles.json`.
+
+## ADR-480: Mesh rebuild stamp loses diagonal-neighbour changes — stale chunk mesh leaves a side face open to the sky (SurVivaZ)
+
+**Context.** Tracey's 2026-11-20 phone photo 1 (live build 8bedc989) shows blue on the side of a
+lone 1-level raised tile at a plateau corner. The blue is sky, not water (sampled ~(100, 135, 175),
+the daytime sky clear colour; no water colour in code matches), and measuring the original photo
+shows the blue region is a TRIANGLE: 53 px wide, ~27 px tall at its left end, tapering to 2 px at
+the right end — full height at one vertex, a point at the other. ADR-418 proved the
+single-consistent-build model airtight (81 height combos, all sealed), so the remaining hole had to
+be cross-build staleness: two different height states disagreeing at a shared vertex.
+
+**Decision.** `TilemapRenderer.stamp` (`packages/render/src/tilemap.ts`) was a floating-point
+polynomial hash of a chunk's version and its 8 neighbours' versions. The stamp is ~1.2e21 even in
+a fresh world (every version contributes +1), where an IEEE-754 double's spacing is 2^18 =
+262,144 — so a +1 increment at the tail of the polynomial rounds away entirely: in a fresh world
+a +1 at d3/d4 does not change the stamp; at versions >= 1 a +1 at d2/d3/d4 does not; at versions
+>= 100 a +1 at d1..d4 does not (proven by direct evaluation of the exact arithmetic). `sync()`
+therefore did not rebuild a chunk's mesh when a diagonal chunk streamed in or was edited, and the
+diagonals feed the shared-vertex corner drops (`slope.ts`) — a stale corner drop flips a slope
+side into a missing cliff, or leaves the top edge a level above the neighbour's fresh edge, opening
+exactly the triangular sky gap in the photo. The stamp is now the exact 32-bit `Math.imul(s, 31)`
+mixing already used by `TileTerrain.stamp` (`packages/render/src/terrainTiles.ts`): a +1 at any
+of the 9 positions always changes it, at any version (31 is odd, so 31^k is odd). No other stamp
+needed changing: the TileTerrain stamp was already exact 32-bit, and the Canvas2D ground-block
+stamp is a string. Render-only: no gameplay, balance, touch-input, or graphics-quality change.
+
+**Verification.** `packages/render/test/adr480_mesh_stamp.test.ts` 5/5, all failing on the pre-fix
+stamp (revert check): 4 stamp unit tests (all 9 positions move the stamp at versions 0, 1, 100,
+1024) and 1 end-to-end repro driving the real `sync()` — a lone raised tile at a chunk corner
+whose +x edge is a slope side while the (1,-1) diagonal chunk is unloaded, then the diagonal
+streams in with a low tile: on pre-fix code the mesh is not rebuilt and the +x cliff quad is
+absent; on fixed code the mesh rebuilds and the quad is present with the exact trapezoid
+[5, 4, 4, 3].
+
+**Honest cuts.** The fix guarantees the mesh rebuilds whenever any of the 9 versions changes; it
+does not prove this was the only stale-mesh path in the game, only that this path reproduces the
+photo's exact triangle shape and is closed. Tracey's phone test on the live build is still the
+check that the blue gap is gone in real play.
