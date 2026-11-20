@@ -7,5 +7,6 @@
   "spreadRadius": 1.6,
   "spreadChance": 0.08,
   "rainQuench": 40,
-  "flammableTiers": [0, 1]
+  "flammableTiers": [0, 1],
+  "lightning": { "strikesPerStorm": 1, "radius": 15, "minDistance": 5 }
 }

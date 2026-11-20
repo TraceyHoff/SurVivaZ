@@ -201,6 +201,9 @@
     "sunDryMul": 2.0
   },
   "wetBuffThreshold": 0.3,
+  "rainFillSecondsPerSip": 45,
+  "smoke": { "heatC": 12, "openness": 0.1, "hpPerSec": 1 },
+  "footprints": { "fadeSeconds": 60, "snowCover": 0.5, "wetness": 0.5, "nearPlayerTiles": 40, "sampleTicks": 5, "maxFootprints": 512 },
   "coldBuffBelow": 10,
   "spoilage": {
     "tempRefC": 20,

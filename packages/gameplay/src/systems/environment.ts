@@ -12,7 +12,9 @@
  */
 import { addModifier, dayNoise, entityIndex, ModOp, Season, seasonFromDays, timeOfDay, sunFractionOf, Transform, Weather, type Entity, type SeasonInfo, type TimeOfDayInfo, type World } from "@engine/core";
 import { ClimateRes, climateAt, EmitterIndexRes, type BaseClimate, type ClimateContext, type ClimateModel, type ClimateSample } from "@engine/world";
-import { Buffs, ChunkSurface, Exposure, RoomHeat, Stat, Wetness } from "../components.js";
+import { Buffs, ChunkSurface, Exposure, Inventory, RoomHeat, Stat, Wetness } from "../components.js";
+import { fillContainer } from "../food.js";
+import { listSlots } from "../inventory.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks, WeatherKind, isSnowing, type EnvironmentTuning, type VitalsTuning, type WeatherDef } from "../defs.js";
 import { DayPhase, DayPhaseChanged, emit, WeatherChanged } from "../events.js";
@@ -21,6 +23,7 @@ import { shelterAt, roomOpennessAt, type Shelter } from "../building/shelter.js"
 import { waterproofOf } from "../combat/arms.js";
 import { dryWetness } from "../exposure-stages.js";
 import { inWater } from "./movement.js";
+import { FREEZING_C } from "../frozen.js"; // ADR-450: the constant lives in frozen.ts (cycle-free home)
 import { isUnderground, TERRAIN } from "../terrain_depth.js";
 
 export const EXPOSURE_EVERY = 4;
@@ -129,8 +132,9 @@ function dailyNoise(days: number): number {
   return dayNoise(d0, 239) * (1 - k) + dayNoise(d0 + 1, 239) * k;
 }
 
-/** Task 23: freezing point (deg C) — snow may only fall below it (32F). */
-export const FREEZING_C = 0;
+/** Task 23: freezing point (deg C) — snow may only fall below it (32F). The constant lives in
+ * frozen.ts (ADR-450); re-exported here so guide.ts / spoilage.ts keep importing it from this module. */
+export { FREEZING_C };
 
 /**
  * ADR-239 seasonal base air temperature (deg C): the blended season curve (mean + day/night + per-day noise),
@@ -320,7 +324,11 @@ export function exposureSystem(world: World, dt: number): void {
     // room or roofless spot holds no heat, and stored heat vents away fast when a door or shutter is opened.
     const enclosed = sh.exposure === 0;
     const prevHeat = hasRoomHeat ? (world.getField(e, RoomHeat, "heat") ?? 0) : 0;
-    const vent = roomHeatVentFactor(roomOpennessAt(world, x, y, z));
+    // ADR-456: room openness, hoisted — the room-heat vent factor and the sealed-smoke check share
+    // one call per occupant per pass (ADR-440 pins: sealed 0, one closed-shutter window 0.0375,
+    // one open shutter 0.15, one open door 0.25, roofless/outdoors 1).
+    const openness = roomOpennessAt(world, x, y, z);
+    const vent = roomHeatVentFactor(openness);
     const roomHeat = approachRoomHeat(prevHeat, enclosed ? Math.min(heat, FIRE_HEAT_MAX_C) * vent : 0, dt, FIRE_HEAT_TAU_S * vent);
     // Write on any change (at equilibrium approachRoomHeat returns the current value exactly, so this stops
     // on its own). A fixed epsilon here would freeze the tail: the per-call delta shrinks with the value.
@@ -350,6 +358,21 @@ export function exposureSystem(world: World, dt: number): void {
     else felt += heat;
     ex.data.wetness[s] = wet; ex.data.feltTemp[s] = felt; ex.data.sheltered[s] = Math.round(sh.factor * 100); /* ADR-312: shelter percent 0..100 (HUD icon) */ ex.markChanged(idx);
 
+    // ADR-452: rain fills open water — a carried liquid container gains +1 sip per
+    // rainFillSecondsPerSip of unsheltered rain (one deterministic roll per exposure tick, first
+    // container with room). Hooks this existing pass (sh.rain already computed); no new scan.
+    // Rain water is untreated, so fillContainer reverts a boiled container to its raw variant.
+    // Ground / storage containers are out of scope. Bots fill too — same code path, they carry
+    // containers like players.
+    if (isRaining(w.kind) && sh.rain > 0 && world.has(e, Inventory)) {
+      if (world.rngFor("rainfill", e).next() < dt / env.rainFillSecondsPerSip) {
+        for (const sl of listSlots(world, e)) {
+          const max = defs.items.get(sl.item)?.sips ?? 0;
+          if (max > 0 && sl.durability < max) { fillContainer(world, e, sl.slot, 1); break; }
+        }
+      }
+    }
+
     // ADR-277: felt temperature drives body-temperature progression; no instant air damage.
 
     // render-facing wetness (only write on change)
@@ -364,6 +387,19 @@ export function exposureSystem(world: World, dt: number): void {
     setMul(world, e, Stat.ThirstRate, thirst, expires);
     setMul(world, e, Stat.HungerRate, hunger, expires);
     setMul(world, e, Stat.StaminaRegen, regen, expires);
+
+    // ADR-456: smoke in a sealed room — a roaring fire (heat >= smoke.heatC: close to a lit campfire
+    // at 18 or fireplace at 22; a torch at 4 never counts) in a sealed-ish room (openness <=
+    // smoke.openness) hurts at smoke.hpPerSec * (1 - openness) hp/s. Stateless v1: a HealthRegen
+    // Add modifier (the sick-food pattern), refreshed while the condition holds and lapsing on its
+    // own ~9 ticks after a door/shutter is opened or the fire goes out. No accumulator, no new
+    // component. Threshold 0.1 (not the SCOPE's 0.25): ADR-440 pins one open door at 0.25 and one
+    // open shutter at 0.15, so 0.25 would still smoke with the door open; 0.1 sits between one
+    // closed-shutter window (0.0375, still smokes) and one open shutter (0.15, vents). Bots share
+    // this pass, so a bot in a sealed room with a roaring fire is hurt the same way.
+    if (heat >= env.smoke.heatC && openness <= env.smoke.openness) {
+      addModifier(world, e, Buffs, { stat: Stat.HealthRegen, op: ModOp.Add, value: -env.smoke.hpPerSec * (1 - openness), expiresAtTick: expires });
+    }
   }
 }
 function setMul(world: World, e: Entity, stat: Stat, value: number, expiresAtTick: number): void {

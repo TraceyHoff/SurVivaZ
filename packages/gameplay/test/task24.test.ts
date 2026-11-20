@@ -123,14 +123,18 @@ describe("Task 24 heat damage vs fire heat", () => {
     const p = spawnLearned(w, { x: 10.5, y: 10.5 });
     setSeason(w, 0, 1.5); setTimeOfDay(w, 14);
     Object.assign(w.env(Weather), { kind: G.WeatherKind.Heat, intensity: 1, endsAtTick: 0xffffffff });
-    const camp = place(w, b, "campfire", 10.5, 10.5); light(w, camp);
+    const camp = place(w, b, "campfire", 10.5, 10.5); const f = light(w, camp);
     const hp0 = w.get(p, G.Health)!.hp;
-    steps(w, 30 * SEC); // Room warms, but body is not yet at the damaging tier.
-    expect(w.get(p, G.Health)!.hp).toBe(hp0);
+    steps(w, 30 * SEC); // Room warms. ADR-456: the sealed room + roaring fire smokes first — the body IS hurt before the heat tier, by smoke, not heat.
+    const hp1 = w.get(p, G.Health)!.hp;
+    expect(hp1).toBeLessThan(hp0); // smoke harm (sealed room, heat 18 >= 12, openness 0)
     expect(feltOf(w, p)).toBeGreaterThan(32);
+    snuff(w, f); // smoke source off, so the heat damage below is isolated: the smoke modifier lapses ~9 ticks after the fire goes out.
+    steps(w, SEC);
+    const hp2 = w.get(p, G.Health)!.hp;
     w.setField(p, G.Survival, "bodyTemp", 39);
     steps(w, SEC);
-    expect(w.get(p, G.Health)!.hp).toBeLessThan(hp0);
+    expect(w.get(p, G.Health)!.hp).toBeLessThan(hp2); // heat damage at the damaging tier, smoke fully lapsed
   });
   it("standing by a campfire outdoors on a hot (not heat-wave) day does not hurt (Task 23 cut, now covered)", () => {
     const w = makeWorld(); const p = G.spawnPlayer(w, { x: 0, y: 0 });

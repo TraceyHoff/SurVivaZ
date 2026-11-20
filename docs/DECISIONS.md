@@ -9526,3 +9526,482 @@ known pre-existing, each confirmed) / 9 skipped across 737 files. No test file f
 Coordinator re-ran the new tests: 4/4 (`adr448_full_bag_stash.test.ts`), plus the updated
 ADR-265 suite. V2r one-off verification: `adr252_ai_humans_live.test.ts` 8/8 with the failed V2r
 worldgen (`3dc00855`) applied in a scratch worktree at this commit — the layout trigger is closed.
+
+## ADR-449: Mud after rain — wet ground slows walking off-path, worn dirt paths stay fast (SurVivaZ)
+
+**Context.** Rain wets the ground (ChunkSurface wetness, per chunk, 0..1) but walking speed ignored it: a
+soaked field was as fast as a dry one, and the worn dirt paths ADR-413 lays had no reason to be
+preferred in the wet. The cost rule for this batch forbids new per-tick scans; the fix must piggyback
+a multiplier that already runs.
+
+**Decision.** One multiplier in the existing `speedMultiplier` (`packages/gameplay/src/systems/movement.ts`,
+after the `roadSpeedMul` step): when the mover is off any road surface (`roadSurfaceAt(...) ===
+RoadSurface.None`) and the chunk wetness at the mover (`chunkWetnessAt`, O(1) map lookup) is at or
+above `mudWetnessThreshold`, multiply speed by `mudSlowMul`. Tuning in `packages/gameplay/data/movement.json`:
+`"mudSlowMul": 0.85, "mudWetnessThreshold": 0.5`. Dirt paths keep their 1.1x (the road check runs
+first, so a path on wet ground is fast, not muddy). The ChunkSurface producer is included: before
+this ADR `chunkSurfaceSystem` iterated an empty store — no producer ever spawned a surface. `world.ts`
+now owns `ChunkSurfaces` (a `Map<ChunkKey, Entity>` resource), `ensureChunkSurface` (idempotent),
+`despawnChunkSurface`, and `chunkWetnessAt`, wired into `attachWorldStreaming` onLoad (authority,
+next to `spawnChunkNodes`) and onUnload. Wetness is transient: rain re-wets a reloaded chunk.
+
+**Consequences.** Wet off-path ground costs 15% speed; paths stay the fast way through the wet. No new
+scan, no new per-frame work (the multiplier is inside the existing movement pass). Rain rate is
+0.01/s (`environment.json` `surface.rainPerSec`), so ~60 s of rain crosses the 0.5 threshold.
+
+**Verification.** `packages/gameplay/test/adr449_mud.test.ts` 9/9: dry 1.0; wet 255 -> 0.85; threshold
+boundary 127/255 -> 1, 128/255 -> 0.85; dirt path on wet ground -> 1.1 (no mud); rain via
+`chunkSurfaceSystem` 60x1 s -> wetness >= 0.5 -> 0.85; producer idempotence; despawn; no surface -> 0.
+
+## ADR-450: Winter ice — still water freezes below 32 F, walkable, thaws in spring (SurVivaZ)
+
+**Context.** Winter changed the look (snow cover, ice visuals) but never the water: lakes stayed liquid
+and uncrossable all winter. The freeze must flip on the temperature change that already drives
+seasons, with no slip physics and no new per-tick scan.
+
+**Decision.** Frozen = the blended season mean temperature is below 0 C (weights x meanTemp; summer
+26.1, fall 11.4, winter -8.05, spring 12.2 C) — the mean, not the instantaneous temperature, so lakes
+don't flicker open on mild winter afternoons; freezing happens over the 0.75-day season blends and
+thaws in spring; seasons off = never frozen. New module `packages/gameplay/src/frozen.ts` (the
+cycle-free home: `environment.ts` already imports `movement.ts` for `inWater`, so the predicate could
+not live there): `FREEZING_C = 0` moved there (environment.ts re-exports it — guide.ts and spoilage.ts
+import it from environment.js unchanged), `isWaterFrozen(world)` cached once per world tick in a
+WeakMap keyed on (tick, Season offsetDays/lengthDays/blendDays), `isFrozenWaterAt(world, tx, ty)` =
+water tile + not flow water (`isFlowWater` via `Terrain.rawHeightAt`, fallback to `heightAt`; rivers,
+dug channels and waterfalls never freeze) + frozen. One choke point each: `waterDepth()` returns None
+on frozen still water (no swim speed, no swim anim, no wetness gain standing on ice); `inWater()`
+returns false; `movementBlocked` and `terrainBlocksWalker` exempt frozen still water (animals and
+zombies cross the ice); `animSettleSystem` exempts frozen water from the Swim switch. `worn_paths.ts`:
+the "never pave a lake" check changed from `inWater` to a raw `isWaterId(terrain.tileAt(...))` check
+(`inWater` now reads frozen lakes as land — otherwise bots would lay dirt paths across frozen lakes).
+Walk speed on ice is 1.0x, no slip physics.
+
+**Consequences / open collisions (reported, not solved here).** Boats on a frozen lake cannot move
+(`boatWaterMul` -> 0, `boatPoseBlocked` -> true — they freeze in, no crash); fishing and drinking
+through ice are disabled (`inWater` false). Bot long-distance travel planning across UNLOADED terrain
+still uses raw `waterDepthAt` (conservative — routes around a frozen lake until the chunk loads). A
+winter heat wave does NOT thaw the ice in v1 (the predicate ignores weather).
+
+**Verification.** `packages/gameplay/test/adr450_winter_ice.test.ts` 7/7: frozen predicate across seasons
+(summer/fall false, winter true, spring false — all at the same tick, exercising the cache key);
+`isFrozenWaterAt` (still deep + shallow true in winter, land false, flow false, summer false);
+movementBlocked deep in/out of winter + shallow always wadeable; terrainBlocksWalker; waterDepth /
+inWater / swimSpeedMulAt (Deep/true/swim mul in summer -> None/false/1 in winter); animSettle (Walk
+stays Walk on frozen lake, becomes Swim in summer); flow water still blocks in winter. Test note:
+TileMap land must be real `GRASS_TILE`, not tile 0 — `waterDepthAt` never counts tile 0 as land.
+
+## ADR-451: Lightning in storms — one roll per storm, only near players, scorches a tree or starts a small fire (SurVivaZ)
+
+**Context.** Storms had thunder and lightning bolts in the sky (`onLightning` existed) but no gameplay
+effect: no strike ever landed. `WeatherChanged` and `onLightning` both had zero consumers.
+
+**Decision.** Roll server-side once per storm on `WeatherChanged`. Tuning in `packages/gameplay/data/fire.json`:
+`"lightning": { "strikesPerStorm": 1, "radius": 15, "minDistance": 5 }`. New component `LightningFire`
+(`{ struckTick: "u32" }`, networked + persistent) appended to `components.ts` + the append-only
+`GAMEPLAY_COMPONENTS` list. `installLightning(world)` subscribes to `WeatherChanged` (once per world;
+one `world.rngFor("lightning")` stream per storm, sequential draws); `resolveLightningStrike(world, rng)`:
+pick a random survivor, strike point 5–15 tiles away at a random angle; nearest tree (axe-node
+`ResourceNode`, `requiredTool === ToolKind.Axe`, not oneShot) within radius -> `depleteNode` (the tree
+dies, leaves a stump for `stumpSeconds` 45 s, regrows after `respawnSeconds` 300 s); else nearest
+flammable piece (`flammableTiers` [0,1]) -> `igniteLightning` (ignite + the marker); else no strike;
+never strikes a person. `burningSystem` skips `rainQuench` for entities with `LightningFire` (a fresh
+lightning fire would otherwise die in ~3 checks: quench 40 vs grow 16) — lightning fires are exempt
+from storm quench. `extinguish()` also removes the marker. Wired in `install.ts` next to
+`installDiseases`. `FireTuning` in `packages/gameplay/src/combat/pvp_pieces.ts` gained the `lightning`
+block.
+
+**Consequences.** At most one strike per storm, always 5–15 tiles from a survivor, never on a person.
+A scorched tree regrows; a lightning fire can catch in a storm (and must be fought or left to burn).
+
+**Verification.** `packages/gameplay/test/adr451_lightning.test.ts` 7/7: stub rng puts the strike exactly
+5 tiles east of the anchor; tree at (5,0) depletes with a `NodeRegrow` marker (stump + respawn at tick +
+300x20); no-tree case ignites a wooden wall with `Burning` + `LightningFire`; `WeatherChanged` emit ->
+exactly 1 tree dies from a ring of 8; no survivors -> no strike; ordinary fire dies in a storm over
+7 burning checks (140 ticks) while the lightning fire grows past 128; `extinguish` removes the marker.
+Note: `emit` is deferred — tests step once after emitting before asserting.
+
+## ADR-452: Rain fills open water — waterskins and containers left outside gain water (SurVivaZ)
+
+**Context.** Rain wet the player and the ground but never filled a container: an empty waterskin stayed
+empty in a downpour. The precipitation tick already exists; the fill must hook it, not add a scan.
+
+**Decision.** Hook in `exposureSystem` (`packages/gameplay/src/systems/environment.ts`, every 4 ticks,
+`sh.rain` already computed): if raining and `sh.rain > 0` and the entity has an Inventory, one
+deterministic roll `world.rngFor("rainfill", e).next() < dt / env.rainFillSecondsPerSip`, then fill the
+first carried liquid container with room via `fillContainer(world, e, slot, 1)` (+1 sip per
+`rainFillSecondsPerSip`). Tuning in `environment.json`: `"rainFillSecondsPerSip": 45`.
+Rain water is untreated, so a boiled container reverts to its raw variant on refill (existing
+`fillContainer` behaviour). Held/carried containers only — ground and storage containers are out of
+scope. Bots fill too (same code path).
+
+**Consequences.** An empty waterskin fills to 3 sips in ~135 s of unsheltered rain (300 s in the test
+covers the roll variance). Roofed players stay dry and unfilled. No new scan, no new per-frame work.
+
+**Verification.** `packages/gameplay/test/adr452_rain_fill.test.ts` 6/6: empty waterskin fills to 3 sips
+in 300 s rain; Clear -> no fill; roofed room (task24 room builder) -> no fill; boiled_waterskin
+reverts to raw on refill; full container stays 3. Test note: `weatherSystem` forbids rain on day 0, so
+tests use `setTimeOfDay(w, 12, 1)` (day 1) + the adr312 `run` pattern (drive `exposureSystem(w, 0.2)`
+directly with `w.tick += 4` per call; `makeWorld` pins weather via `endsAtTick = 0xffffffff`).
+
+## ADR-453: Smoke columns — campfires show a thin smoke column from far off (SurVivaZ)
+
+**Context.** A lit campfire was invisible until you were close enough to see the fire itself: no
+way to spot a distant camp. The map already renders `visibleMarkers` pins generically; a marker is
+the cheapest far-off signal.
+
+**Decision.** Map-marker variant only — the in-world tall column is NOT built in this batch. In
+`packages/gameplay/src/map_markers.ts`: `spawnMarker` refactored to delegate to new
+`spawnMarkerOwned(w, owner, clientId, x, y, visibility, label, party, clan)` (same behaviour);
+`SMOKE_MARKER_LABEL = "Smoke"`, `SMOKE_HEARTH_KEYS = ["campfire", "fireplace"]`; `smokeTargetFor(world, fire)`
+resolves a Fuel entity to its piece via `pieceOf` (builder = `PieceOwner`, mirroring `builtBy`) or a
+free-standing `Campfire` station (owner 0); `placeSmokeMarker` (idempotent, one per fire),
+`removeSmokeMarker` (in-memory `WeakMap<World, Map>` index, fallback to a position+label scan within
+1.5 tiles for the post-restart case), `removeSmokeMarkerForPiece` (index only — the piece is gone);
+`installSmokeMarkers(world)` subscribes to `FireToggled` (place on lit, remove on unlit) and
+`PieceDestroyed` (cleanup); wired in `install.ts`. No client change (the client map already renders
+`visibleMarkers` pins generically; a "Smoke" marker appears as a pin + label). Visibility private (0)
+— only the owner sees their smoke.
+
+**Consequences / open items.** Party/clan sharing is an open follow-up (private-only for now). The
+owner's clientId is looked up from the live `[PlayerId]` entity's `Owner` component (0 when offline —
+the marker still exists, it just cannot replicate until they are back). Destroy-while-lit smoke
+markers rely on the `PieceDestroyed` cleanup; a marker whose fire is destroyed while the world is
+down is cleaned by the position+label scan on the next unlit event.
+
+**Verification.** `packages/gameplay/test/adr453_smoke_columns.test.ts` 7/7: place campfire, add coal,
+`ToggleFire` intent -> marker appears (label "Smoke", visibility 0, owner 7, at the fire's position);
+snuff -> removed; re-light -> still 1; fireplace qualifies; Furnace station lit -> no marker;
+`PieceDestroyed` emit -> removed; another player (id 8) sees nothing. Note: `G.Transform` is NOT
+exported from the gameplay index — tests import `Transform` from `@engine/core`.
+
+## ADR-454: Bees pollinate — crops within a few tiles of an Apiary yield a bit more (SurVivaZ)
+
+**Context.** Apiaries existed (bees, honey) but did nothing for nearby crops: no pollination. The
+harvest already computes yields; the bonus must be checked once at harvest only, not per tick.
+
+**Decision.** `apiaryWithin(world, x, y, radius)` exported from `packages/gameplay/src/skills/husbandry.ts`
+(reuses the StructureIndex-versioned station cache; attachments have Transforms).
+`packages/gameplay/src/systems/gathering.ts`: pollinated flag = `def.key.startsWith("crop_") &&
+world.has(node, GrownPlant) && apiaryWithin(...)`; +1 on first yield only, after skill scaling.
+Tuning in `packages/gameplay/data/farming.json`: `"pollination": { "radius": 5, "bonus": 1 }` (also
+added `"compostFertilizerSeconds": 600` there for ADR-460). Planted-vs-wild discriminator is the
+`GrownPlant` component (mature planted crops get it in `farming.ts` cropGrowthSystem; wild nodes
+don't). No stacking across apiaries (one bonus, however many apiaries are in range).
+
+**Consequences.** A planted crop within 5 tiles of an Apiary yields +1 on its first yield only. Wild
+crops are unaffected. No new scan (the check runs inside the existing harvest path).
+
+**Verification.** `packages/gameplay/test/adr454_bees_pollinate.test.ts` 5/5: paired worlds with identical
+entity creation order (two apiaries always placed, positions vary) so the gather RNG stream matches
+and base vs base+1 is exact. No import cycle (`apiaryWithin` exported via `src/index.ts` `export *`).
+
+## ADR-455: Footprints in snow and mud (SurVivaZ)
+
+**Context.** Walking left no trace: snow and mud showed no sign of passage. The SCOPE found no
+transient per-tile overlay state anywhere (worn paths are permanent roads; ChunkSurface wetness is
+per-chunk; snow cover is a global season uniform) and the feature as specified breaks the cost rule
+in three ways (new state, per-step stamping, new art). Tracey authorized the transient overlay store
+(the one place this batch adds new per-step state) and new runtime-painted art for footprints.
+
+**Decision.** CLIENT-SIDE ONLY transient decals (SCOPE option ii). The net client never steps the
+gameplay sim (`packages/net/src/client.ts` is a snapshot/interpolation client), so a sim-side
+footprint store would live only on the server and never reach any screen; sharing footprints as
+world state would need per-step entity replication, which the cost rule forbids. So each client
+stamps its own footprints from the replicated state it already has (mover Transforms, per-chunk
+wetness via the networked ChunkSurface, season snow cover) and draws them as one-frame VFX overlays
+(the StallLayer pattern: replaced before each render, sharing the lit, depth-sorted sprite batch).
+No sim state, no replication, no persistence — a footprint is gone on reload, which is correct for
+something that fades in 60 s. `apps/client/src/footprints.ts`: `FootprintStore` (stamps
+`Map<tileKey, {x, y, untilTick, facing, variant}>`, `version`, `lastSampleTick`, `lastPos`);
+`sampleFootprints` runs at most once per `sampleTicks` (5 ticks = 0.25 s), sampling movers (players +
+bots via `Survival`, animals via `Animal`, zombies via `Zombie` — all networked) near the local player
+(Chebyshev `nearPlayerTiles`); a mover stamps its tile only when it ENTERED a new tile since the last
+sample and the surface qualifies (ground snow cover >= `snowCover`, or the chunk wetness >=
+`wetness`); standing still stamps nothing and never refreshes a print. Facing is the travel direction
+(derived from the sampled position delta — animals/zombies don't update `Transform.facing` per tick);
+variant alternates left/right foot (a lateral offset perpendicular to the heading, +-0.18 tiles).
+Prints fade linearly over `fadeSeconds` and are pruned on the next sample after expiry; the store is
+capped at `maxFootprints` (oldest evicted first). Tuning in `environment.json` `footprints`:
+`{ fadeSeconds: 60, snowCover: 0.5, wetness: 0.5, nearPlayerTiles: 40, sampleTicks: 5,
+maxFootprints: 512 }` (also added to `EnvironmentTuning` in `defs.ts`). `collectFootprintOverlays`
+builds the VFX spawns (alpha from remaining life, `flat: true`, facing from the stamp). Art:
+`apps/client/src/footprints-art.ts` paints the footprint at runtime (Px canvas): a single boot print
+(sole + toe ball + heel pad, dark semi-transparent, pre-sheared for the iso ground plane — the Flat
+flag only fixes the depth key, the art itself must already be an iso-aligned oval, like the road
+decals), 8 directional frames in a 512x64 atlas (frame f points along `TASK34_DIR_VEC[f]`, the bee's
+convention); fragment `packages/assets/pack/task455/manifest.task455.json` (layout only, `dirStride:
+1`, anchor centre) registered in `MANIFEST_INDEX`; `footprintAtlasSources()` merged in `view.ts`
+next to the task34/256/355 sources. The fragment ALSO has to be served: `apps/client/vite.config.ts` MOUNTS allow-list (the `task34|…|task422` alternation) — without `task455` there the dev server never serves `pack/task455/manifest.task455.json`, the client manifest omits the fragment (ADR-248 parity fails), and the atlas key never reaches the registry, so footprints would never render on the live build. Caught by the ADR-248 parity test in the full suite; fixed by adding `task455` to the allow-list. Lesson: a new pack fragment needs THREE registrations — `MANIFEST_INDEX`, the fragment file on disk, and the vite MOUNTS allow-list. Render: `flat?: boolean` added to `VfxSpawn`/`VfxInstance`
+(`packages/render/src/vfx.ts`) and honored in the WebGL2 VFX push (`packages/render/src/sprites.ts`,
+`SpriteFlag.Flat` OR'd in). Wired in `View.render()`: sample from the net world (replicated
+Transforms), snow cover from the view world (its season is set there), sprite id cached after the
+first resolve, overlay assigned to `r.vfx.overlay` before `r.render(v, alpha)`.
+
+**Consequences / open gaps.** Canvas2D has no main VFX layer (`r.vfx` undefined — ADR-242), so
+footprints render on WebGL2 only; the Canvas2D fallback does not draw them. Footprints are
+per-client: you see your own and nearby movers' prints, but a print is not shared world state (a
+player on another client does not see the same print unless their own client stamped it from the
+same replicated movement). The facing convention (frame f = heading f*45 deg in world atan2 terms)
+follows the engine's geographic facing; if the atlas's directional frame order is offset, all prints
+rotate together (a consistent cosmetic offset, not a per-print error).
+
+**Verification.** `apps/client/test/adr455_footprints.test.ts` 13/13: tuning values; walking in snow
+stamps one footprint per tile (facing east = 0, variant alternates); dry summer grass stamps nothing;
+soaked chunk in summer stamps (mud); standing still stamps nothing and never refreshes; a mover far
+from the player stamps nothing (near-player gate) while the same rabbit near the player stamps;
+prints fade after 60 s (pruned on the next sample); the store caps at 512 (oldest evicted first,
+tested with a long fade so expiry cannot interfere — a 600-tile walk at 5 ticks/sample takes 150 s,
+past the 60 s fade, and with the real fade the store holds 240); the overlay is flat VFX spawns with
+alpha from remaining life (1.0 fresh, ~0.5 halfway, empty past expiry); `quantizeDir8` (east 0, south
+2, west 4, north 6); the painted atlas is 512x64 with 8 non-empty frames and opposite facings differ;
+the fragment declares the atlas + sprite (`dirStride: 1`); `footprintAtlasSources()` is a no-op map in
+a canvas-less environment (no crash).
+
+## ADR-456: Smoke in a sealed room — a roaring fire in a sealed room builds smoke and hurts if ignored (SurVivaZ)
+
+**Context.** A roaring fire in a sealed room was cozy and harmless: the room warmed (ADR-440) but the
+smoke had nowhere to go and no cost. Opening a window or door vents a room (ADR-440's openness
+number); the smoke must use that same number, on the slow tick, with no accumulator.
+
+**Decision.** Stateless v1 (Tracey's decision): instant proportional harm in `exposureSystem`
+(`packages/gameplay/src/systems/environment.ts`, the existing per-occupant pass every 4 ticks). The
+room openness is hoisted into a local (`roomOpennessAt` once per occupant per pass — shared by the
+room-heat vent factor and the smoke check, not called twice). When the fire's heat at the occupant is
+at or above `smoke.heatC` (close to a lit campfire at 18 or fireplace at 22; a torch at 4 never
+counts) and the openness is at or below `smoke.openness`, a `HealthRegen` Add modifier (the sick-food
+pattern, `vitals.ts:114`) of `-smoke.hpPerSec * (1 - openness)` is refreshed, lapsing on its own ~9
+ticks after a door/shutter is opened or the fire goes out. No accumulator, no new component. Tuning
+in `environment.json` `smoke`: `{ heatC: 12, openness: 0.1, hpPerSec: 1 }` (also added to
+`EnvironmentTuning` in `defs.ts`). At fully sealed (openness 0) the Add is -1.0 hp/s against the
+0.25 hp/s well-fed base regen — a net drain of 0.75 hp/s (1.0 hp/s when not well-fed), ~100–133 s to
+die from smoke alone if ignored. Threshold 0.1, NOT the SCOPE's suggested 0.25: ADR-440 pins one open
+door at 0.25 and one open shutter at 0.15, so 0.25 would still smoke with the door open; 0.1 sits
+between one closed-shutter window (0.0375, still smokes at 0.96x) and one open shutter (0.15, vents).
+Bots share the pass, so a bot in a sealed room with a roaring fire is hurt the same way. A real bug
+found while testing this ADR: the ADR-450 refactor's `export { FREEZING_C } from "../frozen.js"` in
+`environment.ts` did not create a local binding, so `snowAllowed` threw `ReferenceError:
+FREEZING_C is not defined` whenever the weather system considered snow — fixed by importing it at
+the top of the file and re-exporting (`export { FREEZING_C };`), so guide.ts and spoilage.ts keep
+importing it from this module.
+
+**Consequences.** A sealed room + roaring fire drains hp until a door/shutter is opened or the fire
+goes out; opening a vent stops the harm within ~0.5 s and regen resumes. The harm only applies when
+no other damage is occurring (the vitalsSystem regen branch is skipped while `dmg > 0` — the same
+property as the sick-food pattern).
+
+**Verification.** `packages/gameplay/test/adr456_sealed_smoke.test.ts` 7/7: tuning values; sealed room +
+roaring fire hurts (hp drops ~45 in 60 s, modifier -1.0 hp/s, heatAt >= 12, openness 0); opening the
+door vents it (hp stops dropping, modifier lapses to 0, openness 0.25); unlit fire does not smoke (hp
+100); open doorway vents it (hp 100, openness 0.1875); one open shutter vents it (hp 100, openness
+0.15); one closed-shutter window still smokes, weaker (modifier -0.9625, hp drops). The test reuses
+the adr440 hut/litRoom builders (foundation + 4 walls + roof_flat, lit campfire piece).
+
+## ADR-457: Wet firewood — wood gathered in rain burns shorter; dry stored wood burns full (SurVivaZ)
+
+**Context.** Wood gathered in a downpour burned as long as wood gathered dry: rain had no effect on
+fuel. The SCOPE's redesign (accepted): a separate `wet_wood` item gathered INSTEAD of wood when it is
+raining at gather time, with its own fuelSeconds — never a second roll, never a status on stored wood.
+
+**Decision.** Data: `wet_wood` added to `packages/gameplay/data/items.json` right after `wood`
+(`{"key": "wet_wood", "name": "Wet Pine Log", "category": "resource", "maxStack": 50, "weight": 0.5,
+"fuelSeconds": 10}` — no `"sprite"` field, so `spriteKey` defaults to `"wet_wood"`; wood is 20 s).
+Drying recipe `dry_wet_wood` in `recipes.json` (`wet_wood` 1 -> `wood` 1, station none, 30 s).
+`ids.lock.json` regenerated (`pnpm --filter @engine/gameplay lock:ids`): wet_wood item id 521,
+dry_wet_wood recipe id 407 (the regen also supplied the ADR-459 keys, whose earlier regen had not
+persisted: cured_poultry 517, cured_prime_cut 518, cured_venison 519, smoked_fish 520; recipes 403–406).
+Gathering: in `packages/gameplay/src/systems/gathering.ts`, hoisted `const raining =
+isRaining(world.env(Weather).kind)` before the yields loop; per yield, the item handed over is
+`wet_wood` when `y.item` is wood's numeric id and it is raining (`addItem` + `ItemGathered` +
+`InventoryOverflow` all use the substituted item; the skill roll and counts stay on "wood"). Yields
+store numeric item ids (resolved at loadDefs), not string keys — the first version compared
+`y.item === "wood"` (always false) and the probe proved it (tree yields `[{item: 1, ...}]`, wood id 1).
+Applies to players and bots (shared path); hardwood is NOT substituted (no wet_hardwood). Rain = Rain
++ Storm kinds. Art (authorized new art): `apps/client/src/wetwood-art.ts` — runtime-painted wet-log
+icon (128x128, Px canvas, ADR-387 book pattern): dark wet bark, wet sheen, bark ridges, pale sawn end
+with growth rings, rain droplets with white highlights, one drip, ground shadow; registered in
+`ICON_DATA` as `wet_wood.png` + a `[data-icon="wet_wood"]` override style, wired in `view.ts` next to
+`installGuideMenuIcon()`. Dropped items are loot bags (the item sprite never renders in the world)
+and dry wood/hardwood/planks/sticks/coal/charcoal have NO manifest sprite entries at all (their UI
+icons come from the CSS `[data-icon]` sheet over `items.png`), so the ICON_DATA + CSS-override icon
+is the only surface wet wood appears on; if Art later ships a real wet_wood pack sprite under the
+same key, it takes over.
+
+**Consequences.** Wood gathered in rain or storm is wet_wood (10 s fuel, half of wood's 20 s); wood
+gathered dry and wood already stored are untouched. Wet wood dries to wood in 30 s with no station.
+The substitution is by numeric id, so any future item-key rename that keeps the id is safe.
+
+**Verification.** `packages/gameplay/test/adr457_wet_firewood.test.ts` 6/6 (data: wet_wood def + 10 s
+fuel; fuel: `fuelSecondsLeft` 10 vs 20 on unlit campfires; drying recipe def + full craft through,
+600 ticks; rain -> wet_wood, dry weather -> wood, storm -> wet_wood, snow -> dry wood, oak in rain ->
+hardwood not substituted) + `apps/client/test/adr457_wet_wood_icon.test.ts` 2/2 (pixel assertions +
+install seam). Test gotchas: the axe lands in inventory slot 0, so `mainHandSlot` must be 0 (slot 1
+was empty -> bare-hands yield 1); `weatherSystem` forbids rain on day 0, so tests use day 1.
+
+## ADR-458: Hot meals warm you — a cooked meal by the fire gives a short warmth buff (SurVivaZ)
+
+**Context.** Eating a hot stew by the fire felt the same as eating it in a blizzard: no warmth from a
+hot meal. The buff must be event-driven on eating (not a per-tick check) and reuse fire proximity.
+
+**Decision.** Tuning in `packages/gameplay/data/vitals.json`: `"hotMeals": { "items": [...14 keys...],
+"insulation": 5, "seconds": 120 }`; `VitalsTuning` in `defs.ts` gained the matching `hotMeals` field.
+`consumeSystem` in `packages/gameplay/src/systems/vitals.ts` (after the successful-eat point): if the
+eaten item is in the list and `heatAt(world, x, y) > 0`, adds Insulation +5 modifier expiring in 120 s
+(via `addModifier`/`secondsToTicks`, the same pattern as the sick-food debuffs); `heatAt` imported
+from `./environment.js` (no cycle: neither environment.ts nor movement.ts imports vitals.ts). Hot-meal
+list: cooked_meat, cooked_fish, cooked_venison, cooked_poultry, cooked_small_game, cooked_prime_cut,
+stew_bowl, fish_stew, vegetable_stew, truffle_stew, potato_soup, meat_pie, berry_pie, pumpkin_pie.
+EXCLUDED: canned_stew (eaten from the can), stewed_* berries (snacks, not meals), baked potato, bread.
+Insulation only shifts felt temperature toward the comfort band, so it warms in the cold and never
+overheats in summer.
+
+**Consequences.** A cooked meal eaten where a fire's heat reaches gives +5 Insulation for 120 s.
+Baked potato and bread do not count. No new scan (event-driven on eating).
+
+**Verification.** `packages/gameplay/test/adr458_hot_meals.test.ts` 7/7: cooked meat by a lit fire -> +5;
+unlit fire -> 0; baked potato / bread by a lit fire -> 0; far from fire -> 0; stew counts and the
+buff expires after 120 s; tuning in vitals.json. Test note: `evaluate` is imported from
+`@engine/core`, NOT from the gameplay index (`G.evaluate` does not exist); lit campfire via
+`G.spawnStation(w, Campfire, ...)` + steps (the emitter index picks it up).
+
+## ADR-459: Salt curing and smoking meat — cured meat spoils much slower (SurVivaZ)
+
+**Context.** Fresh meat spoiled fast and the only preservation was jerky (and salted fish): no cured
+or smoked variants for the meats players actually hunt. The work is mostly data-only recipes on
+freshness numbers.
+
+**Decision.** JSON-only. New items in `packages/gameplay/data/items.json` (inserted after jerky /
+salted_fish): cured_venison (hunger 30, health 4), cured_poultry (20, 3), cured_prime_cut (40, 6)
+with `"sprite": "jerky"`; smoked_fish (hunger 22, thirst -6, health 2) with `"sprite": "salted_fish"`;
+all spoilSeconds 14400, maxStack 20. New recipes in `packages/gameplay/data/recipes.json` (jerky
+pattern: 2 raw + 1 salt -> 2, campfire, 4 s): cured_venison, cured_poultry, cured_prime_cut;
+smoked_fish is the distinct smoking line (fish 2 + salt 1 + wood 1 -> 2, campfire, 4 s).
+`ids.lock.json` regenerated (`pnpm --filter @engine/gameplay lock:ids`): new item ids 517–520, new
+recipe ids 403–406 (the ADR-457 regen later supplied them to the working tree — the ADR-459 regen had
+not persisted). Correction recorded: jerky spoils in 14,400 s, not 1,800 s (an earlier background pass
+quoted 1,800 s, wrong).
+
+**Consequences.** Four new preserved foods (three cured meats + smoked fish), all spoiling in 4 hours
+instead of the raw meats' fast spoil. No code change, no new sprites (existing sprites reused via
+`"sprite"` — the one place in this batch where reuse is the rule, not new art).
+
+**Verification.** `packages/gameplay/test/adr459_curing_smoking.test.ts` 4/4: item defs (spoil 14400,
+sprite reuse), recipe defs (ingredients, campfire station, 4 s), full craft-through of cured_venison
+and smoked_fish. Test note: `ItemDef` extends Visual — sprite is `it.spriteKey` directly, not
+`it.visual.spriteKey`; recipe `station` is the `StationKind` enum, not a string.
+
+## ADR-460: Compost — rotten food on tilled soil fertilises it, like dung (SurVivaZ)
+
+**Context.** Rotten food was only trash: it could be eaten (sick) or thrown away, never used. Dung
+already fertilises tilled soil; rotten food should take the same path, with no crafted compost item.
+
+**Decision.** `FarmingData` in `packages/gameplay/src/farming.ts` gained `compostFertilizerSeconds:
+number` (600, same as bone fertilizer; dung is 900; tuning in `data/farming.json`). `farmUseSystem`:
+`rot` added to the fertilizer branch (fertilize with compostFertilizerSeconds, consumes 1 rot on
+success, `NothingToTend` + rot kept on bare soil); XpActivity source `"fertilize"` includes rot.
+`fertilize()` requires `kind > 0` (planted crops only) — unchanged. Planted crops only (no bare-soil
+change), raw `rot` directly (no crafted compost item).
+
+**Consequences.** Rotten food applied to a planted crop fertilises it for 600 s, like dung (900 s) and
+bone (600 s). Bare soil is unaffected; the rot is kept when there is nothing to tend.
+
+**Verification.** `packages/gameplay/test/adr460_compost.test.ts` 3/3: rot fertilises a planted crop
+(growthMul check needs `G.water()` first — a dry crop returns 0); bare soil keeps the rot; dung
+fertilizer still passes (adr352 suite 19/19). Test reuses the adr352 farm setup pattern (TileMap,
+`spawnCrop`, `holderWith`, `useHeld` via `G.farmUseSystem`).
+
+## ADR-461: Moon phases — full-moon nights brighter, zombies bolder; new-moon darker (SurVivaZ)
+
+**Context.** The moon had no gameplay effect: zombies hunted the same under a full moon and a new moon.
+Brightness already ships (the moon's light is in the renderer); the remaining lever is boldness.
+
+**Decision.** Boldness only (brightness already ships) — the sight-range lever (+25% at full moon), do
+not weaken light avoidance. `moonIllumination(day)` + `LUNAR_DAYS = 29.53` duplicated in
+`packages/gameplay/src/combat/zombies.ts` (gameplay must not import render);
+`moonSightFactor(world)` = 1 + `ai.moonSightMul` x illumination; applied in `acquire()` to the sight
+check. `AiTuning` in `packages/gameplay/src/defs.ts` gained `readonly moonSightMul: number`;
+`packages/gameplay/data/zombies.json` ai gained `"moonSightMul": 0.25`. No other AiTuning literals
+exist, so the required field is safe. Survivors list in `zombieAISystem` is unfiltered (no radius
+issue; max moon sight 18x1.25 = 22.5).
+
+**Consequences.** At full moon a zombie sees 25% farther (sight 10 -> 12.5); at new moon, unchanged.
+Light avoidance is untouched (zombies still avoid light the same way).
+
+**Verification.** `packages/gameplay/test/adr461_moon_boldness.test.ts` 5/5: walker sight 10, player at
+11 tiles — unseen on new-moon night (day 0), seen on full-moon night (day 15, illumination ~0.999),
+still unseen at 14 tiles on full moon; adr194 still passes 6/6.
+
+## ADR-462: Wild animals drink and seek shade (SurVivaZ)
+
+**Context.** Wild animals never drank and never reacted to heat or rain: they wandered the same in a
+heat wave and a storm. Their think tick already runs; the behaviour must hook it, near players only,
+with no thirst stat and no directed shade search.
+
+**Decision.** Drink + linger-in-shade only — no directed shade search, no thirst stat, cosmetic only.
+`packages/gameplay/src/population.ts`: `AnimalState` gained `Drink = 5`; `animalDrinkTuning()` (ai.json
+`tuning.animalDrink`: chance 0.2, radius 12, nearPlayerTiles 40, drinkSeconds [3, 6]; `AiData.tuning`
+in `packages/gameplay/src/ai/population.ts` extended); `findDrinkShore(world, x, y, radius)` —
+expanding square rings step 1 (1-wide streams are never stepped over; a step-3 grid was first tried
+and misses them), first hit wins, goal always land adjacent to water; `shadeLingerAt(world, x, y)` —
+raining/Heat + already under cover (`shelterAt` point query: rain < 1 in rain, sun < 1 in heat). Think
+branch (in `animalAISystem`, on a separate `"animal.drink"` rng stream so existing wander rolls are
+untouched): if near a survivor (THREATS list already built this pass, spatial-index fallback when the
+list is capped) and not tame — shade first (linger: Idle, goal = current pos, thinkAt +2–4 s), else
+drink roll: adjacent water (`nearWater` from `systems/vitals.ts`) -> Drink in place 3–6 s; else walk
+to the nearest shore within radius. Arrival (movement section, `d < 0.1`): a Wander arriving beside
+water near a player drinks deterministically (one drink per trip; the next think resumes normal
+behaviour) — added after a probe showed drink trips happened but the post-arrival 20% roll usually
+failed (the rabbit walked to shore at ticks 768/1152/2522 but never drank in 3000 ticks; after the
+fix the probe showed Drink state for 402 ticks). Drink animals don't move
+(`state !== Idle && state !== Drink`); anim maps Drink -> `Anim.Drink`. Tame/ridden/led animals were
+already skipped above the think branch. Test setup: `animalAISystem` is NOT installed by `makeWorld`/
+`installGameplay` — tests add it manually (`w.addSystem("simulation", "gameplay.animalAI",
+G.animalAISystem)`); `installPopulation` registers it on the server only.
+
+**Consequences.** Wild animals near a player (within 40 tiles) drink at water and linger under cover
+in rain or heat. No thirst stat, no directed shade search, no behaviour change far from players.
+
+**Verification.** `packages/gameplay/test/adr462_animals_drink_shade.test.ts` 7/7: `findDrinkShore`
+(11.5, 0.5), too-far radius -> undefined, no water -> undefined, no terrain -> undefined; rabbit
+drinks on land (Drink state + `Anim.Drink`, tile != 1) within 6000 ticks; no player -> never drinks;
+player at 100 tiles -> never drinks; `shadeLingerAt` (roof+rain true, open+rain false, roof+clear
+false, roof+heat true); roofed rabbit lingers in rain (max distance < 1 tile over 60 s; lone roof =
+foundation + `roof_flat` level 1, adr312 hut pattern with builder `0 as Entity`) while an open rabbit
+wanders > 2 tiles. Test terrain: `new TileMap()` + `w.setResource(G.TerrainRes,
+G.terrainFromTileMap(map))` + `map.setTile(x, y, 1)` (tile 1 = water). Rabbit: flee range 7, wander
+radius 6 — the player must be 7–40 tiles away (test uses player (0,0), rabbit home (10,0), water
+(12,0)).
+
+## ADR-463: Carrion birds — crows circle a fresh kill for a while (SurVivaZ)
+
+**Context.** A fresh kill lay bare: nothing marked it, no scavenger came. Crows exist (crow art, crow
+speed 3.2); the death event already fires. The birds must hook the death event, circle on the ground,
+and leave when the kill is gone — no flight logic.
+
+**Decision.** Ground-circling only, no flight logic. New component `Carrion` (`{bag: "u32", untilTick:
+"u32", angle: "u8"}`, persistent only, server-only) appended to `components.ts` + the append-only
+`GAMEPLAY_COMPONENTS` list. `AiData.tuning` gained `carrion`; `ai.json` tuning.carrion =
+`{crowsPerKill: 2, circleRadius: 2.5, maxSeconds: 120, nearPlayerTiles: 40}`. In `population.ts`:
+`carrionTuning()` (defaults 2 / 2.5 / 120 / 40); `installCarrion(world)` subscribes to `Died` —
+animal/zombie kills only (not players, not tame pets — `Pet` excluded), near-player gate 40 tiles via
+the spatial index; spawns 2 crows (`spawnAnimal(world, "animal_crow", ...)` 1–3 tiles from the death),
+sets each crow's `Animal.homeX/homeY` to the death position (circle the kill, not the spawn spot),
+adopts the kill's loot bag at spawn if already present (the dead sweep in `animalAISystem` runs after
+`gameplay.death` in the same tick, before deferred `Died` delivery — verified from
+`GAMEPLAY_SYSTEM_ORDER` in `install.ts`). Think branch in `animalAISystem`: carrion check runs FIRST
+(before drink/shade) — expiry checked on the crow's own think ticks only, never by a global scan:
+destroy if `tick >= untilTick` or the adopted bag is no longer alive; else adopt a `LootBag` within 4
+tiles of home if none adopted; else set the next circle goal (angle +43/256 ≈ 60 deg per think, radius
+2.5 around the bag or the death spot). Arrival-drink excluded for carrion crows (`!world.has(e,
+Carrion)` in the arrival branch). Wired in `install.ts` next to `installLightning` /
+`installSmokeMarkers`. Rabbit loot is guaranteed (raw_meat chance 1 in ai.json), so the bag test is
+deterministic.
+
+**Consequences.** A fresh animal/zombie kill near a player draws 2 crows that circle it on the ground
+for up to 120 s, leaving when the bag is taken/destroyed or the time expires. No flight, no new scan
+(expiry is checked on the crow's own think ticks only).
+
+**Verification.** `packages/gameplay/test/adr463_carrion_birds.test.ts` 7/7: tuning defaults; kill near
+player -> 2 crows, bag adopted, home = death pos; crows circle 60 s (moved > 2 tiles, stayed < 6 from
+the kill, still alive); cap expiry (gone by 150 s); bag destroyed -> crows leave at next think (<= 200
+ticks); far kill (100 tiles) -> no crows (and the rabbit really died); player death -> no crows
+(player really died).

@@ -2524,7 +2524,9 @@
   }
  },
  "tuning": {
-  "$comment": "Task 15: max chase distance from a wild animal's home anchor, in tiles. Beyond it an engaged animal gives up and returns to wander/home (territory defenders and guard pets are exempt).",
-  "chaseLimitTiles": 18
+  "$comment": "Task 15: max chase distance from a wild animal's home anchor, in tiles. Beyond it an engaged animal gives up and returns to wander/home (territory defenders and guard pets are exempt). ADR-462 animalDrink: wild animals drink (chance per think; radius = shore search) and linger in shade (nearPlayerTiles = only near a survivor); drinkSeconds = how long a drink lasts. ADR-463 carrion: crows circling a fresh kill (crowsPerKill per death, circleRadius tiles out, at most maxSeconds, only near a survivor).",
+  "chaseLimitTiles": 18,
+  "animalDrink": { "chance": 0.2, "radius": 12, "nearPlayerTiles": 40, "drinkSeconds": [3, 6] },
+  "carrion": { "crowsPerKill": 2, "circleRadius": 2.5, "maxSeconds": 120, "nearPlayerTiles": 40 }
  }
 }

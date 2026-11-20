@@ -44,6 +44,9 @@ export const MANIFEST_INDEX: readonly ManifestFragmentRef[] = [
   // ADR-422: dedicated tier-2 motorboat art (atlases painted at runtime by
   // apps/client/src/task421-art.ts; the fragment carries layout only, no PNG files).
   { name: "task422", url: "pack/task422/manifest.task422.json", optional: true },
+  // ADR-455: dedicated footprint art (atlases painted at runtime by
+  // apps/client/src/footprints-art.ts; the fragment carries layout only, no PNG files).
+  { name: "task455", url: "pack/task455/manifest.task455.json", optional: true },
   // ADR-242: Art's PvP/clan drop (raid fx, clan banners/gates, nameplates, loot beams) and the stalls drop (stall art,
   // sale coins). Both repeat keys the building pack already serves; mergeManifests keeps building's (first wins).
   { name: "pvp_clan", url: "pvp_clan/manifest.fragment.json", optional: true, root: "", stream: true, dropClanPalettes: true },

@@ -9,10 +9,10 @@ import { lootBagInit } from "./loot_despawn.js";
 import { Mount, Pet } from "./components.js";
 import { luresMount, mountSpeciesOfAnimal } from "./mount_defs.js";
 import { isTameableAnimalKey } from "./tameable_defs.js";
-import { DEFAULT_TICK_HZ, Permissions, Transform, defineResource, entityIndex, type Entity, type World } from "@engine/core";
+import { DEFAULT_TICK_HZ, Permissions, Transform, Weather, defineResource, entityIndex, type Entity, type World } from "@engine/core";
 import { PopulationSpawner, type BuildingGrid, type ChunkKey, type PhaseKey, type PopulationHost, type SpawnEntry, type PopulationViewpoint } from "@engine/world";
 import { Zombie } from "./components.js";
-import { Anim, AnimState, Animal, Tamed, Container, ContainerViewers, Dead, Health, LootBag, RopeLead, Survival } from "./components.js";
+import { Anim, AnimState, Animal, Carrion, Tamed, Container, ContainerViewers, Dead, Health, LootBag, RopeLead, Survival } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
 import { indexEntity } from "./spawn.js";
 import { currentPhaseKey, PopulationZombies, spawnZombie } from "./combat/zombies.js";
@@ -22,10 +22,15 @@ import { addItem } from "./inventory.js";
 import { structures } from "./building/structure.js";
 import { TerrainRes } from "./world.js";
 import { swimSpeedMulAt, isDrawnDriven } from "./systems/movement.js";
+import { nearWater } from "./systems/vitals.js";
+import { shelterAt } from "./building/shelter.js";
+import { isRaining } from "./realism.js";
+import { WeatherKind } from "./defs.js";
 import { creatureStep, type TileBlocked } from "./systems/creature_nav.js";
 import { nearestClaimHostile, tamedOwnerTribe, TERRITORY_BITE, TERRITORY_DEFEND_RANGE } from "./territory.js";
 import { installSpatialIndex } from "@engine/world";
 import { populationData, resolveBehavior, toSpawnEntries, type AggroMode, type GameMode, type LootEntry } from "./ai/population.js";
+import { Died } from "./events.js";
 import { inSpawnSafeRadius } from "./spawn_points.js";
 
 /** Task 33: "aggressive" for the spawn safe radius — zombies plus animals whose ai.json aggro mode is hostile
@@ -57,7 +62,7 @@ export const animalKindOf = (key: string): number => { const i = animalDefs().fi
 /** Data-driven defaults (data/spawns.json). */
 export const POPULATION_DATA = { get intervalSeconds(): number { return populationData().spawns.intervalSeconds; }, spawns: (mode: GameMode) => toSpawnEntries(mode) };
 
-export const enum AnimalState { Idle = 0, Wander = 1, Flee = 2, Attack = 3, Dead = 4 }
+export const enum AnimalState { Idle = 0, Wander = 1, Flee = 2, Attack = 3, Dead = 4, Drink = 5 }
 /** Corpse lingers this long (death anim) before the animal entity is removed; loot stays in a LootBag. */
 export const ANIMAL_CORPSE_SECONDS = 3;
 export function spawnAnimal(world: World, kind: number | string, x: number, y: number): Entity {
@@ -66,6 +71,94 @@ export function spawnAnimal(world: World, kind: number | string, x: number, y: n
   world.add(e, Transform, { x, y }).add(e, Health, { hp: def.hp, max: def.hp }).add(e, Animal, { kind: k, homeX: x, homeY: y, goalX: x, goalY: y, thinkAt: world.tick })
     .add(e, AnimState, { anim: Anim.Idle, startTick: world.tick });
   indexEntity(world, e); return e;
+}
+/** ADR-462: wild-animal drink/shade tuning (ai.json tuning.animalDrink; defaults when absent). */
+export interface AnimalDrinkTuning { chance: number; radius: number; nearPlayerTiles: number; drinkSeconds: [number, number] }
+export function animalDrinkTuning(): AnimalDrinkTuning {
+  const t = populationData().ai.tuning?.animalDrink;
+  return { chance: t?.chance ?? 0.2, radius: t?.radius ?? 12, nearPlayerTiles: t?.nearPlayerTiles ?? 40, drinkSeconds: t?.drinkSeconds ?? [3, 6] };
+}
+
+/** ADR-463: carrion-crow tuning (ai.json tuning.carrion; defaults when absent). */
+export interface CarrionTuning { crowsPerKill: number; circleRadius: number; maxSeconds: number; nearPlayerTiles: number }
+export function carrionTuning(): CarrionTuning {
+  const t = populationData().ai.tuning?.carrion;
+  return { crowsPerKill: t?.crowsPerKill ?? 2, circleRadius: t?.circleRadius ?? 2.5, maxSeconds: t?.maxSeconds ?? 120, nearPlayerTiles: t?.nearPlayerTiles ?? 40 };
+}
+
+/** ADR-463: subscribe to Died (every creature death) — a fresh animal or zombie kill near a survivor
+ *  draws 2 crows that circle the kill on the ground (no flight logic; Wander goals on a circle, reuse
+ *  of creatureStep). Player deaths and tame-pet deaths do not (a dead survivor is not carrion, and a
+ *  pet is family). The loot bag is not guaranteed to exist when Died delivers — the dead sweep in
+ *  animalAISystem runs after gameplay.death in the same tick, so the bag is normally there already,
+ *  but the crow adopts one later on its own think ticks if it appears then. Crows are spawned directly
+ *  (not through the spawner), so they bypass the crow globalCap and are never distance-despawned —
+ *  they are destroyed explicitly when their cap expires or their adopted bag is gone. */
+export function installCarrion(world: World): void {
+  world.events.on(Died, (p: { entity: Entity; cause: number }) => {
+    if (!isAuthority(world) || world.isReplaying) return;
+    const dead = p.entity;
+    if (!world.isAlive(dead)) return;
+    if (!world.has(dead, Animal) && !world.has(dead, Zombie)) return; // animal / zombie kills only
+    if (world.has(dead, Pet)) return; // not a tame pet
+    const t = world.get(dead, Transform);
+    if (!t) return;
+    const cfg = carrionTuning();
+    const index = installSpatialIndex(world);
+    let nearPlayer = false;
+    for (const q of index.queryRadius(t.x, t.y, cfg.nearPlayerTiles)) if (world.has(q, Survival) && !world.has(q, Dead)) { nearPlayer = true; break; }
+    if (!nearPlayer) return;
+    const rng = world.rngFor("carrion", dead);
+    for (let i = 0; i < cfg.crowsPerKill; i++) {
+      const a = rng.next() * Math.PI * 2, r = 1 + rng.next() * 2;
+      const crow = spawnAnimal(world, "animal_crow", t.x + Math.cos(a) * r, t.y + Math.sin(a) * r);
+      // Circle the kill itself, not the crow's spawn spot: home is the death position.
+      world.setField(crow, Animal, "homeX", t.x);
+      world.setField(crow, Animal, "homeY", t.y);
+      // Adopt the kill's loot bag now if it is already here (animalAI's dead sweep runs before delivery).
+      let bag = 0;
+      for (const q of index.queryRadius(t.x, t.y, 4)) if (world.has(q, LootBag)) { bag = q; break; }
+      world.add(crow, Carrion, { bag, untilTick: world.tick + Math.round(cfg.maxSeconds * DEFAULT_TICK_HZ), angle: Math.floor((i / cfg.crowsPerKill) * 256) });
+    }
+  });
+}
+/**
+ * ADR-462: nearest land tile adjacent to water within `radius` of (x,y), or undefined. Expanding
+ * square rings (step 1, so 1-wide streams are never stepped over), first hit wins — bounded by the
+ * radius square (≤ 625 tiles at radius 12) and only called on a successful drink roll on a think
+ * tick, never per tick. The goal is always land: water tiles are unwalkable for animals, so the
+ * drink goal is the shore, never the water itself.
+ */
+export function findDrinkShore(world: World, x: number, y: number, radius: number): { x: number; y: number } | undefined {
+  const terrain = world.getResource(TerrainRes); if (!terrain) return undefined;
+  const defs = gameplayDefs(world); const swim = defs.movement.swimTiles; const unwalk = defs.worldgen.unwalkableTiles;
+  const shoreAt = (cx: number, cy: number): { x: number; y: number } | undefined => {
+    if (!swim.has(terrain.tileAt(cx, cy))) return undefined; // need a water tile
+    let best: { x: number; y: number; d2: number } | undefined;
+    for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      const tx = cx + ox, ty = cy + oy; const t = terrain.tileAt(tx, ty);
+      if (swim.has(t) || unwalk.has(t)) continue;
+      const d2 = (tx + 0.5 - x) ** 2 + (ty + 0.5 - y) ** 2;
+      if (!best || d2 < best.d2) best = { x: tx + 0.5, y: ty + 0.5, d2 };
+    }
+    return best === undefined ? undefined : { x: best.x, y: best.y };
+  };
+  for (let r = 0; r <= radius; r++) {
+    for (let dx = -r; dx <= r; dx++) for (const dy of [-r, r]) { const hit = shoreAt(Math.floor(x) + dx, Math.floor(y) + dy); if (hit) return hit; }
+    for (let dy = -r + 1; dy <= r - 1; dy++) for (const dx of [-r, r]) { const hit = shoreAt(Math.floor(x) + dx, Math.floor(y) + dy); if (hit) return hit; }
+  }
+  return undefined;
+}
+/**
+ * ADR-462: does an animal at (x,y) linger in shade right now — raining or a heat wave, and already
+ * standing under cover (roof/walls point query; no directed shade search exists to reuse). Rain cover
+ * is `rain < 1`, heat shade is `sun < 1`.
+ */
+export function shadeLingerAt(world: World, x: number, y: number): boolean {
+  const w = world.env(Weather);
+  if (!isRaining(w.kind) && w.kind !== WeatherKind.Heat) return false;
+  const sh = shelterAt(world, x, y, 0, w.windDir);
+  return isRaining(w.kind) ? sh.rain < 1 : sh.sun < 1;
 }
 /** Roll an animal's loot (deterministic per entity) into an ownerless LootBag at its body. */
 export function dropAnimalLoot(world: World, e: Entity): Entity | undefined {
@@ -138,6 +231,7 @@ export function animalAISystem(world: World, dt: number): void {
   // object per call (~0.8us for Animal alone); the loops below read store data directly instead.
   const aStore = world.store(Animal); const tfStore = world.store(Transform); const deadStore = world.store(Dead);
   const chaseLimit = populationData().ai.tuning?.chaseLimitTiles ?? 18;
+  const drinkCfg = animalDrinkTuning(); // ADR-462 (constant per run; the think + arrival branches share it)
   const tileBlocked: TileBlocked = (tx, ty) => unwalk.has(populationTile(world, tx, ty));
   let cache = animalListCaches.get(world);
   if (cache === undefined) {
@@ -276,14 +370,87 @@ export function animalAISystem(world: World, dt: number): void {
     } else if (scared && state === AnimalState.Flee) { /* keep running to the last goal */ }
     else if (world.tick >= aThinkAt || state === AnimalState.Flee || state === AnimalState.Attack) {
       const rng = world.rngFor("animal.think", e);
-      if (rng.next() < 0.5) state = AnimalState.Idle;
-      else { state = AnimalState.Wander; const ang = rng.range(-Math.PI, Math.PI), r = rng.range(1, tame ? Math.min(2.5, def.wanderRadius) : def.wanderRadius); gx = aHomeX + Math.cos(ang) * r; gy = aHomeY + Math.sin(ang) * r; }
-      world.setField(e, Animal, "thinkAt", world.tick + Math.round(rng.range(2, 6) * DEFAULT_TICK_HZ));
+      // ADR-463: carrion crows circle the kill on the ground (no flight logic) — successive points on
+      // a circle around the kill's loot bag (or the death spot when there is no bag). Expiry is checked
+      // here, on the crow's own think ticks, never by a global scan: the cap (untilTick), or the
+      // adopted bag being gone (looted / despawned). A crow that never adopted a bag circles the spot
+      // until the cap. Carrion crows do not drink or linger (this branch runs first).
+      if (world.has(e, Carrion)) {
+        const cfg = carrionTuning();
+        const c = world.get(e, Carrion)!;
+        if (world.tick >= c.untilTick) { world.destroy(e); continue; }
+        let bag = c.bag;
+        if (bag !== 0 && !world.isAlive(bag)) { world.destroy(e); continue; }
+        if (bag === 0) {
+          for (const q of index.queryRadius(aHomeX, aHomeY, 4)) if (world.has(q, LootBag)) { bag = q; break; }
+          if (bag !== 0) world.setField(e, Carrion, "bag", bag);
+        }
+        const anchor = bag !== 0 ? world.get(bag, Transform)! : { x: aHomeX, y: aHomeY };
+        const nextAngle = (c.angle + 43) % 256; // ~60° per think: a full circle every ~6 thinks
+        const ang = (nextAngle / 256) * Math.PI * 2;
+        world.setField(e, Carrion, "angle", nextAngle);
+        state = AnimalState.Wander; gx = anchor.x + Math.cos(ang) * cfg.circleRadius; gy = anchor.y + Math.sin(ang) * cfg.circleRadius;
+        world.setField(e, Animal, "thinkAt", world.tick + Math.round(rng.range(2, 6) * DEFAULT_TICK_HZ));
+      } else {
+      // ADR-462: wild animals drink and linger in shade — cosmetic only (no thirst stat, no survival
+      // benefit), on the think tick only, only near a survivor (THREATS, already built this pass; the
+      // spatial-index fallback covers the capped-list case). A separate rng stream ("animal.drink") so
+      // the existing wander rolls are untouched. Tame / ridden / led animals were skipped above.
+      // Drink: roll per think; water beside the animal -> Drink in place for a few seconds, else walk
+      // to the nearest shore within the nav radius and drink on arrival (arrival triggers the drink,
+      // below — the roll only gates the trip). Shade: in rain or a heat wave, an animal already under
+      // cover lingers there — point query only, no directed shade search (none exists to reuse).
+      let decided = false;
+      if (!tame) {
+        const near2 = drinkCfg.nearPlayerTiles * drinkCfg.nearPlayerTiles;
+        let nearPlayer = false;
+        if (few) { for (let i = 0; i < THREATS.length; i += 3) { const dx = THREATS[i + 1]! - tx, dy = THREATS[i + 2]! - ty; if (dx * dx + dy * dy <= near2) { nearPlayer = true; break; } } }
+        else for (const p of index.queryRadius(tx, ty, drinkCfg.nearPlayerTiles)) if (world.has(p, Survival) && !world.has(p, Dead)) { nearPlayer = true; break; }
+        if (nearPlayer) {
+          const drinkRng = world.rngFor("animal.drink", e);
+          if (shadeLingerAt(world, tx, ty)) {
+            state = AnimalState.Idle; gx = tx; gy = ty; // linger in the shade
+            world.setField(e, Animal, "thinkAt", world.tick + Math.round(drinkRng.range(2, 4) * DEFAULT_TICK_HZ));
+            decided = true;
+          } else if (drinkRng.next() < drinkCfg.chance) {
+            if (nearWater(world, tx, ty)) {
+              state = AnimalState.Drink; gx = tx; gy = ty;
+              world.setField(e, Animal, "thinkAt", world.tick + Math.round(drinkRng.range(drinkCfg.drinkSeconds[0], drinkCfg.drinkSeconds[1]) * DEFAULT_TICK_HZ));
+              decided = true;
+            } else {
+              const shore = findDrinkShore(world, tx, ty, drinkCfg.radius);
+              if (shore) {
+                state = AnimalState.Wander; gx = shore.x; gy = shore.y; // walk to the shore; drink on arrival
+                world.setField(e, Animal, "thinkAt", world.tick + Math.round(drinkRng.range(2, 6) * DEFAULT_TICK_HZ));
+                decided = true;
+              }
+            }
+          }
+        }
+      }
+      if (!decided) {
+        if (rng.next() < 0.5) state = AnimalState.Idle;
+        else { state = AnimalState.Wander; const ang = rng.range(-Math.PI, Math.PI), r = rng.range(1, tame ? Math.min(2.5, def.wanderRadius) : def.wanderRadius); gx = aHomeX + Math.cos(ang) * r; gy = aHomeY + Math.sin(ang) * r; }
+        world.setField(e, Animal, "thinkAt", world.tick + Math.round(rng.range(2, 6) * DEFAULT_TICK_HZ));
+      }
+      } // end else (not a carrion crow)
     }
     let moving = false;
-    if (state !== AnimalState.Idle) {
+    if (state !== AnimalState.Idle && state !== AnimalState.Drink) { // ADR-462: drinking animals stand still
       const dx = gx - tx, dy = gy - ty, d = Math.hypot(dx, dy); const sp = (state === AnimalState.Wander ? def.speed : def.fleeSpeed) * swimSpeedMulAt(world, tx, ty) * dt;
-      if (d < 0.1) { if (state !== AnimalState.Attack) state = AnimalState.Idle; }
+      if (d < 0.1) {
+        // ADR-462: arrived at the shore on a wander — drink (one drink per trip; the next think resumes
+        // normal behaviour). Near-player gate, same as the think branch (THREATS / spatial fallback).
+        const near2 = drinkCfg.nearPlayerTiles * drinkCfg.nearPlayerTiles;
+        let nearPlayer = false;
+        if (few) { for (let i = 0; i < THREATS.length; i += 3) { const pdx = THREATS[i + 1]! - tx, pdy = THREATS[i + 2]! - ty; if (pdx * pdx + pdy * pdy <= near2) { nearPlayer = true; break; } } }
+        else for (const p of index.queryRadius(tx, ty, drinkCfg.nearPlayerTiles)) if (world.has(p, Survival) && !world.has(p, Dead)) { nearPlayer = true; break; }
+        if (state === AnimalState.Wander && !world.has(e, Carrion) && nearPlayer && nearWater(world, tx, ty)) { // ADR-463: circling crows never stop to drink
+          state = AnimalState.Drink;
+          const drinkRng = world.rngFor("animal.drink", e);
+          world.setField(e, Animal, "thinkAt", world.tick + Math.round(drinkRng.range(drinkCfg.drinkSeconds[0], drinkCfg.drinkSeconds[1]) * DEFAULT_TICK_HZ));
+        } else if (state !== AnimalState.Attack) state = AnimalState.Idle;
+      }
       else {
         const nav = creatureStep(world, e, gx, gy, sp, 0, tileBlocked, dt); // ADR-215: collide with / path around structures
         if (nav !== undefined) { moving = nav; if (!nav && state !== AnimalState.Attack) state = AnimalState.Idle; }
@@ -298,7 +465,7 @@ export function animalAISystem(world: World, dt: number): void {
     // write on change, add the component if missing), without the per-call getField/store lookups.
     const curAnim = anSlot >= 0 ? anD.anim[anSlot]! : undefined;
     if (curAnim !== Anim.Attack || !moving) {
-      const want = moving ? (state === AnimalState.Wander ? Anim.Walk : Anim.Run) : state === AnimalState.Attack ? (curAnim as Anim) : Anim.Idle;
+      const want = moving ? (state === AnimalState.Wander ? Anim.Walk : Anim.Run) : state === AnimalState.Attack ? (curAnim as Anim) : state === AnimalState.Drink ? Anim.Drink : Anim.Idle;
       if (anSlot >= 0) { if (curAnim !== Anim.Hurt && curAnim !== want) { anD.anim[anSlot] = want; anD.startTick[anSlot] = world.tick; anStore.markChanged(ei); } }
       else animAt(world, e, want);
     }

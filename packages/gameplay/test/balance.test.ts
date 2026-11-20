@@ -13,6 +13,7 @@ function baseSources(): Set<number> {
   const aiText = JSON.stringify(ai);
   for (const it of d.items.values()) if (aiText.includes(`"${it.key}"`)) s.add(it.id);
   s.add(d.itemId("dung")); // ADR-352: produced by dungSystem (data/dung.json), not gathered / crafted / looted
+  s.add(d.itemId("wet_wood")); // ADR-457: produced by the rain substitution in gathering.ts (wood yields become wet_wood while raining), not a data yield / recipe
   return s;
 }
 function reachable(): Set<number> {

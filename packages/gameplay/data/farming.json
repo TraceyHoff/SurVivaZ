@@ -6,6 +6,8 @@
   "fertilizerMul": 1.5,
   "fertilizerSeconds": 600,
   "dungFertilizerSeconds": 900,
+  "compostFertilizerSeconds": 600,
+  "pollination": { "radius": 5, "bonus": 1 },
   "waterRadius": 2.0,
   "fertilizeRadius": 1.5,
   "plantReach": 2.5,

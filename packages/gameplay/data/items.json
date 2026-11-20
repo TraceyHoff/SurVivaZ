@@ -10,6 +10,14 @@
       "fuelSeconds": 20
     },
     {
+      "key": "wet_wood",
+      "name": "Wet Pine Log",
+      "category": "resource",
+      "maxStack": 50,
+      "weight": 0.5,
+      "fuelSeconds": 10
+    },
+    {
       "key": "hardwood",
       "name": "Oak Log",
       "category": "resource",
@@ -1041,6 +1049,48 @@
       "spoilSeconds": 14400
     },
     {
+      "key": "cured_venison",
+      "name": "Cured Venison",
+      "category": "food",
+      "maxStack": 20,
+      "weight": 0.3,
+      "food": {
+        "hunger": 30,
+        "thirst": -4,
+        "health": 4
+      },
+      "spoilSeconds": 14400,
+      "sprite": "jerky"
+    },
+    {
+      "key": "cured_poultry",
+      "name": "Cured Poultry",
+      "category": "food",
+      "maxStack": 20,
+      "weight": 0.25,
+      "food": {
+        "hunger": 20,
+        "thirst": -4,
+        "health": 3
+      },
+      "spoilSeconds": 14400,
+      "sprite": "jerky"
+    },
+    {
+      "key": "cured_prime_cut",
+      "name": "Cured Prime Cut",
+      "category": "food",
+      "maxStack": 20,
+      "weight": 0.5,
+      "food": {
+        "hunger": 40,
+        "thirst": -4,
+        "health": 6
+      },
+      "spoilSeconds": 14400,
+      "sprite": "jerky"
+    },
+    {
       "key": "baked_potato",
       "name": "Baked Potato",
       "category": "food",
@@ -1117,6 +1167,20 @@
         "health": 2
       },
       "spoilSeconds": 14400
+    },
+    {
+      "key": "smoked_fish",
+      "name": "Smoked Fish",
+      "category": "food",
+      "maxStack": 20,
+      "weight": 0.2,
+      "food": {
+        "hunger": 22,
+        "thirst": -6,
+        "health": 2
+      },
+      "spoilSeconds": 14400,
+      "sprite": "salted_fish"
     },
     {
       "key": "berry_pie",

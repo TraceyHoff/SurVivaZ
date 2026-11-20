@@ -24,5 +24,6 @@
   "comfortMin": 8,
   "comfortMax": 32,
   "coldHungerMul": 1.5,
-  "heatThirstMul": 1.75
+  "heatThirstMul": 1.75,
+  "hotMeals": { "items": ["cooked_meat", "cooked_fish", "cooked_venison", "cooked_poultry", "cooked_small_game", "cooked_prime_cut", "stew_bowl", "fish_stew", "vegetable_stew", "truffle_stew", "potato_soup", "meat_pie", "berry_pie", "pumpkin_pie"], "insulation": 5, "seconds": 120 }
 }

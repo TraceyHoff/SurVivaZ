@@ -30,8 +30,9 @@ describe("96-slot Container replication bandwidth", () => {
     // add two more bits. ADR-263: 28 — WorkerOrder / WorkerTarget / TerrainEdit push the masks over another byte.
     // ADR-299: InShaft adds one networked-component mask bit and pushes the record to 29 B.
     // ADR-319: Mount / Riding / MountTaming add three mask bits and push it to 30 B.
-    // The assertion's point stands: 30 B vs the ~1344 B whole array.
-    expect(deltaBytes).toBeLessThanOrEqual(30); // mostly the per-record component masks
+    // ADR-449–463: LightningFire adds one networked-component mask bit and pushes the record to 31 B.
+    // (Carrion is server-only, persistent — no mask bit.) The assertion's point stands: 31 B vs the ~1344 B whole array.
+    expect(deltaBytes).toBeLessThanOrEqual(31); // mostly the per-record component masks
 
     // a full stack move (item+count+tick+durability+crafter in 2 slots) is still well under 5% of the array
     for (const f of ["items", "counts", "createdTick", "durability", "crafterId"] as const) { st.data[f][slot * N + 10] = 0; st.data[f][slot * N + 95] = 3; }

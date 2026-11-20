@@ -17,7 +17,11 @@
  * must show on the map even when the player is nowhere near it.
  */
 import { entityIndex, GroupKind, Membership, Owner, Permissions, PlayerId, Transform, type CommandHandlers, type Entity, type GroupRegistry, type World } from "@engine/core";
-import { MAP_MARKER_LABEL_MAX, MapMarker, MarkerVisibility } from "./components.js";
+import { BuildPiece, CraftingStation, MAP_MARKER_LABEL_MAX, MapMarker, MarkerVisibility, PieceBuilder, PieceOwner } from "./components.js";
+import { gameplayDefs, isAuthority } from "./config.js";
+import { StationKind } from "./defs.js";
+import { FireToggled, PieceDestroyed } from "./events.js";
+import { pieceOf } from "./building/links.js";
 import { PlaceMapMarkerCmd, RemoveMapMarkerCmd } from "./map_marker_commands.js";
 import { sanitizeSignText } from "./signs.js";
 
@@ -49,9 +53,14 @@ export function placeMarkerReject(w: World, actor: Entity, x: number, y: number,
 /** Raw spawn (no checks): returns the marker entity. Label is sanitized like sign text. */
 export function spawnMarker(w: World, actor: Entity, x: number, y: number, visibility: number, label = ""): Entity {
   const me = pidOf(w, actor); const clientId = w.has(actor, Owner) ? w.getField(actor, Owner, "clientId") ?? 0 : 0;
+  return spawnMarkerOwned(w, me, clientId, x, y, visibility, label,
+    visibility === 1 ? partyOfPlayer(w, me) : 0, visibility === 2 ? clanOfPlayer(w, me) : 0);
+}
+/** Raw spawn by owner id (no checks): the smoke-marker path (server-side, no actor entity). */
+export function spawnMarkerOwned(w: World, owner: number, clientId: number, x: number, y: number, visibility: number, label = "", party = 0, clan = 0): Entity {
   const clean = sanitizeSignText(label, MAP_MARKER_LABEL_MAX);
   const e = w.create();
-  w.add(e, Transform, { x, y, z: 0 }).add(e, Owner, { clientId }).add(e, MapMarker, { owner: me, visibility, party: visibility === 1 ? partyOfPlayer(w, me) : 0, clan: visibility === 2 ? clanOfPlayer(w, me) : 0, len: 0 });
+  w.add(e, Transform, { x, y, z: 0 }).add(e, Owner, { clientId }).add(e, MapMarker, { owner, visibility, party, clan, len: 0 });
   const a = w.getArray(e, MapMarker, "label")!; for (let i = 0; i < MAP_MARKER_LABEL_MAX; i++) a[i] = i < clean.length ? clean.charCodeAt(i) : 0;
   w.setField(e, MapMarker, "len", clean.length); w.store(MapMarker).markChanged(entityIndex(e));
   return e;
@@ -119,5 +128,94 @@ export function installMapMarkerCommands(world: World, handlers: CommandHandlers
   handlers.on(RemoveMapMarkerCmd, {
     validate: (v, c) => removeMarkerReject(world, c.actor, v.marker as Entity),
     handle: (v, c) => { removeMarker(world, c.actor, v.marker as Entity); },
+  });
+}
+
+/**
+ * ADR-453 smoke columns (map-marker variant): a lit campfire / fireplace shows on the map from anywhere
+ * as a private marker labelled "Smoke", owned by the fire's owner. The in-world tall column is NOT built
+ * (Tracey decision: map-marker variant only). The marker is placed on FireToggled(lit) and removed on
+ * FireToggled(unlit) or when the piece is destroyed; the owner can also remove it by hand.
+ * Visibility is private: only the owner sees their smoke (party/clan sharing is a follow-up decision).
+ * Which fires qualify: campfire + fireplace pieces, and free-standing Campfire stations. Furnaces, stoves
+ * and ovens do not — they would spam the map from every base. Zero per-frame work: the marker rides the
+ * existing global replication and the map's existing visibleMarkers query.
+ */
+export const SMOKE_MARKER_LABEL = "Smoke";
+export const SMOKE_HEARTH_KEYS: readonly string[] = ["campfire", "fireplace"];
+
+/** The smoke target for a fire entity (Fuel attachment or free-standing station), or undefined when it is not a smoke hearth. */
+export function smokeTargetFor(world: World, fire: Entity): { piece: Entity; x: number; y: number; owner: number } | undefined {
+  const defs = gameplayDefs(world);
+  const piece = pieceOf(world, fire);
+  if (piece !== undefined) {
+    const t = world.getField(piece, BuildPiece, "type");
+    const key = t === undefined ? undefined : defs.pieces.get(t)?.key;
+    if (key === undefined || !SMOKE_HEARTH_KEYS.includes(key)) return undefined;
+    const pos = world.get(piece, Transform) ?? world.get(fire, Transform); if (!pos) return undefined;
+    // ADR-317: the builder is PieceBuilder, with PieceOwner as the legacy fallback (same as builtBy).
+    const owner = world.getField(piece, PieceBuilder, "player") ?? world.getField(piece, PieceOwner, "player") ?? 0;
+    return { piece, x: pos.x, y: pos.y, owner };
+  }
+  const st = world.get(fire, CraftingStation);
+  if (!st || st.kind !== StationKind.Campfire) return undefined;
+  const pos = world.get(fire, Transform); if (!pos) return undefined;
+  return { piece: fire, x: pos.x, y: pos.y, owner: 0 };
+}
+
+const smokeByPiece = new WeakMap<World, Map<Entity, Entity>>(); // piece/fire entity -> smoke marker
+const smokeIndex = (world: World): Map<Entity, Entity> => { let m = smokeByPiece.get(world); if (!m) smokeByPiece.set(world, (m = new Map())); return m; };
+/** The client session of a player id right now (0 when offline — the marker still exists, it just cannot replicate until they are back). */
+function ownerClientId(world: World, player: number): number {
+  if (!player || !world.isRegistered(PlayerId)) return 0;
+  for (const p of world.query([PlayerId])) {
+    if ((world.getField(p, PlayerId, "id") ?? 0) !== player) continue;
+    return world.has(p, Owner) ? world.getField(p, Owner, "clientId") ?? 0 : 0;
+  }
+  return 0;
+}
+
+/** Spawn a smoke marker for a lit fire (idempotent: one marker per fire). Returns the marker, or undefined. */
+export function placeSmokeMarker(world: World, fire: Entity): Entity | undefined {
+  const tgt = smokeTargetFor(world, fire); if (!tgt) return undefined;
+  const idx = smokeIndex(world);
+  const ex = idx.get(tgt.piece); if (ex !== undefined && world.isAlive(ex) && world.has(ex, MapMarker)) return ex;
+  const e = spawnMarkerOwned(world, tgt.owner, ownerClientId(world, tgt.owner), tgt.x, tgt.y, MarkerVisibility.Private, SMOKE_MARKER_LABEL);
+  idx.set(tgt.piece, e); return e;
+}
+/** Remove the smoke marker for a fire (no-op when there is none). Falls back to a position+label scan when the in-memory index is empty (e.g. after a restart). */
+export function removeSmokeMarker(world: World, fire: Entity): boolean {
+  const idx = smokeIndex(world);
+  const piece = pieceOf(world, fire) ?? fire;
+  const ex = idx.get(piece);
+  if (ex !== undefined) {
+    idx.delete(piece);
+    if (world.isAlive(ex) && world.has(ex, MapMarker)) { world.destroy(ex); return true; }
+    return false;
+  }
+  const tgt = smokeTargetFor(world, fire); if (!tgt) return false;
+  for (const m of world.query([MapMarker])) {
+    const mm = world.get(m, MapMarker)!; if (mm.owner !== tgt.owner || markerLabel(world, m) !== SMOKE_MARKER_LABEL) continue;
+    const t = world.get(m, Transform); if (!t || Math.hypot(t.x - tgt.x, t.y - tgt.y) > 1.5) continue;
+    world.destroy(m); return true;
+  }
+  return false;
+}
+/** Remove the smoke marker for a destroyed piece (in-memory index only — the piece is gone, so no position is available). */
+export function removeSmokeMarkerForPiece(world: World, piece: Entity): boolean {
+  const idx = smokeIndex(world); const ex = idx.get(piece); if (ex === undefined) return false;
+  idx.delete(piece);
+  if (world.isAlive(ex) && world.has(ex, MapMarker)) { world.destroy(ex); return true; }
+  return false;
+}
+/** Subscribe once per world: FireToggled places/removes the marker, PieceDestroyed cleans up a lit fire's marker. */
+export function installSmokeMarkers(world: World): void {
+  world.events.on(FireToggled, (p: { entity: Entity; lit: number }) => {
+    if (!isAuthority(world) || world.isReplaying) return;
+    if (p.lit) placeSmokeMarker(world, p.entity); else removeSmokeMarker(world, p.entity);
+  });
+  world.events.on(PieceDestroyed, (p: { piece: Entity; type: number; cause: number }) => {
+    if (!isAuthority(world) || world.isReplaying) return;
+    removeSmokeMarkerForPiece(world, p.piece);
   });
 }

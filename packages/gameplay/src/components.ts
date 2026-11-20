@@ -516,6 +516,16 @@ export const MountHarness = defineComponent("MountHarness", { item: "u16" }, { n
  *  store from an older save starts empty and corrects itself within one cadence tick. */
 export const StoreFill = defineComponent("StoreFill", { level: "u8" }, { networked: true });
 
+/** ADR-451: a fire started by lightning — exempt from storm quench in burningSystem (rain would kill a
+ *  fresh lightning fire in ~3 checks: rainQuench 40 vs growPerCheck 16). Removed on extinguish, so a later
+ *  ordinary fire on the same piece is quenched normally. struckTick = the storm tick that lit it. */
+export const LightningFire = defineComponent("LightningFire", { struckTick: "u32" }, { networked: true, persistent: true });
+
+/** ADR-463: a crow circling a fresh kill (ground only, no flight). bag = the kill's loot-bag entity
+ *  (0 when none adopted yet — the crow circles the death spot until one appears); untilTick = the
+ *  cap (circle no longer than this); angle = the circle phase 0..255. Server-only, persistent. */
+export const Carrion = defineComponent("Carrion", { bag: "u32", untilTick: "u32", angle: "u8" }, { persistent: true });
+
 export const GAMEPLAY_COMPONENTS = [
   Emitter, Buffs,
   Health, ResourceNode, Survival, VitalsState, Exposure, Dead,
@@ -573,4 +583,6 @@ export const GAMEPLAY_COMPONENTS = [
   MountHunger, // append-only (ADR-353 mount hunger clock; server-only, persistent)
   MountHarness, // append-only (ADR-359 harness on a mount; networked + persistent)
   StoreFill, // append-only (ADR-356 store fill level; networked, derived — not persistent)
+  LightningFire, // append-only (ADR-451 lightning-struck fire, exempt from storm quench; networked + persistent)
+  Carrion, // append-only (ADR-463 crow circling a fresh kill; server-only, persistent)
 ] as const;

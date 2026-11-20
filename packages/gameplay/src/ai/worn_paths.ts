@@ -26,10 +26,11 @@
  * zone (hasPrivilege) — a worn path never paves a lake or a stranger's claim.
  */
 import { Transform, type Agent, type Entity, type World } from "@engine/core";
+import { isWaterId } from "@engine/world";
 import { Road, RoadSurface } from "../components.js";
 import { hasPrivilege } from "../building/place.js";
 import { roadAt, roadLine, spawnRoad } from "../roads.js";
-import { inWater } from "../systems/movement.js";
+import { TerrainRes } from "../world.js";
 import { aiMemoryOf, markAiDirty } from "./planner.js";
 
 /** Completed trips on one route before a worn path forms. */
@@ -97,10 +98,13 @@ export function maybeFormWornPath(world: World, self: Entity, a: Agent, from: { 
   if (worn >= WORN_PATH_MAX_WORLD_TILES) return 0;
   const line = roadLine(from.x, from.y, to.x, to.y, WORN_PATH_MAX_TILES);
   let laid = 0;
+  const terrain = world.getResource(TerrainRes);
   for (const [x, y] of line) {
     if (worn + laid >= WORN_PATH_MAX_WORLD_TILES) break;
     if (roadAt(world, x, y) !== undefined) continue;
-    if (inWater(world, x + 0.5, y + 0.5)) continue;
+    // ADR-450: the raw water-tile check, not inWater — inWater reads frozen lakes as land, and a worn
+    // path must never pave a lake (frozen or not); the ice thaws and the path would sit on water.
+    if (terrain && isWaterId(terrain.tileAt(Math.floor(x + 0.5), Math.floor(y + 0.5)))) continue;
     if (!hasPrivilege(world, self, x + 0.5, y + 0.5)) continue;
     spawnRoad(world, x, y, RoadSurface.Path, 0);
     laid++;

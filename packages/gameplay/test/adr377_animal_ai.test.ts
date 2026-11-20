@@ -4,6 +4,10 @@
  * base): every live animal's id/kind/state/position/goal/thinkAt/hp, every loot bag's id/position,
  * and the entity count. Any change in iteration order, threat choice, flee/attack boundary or
  * cache staleness changes the hash. Golden values were recorded from the pre-377 code.
+ * Re-pinned by ADR-463 (2026-11-19): crows now spawn at animal/zombie kills near players, so the
+ * snapshot carries the crows (kind/state/position/goal) and a higher entity count. Probe of the
+ * open-ground run: 16 crows spawned, 0 Drink-state observations (ADR-462 drink/shade is inert
+ * here — no terrain/water, Clear weather) — the drift is the carrion feature alone.
  */
 import { describe, expect, it } from "vitest";
 import { PlayerId, Rng, Transform, type Entity } from "@engine/core";
@@ -51,7 +55,7 @@ function snapshot(w: ReturnType<typeof world215>["w"]): string {
   return fnv1a(parts.join("|"));
 }
 
-const GOLDEN = { open: "64878346", base: "6402418b" };
+const GOLDEN = { open: "9d89ddf7", base: "602b24ce" }; // ADR-463 re-pin (see header)
 
 describe("ADR-377 animalAI behaviour identity", () => {
   it("golden hash: 800 ticks, open ground", () => {

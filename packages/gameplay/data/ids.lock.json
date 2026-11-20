@@ -515,7 +515,12 @@
     "vehicle_kit_rowboat": 513,
     "vehicle_kit_motorboat": 514,
     "vehicle_kit_pontoon": 515,
-    "vehicle_kit_speedboat": 516
+    "vehicle_kit_speedboat": 516,
+    "cured_poultry": 517,
+    "cured_prime_cut": 518,
+    "cured_venison": 519,
+    "smoked_fish": 520,
+    "wet_wood": 521
   },
   "resources": {
     "fallen_branches": 1,
@@ -1015,7 +1020,12 @@
     "vehicle_kit_rowboat": 399,
     "vehicle_kit_motorboat": 400,
     "vehicle_kit_pontoon": 401,
-    "vehicle_kit_speedboat": 402
+    "vehicle_kit_speedboat": 402,
+    "cured_poultry": 403,
+    "cured_prime_cut": 404,
+    "cured_venison": 405,
+    "smoked_fish": 406,
+    "dry_wet_wood": 407
   },
   "pieces": {
     "anvil": 1,

@@ -106,6 +106,17 @@ function apiaries(world: World): Entity[] {
   }
   return out.sort((x, y) => x - y);
 }
+/** ADR-454: true when a live Apiary is within `radius` tiles of (x, y). Reuses the StructureIndex-versioned
+ * station cache (same list bees deposit honey into) — no new scan per harvest. */
+export function apiaryWithin(world: World, x: number, y: number, radius: number): boolean {
+  for (const a of stationLists(world).apiaries) {
+    if (!world.isAlive(a)) continue;
+    const t = world.get(a, Transform); if (!t) continue;
+    const dx = t.x - x, dy = t.y - y;
+    if (dx * dx + dy * dy <= radius * radius) return true;
+  }
+  return false;
+}
 /** Task 28: hay (the trough-feed item); 1 hay feeds one farm animal for the usual fedSeconds (600s). */
 export const HAY_ITEM = "hay";
 // ---- ADR-353: wider trough diets + trough ownership -------------------------------------------------------

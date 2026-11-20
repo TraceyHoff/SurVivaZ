@@ -24,7 +24,7 @@ import { clanPieceTint, clanPieceTintPair } from "./clan-tint.js";
 import { pieceVariantOpts } from "./piece-variant.js";
 import { DoorView, doorArt } from "./door-view.js";
 import { loadManifest, buildPieceVisual, quarterTurn, type AssetRegistry } from "@engine/assets";
-import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard, setResizeSlicing } from "@engine/render";
+import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard, setResizeSlicing, type VfxSpawn } from "@engine/render";
 import { countFraction } from "./load-progress.js";
 import { isWarmupCandidate, warmupPageBudget, type WarmupResult } from "@engine/render";
 import { VehicleView, type RiderPlacement, type VehicleSnapshot, type VehicleRenderDef } from "@engine/render";
@@ -88,6 +88,9 @@ import { task421AtlasSources, installBoatMenuIcons, TASK421_ATLAS_KEYS } from ".
 import { task422AtlasSources, installMotorboatMenuIcons, TASK422_ATLAS_KEYS } from "./task421-art.js";
 import { installGuideArt } from "./task364-art.js";
 import { installGuideMenuIcon } from "./guide-art.js";
+import { installWetWoodIcon } from "./wetwood-art.js"; // ADR-457: wet firewood's own icon
+import { footprintAtlasSources, FOOTPRINT_SPRITE_KEY } from "./footprints-art.js"; // ADR-455: footprints' own sprite
+import { FootprintStore, sampleFootprints, collectFootprintOverlays, footprintTuning, snowCoverOf } from "./footprints.js"; // ADR-455
 import { stumpKeys } from "./stumps.js";
 import { RoofTiler, rfxStandIn, roofWallMaterial } from "./roof-tiler.js";
 /** `?cam=animal`: debug camera that follows the first ambient animal instead of the player. */
@@ -482,6 +485,8 @@ export class IsoView {
     for (const [k, src] of await task421AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-422: dedicated tier-2 motorboat atlases (world sprites keyed by def id, like ADR-421).
     for (const [k, src] of await task422AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-455: dedicated footprint atlas (one boot print, 8 facings — the ground decal for snow/mud).
+    for (const [k, src] of await footprintAtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-357: the five store build-menu icons point at items_build frames 297–301, which are transparent
     // in the shipped atlas (no binary could ship through the snapshot route) — paint them at runtime from
     // the stores' own world art so the build menu shows them. Safe no-op without a canvas.
@@ -508,6 +513,10 @@ export class IsoView {
     // from the guide-art painter and registered in ICON_DATA, so the pause/settings Guide buttons and
     // the Guide panel headers render it. Safe no-op without a canvas.
     installGuideMenuIcon();
+    // ADR-457: wet firewood's own icon (a wet pine log, not a tinted dry log) — painted at runtime
+    // from the wetwood-art painter and registered in ICON_DATA, so the inventory / hotbar / toast /
+    // crafting icons for wet_wood render it. Safe no-op without a canvas.
+    installWetWoodIcon();
     // Art's customization pack (~220 paper-doll atlases, 1008x960): the renderer packs every atlas into one 2048² texture
     // array, so these alone need ~1.7 GiB of VRAM ("Texture total allocation size is too large" -> every sprite black).
     // Until Render loads outfit layers on demand, keep them out unless the array fits (?cz=1 forces them in).
@@ -914,6 +923,24 @@ export class IsoView {
     v.runPhase("renderPrep", 0);
     const held0 = r.heldFrames;
     this.syncGrazed(net); // ADR-256: grazed grass art on the tilemap
+    // ADR-455: footprints in snow and mud (client-side transient decals). Sample mover positions from
+    // the net world (replicated Transforms) every 5 ticks and draw the current prints as one-frame VFX
+    // overlays (flat ground decals). No sim state, no replication — each client stamps its own. The
+    // snow cover comes from the view world (its season is set above); the wetness from the net world's
+    // replicated ChunkSurface. Canvas2D has no VFX layer (r.vfx undefined), so footprints render on
+    // WebGL2 only.
+    if (player !== undefined) {
+      const pt = net.get(player, Transform);
+      if (pt) {
+        const ft = footprintTuning(defs?.environment);
+        sampleFootprints(this.footprints, net, pt.x, pt.y, net.tick, ft, snowCoverOf(v));
+        if (this.footprintSpriteId === undefined) this.footprintSpriteId = this.rs(FOOTPRINT_SPRITE_KEY)?.id;
+        if (r.vfx && this.footprintSpriteId !== undefined) {
+          collectFootprintOverlays(this.footprints, this.footprintSpriteId, net.tick, Math.max(1, Math.round(ft.fadeSeconds * 20)), this.footprintOverlays);
+          r.vfx.overlay = this.footprintOverlays;
+        }
+      }
+    }
     try { r.render(v, alpha); } catch (e) { showRenderError("Renderer exception", `${e instanceof Error ? e.stack ?? e.message : String(e)}\n${glInfo(r.gl)}`); return; }
     // all-black self-check over the first frames (daytime only, where black means a broken pass)
     // ADR-148: async readback (no pipeline stall during startup); the default framebuffer is read right after the frame
@@ -962,6 +989,9 @@ export class IsoView {
   }
   /** ADR-242: raid hit / repair / collapse fx input + Burning mirror for one piece. */
   private readonly raid = new RaidFx(); private readonly raidPieces: RaidPiece[] = [];
+  /** ADR-455: client-side transient footprints (snow/mud) + their one-frame VFX overlay (reused scratch). */
+  private readonly footprints = new FootprintStore(); private readonly footprintOverlays: VfxSpawn[] = [];
+  private footprintSpriteId: number | undefined;
   private syncRaid(net: World, e: Entity, ve: Entity): void {
     const v = this.view; const bp = net.get(e, GPiece); const t = v.get(ve, Transform); if (!bp || !t) return;
     this.raidPieces.push({ e, x: Math.floor(t.x) + 0.5, y: Math.floor(t.y) + 0.5, z: floorToTerrainZ(v.getField(ve, VPiece, "level") ?? 0, t.z), hp: bp.hp, tier: bp.tier });

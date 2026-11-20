@@ -17,6 +17,7 @@ import { setHotbarSelection, readSlots, slotFreshness, slotItem, takeFromSlot } 
 import { hasPerk, skillMul } from "../skills/tree.js";
 import { fillContainer, spoilStageIndex, spoilStages, takeSip } from "../food.js";
 import { inWater } from "./movement.js";
+import { heatAt } from "./environment.js";
 import { pendingReady } from "../ready.js";
 import { TerrainRes } from "../world.js";
 
@@ -112,6 +113,13 @@ export function consumeSystem(world: World, dt = 1 / 20): void {
       const until = world.tick + secondsToTicks(sp.sickSeconds, dt);
       addModifier(world, e, Buffs, { stat: Stat.HealthRegen, op: ModOp.Add, value: -defs.vitals.healthRegenPerSec * 2, expiresAtTick: until });
       addModifier(world, e, Buffs, { stat: Stat.StaminaRegen, op: ModOp.Add, value: -defs.vitals.staminaRegenPerSec * 0.5, expiresAtTick: until });
+    }
+    // ADR-458: hot meals warm you — a cooked meal (vitals.hotMeals) eaten where a fire's heat reaches
+    // (heatAt > 0, i.e. within the fire's heat radius) gives a short Insulation buff. Event-driven on
+    // eating; insulation only shifts felt temperature toward the comfort band, so it warms in the cold
+    // and never overheats in summer. Baked potato and bread do not count.
+    if (tf && defs.vitals.hotMeals.items.includes(idef.key) && heatAt(world, tf.x, tf.y) > 0) {
+      addModifier(world, e, Buffs, { stat: Stat.Insulation, op: ModOp.Add, value: defs.vitals.hotMeals.insulation, expiresAtTick: world.tick + secondsToTicks(defs.vitals.hotMeals.seconds, dt) });
     }
     // Task 13: cures clear their disease on any successful consume (deterministic: every peer agrees); cause
     // rolls are authority-only and replicate via the Diseases component.

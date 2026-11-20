@@ -13,10 +13,11 @@
  */
 import { addModifier, ModOp, PlayerId, Transform, Weather, type Entity, type World } from "@engine/core";
 import fireRaw from "../../data/fire.json";
-import { BuildPiece, Buffs, Burning, DamageCause, Dead, DoorState, Health, Stat, Tribe } from "../components.js";
+import { BuildPiece, Buffs, Burning, DamageCause, Dead, DoorState, Health, LightningFire, ResourceNode, Stat, Survival, Tribe } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
-import { secondsToTicks, WeatherKind, type PieceDef } from "../defs.js";
-import { emit, Extinguished, Ignited, RaidAlarm } from "../events.js";
+import { secondsToTicks, ToolKind, WeatherKind, type PieceDef } from "../defs.js";
+import { emit, Extinguished, Ignited, RaidAlarm, WeatherChanged } from "../events.js";
+import { depleteNode } from "../systems/gathering.js";
 import { applyDamage } from "./combat.js";
 import { damagePiece, maxHpOf } from "../building/integrity.js";
 import { attachmentsOf } from "../building/links.js";
@@ -24,7 +25,7 @@ import { noteUnlockEvent } from "../customization.js";
 import { GateBreached, hasPlayerId } from "./pvp.js";
 import { installSpatialIndex } from "@engine/world";
 
-export interface FireTuning { checkSeconds: number; dps: number; igniteIntensity: number; growPerCheck: number; spreadRadius: number; spreadChance: number; rainQuench: number; flammableTiers: number[] }
+export interface FireTuning { checkSeconds: number; dps: number; igniteIntensity: number; growPerCheck: number; spreadRadius: number; spreadChance: number; rainQuench: number; flammableTiers: number[]; /** ADR-451: one gameplay strike per storm, 5..15 tiles from a random survivor. */ lightning: { strikesPerStorm: number; radius: number; minDistance: number } }
 export const FIRE: Readonly<FireTuning> = fireRaw;
 export const CONTACT_EVERY = 4;
 export const DOOR_BREACHED = 2;
@@ -67,7 +68,16 @@ export function ignite(world: World, e: Entity, intensity = FIRE.igniteIntensity
   emit(world, Ignited, { entity: e }); return true;
 }
 export function extinguish(world: World, e: Entity): void {
-  if (!world.has(e, Burning)) return; world.remove(e, Burning); emit(world, Extinguished, { entity: e });
+  if (!world.has(e, Burning)) return; world.remove(e, Burning);
+  if (world.has(e, LightningFire)) world.remove(e, LightningFire); // ADR-451: the exemption ends with the fire
+  emit(world, Extinguished, { entity: e });
+}
+
+/** ADR-451: ignite as a lightning fire — exempt from storm quench (see burningSystem). */
+export function igniteLightning(world: World, e: Entity): boolean {
+  if (!ignite(world, e)) return false;
+  if (!world.has(e, LightningFire)) world.add(e, LightningFire, { struckTick: world.tick });
+  return true;
 }
 
 /** Fire system (every checkSeconds). */
@@ -81,7 +91,7 @@ export function burningSystem(world: World, dt: number): void {
     const isPiece = world.has(e, BuildPiece);
     const dmg = FIRE.dps * FIRE.checkSeconds * (b.intensity / 255);
     if (isPiece) damagePiece(world, e, dmg, undefined, DamageCause.Fire); else applyDamage(world, e, dmg, e, DamageCause.Fire);
-    let next = b.intensity + (isPiece ? FIRE.growPerCheck : -FIRE.growPerCheck) - (wet ? FIRE.rainQuench : 0);
+    let next = b.intensity + (isPiece ? FIRE.growPerCheck : -FIRE.growPerCheck) - (wet && !world.has(e, LightningFire) ? FIRE.rainQuench : 0); // ADR-451: lightning fires are exempt from storm quench
     if (world.has(e, Dead)) next = 0;
     next = Math.max(0, Math.min(255, next));
     if (next === 0) { extinguish(world, e); continue; }
@@ -94,6 +104,46 @@ export function burningSystem(world: World, dt: number): void {
       }
     }
   }
+}
+
+/**
+ * ADR-451 lightning: one gameplay strike per storm, rolled server-side on WeatherChanged (not from the
+ * renderer's client-side visual bolts, which stay per-client noise). One rng stream per storm, sequential
+ * draws; strikes land near a survivor (5..radius tiles from a random player/bot) and never on a person.
+ * Target priority: nearest tree (axe node) — scorch = depletion (dies, regrows; a stump for stumpSeconds) —
+ * else the nearest flammable piece, ignited as a quench-exempt lightning fire; else no strike.
+ */
+export function installLightning(world: World): void {
+  world.events.on(WeatherChanged, (p: { from: WeatherKind; to: WeatherKind; intensity: number; ticks: number }) => {
+    if (p.to !== WeatherKind.Storm || !isAuthority(world) || world.isReplaying) return;
+    const rng = world.rngFor("lightning");
+    for (let i = 0; i < FIRE.lightning.strikesPerStorm; i++) resolveLightningStrike(world, rng);
+  });
+}
+export function resolveLightningStrike(world: World, rng: { next(): number; int(min: number, maxExclusive: number): number }): { kind: "tree" | "fire"; entity: Entity } | undefined {
+  if (!isAuthority(world) || world.isReplaying) return undefined;
+  const defs = gameplayDefs(world); const L = FIRE.lightning;
+  const people = [...world.query([Survival, Transform])].sort((a, b) => a - b);
+  if (people.length === 0) return undefined;
+  const anchor = people[rng.int(0, people.length)]!;
+  const a = world.get(anchor, Transform)!;
+  const ang = rng.next() * Math.PI * 2;
+  const dist = L.minDistance + rng.next() * (L.radius - L.minDistance);
+  const x = a.x + Math.cos(ang) * dist, y = a.y + Math.sin(ang) * dist;
+  const distTo = (e: Entity): number => { const t = world.get(e, Transform)!; return Math.hypot(t.x - x, t.y - y); };
+  const trees = nearby(world, x, y, L.radius, (e) => world.has(e, ResourceNode))
+    .filter((e) => { const k = world.getField(e, ResourceNode, "kind"); const d = k === undefined ? undefined : defs.resources.get(k); return d !== undefined && d.requiredTool === ToolKind.Axe && !d.oneShot; })
+    .sort((p, q) => distTo(p) - distTo(q) || p - q);
+  if (trees.length > 0) {
+    const node = trees[0]!; const kind = world.getField(node, ResourceNode, "kind")!;
+    const def = defs.resources.get(kind)!; const dep = defs.depletion;
+    depleteNode(world, node, kind, world.tick + secondsToTicks(def.respawnSeconds * dep.respawnMul, 1 / 20), secondsToTicks(dep.stumpSeconds, 1 / 20));
+    return { kind: "tree", entity: node };
+  }
+  const pieces = nearby(world, x, y, L.radius, (e) => world.has(e, BuildPiece) && FIRE.flammableTiers.includes(world.getField(e, BuildPiece, "tier")!))
+    .sort((p, q) => distTo(p) - distTo(q) || p - q);
+  if (pieces.length > 0 && igniteLightning(world, pieces[0]!)) return { kind: "fire", entity: pieces[0]! };
+  return undefined;
 }
 
 /** Contact damage + slow (barricade_spiked), every CONTACT_EVERY ticks. */

@@ -95,6 +95,18 @@ function setState(world: World, z: Entity, state: ZState): void {
 const dist = (ax: number, ay: number, bx: number, by: number): number => Math.hypot(ax - bx, ay - by);
 
 /**
+ * ADR-461: moon illumination (0 new .. 1 full) for a day number (synodic month, 29.53 days). Same formula
+ * as the renderer's moonIllumination (packages/render/src/timeOfDay.ts), duplicated here because gameplay
+ * must not import render. The brightness half already ships in both renderers; this only drives boldness.
+ */
+export const LUNAR_DAYS = 29.53;
+export function moonIllumination(day: number): number { const p = (((day / LUNAR_DAYS) % 1) + 1) % 1; return 0.5 - 0.5 * Math.cos(p * 2 * Math.PI); }
+/** ADR-461: sight-range multiplier from the moon: x(1 + ai.moonSightMul) at full moon, x1 at new moon. */
+export function moonSightFactor(world: World): number {
+  return 1 + gameplayDefs(world).ai.moonSightMul * moonIllumination(timeOfDay(world).day);
+}
+
+/**
  * Nearest living player seen (sight range) or heard (noise x hearing) from (x,y).
  * Task 29: scans the small living-survivors list (built once per system run) instead of a
  * spatial radius query over every piece/animal/node in the village (~186us -> ~1us per call).
@@ -105,6 +117,8 @@ const dist = (ax: number, ay: number, bx: number, by: number): number => Math.hy
 function acquire(world: World, z: Entity, x: number, y: number, def: ZombieDef, survivors: readonly Entity[], dt: number, ai: AiTuning): { e: Entity; seen: boolean } | undefined {
   const la = lastAttacker(world, z);
   const retaliateTicks = secondsToTicks(ai.retaliateSeconds, dt);
+  // ADR-461: full-moon nights make zombies bolder — sight range grows with moon illumination.
+  const moon = moonSightFactor(world);
   let best: { e: Entity; seen: boolean; d: number } | undefined;
   for (const p of survivors) {
     if (world.has(p, Dead)) continue;
@@ -115,7 +129,7 @@ function acquire(world: World, z: Entity, x: number, y: number, def: ZombieDef, 
     // scope for the safe radius and must still reach its target.
     const recentAttacker = la !== undefined && la.e === p && world.tick - la.tick <= retaliateTicks;
     if (!recentAttacker && !world.has(z, HordeMember) && inSpawnSafeRadius(world, t.x, t.y)) continue;
-    const seen = d <= def.sightRange * (isCrouched(world, p) ? STANCE.crouchSightMul : 1); const heard = d <= (world.getField(p, NoiseLevel, "value") ?? 0) * def.hearingMul;
+    const seen = d <= def.sightRange * moon * (isCrouched(world, p) ? STANCE.crouchSightMul : 1); const heard = d <= (world.getField(p, NoiseLevel, "value") ?? 0) * def.hearingMul;
     if (!seen && !heard) continue;
     if (!best || d < best.d || (d === best.d && p < best.e)) best = { e: p, seen, d };
   }

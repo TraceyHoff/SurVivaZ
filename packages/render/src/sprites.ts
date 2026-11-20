@@ -1140,7 +1140,7 @@ export class SpriteBatch {
       if (!atlas.resolve(v.spriteId, v.anim, v.facing + vFace, cx.now - v.born, 0, res)) continue;
       const life = Math.min(1, (cx.now - v.born) / Math.max(1e-3, v.lifetime));
       const fadeOut = (v.fade ? 1 - life : Math.min(1, (v.lifetime - (cx.now - v.born)) / 0.15)) * v.alpha;
-      this.push(this.writeOne(sx, sy, xu + xv + v.z * zf + 0.05, v.scale * (v.s0 + (v.s1 - v.s0) * life), res, (v.emissive ? SpriteFlag.Emissive : 0) | SpriteFlag.NoOutline, 0, fadeOut, -OPEN, OPEN, 0, 0, 0, 0, 0, 0), 0);
+      this.push(this.writeOne(sx, sy, xu + xv + v.z * zf + 0.05, v.scale * (v.s0 + (v.s1 - v.s0) * life), res, (v.emissive ? SpriteFlag.Emissive : 0) | SpriteFlag.NoOutline | (v.flat ? SpriteFlag.Flat : 0), 0, fadeOut, -OPEN, OPEN, 0, 0, 0, 0, 0, 0), 0);
     }
 
     // ---- build pieces ----

@@ -380,7 +380,7 @@ describe("ADR-371 AI passenger", () => {
 
 describe("ADR-371 schema + tuning", () => {
   it("no new component: the world schema hash is unchanged from ADR-360", () => {
-    expect(makeWorld().getSchemaHash()).toBe(0x2ec1a43d); // ADR-426: skills salt only — dock_craft + shipyard_craft appended to skills.json (no component changed; old saves keep their node bits)
+    expect(makeWorld().getSchemaHash()).toBe(0x8890b694); // ADR-449–463: LightningFire (451) + Carrion (463) components appended (old saves keep their node bits)
   });
   it("passenger tuning loads from data (search 3, fallback 6) and rejects bad values", () => {
     expect(G.VEHICLE_PASSENGER_TUNING.dismountSearchRadiusTiles).toBe(3);

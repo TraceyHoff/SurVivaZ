@@ -23,6 +23,9 @@ import { spoilageSystem, SPOILAGE_EVERY } from "./systems/spoilage.js";
 import { consumeSystem, deathSystem, vitalsSystem } from "./systems/vitals.js";
 import { diseaseSystem } from "./systems/diseases.js";
 import { installDiseases } from "./diseases.js";
+import { installLightning } from "./combat/pvp_pieces.js";
+import { installSmokeMarkers } from "./map_markers.js";
+import { installCarrion } from "./population.js";
 import { recruitmentSystem } from "./recruitment.js";
 import { animSettleSystem } from "./systems/movement.js";
 import { installShaftHatchInput } from "./building/terrain-hatch.js";
@@ -154,6 +157,9 @@ export function installGameplay(world: World, options: GameplayOptions | number 
   installPets(world); // ADR-145
   installMounts(world); // ADR-320 saddle wear
   installDiseases(world); // Task 13: wound-infection Damaged subscription (once per world)
+  installLightning(world); // ADR-451: one gameplay strike per storm, on WeatherChanged (once per world)
+  installSmokeMarkers(world); // ADR-453: lit campfires show as "Smoke" map markers (once per world)
+  installCarrion(world); // ADR-463: crows circle a fresh kill near a player (once per world)
   for (const [phase, name, every] of GAMEPLAY_SYSTEM_ORDER) {
     const fn = sys[name]; if (!fn) throw new Error(`no system ${name}`);
     world.addSystem(phase, name, fn, every ? { every } : {});

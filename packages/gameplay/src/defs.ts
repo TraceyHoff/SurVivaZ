@@ -121,6 +121,8 @@ export interface VitalsTuning {
   readonly bodyTempMin: number; readonly bodyTempMax: number; readonly bodyTempChangePerDegreePerSec: number; readonly bodyTempRecoverPerSec: number;
   readonly hypothermiaBelow: number; readonly hyperthermiaAbove: number; readonly exposureDps: number; readonly comfortMin: number;
   readonly comfortMax: number; readonly coldHungerMul: number; readonly heatThirstMul: number;
+  /** ADR-458: hot meals by the fire — item keys that count as a cooked meal, Insulation bonus, duration in seconds. */
+  readonly hotMeals: { readonly items: readonly string[]; readonly insulation: number; readonly seconds: number };
 }
 /** ADR-239: one season's climate + weather table (entries are full WeatherDefs: base kind def + season overrides). */
 export interface SeasonDef {
@@ -146,6 +148,18 @@ export interface EnvironmentTuning {
   readonly altitudeLapse: number; readonly humidityPerIntensity: number; readonly windChillPerSpeed: number;
   readonly surface: { readonly rainPerSec: number; readonly dryPerSec: number; readonly windDryMul: number; readonly sunDryMul: number };
   readonly wetBuffThreshold: number; readonly coldBuffBelow: number;
+  /** ADR-452: seconds of unsheltered rain per +1 sip into a carried liquid container. */
+  readonly rainFillSecondsPerSip: number;
+  /** ADR-456: smoke in a sealed room — a roaring fire (heat >= heatC, i.e. close to a lit campfire or
+   *  fireplace; a torch at 4 never counts) in a room with openness <= openness hurts at
+   *  hpPerSec * (1 - openness) hp/s, via a HealthRegen Add modifier (stateless v1). */
+  readonly smoke: { readonly heatC: number; readonly openness: number; readonly hpPerSec: number };
+  /** ADR-455: footprints in snow and mud (CLIENT-SIDE ONLY — the net client never steps the sim, so a
+   *  sim-side store would be invisible; see apps/client/src/footprints.ts). A mover near a player stamps
+   *  its tile when the ground snow cover >= snowCover or the chunk wetness >= wetness; the print fades
+   *  after fadeSeconds. sampleTicks = how often the client samples mover positions (5 ticks = 0.25 s);
+   *  maxFootprints caps the transient store (oldest evicted first). */
+  readonly footprints: { readonly fadeSeconds: number; readonly snowCover: number; readonly wetness: number; readonly nearPlayerTiles: number; readonly sampleTicks: number; readonly maxFootprints: number };
   readonly spoilage: { readonly tempRefC: number; readonly mulPerDegree: number; readonly minMul: number; readonly maxMul: number; readonly rebaseThreshold: number; readonly sickSeconds: number; readonly spoiledItem: string; readonly staleFreshness: number;
     /** Four freshness stages, descending minFresh (fresh, stale, spoiling, rotten). */
     readonly stages?: readonly SpoilStage[] };
@@ -250,6 +264,8 @@ export interface AiTuning {
   /** ADR-194 aggression window (time-of-day fractions) + per-zombie stagger; calm zombies retaliate for retaliateSeconds. */ readonly aggroStartT: number; readonly aggroEndT: number; readonly aggroStaggerT: number; readonly retaliateSeconds: number; readonly despawnDistance: number; readonly corpseSeconds: number;
   /** Task 15: max chase distance from a zombie's spawn anchor (homeX/homeY), in tiles. Beyond it a chasing zombie gives up and wanders (horde members and light/structure chasing are exempt). */
   readonly chaseLimitTiles: number;
+  /** ADR-461: moon boldness — sight range multiplier at full moon (sight x(1 + moonSightMul) at full moon, x1 at new moon). */
+  readonly moonSightMul: number;
 }
 export interface NoiseTuning { readonly gather: number; readonly build: number; readonly attack: number; readonly structureHit: number; readonly door: number; readonly walk: number; readonly sprint: number; readonly swim: number; readonly decayPerSec: number }
 export interface WorldgenBand { readonly max: number; readonly tile: number; readonly nodes: readonly number[]; readonly nodeChance: number; readonly temp: number; readonly humidity: number }
@@ -259,7 +275,9 @@ export interface MovementTuning { readonly walkSpeed: number; readonly sprintMul
   /** ADR-212: walker stand height on a foundation deck / an upper floor (z above the level floor), step-up ease rate (z/s). */ readonly deckStandHeight: number; readonly floorStandHeight: number; readonly stepRate: number;
   /** ADR-107 swimming: terrain ids players may swim in, and the speed multiplier there. */ readonly swimTiles: ReadonlySet<number>; readonly swimSpeedMul: number;
   /** ADR-181 depths: shallow water (shore band within shallowRadius tiles of land) is wadeable for everyone at wadeSpeedMul; deep water is swim-only (swimSpeedMul, no sprint). */ readonly wadeSpeedMul: number; readonly shallowRadius: number;
-  /** ADR-125: tiles/s the character walk art was authored at (render playback = walkSpeed / this). */ readonly walkAnimRefSpeed: number }
+  /** ADR-125: tiles/s the character walk art was authored at (render playback = walkSpeed / this). */ readonly walkAnimRefSpeed: number;
+  /** ADR-449 mud: wet ground (chunk wetness >= threshold) slows walking off-path by mudSlowMul; road tiles stay fast. */
+  readonly mudSlowMul: number; readonly mudWetnessThreshold: number }
 
 export interface IdLock { items: Record<string, number>; resources: Record<string, number>; recipes: Record<string, number>; pieces: Record<string, number>; zombies: Record<string, number> }
 

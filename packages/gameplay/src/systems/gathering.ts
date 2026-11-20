@@ -7,8 +7,8 @@
  * emits GatherSwing for feedback, but does NOT roll yields or touch the node (RNG outcomes and shared
  * world state arrive by replication).
  */
-import { entityIndex, NetId, Transform, type Entity, type World } from "@engine/core";
-import { Anim, AnimState, BuildPiece, Dead, Equipment, Gatherer, IntentAction, Inventory, NO_SLOT, NodeRegrow, PieceLink, PlayerIntent, ResourceNode, Road, Survival, Crop, WorkerTarget } from "../components.js";
+import { entityIndex, NetId, Transform, Weather, type Entity, type World } from "@engine/core";
+import { Anim, AnimState, BuildPiece, Dead, Equipment, Gatherer, GrownPlant, IntentAction, Inventory, NO_SLOT, NodeRegrow, PieceLink, PlayerIntent, ResourceNode, Road, Survival, Crop, WorkerTarget } from "../components.js";
 import { spawnResourceNode } from "../spawn.js";
 import { ChunkNodes } from "../world.js";
 import { populationTile, PopulationTiles } from "../population.js";
@@ -20,7 +20,11 @@ import { makeNoise } from "./noise.js";
 import { addItem, slotItem } from "../inventory.js";
 import { spendStamina } from "./vitals.js";
 import { scaleCount, skillMul } from "../skills/tree.js";
+import { apiaryWithin } from "../skills/husbandry.js";
+import { isRaining } from "../realism.js";
 import farmingRaw from "../../data/farming.json";
+/** ADR-454: bees pollinate — planted crops near an Apiary yield +`bonus` on the first yield only (data/farming.json). */
+const POLLINATION: { radius: number; bonus: number } = (farmingRaw as unknown as { pollination?: { radius: number; bonus: number } }).pollination ?? { radius: 5, bonus: 1 };
 /** ADR-234: nodes a player can grow without tilling (berry bushes, saplings): their food yields are farm produce. */
 const ORCHARD_NODES: ReadonlySet<string> = new Set((farmingRaw as unknown as { plantables: { type: string; becomes: string }[] }).plantables.filter((p) => p.type !== "crop").map((p) => p.becomes));
 /** ADR-234: which skill mod scales a yield: "cropYield" for crop_* nodes and the food (fruit / berries) of orchard nodes, else "gather". */
@@ -178,6 +182,17 @@ export function gatherSystem(world: World, dt: number): void {
     const rng = world.rngFor("gather", world.getField(node, NetId, "id") ?? node);
 
     const bonus = def.requiredTool !== ToolKind.None && !bare ? Math.max(0, tool.tier - def.minTier) * def.bonusPerTier : 0;
+    // ADR-454: bees pollinate — a planted crop (matured into a crop_* node with GrownPlant, i.e. grown by a
+    // player, not a wild node) harvested within POLLINATION.radius of an Apiary yields +bonus on the first
+    // yield only. No stacking across apiaries: one Apiary in range is enough. Checked once, at harvest.
+    const pollinated = def.key.startsWith("crop_") && world.has(node, GrownPlant)
+      && apiaryWithin(world, tf.data.x[b]!, tf.data.y[b]!, POLLINATION.radius);
+    // ADR-457: wood gathered in the rain is wet wood (burns 10 s, not 20 s) — gathered INSTEAD of wood,
+    // never as a second roll; dry stored wood is untouched. Rain = Rain + Storm kinds. The skill roll
+    // and counts above stay on "wood" (wet wood is still wood gathering); only the item handed over changes.
+    // Yields store numeric item ids (resolved at loadDefs), so the comparison is by id, not key.
+    const raining = isRaining(world.env(Weather).kind);
+    const woodId = defs.itemId("wood"), wetWoodId = defs.itemId("wet_wood");
     def.yields.forEach((y, i) => {
       if (bare && i > 0) return; // fists: first yield only
       if (y.chance < 1 && rng.next() >= y.chance) return;
@@ -185,10 +200,12 @@ export function gatherSystem(world: World, dt: number): void {
       const n0 = bare ? Math.max(defs.bareHands.minYield, Math.floor(rolled * defs.bareHands.yieldMul)) : rolled;
       const gm = skillMul(world, e, yieldSkillMod(defs, defs.resources.get(world.get(node, ResourceNode)!.kind)?.key, y.item));
       const n = gm === 1 ? n0 : scaleCount(n0, gm, rng.next()); // ADR-113 (no extra roll without perks: rng stream unchanged)
-      if (n <= 0) return;
-      const added = addItem(world, e, y.item, n);
-      if (added > 0) emit(world, ItemGathered, { entity: e, node, item: y.item, count: added });
-      if (added < n) emit(world, InventoryOverflow, { entity: e, item: y.item, lost: n - added });
+      const total = n + (pollinated && i === 0 ? POLLINATION.bonus : 0);
+      if (total <= 0) return;
+      const item = y.item === woodId && raining ? wetWoodId : y.item;
+      const added = addItem(world, e, item, total);
+      if (added > 0) emit(world, ItemGathered, { entity: e, node, item, count: added });
+      if (added < total) emit(world, InventoryOverflow, { entity: e, item, lost: total - added });
     });
     const left = rn.data.amount[ns]! - 1;
     rn.data.amount[ns] = left;

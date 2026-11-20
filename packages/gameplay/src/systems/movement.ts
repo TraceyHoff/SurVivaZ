@@ -10,10 +10,11 @@ import { shaftAwareHeight, updateShaftOccupancy } from "../building/terrain-hatc
  * MoveSpeed buffs. Sprint stamina drain happens in vitalsSystem from PlayerIntent.moving/sprint. Movement is blocked
  * by edge walls/closed doors, solid cell pieces at the player's level and unwalkable terrain (per-axis slide).
  */
-import { roadSpeedMul } from "../roads.js";
+import { roadSpeedMul, roadSurfaceAt } from "../roads.js";
+import { isFrozenWaterAt } from "../frozen.js"; // ADR-450: frozen still water is walkable land
 import { entityIndex, evaluate, defineResource, Transform, type Entity, type World } from "@engine/core";
 import { contractDisease, diseaseMoveMul, hasDisease } from "../diseases.js";
-import { Anim, AnimState, DamageCause, Health, LootBag, Buffs, Dead, Driver, EdgeSide, Inventory, Mount, PlayerIntent, Riding, Stat, Survival, Wetness } from "../components.js";
+import { Anim, AnimState, DamageCause, Health, LootBag, Buffs, Dead, Driver, EdgeSide, Inventory, Mount, PlayerIntent, Riding, RoadSurface, Stat, Survival, Wetness } from "../components.js";
 import { fitsDoorway, fitsUnderCeiling, mountBodyRadius, mountOfRider, mountSpecies, MOUNT_TUNING } from "../mount_defs.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { skillMul } from "../skills/tree.js";
@@ -21,7 +22,7 @@ import { GameplayHoldBits as A, INPUT } from "../input_hooks.js";
 import { isLCorner, rotParts, StructureIndexRes, type StructureIndex } from "../building/structure.js";
 import { stairRampHeight } from "../building/stairs.js";
 import type { PieceDef } from "../defs.js";
-import { TerrainRes } from "../world.js";
+import { TerrainRes, chunkWetnessAt } from "../world.js";
 import { WaterDepth, waterDepthAt, installSpatialIndex } from "@engine/world";
 import { STANCE_ANIM, stanceAllowsSprint, stanceMode, stanceMoveMul } from "../stance.js";
 import { makeNoise } from "./noise.js";
@@ -55,7 +56,15 @@ export function speedMultiplier(world: World, e: Entity, sprint: boolean): numbe
   if (max > 0) { const f = w / max; if (f > mv.encumberedFrom) m *= 1 - (1 - mv.encumberedMinMul) * Math.min(1, (f - mv.encumberedFrom) / (1 - mv.encumberedFrom)); }
   m *= 1 - mv.wetSlowMul * ((world.getField(e, Wetness, "level") ?? 0) / 255);
   m *= diseaseMoveMul(world, e); // Task 13: active diseases slow the carrier (replicated Diseases component)
-  const t = world.get(e, Transform); if (t) m *= roadSpeedMul(world, t.x, t.y); // ADR-119 road surface bonus
+  const t = world.get(e, Transform);
+  if (t) {
+    m *= roadSpeedMul(world, t.x, t.y); // ADR-119 road surface bonus
+    // ADR-449: mud after rain — wet ground slows walking off-path; worn dirt paths stay fast.
+    if (roadSurfaceAt(world, t.x, t.y) === RoadSurface.None) {
+      const wet = chunkWetnessAt(world, t.x, t.y);
+      if (wet >= mv.mudWetnessThreshold) m *= mv.mudSlowMul;
+    }
+  }
   return evaluate(world, e, Buffs, Stat.MoveSpeed, m, world.simTick(e)); // ADR-191: server-frame expiry while predicting
 }
 
@@ -63,7 +72,7 @@ export function speedMultiplier(world: World, e: Entity, sprint: boolean): numbe
 export function movementBlocked(world: World, x0: number, y0: number, x1: number, y1: number, level: number, swim = false, traveler?: Entity): boolean {
   const defs = gameplayDefs(world); const terrain = world.getResource(TerrainRes);
   const tx0 = Math.floor(x0), ty0 = Math.floor(y0), tx1 = Math.floor(x1), ty1 = Math.floor(y1);
-  if (terrain) { const tile = terrain.tileAt(tx1, ty1); if (defs.worldgen.unwalkableTiles.has(tile) && !(swim && defs.movement.swimTiles.has(tile)) && waterDepthAt(terrain.tileAt, tx1, ty1, defs.movement.shallowRadius) !== WaterDepth.Shallow) return true; }
+  if (terrain) { const tile = terrain.tileAt(tx1, ty1); if (defs.worldgen.unwalkableTiles.has(tile) && !(swim && defs.movement.swimTiles.has(tile)) && waterDepthAt(terrain.tileAt, tx1, ty1, defs.movement.shallowRadius) !== WaterDepth.Shallow && !isFrozenWaterAt(world, tx1, ty1)) return true; } // ADR-450: frozen still water is walkable
   if (level === 0 && terrainMoveBlocked(world, tx0, ty0, tx1, ty1, false, traveler)) return true;
   const idx = world.getResource(StructureIndexRes); if (!idx || idx.count === 0) return false;
   if (tx1 !== tx0 && idx.edgeBlocker(Math.max(tx0, tx1), ty0, level, EdgeSide.West)) return true;
@@ -319,15 +328,18 @@ export function turnFacing(cur: number, target: number, dt: number): number {
 export function walkAnimRate(world: World): number { const mv = gameplayDefs(world).movement; return mv.walkAnimRefSpeed > 0 ? mv.walkSpeed / mv.walkAnimRefSpeed : 1; }
 
 // ---- swimming (ADR-107) -------------------------------------------------------------------------------------
-/** True when (x, y) is on a swim tile (movement.json swimTiles). */
+/** True when (x, y) is on a swim tile (movement.json swimTiles) — frozen still water is not water (ADR-450). */
 export function inWater(world: World, x: number, y: number): boolean {
   const terrain = world.getResource(TerrainRes); if (!terrain) return false;
-  return gameplayDefs(world).movement.swimTiles.has(terrain.tileAt(Math.floor(x), Math.floor(y)));
+  const tx = Math.floor(x), ty = Math.floor(y);
+  return gameplayDefs(world).movement.swimTiles.has(terrain.tileAt(tx, ty)) && !isFrozenWaterAt(world, tx, ty);
 }
-/** ADR-181: 0 land, 1 shallow (wade), 2 deep (swim) at (x, y). Same function the renderers use. */
+/** ADR-181: 0 land, 1 shallow (wade), 2 deep (swim) at (x, y). Same function the renderers use. Frozen still water reads as land (ADR-450): walk speed, no swim anim, no wetness, boats beach. */
 export function waterDepth(world: World, x: number, y: number): WaterDepth {
   const terrain = world.getResource(TerrainRes); if (!terrain) return WaterDepth.None;
-  return waterDepthAt(terrain.tileAt, Math.floor(x), Math.floor(y), gameplayDefs(world).movement.shallowRadius);
+  const tx = Math.floor(x), ty = Math.floor(y);
+  if (isFrozenWaterAt(world, tx, ty)) return WaterDepth.None;
+  return waterDepthAt(terrain.tileAt, tx, ty, gameplayDefs(world).movement.shallowRadius);
 }
 export function inDeepWater(world: World, x: number, y: number): boolean { return waterDepth(world, x, y) === WaterDepth.Deep; }
 /** Speed multiplier at (x, y): swimSpeedMul in deep water, wadeSpeedMul in shallow, else 1 (players, zombies, animals). */
@@ -335,10 +347,10 @@ export function swimSpeedMulAt(world: World, x: number, y: number): number {
   const d = waterDepth(world, x, y); const mv = gameplayDefs(world).movement;
   return d === WaterDepth.Deep ? mv.swimSpeedMul : d === WaterDepth.Shallow ? mv.wadeSpeedMul : 1;
 }
-/** ADR-181: terrain blocks non-swimmers (AI pathing, zombies, hordes) at tile (tx, ty): unwalkable tiles except shallow water. */
+/** ADR-181: terrain blocks non-swimmers (AI pathing, zombies, hordes) at tile (tx, ty): unwalkable tiles except shallow water. Frozen still water does not block (ADR-450) — animals and zombies cross the ice. */
 export function terrainBlocksWalker(world: World, tx: number, ty: number): boolean {
   const terrain = world.getResource(TerrainRes); if (!terrain) return false; const defs = gameplayDefs(world);
-  return defs.worldgen.unwalkableTiles.has(terrain.tileAt(tx, ty)) && waterDepthAt(terrain.tileAt, tx, ty, defs.movement.shallowRadius) !== WaterDepth.Shallow;
+  return defs.worldgen.unwalkableTiles.has(terrain.tileAt(tx, ty)) && waterDepthAt(terrain.tileAt, tx, ty, defs.movement.shallowRadius) !== WaterDepth.Shallow && !isFrozenWaterAt(world, tx, ty);
 }
 
 const SWIM_OVER: ReadonlySet<number> = new Set([Anim.Idle, Anim.Walk, Anim.Run, Anim.Shamble, Anim.Crawl, Anim.Graze, Anim.Sit]);
@@ -368,7 +380,7 @@ export function animSettleSystem(world: World): void {
     let cur = anStore.data.anim[ans]!;
     if (ONE_SHOT.has(cur) && svStore?.has(ei) && world.tick - anStore.data.startTick[ans]! >= (cur === Anim.Attack || cur === Anim.Punch ? PLAYER_SWING_TICKS : PLAYER_ONE_SHOT_TICKS)) { cur = STANCE_ANIM[stanceMode(world, e)] ?? Anim.Idle; world.set(e, AnimState, { anim: cur, startTick: world.tick }); } // ADR-244: back to the held stance
     if (!terrain) continue;
-    const wet = z < 0.5 && waterDepthAt(terrain.tileAt, Math.floor(x), Math.floor(y), shallowR) === WaterDepth.Deep; // ADR-181: wading keeps walk anims
+    const wet = z < 0.5 && waterDepthAt(terrain.tileAt, Math.floor(x), Math.floor(y), shallowR) === WaterDepth.Deep && !isFrozenWaterAt(world, Math.floor(x), Math.floor(y)); // ADR-181: wading keeps walk anims; ADR-450: frozen water is walked, not swum
     if (wet && SWIM_OVER.has(cur)) world.set(e, AnimState, { anim: Anim.Swim, startTick: world.tick });
     else if (!wet && cur === Anim.Swim) world.set(e, AnimState, { anim: Anim.Idle, startTick: world.tick });
   }

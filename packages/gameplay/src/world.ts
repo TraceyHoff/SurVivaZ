@@ -3,8 +3,8 @@
  * nodes on load (authority) and despawn them on unload, and the terrain lookup used by building validation.
  */
 import { defineResource, entityIndex, Transform, type Entity, type World } from "@engine/core";
-import { chunkKeyOf, terrainLevel, tileToChunk, tileToLocal, type ChunkKey, type ChunkManager, type NodePlacement, type ProceduralOptions, type TileMap } from "@engine/world";
-import { ResourceNode } from "./components.js";
+import { chunkKeyOf, parseChunkKey, terrainLevel, tileToChunk, tileToLocal, type ChunkKey, type ChunkManager, type NodePlacement, type ProceduralOptions, type TileMap } from "@engine/world";
+import { ChunkSurface, ResourceNode } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
 import type { GameDefs } from "./defs.js";
 import { spawnResourceNode } from "./spawn.js"; // not ./install.js: that edge made an ESM cycle (CROP_EVERY TDZ, ADR-115)
@@ -37,6 +37,36 @@ export function terrainFromTileMap(map: TileMap): Terrain {
 export const ChunkNodes = defineResource<Map<ChunkKey, Entity[]>>("gameplay.ChunkNodes");
 
 /**
+ * ADR-449: one ChunkSurface entity per loaded chunk — the per-chunk wetness the mud multiplier reads.
+ * Before this ADR the chunkSurfaceSystem iterated an empty store: no producer ever spawned a surface.
+ * Authority spawns on chunk load (below); clients receive surfaces by replication. The index map is
+ * the O(1) lookup for chunkWetnessAt (called per mover per tick) — no store scan in the hot path.
+ */
+export const ChunkSurfaces = defineResource<Map<ChunkKey, Entity>>("gameplay.ChunkSurfaces");
+
+/** Idempotent: return the existing surface for the chunk, or spawn one (wetness 0 = dry). */
+export function ensureChunkSurface(world: World, key: ChunkKey): Entity {
+  let m = world.getResource(ChunkSurfaces); if (!m) world.setResource(ChunkSurfaces, (m = new Map()));
+  const ex = m.get(key); if (ex !== undefined && world.isAlive(ex) && world.has(ex, ChunkSurface)) return ex;
+  const { cx, cy } = parseChunkKey(key);
+  const e = world.create(); world.add(e, ChunkSurface, { cx, cy, wetness: 0 });
+  m.set(key, e); return e;
+}
+/** Destroy the surface for an unloaded chunk (wetness is transient weather state; rain re-wets on reload). */
+export function despawnChunkSurface(world: World, key: ChunkKey): boolean {
+  const m = world.getResource(ChunkSurfaces); const e = m?.get(key);
+  if (e === undefined) return false; m!.delete(key);
+  if (world.isAlive(e) && world.has(e, ChunkSurface)) world.destroy(e); return true;
+}
+/** Wetness 0..1 of the chunk containing (x,y); 0 when the chunk has no surface (unloaded / no streaming). */
+export function chunkWetnessAt(world: World, x: number, y: number): number {
+  const m = world.getResource(ChunkSurfaces);
+  const e = m?.get(chunkKeyOf(x, y));
+  if (e !== undefined && world.isAlive(e)) { const cs = world.get(e, ChunkSurface); if (cs) return cs.wetness / 255; }
+  return 0;
+}
+
+/**
  * Hooks gameplay into a ChunkManager: terrain lookup, node spawning on load (authority only; clients receive
  * nodes by replication) and despawn on unload. Returns a detach function.
  */
@@ -51,10 +81,11 @@ export function attachWorldStreaming(world: World, chunks: ChunkManager): () => 
   const offLoad = chunks.onLoad((chunk, nodes) => {
     if (isAuthority(world)) {
       spawnChunkNodes(world, chunk.key, nodes);
+      ensureChunkSurface(world, chunk.key); // ADR-449: the surface the mud multiplier reads
       for (const hook of chunkLoadHooks) hook(world, chunk.key);
     }
   });
-  const offUnload = chunks.onUnload((chunk) => despawnChunkNodes(world, chunk.key));
+  const offUnload = chunks.onUnload((chunk) => { despawnChunkNodes(world, chunk.key); despawnChunkSurface(world, chunk.key); });
   return () => { offLoad(); offUnload(); };
 }
 
