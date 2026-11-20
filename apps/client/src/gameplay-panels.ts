@@ -23,7 +23,7 @@ import { hasDisease, iconForItem, ROADS, clanTintIndex,
   setAppearanceIntent, setStallNameIntent, priceItemChoices, listItemIntents, unstockStallIntent, type StallListDraft, setStallOpenIntent, stallView, togglePermMask, wardrobeView, placeIntent,
   type BuildSelection, type MenuCtx, type MenuIntent, camperStationView, vehicleRefuelIntent, type CamperRecipeView,
   progressionView, unlockSkillIntent, respecSkillsIntent, SKILL_REJECT_TEXT, useIntent, drinkWaterIntent, nearWater,
-  SKILLS, equipIntent, wearIntent, equipmentView, boilIntent, nearLitCampfire, holdingTorch,
+  SKILLS, equipIntent, wearIntent, equipmentView, boilIntent, nearLitCampfire, holdingTorch, itemRepairIntent, itemRepairView,
   mountView, mountRideIntent, mountDismountIntent, mountFeedIntent, mountSaddleIntent, mountUnsaddleIntent, mountRepairIntent, mountHarnessIntent, mountUnharnessIntent, mountHitchIntent, mountUnhitchIntent, MOUNT_SPECIES,
   petView, petsOf, petOfferIntent, petCommandIntent, petGuardIntent, animalSkillIntent, animalSkillView, petStatusLabel, dropItemIntent, splitStackIntent, moveSlotIntent, containerToSlotIntent, slotToContainerIntent, defaultSplit, HOTBAR_SIZE, PACK_SLOTS, HOTBAR_OFFSET, PET_HELP, petName, petSpecies, Pet, Animal, BuildPiece, Tamed,
   ropeLeadIntent, ropeEquipped,
@@ -456,6 +456,16 @@ export function gameplayBody(id: GameplayPanel, src: GameplaySource, kit: PanelK
             if (boilable && me && (holdingTorch(c.world, c.player) || nearLitCampfire(c.world, me.x, me.y, gameplayDefs(c.world).building.containerReach))) row.append(btn("Boil", `boil-${s.slot}`, () => send(boilIntent(s.slot), `Boiled ${s.name}.`), { role: "use" }));
           }
           if (s.equip) row.append(btn(s.equipped ? "Unequip" : "Equip", `eq-${s.slot}`, () => equipSlot(s), { role: "equip-toggle" }));
+          // ADR-474: repair a damaged / broken tool or weapon in place (first-tier anywhere, later tiers need an
+          // anvil in range). A plain focusable button, so touch, D-pad and keys work alike; the title names the
+          // cost / the blocker. Shown only while the item is damaged (a full-durability tool has nothing to repair).
+          const rv = itemRepairView(c, s.slot);
+          const maxDur = gameplayDefs(c.world).items.get(s.item)?.maxDurability ?? 0;
+          if (rv && s.durability < maxDur) {
+            const costText = rv.cost.length ? rv.cost.map((g) => `${g.name} ×${g.count}`).join(", ") : "free";
+            const why = rv.reason === "cannot_afford" ? `Needs ${costText}` : rv.reason === "needs_anvil" ? "Needs an anvil nearby" : rv.reason === "skill_locked" ? "Needs the skill unlock" : `Repair (${costText})`;
+            row.append(btn("Repair", `repair-${s.slot}`, () => send(itemRepairIntent(s.slot), `Repaired ${s.name}.`), { role: "use", disabled: !!rv.reason, title: why }));
+          }
           if (!cv && s.equip === "hand" && gameplayDefs(c.world).items.get(s.item)?.wear?.slot === 6 /* WearSlot.OffHand */) row.append(btn("Off hand", `offhand-${s.slot}`, () => send(wearIntent(s.slot), `Off hand ${s.name}.`), { role: "use" }));
           if (!cv && isKit(c.world, s.item)) row.append(btn("Deploy", `deploy-${s.slot}`, () => { const i = deployKitIntent(c.world, c.player, s.slot); if (i) send(i, `Deployed ${s.name}. Walk up and press Use to get in.`); }, { role: "deploy" }));
           if (s.count >= 2) row.append(btn("Split", `split-${s.slot}`, () => startArrange("split", 0, s.slot), { alt: true, role: "split-start" }));

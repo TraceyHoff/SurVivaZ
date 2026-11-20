@@ -38,7 +38,7 @@ import { containerSeq, goTo, storageTargetFor } from "./base_behaviors.js";
 import { storageWithdrawActions } from "./storage_api.js";
 import { scanBase } from "./planner.js";
 import { nearestClaimHostile } from "../territory.js";
-import { trustOf } from "./social_memory.js"; // ADR-444: remembered trust in the owner scales follow / defend
+import { affinityOf, SOCIAL_AFFINITY, trustOf } from "./social_memory.js"; // ADR-444: remembered trust in the owner scales follow / defend; ADR-478: affinity scales the guard radius too
 import { workerAnchor, workerWorkAnchor, workerOrderTarget, workerSelections, workerRecipes } from "../recruitment.js";
 import { playerEntity } from "../pets.js";
 import { GatherCmd, UseCmd } from "../input.js";
@@ -225,8 +225,10 @@ export function fillHireSensors(world: World, self: Entity, view: AgentWorldView
   delete view.defend; delete view.farm; delete view.repair;
   // ADR-444: the bot's remembered trust in its owner (0 when no agent ran the sensors) — a distrusted
   // owner gets a reluctant guard (short defend radius) and a distant follower; a trusted owner gets the
-  // full radius and a close shadow.
+  // full radius and a close shadow. ADR-478: remembered affinity (friendship) modulates the guard the
+  // same way — a friend is guarded more keenly, a grudge only up close (see defendR below).
   const ownerTrust = agent ? trustOf(agent, w.owner) : 0;
+  const ownerAffinity = agent ? affinityOf(agent, w.owner) : 0;
   view.hire = { job: w.job, owner: w.owner, ax: anchor.x, ay: anchor.y, trust: ownerTrust };
   view.home = anchor; view.base = base;
   const bs = scanBase(world, defs, base); view.bs = bs;
@@ -250,7 +252,10 @@ export function fillHireSensors(world: World, self: Entity, view: AgentWorldView
   }
   if (w.job === WorkerJob.Defend || w.job === WorkerJob.Follow) {
     const owner = playerEntity(world, w.owner); const tribe = owner ? tribeOf(world, owner) : 0;
-    const defendR = ownerTrust < 0 ? 4 : DEFEND_R; // ADR-444: a distrusted owner is guarded only up close
+    // ADR-478: a friend (affinity >= friendAt) is guarded more keenly — wider radius, so the bot engages
+    // threats further from the friend; a grudge (affinity < grudgeBelow) is guarded only up close. The
+    // trust gate still applies: a distrusted owner is guarded up close no matter the affinity.
+    const defendR = ownerTrust < 0 ? 4 : ownerAffinity < SOCIAL_AFFINITY.grudgeBelow ? 4 : ownerAffinity >= SOCIAL_AFFINITY.friendAt ? DEFEND_R + SOCIAL_AFFINITY.friendDefendBonus : DEFEND_R;
     let best: { id: number; x: number; y: number } | undefined;
     const claimed = tribe ? nearestClaimHostile(world, anchor.x, anchor.y, defendR, tribe) : undefined;
     if (claimed !== undefined) { const t = world.get(claimed, Transform)!; best = { id: claimed, x: t.x, y: t.y }; }

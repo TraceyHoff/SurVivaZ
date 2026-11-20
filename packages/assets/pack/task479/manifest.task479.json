@@ -1,0 +1,49 @@
+{
+ "$comment": "ADR-479: dedicated sailboat art. The atlas has NO image file of its own: its pixels are painted at runtime by apps/client/src/task421-art.ts (software rasterizer -> blob URL, the Task 34 / ADR-361 pattern) and the sources override in view.ts points the registry at that blob URL, so the image/ktx2 paths below are never fetched. They point at a real pack atlas only because the pack test requires every manifest atlas to name a PNG + KTX2 twin that exist on disk. Vehicle layout: 4 cols x 6 rows of the def's frame (two rows per sail phase 0-2, Art order E,SE,S,SW,W,NW,N,NE in row-major order); frame(phase, dir) = phase*8 + dir, so the idle animation is frames [8] (full sail) and the sail animation cycles [0, 8, 16] at 4 fps (slack / full / billowing). resolveVehicleArt binds this by def id (sprite key == def id, first animation 8 directions, veh_art_* atlas = native scale). Frame 300x228 + anchor (0.5, 0.6623) come from boatFrameSize(SAILBOAT_ART) in the painter (asserted in apps/client/test/adr479_sailboat_art.test.ts).",
+ "atlases": [
+  {
+   "columns": 4,
+   "frameH": 228,
+   "frameW": 300,
+   "image": "../vehicles/atlases/veh_art_car_compact.png",
+   "key": "veh_art_sailboat",
+   "ktx2": "../vehicles/atlases/veh_art_car_compact.ktx2",
+   "rows": 6
+  }
+ ],
+ "name": "survivaz-task479",
+ "sprites": [
+  {
+   "anchor": {
+    "x": 0.5,
+    "y": 0.6623
+   },
+   "animations": {
+    "idle": {
+     "dirStride": 1,
+     "directions": 8,
+     "fps": 1,
+     "frames": [
+      8
+     ],
+     "loop": false
+    },
+    "sail": {
+     "dirStride": 1,
+     "directions": 8,
+     "fps": 4,
+     "frames": [
+      0,
+      8,
+      16
+     ],
+     "loop": true
+    }
+   },
+   "atlas": "veh_art_sailboat",
+   "category": "vehicle",
+   "key": "sailboat"
+  }
+ ],
+ "version": 1
+}

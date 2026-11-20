@@ -23,7 +23,9 @@ import type { ItemCount } from "../defs.js";
 import { countItem, hasBrushInHotbar, listSlots, readSlots, slotItem, slotsWeight } from "../inventory.js";
 import { itemInfo, type NameLookup } from "../economy/provenance.js";
 import { BuyFromStallCmd, OpenStallCmd, CollectTillCmd, SetListingCmd, SetStallNameCmd, SetStallOpenCmd, StockStallCmd, UnstockStallCmd, listingRevision, stallListings, stallName, tillOf } from "../economy/stall.js";
-import { holdingTorch } from "../systems/crafting.js";
+import { holdingTorch, stationInRange } from "../systems/crafting.js";
+import { checkItemRepair, isRepairableSlot, itemRepairCost, itemRepairTier } from "../item_repair.js";
+import { ItemRepairCmd } from "../item_repair_commands.js";
 import { CancelQueuedCraftCmd, MAX_CRAFT_COUNT, QueueCraftCmd, craftQueueReason, owedOf } from "../systems/craft_queue.js";
 import { pieceCost, pieceGates, zonesAt } from "../building/place.js";
 import { hasSkillUnlock, unlockRequirement, xpToNext } from "../skills/tree.js";
@@ -31,7 +33,7 @@ import { activeDiseases, careStatus, diseasePresentation, CARE_DRY_MAX } from ".
 import { ambientTemperature, effectiveInsulation, heatAt, shelteredAirTemp, weatherDef, worldSeason } from "../systems/environment.js";
 import { BoilCmd, DepositCmd, EquipCmd, PaintCmd, PlaceCmd, ToggleDoorCmd, ToggleFireCmd, UseCmd, WearCmd, WithdrawCmd } from "../input.js";
 import { Equipment, Worn } from "../components.js";
-import { ItemCategory, WEAR_SLOTS, WeatherKind } from "../defs.js";
+import { ItemCategory, StationKind, WEAR_SLOTS, WeatherKind } from "../defs.js";
 import { entityIndex } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
 import { isAuthority } from "../config.js";
@@ -93,6 +95,16 @@ export function foodTooltip(w: World, item: number, durability = 0): string {
 export function useIntent(slot: number): MenuIntent { return intent(UseCmd, { slot }); }
 /** Task 13: boil the filled raw-water container in `slot` at a lit campfire (server validates the fire). */
 export function boilIntent(slot: number): MenuIntent { return intent(BoilCmd, { slot }); }
+/** ADR-474: repair the tool / weapon in `slot` (see item_repair.ts). */
+export const itemRepairIntent = (slot: number): MenuIntent => intent(ItemRepairCmd, { slot });
+/** ADR-474: what the inventory panel's Repair button needs for one slot (undefined = not a repairable tool / weapon). */
+export function itemRepairView(c: MenuCtx, slot: number): { cost: { item: number; name: string; count: number; have: number }[]; needsAnvil: boolean; anvilInRange: boolean; reason: string | undefined } | undefined {
+  const w = c.world; const e = c.player;
+  if (!isRepairableSlot(w, e, slot)) return undefined;
+  const item = slotItem(w, e, slot).item;
+  const cost = itemRepairCost(w, item).map((g) => ({ ...g, name: itemName(w, g.item), have: countItem(w, e, g.item) }));
+  return { cost, needsAnvil: itemRepairTier(w, item) > 1, anvilInRange: stationInRange(w, e, StationKind.Anvil), reason: checkItemRepair(w, e, slot) };
+}
 /** ADR-135: main-hand equip (same command the hotbar keys send) and wear/unwear toggle for gear slots. */
 export const selectHotbarIntent = (slot: number): MenuIntent => intent(SelectHotbarCmd, { slot });
 export const equipIntent = (slot: number): MenuIntent => intent(EquipCmd, { slot });
@@ -148,8 +160,11 @@ export function inventoryView(c: MenuCtx): InventorySlotView[] {
     const info = itemInfo(w, c.player, s.slot, c.names ?? { get: () => undefined });
     const crafterName = info?.crafterName || nameOf(c, s.crafterId);
     const name = itemName(w, s.item); const ck = consumeKind(w, s.item);
-    const tip = [`${name} ×${s.count}`, s.durability && !gameplayDefs(w).items.get(s.item)?.sips && gameplayDefs(w).items.get(s.item)?.maxDurability ? `Durability ${s.durability}/${gameplayDefs(w).items.get(s.item)!.maxDurability}` : "", foodTooltip(w, s.item, s.durability), itemDefKey(w, s.item) === KEY_ITEM ? keyTooltip(w, s.crafterId) : crafterName ? `Crafted by ${crafterName}` : ""].filter(Boolean).join("\n");
-    const def = gameplayDefs(w).items.get(s.item); const handy = def?.weapon || def?.tool || def?.ranged || def?.thrown;
+    const def = gameplayDefs(w).items.get(s.item); const maxDur = def?.maxDurability ?? 0;
+    // ADR-474: a broken tool says so in its tooltip (and a dull one says it is dull) — the Repair button is in the details pane.
+    const wearNote = maxDur > 0 && !def?.sips ? s.durability <= 0 ? "Broken — repair it" : s.durability < maxDur * 0.25 ? "Dull — one tier lower" : "" : "";
+    const tip = [`${name} ×${s.count}`, s.durability && !def?.sips && maxDur ? `Durability ${s.durability}/${maxDur}` : "", wearNote, foodTooltip(w, s.item, s.durability), itemDefKey(w, s.item) === KEY_ITEM ? keyTooltip(w, s.crafterId) : crafterName ? `Crafted by ${crafterName}` : ""].filter(Boolean).join("\n");
+    const handy = def?.weapon || def?.tool || def?.ranged || def?.thrown;
     const eqv = equipped ??= equippedSlots(c); const equip = def?.wear && (def.category === ItemCategory.Clothing || def.category === ItemCategory.Armor) ? "wear" as const : handy ? "hand" as const : def?.wear ? "wear" as const : undefined;
     const fill = liquidFill(w, s.item, s.durability);
     out.push({ slot: s.slot, item: s.item, icon: def?.spriteKey ?? "", name, count: s.count, durability: s.durability, crafterId: s.crafterId, crafterName, tooltip: tip, ...(ck ? { consume: ck } : {}), ...(equip ? { equip, equipped: eqv.has(s.slot) } : {}), ...(fill ? { fill } : {}) });

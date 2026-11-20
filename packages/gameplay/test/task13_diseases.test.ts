@@ -8,7 +8,7 @@ const id = (k: string): number => d.itemId(k);
 /** Test defs: every disease roll succeeds and every threshold is seconds, so cause -> disease wiring is deterministic. */
 const testDefs = (): G.GameDefs => {
   const raw = JSON.parse(JSON.stringify(G.DEFAULT_RAW_DEFS)) as G.RawDefs;
-  raw.diseases.causes = { rawMeatChance: 1, sickFoodChance: 1, rottenFoodChance: 1, rawWaterChance: 1, woundChance: 1 };
+  raw.diseases.causes = { rawMeatChance: 1, sickFoodChance: 1, rottenFoodChance: 1, rawWaterChance: 1, woundChance: 1, riverWaterChance: 1, isolatedWaterChance: 1 };
   raw.diseases.transmission = { radiusTiles: 2, contactSeconds: 5, chance: 1, scanEveryTicks: 20 };
   raw.diseases.exposure = { coldSeconds: 5, heatSeconds: 5, sprintSeconds: 3, restSeconds: 2 };
   raw.diseases.diseases.find((x) => x.key === "food_poisoning")!.durationSeconds = 2;

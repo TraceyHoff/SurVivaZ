@@ -333,6 +333,10 @@
     "speedboat": {
       "kit": "vehicle_kit_speedboat",
       "fuel": "gasoline"
+    },
+    "sailboat": {
+      "kit": "vehicle_kit_sailboat",
+      "fuel": "none"
     }
   },
   "bots": {

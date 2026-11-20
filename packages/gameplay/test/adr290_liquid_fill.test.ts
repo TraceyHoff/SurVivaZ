@@ -9,7 +9,7 @@ const containers = [...d.items.values()].filter((x) => x.sips > 0);
 
 describe("ADR-290 liquid container fill", () => {
   it("covers every sips > 0 item (raw + boiled water flask / canteen / bottle / waterskin) and nothing else", () => {
-    expect(containers.map((x) => x.key).sort()).toEqual(["boiled_canteen", "boiled_water_bottle", "boiled_water_flask", "boiled_waterskin", "canteen", "water_bottle", "water_flask", "waterskin"]);
+    expect(containers.map((x) => x.key).sort()).toEqual(["boiled_canteen", "boiled_water_bottle", "boiled_water_flask", "boiled_waterskin", "canteen", "water_bottle", "water_flask", "waterskin", "well_canteen", "well_water_bottle", "well_water_flask", "well_waterskin"]); // ADR-471: well variants hold well water (safeWater), filled by drawing at a well
     const w = makeWorld();
     for (const x of [...d.items.values()]) if (!(x.sips > 0)) expect(liquidFill(w, x.id, 3)).toBeUndefined();
   });

@@ -65,6 +65,8 @@ export interface AgentWorldView extends AgentSensors, GoalSensors, StanceSensors
   feedTrough?: { id: number; x: number; y: number; item: number; count: number };
   /** Task 22: nearest zombie threatening the owner's base (Defend job). */
   defend?: { id: number; x: number; y: number };
+  /** ADR-474: a broken tool / weapon the bot can repair right now (set by fillAgentSensors when checkItemRepair passes). */
+  repairTool?: { slot: number };
   /** Task 22: damaged piece near the owner's base the worker can repair (lack = material to withdraw first). */
   repair?: { id: number; x: number; y: number; lack?: { item: number; count: number } };
 }

@@ -36,6 +36,10 @@
     "spawnRingMax": 48,
     "targetRadius": 16,
     "composition": { "zombie_walker": 6, "zombie_runner": 2, "zombie_brute": 1, "zombie_snuffer": 1 },
-    "minPiecesPerTarget": 1
+    "minPiecesPerTarget": 1,
+    "noiseMin": 8,
+    "siegeMinutes": 30,
+    "lightSeekTiles": 20,
+    "noiseTargetRadius": 32
   }
 }

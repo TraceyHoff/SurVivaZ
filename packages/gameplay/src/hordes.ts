@@ -21,12 +21,23 @@ import { gameplayDefs, isAuthority } from "./config.js";
 import { secondsToTicks } from "./defs.js";
 import { currentPhaseKey, spawnZombie } from "./combat/zombies.js";
 import { TerrainRes } from "./world.js";
+import { lastLoudNoise } from "./systems/noise.js";
+import { nearestLight } from "./systems/lights.js";
+import { pieceOf } from "./building/links.js";
 
 export interface HordeTuning {
   enabledDefault: boolean; graceDaysDefault: number; lowLevelGraceMul: number; minTargetLevel: number; intervalDays: number; warnSeconds: number;
   phases: string[]; solo: { base: number; cap: number }; clan: { base: number; perMember: number; cap: number };
   levelScalePerLevel: number; dayScalePerDay: number; scaleCap: number; maxActiveHordes: number; maxHordeZombies: number;
   spawnRingMin: number; spawnRingMax: number; targetRadius: number; composition: Record<string, number>; minPiecesPerTarget: number;
+  /** ADR-476: noise level at which a survivor's action draws a horde (8 = gather/chop; gunshot 9, build 10, walk 12, sprint 18, explosion 27; door 5 and swim 7 do not). */
+  noiseMin: number;
+  /** ADR-476: in-game minutes a horde sieges a noisy base (refreshed by further loud noise there). */
+  siegeMinutes: number;
+  /** ADR-476: tiles from the siege target within which a sieging horde seeks the base's lights. */
+  lightSeekTiles: number;
+  /** ADR-476: max distance from a loud noise to a structure group for the horde to siege it. */
+  noiseTargetRadius: number;
 }
 export const HORDES = raw.hordes as HordeTuning;
 export const HORDES_EVERY = 20;
@@ -60,7 +71,7 @@ export function worldDays(world: World): number {
 }
 
 export interface HordeTarget { key: string; kind: HordeKind; owner: number; members: number; level: number; pieces: Entity[]; x: number; y: number }
-interface Horde { id: number; kind: HordeKind; owner: number; key: string; members: Set<Entity>; tx: number; ty: number; target: Entity }
+interface Horde { id: number; kind: HordeKind; owner: number; key: string; members: Set<Entity>; tx: number; ty: number; target: Entity; /** ADR-476: tick the siege expires (0 = not sieging). */ siegeUntil: number }
 interface Pending { at: number; t: HordeTarget; size: number }
 interface HordeRuntime { hordes: Map<number, Horde>; nextId: number; nextTick: number; pending?: Pending | undefined; lastHit: Map<string, number> }
 export const HordeRuntimeRes = defineResource<HordeRuntime>("gameplay.HordeRuntime");
@@ -122,6 +133,45 @@ function compositionKinds(world: World): { kinds: number[]; weights: number[] } 
   for (const [k, w] of Object.entries(HORDES.composition)) { try { kinds.push(defs.zombieId(k)); weights.push(w); } catch { /* unknown kind */ } }
   return { kinds, weights };
 }
+/** ADR-476: ticks in a siege — siegeMinutes in-game minutes (dayLengthTicks per game day; 30 min
+ * default). No clock (dayLengthTicks 0) falls back to real-time minutes at 20 ticks/s. */
+export function siegeTicks(world: World): number {
+  const len = world.env(TimeOfDayLike).dayLengthTicks;
+  return len > 0 ? Math.max(1, Math.round((len * HORDES.siegeMinutes) / (24 * 60))) : HORDES.siegeMinutes * 60 * 20;
+}
+/** ADR-476: a horde hears what a walker would hear — 1 tile of radius per noise level
+ * (zombie_walker hearingMul 1.0, the baseline; runners hear further, brutes less). */
+export const HORDE_HEARING_TILES_PER_LEVEL = 1;
+/** Centroid of a horde's living members (undefined when none are left). */
+function hordeCentroid(world: World, h: Horde): { x: number; y: number } | undefined {
+  let x = 0, y = 0, n = 0;
+  for (const z of h.members) {
+    if (!world.isAlive(z)) continue;
+    const t = world.get(z, Transform); if (!t) continue;
+    x += t.x; y += t.y; n++;
+  }
+  return n ? { x: x / n, y: y / n } : undefined;
+}
+/** Point every member of a horde at one piece (and set their siege clock). The director calls this
+ * for the noise re-target and the light-seek re-target; spawnHorde does its own member setup. */
+function setHordeMembersTarget(world: World, h: Horde, target: Entity, tx: number, ty: number, siegeUntil: number): void {
+  for (const z of [...h.members]) {
+    if (!world.isAlive(z) || !world.has(z, HordeMember)) continue;
+    world.set(z, HordeMember, { target, tx, ty, siegeUntil });
+    world.setField(z, ZombieBrain, "goalX", tx); world.setField(z, ZombieBrain, "goalY", ty);
+    world.setField(z, ZombieBrain, "state", ZState.Chase);
+  }
+}
+/** ADR-476: re-target a horde to a structure group (the base near a loud noise) and start a siege.
+ * The target piece is the one nearest the noise, not the group centroid — the horde marches on
+ * where the noise came from. */
+function retargetHorde(world: World, h: Horde, t: HordeTarget, loud: { x: number; y: number }): void {
+  const piece = t.pieces.reduce((best, e) => { const a = world.get(e, Transform)!, b = world.get(best, Transform)!; return Math.hypot(a.x - loud.x, a.y - loud.y) < Math.hypot(b.x - loud.x, b.y - loud.y) ? e : best; }, t.pieces[0]!);
+  const pt = world.get(piece, Transform)!;
+  const until = world.tick + siegeTicks(world);
+  h.key = t.key; h.kind = t.kind; h.owner = t.owner; h.tx = pt.x; h.ty = pt.y; h.target = piece; h.siegeUntil = until;
+  setHordeMembersTarget(world, h, piece, pt.x, pt.y, until);
+}
 /** Spawns a horde of `size` toward target group t. Returns the horde id (0 when nothing could spawn). */
 export function spawnHorde(world: World, t: HordeTarget, size: number): number {
   const rt = hordeRuntime(world); const rng = world.rngFor("horde", rt.nextId);
@@ -144,7 +194,7 @@ export function spawnHorde(world: World, t: HordeTarget, size: number): number {
     members.add(z);
   }
   if (!members.size) return 0;
-  rt.hordes.set(id, { id, kind: t.kind, owner: t.owner, key: t.key, members, tx: tt.x, ty: tt.y, target });
+  rt.hordes.set(id, { id, kind: t.kind, owner: t.owner, key: t.key, members, tx: tt.x, ty: tt.y, target, siegeUntil: 0 });
   return id;
 }
 const aliveIn = (world: World, h: Horde): number => { for (const z of [...h.members]) if (!world.isAlive(z) || world.has(z, Dead) || !world.has(z, HordeMember)) h.members.delete(z); return h.members.size; };
@@ -164,6 +214,49 @@ export function hordeDirectorSystem(world: World, dt = 1 / 20): void {
   if (!rules.hordes) { rt.pending = undefined; if (st && st.phase === HordePhase.Warning) setStatus(world, { phase: HordePhase.Idle }); return; }
   const len = world.env(TimeOfDayLike).dayLengthTicks; if (len <= 0) return;
   if (rt.nextTick === 0) rt.nextTick = world.tick + Math.round(len * HORDES.intervalDays * 0.5);
+  // ADR-476: hordes hunt by sound, then by lamplight. The director reads the last loud survivor
+  // noise (recorded by makeNoise — the noise system has no event log) and re-targets the nearest
+  // horde that can hear it to the nearest base near the noise; that horde then sieges for
+  // siegeMinutes. A horde already sieging that base just refreshes its siege clock, and a sieging
+  // horde is never pulled away to another noise. Loud in the open (no base within noiseTargetRadius)
+  // draws no horde — the individuals still investigate by their own hearing, unchanged.
+  const loud = lastLoudNoise(world);
+  if (loud && loud.level >= HORDES.noiseMin) {
+    const targets = hordeTargets(world);
+    let best: HordeTarget | undefined; let bd = HORDES.noiseTargetRadius;
+    for (const t of targets) { const d = Math.hypot(t.x - loud.x, t.y - loud.y); if (d <= bd) { bd = d; best = t; } }
+    if (best) {
+      const sieging = [...rt.hordes.values()].find((h) => h.key === best!.key && h.siegeUntil > world.tick);
+      if (sieging) {
+        sieging.siegeUntil = world.tick + siegeTicks(world);
+        for (const z of sieging.members) if (world.isAlive(z) && world.has(z, HordeMember)) world.setField(z, HordeMember, "siegeUntil", sieging.siegeUntil);
+      } else {
+        let nearest: Horde | undefined; let nd = Infinity;
+        for (const h of rt.hordes.values()) {
+          if (h.siegeUntil > world.tick) continue;
+          const c = hordeCentroid(world, h); if (!c) continue;
+          const d = Math.hypot(c.x - loud.x, c.y - loud.y);
+          if (d <= loud.level * HORDE_HEARING_TILES_PER_LEVEL && d < nd) { nd = d; nearest = h; }
+        }
+        if (nearest) retargetHorde(world, nearest, best, loud);
+      }
+    }
+  }
+  // ADR-476 lamplight (Tracey's decision: IN, but only for hordes already in siege mode, within
+  // lightSeekTiles of their target, exempt from shyGoal while sieging — see combat/zombies.ts).
+  // The director re-targets the siege to the piece the nearest light is on; hordeSteer then drives
+  // the members to it and attacks it through the existing structure-attack path. The re-target is
+  // self-stabilising: once the target IS a light's piece, the nearest light to it is itself.
+  for (const h of rt.hordes.values()) {
+    if (h.siegeUntil <= world.tick) continue;
+    const nl = nearestLight(world, h.tx, h.ty, HORDES.lightSeekTiles);
+    if (!nl) continue;
+    const piece = pieceOf(world, nl.e) ?? (world.has(nl.e, BuildPiece) ? nl.e : undefined);
+    if (!piece || piece === h.target) continue;
+    const pt = world.get(piece, Transform); if (!pt) continue;
+    h.tx = pt.x; h.ty = pt.y; h.target = piece;
+    setHordeMembersTarget(world, h, piece, pt.x, pt.y, h.siegeUntil);
+  }
   // warning elapsed -> spawn
   if (rt.pending && world.tick >= rt.pending.at) {
     const p = rt.pending; rt.pending = undefined;

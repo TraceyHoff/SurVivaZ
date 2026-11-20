@@ -162,7 +162,8 @@ export const Wetness = defineComponent("Wetness", { level: "u8" }, { networked: 
 /** Render-facing (renderer contract): cold/heat stress 0..255 and shivering 0/1. Precise bodyTemp stays owner-scoped in Survival. */
 export const BodyTemp = defineComponent("BodyTemp", { cold: "u8", heat: "u8", shivering: "u8" }, { networked: true });
 /** Per-chunk surface wetness (0..1 as u8 0..255), one entity per active chunk at its center; server-driven, render reads it. */
-export const ChunkSurface = defineComponent("ChunkSurface", { cx: "i32", cy: "i32", wetness: "u8" }, { networked: true });
+/** ADR-449 mud + ADR-466 snow: per-chunk surface state, one entity per loaded chunk (networked, low-rate). wetness u8 0..255 = 0..1 wet; snow u8 0..255 = 0..~30 cm of accumulated snow (see chunkSurfaceSystem). */
+export const ChunkSurface = defineComponent("ChunkSurface", { cx: "i32", cy: "i32", wetness: "u8", snow: "u8" }, { networked: true });
 /** Social summary for render/UI (scope all). Ids come from core GroupRegistry (party, clan); rank is clan rank. */
 export const GroupSummary = defineComponent("GroupSummary", { partyId: "u32", clanId: "u32", rank: "u8" }, { networked: true });
 /** Last tick this entity dealt or took combat damage (combat tag: blocks trade/logout rules, UI timer). */
@@ -346,12 +347,20 @@ export const enum RoadSurface { None = 0, Path = 1, Gravel = 2, Paved = 3 }
  * ADR-297 ±25..75 range — a ±300 offset needs i16). Networked (client depth / darkness / HUD temperature) and
  * persistent (the chunk height is saved with the chunk; this keeps the "how far below ground" reference). */
 export const TerrainEdit = defineComponent("TerrainEdit", { dig: "i16" }, { networked: true, persistent: true });
+/** ADR-467 (floods): one entity per flooded tile, at the tile centre (like TerrainEdit). origTile = the tile id
+ *  before flooding (restored on drain; the raw height is the bed level and never changes). drainTick = the
+ *  tick this tile starts draining (u32 max = never — a seasonal tile before summer sets it). kind 0 = storm
+ *  flood (drains drainAfterSeconds after flooding, outermost first), 1 = seasonal spring band (drains in
+ *  summer, hash-staggered over seasonalDrainDays). dist = distance from the original water (1..3). Persistent
+ *  (a reload keeps the flood and its drain schedule) but not networked — the client sees the water through
+ *  the terrain tilemap, and the drain is server-side state. */
+export const FloodTile = defineComponent("FloodTile", { origTile: "u8", drainTick: "u32", kind: "u8", dist: "u8" }, { persistent: true });
 export const SIGN_TEXT_MAX = 48;
 /** ADR-120 sign (signs.ts). kind = signs.json index + 1; rot = quarter turns; owner = PlayerId, clan = owner's clan at
  *  placement (edit rights); text = sanitized ASCII bytes, len used. Networked (rendered as a world label) + persistent. */
 export const Sign = defineComponent("Sign", { kind: "u8", rot: "u8", owner: "u32", clan: "u32", len: "u8", text: { type: "u8", length: SIGN_TEXT_MAX } }, { networked: true, persistent: true });
 /** ADR-121 roaming horde member (hordes.ts): horde id, target piece entity + target centroid (retarget if destroyed). Server-only. */
-export const HordeMember = defineComponent("HordeMember", { horde: "u16", target: "u32", tx: "f32", ty: "f32" });
+export const HordeMember = defineComponent("HordeMember", { horde: "u16", target: "u32", tx: "f32", ty: "f32", siegeUntil: "u32" }); // ADR-476: tick the siege expires (0 = not sieging); the director sets it, the zombie AI reads it for the shyGoal exemption
 /** ADR-121 world rules on the environment singleton (replicated so clients show them): hordes 0/1, grace in in-game days. */
 export const WorldRules = defineComponent("WorldRules", { hordes: "u8", hordeGraceDays: "f32", aiHumans: "u8" }, { networked: true });
 export const enum HordePhase { Idle = 0, Warning = 1, Active = 2 }
@@ -436,6 +445,13 @@ export const RecentCrafts = defineComponent("RecentCrafts", {
 }, { networked: true, persistent: true });
 export const RecentBuilds = defineComponent("RecentBuilds", {
   piece: { type: "u16", length: RECENT_MAX }, count: "u8",
+}, { networked: true, persistent: true });
+/** ADR-470: diet groups of the last 8 foods eaten (group indices into DIET_GROUPS, oldest first, capped
+ * at RECENT_MAX). Networked + persistent, same class as RecentCrafts — but a plain queue, not a
+ * deduped list: variety is the distinct-group count over the last 8 eats, so an old group must fall
+ * off once 8 newer eats have passed. Written once per eat, read once per eat, never scanned. */
+export const RecentFoods = defineComponent("RecentFoods", {
+  group: { type: "u16", length: RECENT_MAX }, count: "u8",
 }, { networked: true, persistent: true });
 /**
  * Task 14: a joined player's load-in state (networked, NOT persistent — re-added on every join).
@@ -525,6 +541,10 @@ export const LightningFire = defineComponent("LightningFire", { struckTick: "u32
  *  (0 when none adopted yet — the crow circles the death spot until one appears); untilTick = the
  *  cap (circle no longer than this); angle = the circle phase 0..255. Server-only, persistent. */
 export const Carrion = defineComponent("Carrion", { bag: "u32", untilTick: "u32", angle: "u8" }, { persistent: true });
+/** ADR-471: sips of water left in a well piece (0..capacity, environment.wells.capacity). Networked +
+ *  persistent like Fuel on hearths. Wells stamped, placed or loaded before this ADR have no
+ *  component — wells.ts lazy-attaches it at full on first touch, so a pre-existing well starts full. */
+export const Well = defineComponent("Well", { level: "u8" }, { networked: true, persistent: true });
 
 export const GAMEPLAY_COMPONENTS = [
   Emitter, Buffs,
@@ -585,4 +605,7 @@ export const GAMEPLAY_COMPONENTS = [
   StoreFill, // append-only (ADR-356 store fill level; networked, derived — not persistent)
   LightningFire, // append-only (ADR-451 lightning-struck fire, exempt from storm quench; networked + persistent)
   Carrion, // append-only (ADR-463 crow circling a fresh kill; server-only, persistent)
+  Well, // append-only (ADR-471 well water level; networked + persistent)
+  RecentFoods, // append-only (ADR-470 diet groups of the last 8 foods eaten; networked + persistent)
+  FloodTile, // append-only (ADR-467 flood water per tile; server-only, persistent)
 ] as const;

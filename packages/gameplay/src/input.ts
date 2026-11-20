@@ -30,6 +30,7 @@ import { SKILL_COMMANDS } from "./skills/progression.js";
 import { VEHICLE_CRAFT_COMMANDS, VEHICLE_CRAFT_ENTITY_FIELDS } from "./vehicle_craft.js";
 import { driveFromBits, setDriveInput, VEHICLE_COMMANDS, VEHICLE_STATE_COMMANDS, VEHICLE_ENTITY_FIELDS } from "./vehicles.js";
 import { MOUNT_COMMANDS } from "./mount_commands.js";
+import { ITEM_REPAIR_COMMANDS } from "./item_repair_commands.js"; // ADR-474
 import { ROPE_COMMANDS, ROPE_ENTITY_FIELDS } from "./rope_commands.js";
 import { analogMoving, GameplayEdgeBits, GameplayHoldBits, hotbarSlotFromEdges, runInputHooks } from "./input_hooks.js";
 import { DrawnDriveRes } from "./systems/movement.js";
@@ -142,7 +143,8 @@ export function registerGameplayCommands(reg: CommandRegistry = new CommandRegis
   for (const [d] of MOVE_COMMANDS) reg.register(d); // ADR-318: append-only move
   for (const d of MOUNT_COMMANDS) reg.register(d); // ADR-319 / ADR-320: append-only mounts + saddles
   for (const d of ROPE_COMMANDS) reg.register(d); // ADR-351: append-only rope leading
-  for (const d of RAMP_COMMANDS) reg.register(d); // ADR-419: append-only ramp grading (last: older ids keep their wire index)
+  for (const d of RAMP_COMMANDS) reg.register(d); // ADR-419: append-only ramp grading
+  for (const d of ITEM_REPAIR_COMMANDS) reg.register(d); // ADR-474: append-only tool / weapon repair (last: older ids keep their wire index)
   return reg;
 }
 

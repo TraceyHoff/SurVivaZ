@@ -18,14 +18,16 @@ import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks, ToolKind, WeatherKind, type PieceDef } from "../defs.js";
 import { emit, Extinguished, Ignited, RaidAlarm, WeatherChanged } from "../events.js";
 import { depleteNode } from "../systems/gathering.js";
+import { spawnResourceNode } from "../spawn.js"; // ADR-469: fallen log for a lightning-felled tree
 import { applyDamage } from "./combat.js";
 import { damagePiece, maxHpOf } from "../building/integrity.js";
 import { attachmentsOf } from "../building/links.js";
 import { noteUnlockEvent } from "../customization.js";
 import { GateBreached, hasPlayerId } from "./pvp.js";
 import { installSpatialIndex } from "@engine/world";
+import { chunkWetnessAt } from "../world.js"; // ADR-468: dryness (1 - chunk wetness) scales wildfire spread
 
-export interface FireTuning { checkSeconds: number; dps: number; igniteIntensity: number; growPerCheck: number; spreadRadius: number; spreadChance: number; rainQuench: number; flammableTiers: number[]; /** ADR-451: one gameplay strike per storm, 5..15 tiles from a random survivor. */ lightning: { strikesPerStorm: number; radius: number; minDistance: number } }
+export interface FireTuning { checkSeconds: number; dps: number; igniteIntensity: number; growPerCheck: number; spreadRadius: number; spreadChance: number; rainQuench: number; flammableTiers: number[]; /** ADR-465: wind fanning of fire spread — see windSpreadFactor. */ windFan: { minSpeed: number; mul: number; minMul: number; maxMul: number }; /** ADR-468: wildfire on vegetation — node→node spread radius/chance, and the cap on concurrently burning vegetation nodes. */ vegetation: { spreadRadius: number; spreadChance: number; maxBurning: number }; /** ADR-451: one gameplay strike per storm, 5..15 tiles from a random survivor. */ lightning: { strikesPerStorm: number; radius: number; minDistance: number } }
 export const FIRE: Readonly<FireTuning> = fireRaw;
 export const CONTACT_EVERY = 4;
 export const DOOR_BREACHED = 2;
@@ -56,11 +58,28 @@ function maxRadii(world: World): { alarm: number; sight: number; contact: number
 }
 const pieceWith = (world: World, pick: (d: PieceDef) => boolean) => (e: Entity): boolean => { const d = defOf(world, e); return d !== undefined && pick(d); };
 
+/** ADR-468: vegetation that can burn — axe trees (except the stump, already burnt), the five fruit
+ *  trees, and dry grass. Berry bushes, cotton/fiber bushes and stumps do not burn in v1; crops are a
+ *  separate kind (Crop/GrownPlant, not ResourceNode) and do not burn either. Pure (exported for tests). */
+const VEGETATION_FUEL_NON_AXE = new Set(["apple_tree", "pear_tree", "cherry_tree", "orange_tree", "peach_tree", "fiber_grass"]);
+export function isVegetationFuel(world: World, kind: number): boolean {
+  const def = gameplayDefs(world).resources.get(kind);
+  if (!def || def.oneShot || def.key === "tree_stump") return false;
+  if (def.requiredTool === ToolKind.Axe) return true;
+  return VEGETATION_FUEL_NON_AXE.has(def.key);
+}
+/** A resource node that is burnable vegetation (ADR-468). */
+const isFuelNode = (world: World, e: Entity): boolean => world.has(e, ResourceNode) && isVegetationFuel(world, world.getField(e, ResourceNode, "kind") ?? 0);
+/** Trees leave a stump when they burn out; grass just goes (ADR-468). */
+const VEGETATION_NO_STUMP = new Set(["fiber_grass"]);
+
 /** Sets a target burning (authority). Pieces only ignite when their tier is flammable. Returns true if now burning. */
 export function ignite(world: World, e: Entity, intensity = FIRE.igniteIntensity): boolean {
   if (!isAuthority(world) || world.isReplaying || !world.isAlive(e)) return false;
   if (world.has(e, BuildPiece) && !FIRE.flammableTiers.includes(world.getField(e, BuildPiece, "tier")!)) return false;
-  if (!world.has(e, BuildPiece) && !world.has(e, Health)) return false;
+  // ADR-468: burnable vegetation (trees, fruit trees, dry grass) can burn too — a Burning node
+  // decays and depletes (see burningSystem); anything else still needs BuildPiece or Health.
+  if (!world.has(e, BuildPiece) && !world.has(e, Health) && !isFuelNode(world, e)) return false;
   const cur = world.get(e, Burning);
   if (cur && cur.lit) { world.setField(e, Burning, "intensity", Math.max(cur.intensity, Math.min(255, intensity))); return true; }
   const v = { lit: 1, intensity: Math.min(255, intensity), startTick: world.tick };
@@ -80,27 +99,86 @@ export function igniteLightning(world: World, e: Entity): boolean {
   return true;
 }
 
+/** ADR-465: wind fanning of fire spread — the directional bias shared with ADR-468 wildfire spread.
+ * Calm air (windSpeed < windFan.minSpeed) spreads evenly (factor 1). Otherwise the chance is scaled by the
+ * alignment between the wind and the direction from the burning entity to the candidate: downwind up to
+ * maxMul×, upwind down to minMul×. Pure (exported for tests and ADR-468). */
+export function windSpreadFactor(windDir: number, windSpeed: number, fromX: number, fromY: number, toX: number, toY: number, fan: FireTuning["windFan"] = FIRE.windFan): number {
+  if (!(windSpeed >= fan.minSpeed)) return 1;
+  const dx = toX - fromX, dy = toY - fromY; if (dx === 0 && dy === 0) return 1;
+  const ang = Math.atan2(dy, dx);
+  return Math.min(fan.maxMul, Math.max(fan.minMul, 1 + fan.mul * Math.cos(ang - windDir)));
+}
+
+/** ADR-468: a burning vegetation node that reaches intensity 0 is consumed — it depletes like a
+ *  harvested node (tree → stump for stumpSeconds, then regrows; grass → gone for its respawn). */
+function burnOutNode(world: World, e: Entity, struck = false): void {
+  const kind = world.getField(e, ResourceNode, "kind");
+  if (kind === undefined) return;
+  const defs = gameplayDefs(world); const def = defs.resources.get(kind); if (!def) return;
+  const dep = defs.depletion;
+  const t = world.get(e, Transform);
+  depleteNode(world, e, kind, world.tick + secondsToTicks(def.respawnSeconds * dep.respawnMul, 1 / 20), VEGETATION_NO_STUMP.has(def.key) ? 0 : secondsToTicks(dep.stumpSeconds, 1 / 20));
+  // ADR-469: a lightning-felled tree leaves a fallen log (axe-felled trees do not; wildfire spread does
+  // not — only a strike's own trees, which carry LightningFire until extinguish removes it).
+  if (struck && t && def.requiredTool === ToolKind.Axe && !def.oneShot) spawnResourceNode(world, "fallen_log", t.x, t.y);
+}
+
 /** Fire system (every checkSeconds). */
 export function burningSystem(world: World, dt: number): void {
   if (!isAuthority(world) || world.isReplaying) return;
   const every = Math.max(1, secondsToTicks(FIRE.checkSeconds, dt)); if (world.tick % every !== 0) return;
   const wk = world.env(Weather).kind; const wet = wk === WeatherKind.Rain || wk === WeatherKind.Storm;
+  const w = world.env(Weather);
   const burning = [...world.query([Burning])].sort((a, b) => a - b);
+  // ADR-468: cap concurrent burning vegetation so a dry summer cannot DoS the sim — counted once
+  // per check from the snapshot; spread ignitions increment it, so the cap holds within the pass.
+  let burningVeg = 0; for (const e of burning) if (world.has(e, ResourceNode)) burningVeg++;
   for (const e of burning) {
     const b = world.get(e, Burning)!; if (!b.lit) continue;
     const isPiece = world.has(e, BuildPiece);
+    const isNode = !isPiece && world.has(e, ResourceNode); // ADR-468: burning vegetation
     const dmg = FIRE.dps * FIRE.checkSeconds * (b.intensity / 255);
-    if (isPiece) damagePiece(world, e, dmg, undefined, DamageCause.Fire); else applyDamage(world, e, dmg, e, DamageCause.Fire);
+    if (isPiece) damagePiece(world, e, dmg, undefined, DamageCause.Fire);
+    else if (!isNode) applyDamage(world, e, dmg, e, DamageCause.Fire);
+    // nodes take no damage (no Health) — they decay and deplete instead (below)
     let next = b.intensity + (isPiece ? FIRE.growPerCheck : -FIRE.growPerCheck) - (wet && !world.has(e, LightningFire) ? FIRE.rainQuench : 0); // ADR-451: lightning fires are exempt from storm quench
     if (world.has(e, Dead)) next = 0;
     next = Math.max(0, Math.min(255, next));
-    if (next === 0) { extinguish(world, e); continue; }
+    if (next === 0) {
+      // ADR-469: extinguish removes LightningFire, so capture the strike flag first — burnOutNode
+      // spawns a fallen log only for a lightning-felled tree.
+      const struck = world.has(e, LightningFire);
+      extinguish(world, e);
+      if (isNode) burnOutNode(world, e, struck); // ADR-468: the tree is consumed (stump + regrow), the grass is gone
+      continue;
+    }
     if (next !== b.intensity) world.setField(e, Burning, "intensity", next);
     if (isPiece) {
       const p = pos(world, e)!; const rng = world.rngFor("fire.spread", e);
       for (const o of nearby(world, p.x, p.y, FIRE.spreadRadius, (o) => o !== e && world.has(o, BuildPiece))) {
         if (world.getField(o, Burning, "lit")) continue;
-        if (rng.next() < FIRE.spreadChance) ignite(world, o);
+        // ADR-465: wind fans the spread — downwind candidates catch more easily, upwind ones rarely.
+        const q = pos(world, o)!;
+        if (rng.next() < FIRE.spreadChance * windSpreadFactor(w.windDir, w.windSpeed, p.x, p.y, q.x, q.y)) ignite(world, o);
+      }
+    }
+    // ADR-468: vegetation spread — a burning node ignites nearby fuel, downwind first. The chance
+    // scales with dryness (1 - chunk wetness: soaked ground barely burns) and the ADR-465 wind
+    // factor. Spread children are plain fires (ignite, not igniteLightning) — rain quenches them,
+    // even when the parent is an exempt lightning fire. A burning structure does NOT ignite
+    // nearby vegetation in v1 (node→node only) — follow-up.
+    if (isNode) {
+      if (burningVeg >= FIRE.vegetation.maxBurning) continue;
+      const p = pos(world, e)!; const rng = world.rngFor("fire.spread", e);
+      for (const o of nearby(world, p.x, p.y, FIRE.vegetation.spreadRadius, (o) => o !== e && isFuelNode(world, o))) {
+        if (world.getField(o, Burning, "lit")) continue;
+        if (burningVeg >= FIRE.vegetation.maxBurning) break;
+        const q = pos(world, o)!;
+        const dryness = 1 - chunkWetnessAt(world, q.x, q.y);
+        if (rng.next() < FIRE.vegetation.spreadChance * dryness * windSpreadFactor(w.windDir, w.windSpeed, p.x, p.y, q.x, q.y)) {
+          if (ignite(world, o)) burningVeg++;
+        }
       }
     }
   }
@@ -132,13 +210,21 @@ export function resolveLightningStrike(world: World, rng: { next(): number; int(
   const x = a.x + Math.cos(ang) * dist, y = a.y + Math.sin(ang) * dist;
   const distTo = (e: Entity): number => { const t = world.get(e, Transform)!; return Math.hypot(t.x - x, t.y - y); };
   const trees = nearby(world, x, y, L.radius, (e) => world.has(e, ResourceNode))
-    .filter((e) => { const k = world.getField(e, ResourceNode, "kind"); const d = k === undefined ? undefined : defs.resources.get(k); return d !== undefined && d.requiredTool === ToolKind.Axe && !d.oneShot; })
+    .filter((e) => { const k = world.getField(e, ResourceNode, "kind"); const d = k === undefined ? undefined : defs.resources.get(k); return d !== undefined && d.requiredTool === ToolKind.Axe && !d.oneShot && d.key !== "tree_stump"; })
     .sort((p, q) => distTo(p) - distTo(q) || p - q);
   if (trees.length > 0) {
-    const node = trees[0]!; const kind = world.getField(node, ResourceNode, "kind")!;
-    const def = defs.resources.get(kind)!; const dep = defs.depletion;
-    depleteNode(world, node, kind, world.tick + secondsToTicks(def.respawnSeconds * dep.respawnMul, 1 / 20), secondsToTicks(dep.stumpSeconds, 1 / 20));
-    return { kind: "tree", entity: node };
+    const node = trees[0]!;
+    // ADR-469: the strike fells a grove, not a single tree — ignite the nearest tree plus the other
+    // axe-trees within 3 tiles of it. strikesPerStorm stays 1 (one strike, several trees).
+    const np = world.get(node, Transform)!;
+    let struck = false;
+    for (const t of trees) {
+      const tp = world.get(t, Transform)!;
+      if (Math.hypot(tp.x - np.x, tp.y - np.y) > 3) continue;
+      if (igniteLightning(world, t)) struck = true;
+    }
+    if (struck) return { kind: "tree", entity: node };
+    return undefined;
   }
   const pieces = nearby(world, x, y, L.radius, (e) => world.has(e, BuildPiece) && FIRE.flammableTiers.includes(world.getField(e, BuildPiece, "tier")!))
     .sort((p, q) => distTo(p) - distTo(q) || p - q);

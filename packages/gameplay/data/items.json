@@ -266,7 +266,8 @@
       },
       "sips": 4,
       "durability": 4,
-      "boilTo": "boiled_water_flask"
+      "boilTo": "boiled_water_flask",
+      "wellTo": "well_water_flask"
     },
     {
       "key": "raw_meat",
@@ -5000,7 +5001,8 @@
       },
       "sips": 6,
       "durability": 6,
-      "boilTo": "boiled_canteen"
+      "boilTo": "boiled_canteen",
+      "wellTo": "well_canteen"
     },
     {
       "key": "water_bottle",
@@ -5015,7 +5017,8 @@
       },
       "sips": 2,
       "durability": 2,
-      "boilTo": "boiled_water_bottle"
+      "boilTo": "boiled_water_bottle",
+      "wellTo": "well_water_bottle"
     },
     {"key": "dog_biscuit", "name": "Dog Biscuit", "category": "food", "maxStack": 30, "weight": 0.05, "food": {"hunger": 4, "thirst": 0, "health": 0}, "spoilSeconds": 7200, "petTreat": true},
     {"key": "meaty_chew", "name": "Meaty Chew", "category": "food", "maxStack": 30, "weight": 0.05, "food": {"hunger": 4, "thirst": 0, "health": 0}, "spoilSeconds": 7200, "petTreat": true},
@@ -5023,11 +5026,15 @@
     {"key": "seed_mix", "name": "Seed Mix", "category": "food", "maxStack": 30, "weight": 0.05, "food": {"hunger": 4, "thirst": 0, "health": 0}, "spoilSeconds": 7200, "petTreat": true},
     {"key": "veggie_bites", "name": "Veggie Bites", "category": "food", "maxStack": 30, "weight": 0.05, "food": {"hunger": 4, "thirst": 0, "health": 0}, "spoilSeconds": 7200, "petTreat": true},
     {"key": "egg_crunch", "name": "Egg Crunch", "category": "food", "maxStack": 30, "weight": 0.05, "food": {"hunger": 4, "thirst": 0, "health": 0}, "spoilSeconds": 7200, "petTreat": true}
-    ,{"key": "waterskin", "name": "Waterskin", "category": "food", "maxStack": 1, "weight": 0.8, "food": {"hunger": 0, "thirst": 30, "health": 0}, "sips": 3, "durability": 3, "boilTo": "boiled_waterskin"}
+    ,{"key": "waterskin", "name": "Waterskin", "category": "food", "maxStack": 1, "weight": 0.8, "food": {"hunger": 0, "thirst": 30, "health": 0}, "sips": 3, "durability": 3, "boilTo": "boiled_waterskin", "wellTo": "well_waterskin"}
     ,{"key": "boiled_water_flask", "name": "Boiled Water Flask", "category": "food", "maxStack": 1, "weight": 1.0, "food": {"hunger": 0, "thirst": 35, "health": 0}, "sips": 4, "durability": 4, "boiled": true}
+    ,{"key": "well_water_flask", "name": "Well Water Flask", "category": "food", "maxStack": 1, "weight": 1.0, "food": {"hunger": 0, "thirst": 35, "health": 0}, "sips": 4, "durability": 4, "safeWater": true, "sprite": "water_flask"}
     ,{"key": "boiled_canteen", "name": "Boiled Canteen", "category": "food", "maxStack": 1, "weight": 0.8, "food": {"hunger": 0, "thirst": 48, "health": 0}, "sips": 6, "durability": 6, "boiled": true}
+    ,{"key": "well_canteen", "name": "Well Canteen", "category": "food", "maxStack": 1, "weight": 0.8, "food": {"hunger": 0, "thirst": 48, "health": 0}, "sips": 6, "durability": 6, "safeWater": true, "sprite": "canteen"}
     ,{"key": "boiled_water_bottle", "name": "Boiled Water Bottle", "category": "food", "maxStack": 1, "weight": 0.4, "food": {"hunger": 0, "thirst": 20, "health": 0}, "sips": 2, "durability": 2, "boiled": true}
+    ,{"key": "well_water_bottle", "name": "Well Water Bottle", "category": "food", "maxStack": 1, "weight": 0.4, "food": {"hunger": 0, "thirst": 20, "health": 0}, "sips": 2, "durability": 2, "safeWater": true, "sprite": "water_bottle"}
     ,{"key": "boiled_waterskin", "name": "Boiled Waterskin", "category": "food", "maxStack": 1, "weight": 0.8, "food": {"hunger": 0, "thirst": 30, "health": 0}, "sips": 3, "durability": 3, "boiled": true}
+    ,{"key": "well_waterskin", "name": "Well Waterskin", "category": "food", "maxStack": 1, "weight": 0.8, "food": {"hunger": 0, "thirst": 30, "health": 0}, "sips": 3, "durability": 3, "safeWater": true, "sprite": "waterskin"}
     ,{"key": "cloth_mask", "name": "Cloth Mask", "category": "clothing", "maxStack": 1, "weight": 0.1, "tier": 1, "wear": {"slot": "accessory", "insulation": 0.5}, "mask": true}
     ,{"key": "charcoal_tonic", "name": "Charcoal Tonic", "category": "food", "maxStack": 10, "weight": 0.3, "food": {"hunger": 0, "thirst": 10, "health": 2}, "cures": ["food_poisoning"]}
     ,{"key": "salt_brew", "name": "Salt Brew", "category": "food", "maxStack": 10, "weight": 0.3, "food": {"hunger": 0, "thirst": 15, "health": 2}, "cures": ["dysentery"]}

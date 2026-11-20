@@ -13,7 +13,7 @@
  *    (forceExitVehicle / ejectVehicleOccupants) when a ridden vehicle's entity is gone.
  */
 import { roadVehicleMul } from "./roads.js";
-import { AnimState as Anim, defineCommand, defineResource, fnv1a, NetId, Transform, type CommandHandlers, type Entity, type World } from "@engine/core";
+import { AnimState as Anim, defineCommand, defineResource, fnv1a, NetId, Transform, Weather, type CommandHandlers, type Entity, type World } from "@engine/core";
 import { WaterDepth } from "@engine/world";
 import raw from "../data/vehicles.json";
 import passengersRaw from "../data/vehicle_passengers.json";
@@ -54,16 +54,20 @@ export interface VehicleDef {
   /** ADR-358: animal-drawn vehicles only. pullMul multiplies the pulling mount's current gait speed (walk/gallop);
    * the result is capped by maxSpeed (see drawnSpeedCap). */
   drawn?: { pullMul: number };
+  /** ADR-479: wind-driven sailboat (class boat, no fuel, no stamina). Only class boat may set it true. */
+  sail?: boolean;
 }
 /** True for an animal-drawn def (class wagon/cart/carriage/chariot). */
 export const isDrawnDef = (d: VehicleDef): boolean => isDrawnClass(d.class);
 /** True for a paddle-boat def (class boat, ADR-421). */
 /** ADR-422: a boat is exactly one of motor (fuel, no stamina) or paddle (stamina, no fuel) — never both, never neither. */
+/** ADR-479: a sailboat is the third boat kind (sail, no fuel, no stamina) — wind-driven, with a paddle crawl as the floor. */
+export const isSailBoatDef = (d: VehicleDef): boolean => isBoatClass(d.class) && d.sail === true;
 export const isBoatDef = (d: VehicleDef): boolean => isBoatClass(d.class);
 /** ADR-422: motorboat def (class boat with a fuel tank: motorboat, pontoon, speedboat). */
 export const isMotorBoatDef = (d: VehicleDef): boolean => isBoatClass(d.class) && !!d.fuel;
-/** ADR-422: paddle-boat def (class boat with stamina, no tank: raft, canoe, rowboat). */
-export const isPaddleBoatDef = (d: VehicleDef): boolean => isBoatClass(d.class) && !d.fuel;
+/** ADR-422: paddle-boat def (class boat with stamina, no tank: raft, canoe, rowboat). ADR-479: a sailboat is not a paddle boat. */
+export const isPaddleBoatDef = (d: VehicleDef): boolean => isBoatClass(d.class) && !d.fuel && !d.sail;
 const STATIONS: Record<string, number> = (stationsRaw as { stations: Record<string, number> }).stations;
 
 export function validateVehicleDefs(defs: readonly VehicleDef[]): string[] {
@@ -76,7 +80,12 @@ export function validateVehicleDefs(defs: readonly VehicleDef[]): string[] {
     if (!(d.seats >= 0 && d.seats <= VEHICLE_MAX_SEATS) || !Number.isInteger(d.seats)) errs.push(`${p}: seats`);
     if (d.class === "trailer" ? d.seats !== 0 : d.seats < 1) errs.push(`${p}: seats for class`);
     if (d.class === "bicycle" && (d.fuel || !d.stamina)) errs.push(`${p}: bicycles use stamina, not fuel`);
-    if (d.class === "boat" && (d.fuel ? !!d.stamina : !d.stamina)) errs.push(`${p}: boats use fuel (motor) or stamina (paddling), never both or neither`);
+    if (d.class === "boat") {
+      const kinds = [d.fuel ? 1 : 0, d.stamina ? 1 : 0, d.sail === true ? 1 : 0].reduce((a, b) => a + b, 0);
+      if (kinds !== 1) errs.push(`${p}: boats use exactly one of fuel (motor), stamina (paddling), sail (wind)`);
+      if (d.sail === true && (d.fuel || d.stamina)) errs.push(`${p}: sailboats have no fuel or stamina`);
+    }
+    if (d.sail === true && d.class !== "boat") errs.push(`${p}: sail is only for boats`);
     if (d.class !== "bicycle" && d.class !== "trailer" && d.class !== "boat" && !isDrawnDef(d) && !d.fuel) errs.push(`${p}: motor vehicles need fuel`);
     if (isDrawnDef(d)) {
       if (d.fuel || d.stamina) errs.push(`${p}: drawn vehicles have no engine or stamina drain`);
@@ -133,7 +142,32 @@ export const VEHICLE_TUNING = {
   boostMul: 1.3, reverseMul: 0.35, rollingDrag: 0.6, exhaustedThrottle: 0.35,
   /** Max trailer angle relative to its tow (rad) before the joint clamps (jackknife limit). */
   maxArticulation: 1.75, impactDamagePerSpeedTon: 4, bounce: 0.2,
+  /** ADR-465: wind on boats — a following wind (within 45° of the heading) adds up to windTailMul to
+   * maxSpeed at windRefSpeed; motorboats get windMotorMul of it (the engine dominates). Any wind adds a
+   * leeward drift of windDriftPerSpeed * windSpeed tiles/s while underway. */
+  windTailMul: 0.25, windRefSpeed: 12, windDriftPerSpeed: 0.02, windMotorMul: 0.5, windAlignCos: 0.7071,
+  /** ADR-479: sail factor — a sailboat's speed-target multiplier from the wind. A tailwind at windRefSpeed
+   * multiplies maxSpeed by (sailPaddleFloor + sailTailMul) = 2.0; headwind, beam wind or calm leaves only
+   * the sailPaddleFloor paddle crawl, so the driver is never stranded. */
+  sailTailMul: 1.75, sailPaddleFloor: 0.25,
 } as const;
+/** ADR-465: pure wind bonus for a boat underway (exported for tests; ADR-479 sailboat reuses the drift). */
+export function boatWindBonus(windDir: number, windSpeed: number, heading: number, isMotor: boolean): { mul: number; driftX: number; driftY: number } {
+  const T = VEHICLE_TUNING;
+  const align = Math.cos(windDir - heading);
+  const tail = align > T.windAlignCos ? T.windTailMul * Math.min(1, Math.max(0, windSpeed) / T.windRefSpeed) * (isMotor ? T.windMotorMul : 1) : 0;
+  const drift = Math.max(0, windSpeed) * T.windDriftPerSpeed;
+  return { mul: 1 + tail, driftX: Math.cos(windDir) * drift, driftY: Math.sin(windDir) * drift };
+}
+/** ADR-479: pure sail factor for a sailboat underway (exported for tests). The sail's drive scales with
+ * how much the wind is behind the boat: a full tailwind at windRefSpeed doubles the paddle-equivalent
+ * maxSpeed (floor + tail = 2.0); a headwind, beam wind or calm leaves only the 0.25x paddle crawl, so
+ * the driver can always limp home. Leeward drift comes from boatWindBonus, shared with every boat. */
+export function sailFactor(windDir: number, windSpeed: number, heading: number): number {
+  const T = VEHICLE_TUNING;
+  const align = Math.cos(windDir - heading);
+  return T.sailPaddleFloor + T.sailTailMul * Math.max(0, align) * Math.min(1, Math.max(0, windSpeed) / T.windRefSpeed);
+}
 /** ADR-371: seat 254 = first free *passenger* seat (seat 255 = first free seat, which is the driver seat for a
  * key-holder). 254 never takes seat 0, so a key-holder can ride as a passenger without stealing the drive. */
 export const PASSENGER_SEAT = 254;
@@ -158,7 +192,7 @@ export function spawnVehicle(world: World, def: number | string, x: number, y: n
     .add(e, Container, { slotCount: cap.slots, maxWeight: cap.maxWeight });
   if (d.seats > 0) world.add(e, VehicleSeats);
   if (d.hitches.length) world.add(e, Hitch);
-  if (d.class !== "trailer" && !isDrawnDef(d) && !isPaddleBoatDef(d)) world.add(e, VehicleState); // trailers, drawn vehicles and paddle boats have no engine/lights; motorboats do
+  if (d.class !== "trailer" && !isDrawnDef(d) && !isPaddleBoatDef(d) && !isSailBoatDef(d)) world.add(e, VehicleState); // trailers, drawn vehicles, paddle boats and sailboats have no engine/lights; motorboats do
   return e;
 }
 export const netIdOf = (world: World, e: Entity): number => world.getField(e, NetId, "id") ?? 0;
@@ -341,14 +375,15 @@ export function drawnDriven(world: World, mount: Entity): boolean {
   return (seatsOf(world, v)?.[0] ?? 0) !== 0;
 }
 
-/** One tick of a powered vehicle (pure state step; exported for tests/tools). */
-export function stepVehicleKinematics(d: VehicleDef, s: { x: number; y: number; speed: number; heading: number; drift: number; steer: number }, inp: DriveInput, throttleCap: number, dt: number, surfaceMul = 1): void {
+/** One tick of a powered vehicle (pure state step; exported for tests/tools). windMul scales the speed
+ * target (ADR-465: a following wind on a boat); 1 = no wind effect. */
+export function stepVehicleKinematics(d: VehicleDef, s: { x: number; y: number; speed: number; heading: number; drift: number; steer: number }, inp: DriveInput, throttleCap: number, dt: number, surfaceMul = 1, windMul = 1): void {
   const T = VEHICLE_TUNING; const mag = Math.min(1, Math.hypot(inp.x, inp.y));
   let target = 0, steerTarget = 0;
   if (mag > 1e-3) {
     const want = Math.atan2(inp.y, inp.x); const diff = wrap(want - s.heading);
     const reverse = Math.abs(diff) > 2.4 && s.speed <= 0.5; // pull back -> reverse
-    target = (reverse ? -T.reverseMul : 1) * mag * Math.min(1, throttleCap) * d.maxSpeed * surfaceMul * (inp.boost ? T.boostMul : 1);
+    target = (reverse ? -T.reverseMul : 1) * mag * Math.min(1, throttleCap) * d.maxSpeed * surfaceMul * windMul * (inp.boost ? T.boostMul : 1);
     steerTarget = clamp(reverse ? wrap(diff + Math.PI) * -1 : diff, -0.6, 0.6);
     if (!reverse && Math.abs(diff) > Math.PI / 2 && s.speed > 1) target = 0; // braking into a U-turn
   }
@@ -383,7 +418,15 @@ function stepPowered(world: World, v: Entity, d: VehicleDef, dt: number, inputs:
   const s = { x: t.x, y: t.y, speed: st.speed, heading: st.heading, drift: st.drift, steer: st.steer };
   if (mag === 0 && s.speed === 0 && s.steer === 0 && s.drift === 0) return; // at rest: no writes
   const boat = isBoatDef(d);
-  stepVehicleKinematics(d, s, inp, cap, dt, boat ? boatWaterMul(world, t.x, t.y) : roadVehicleMul(world, t.x, t.y)); // ADR-421: boats take water drag, never the road bonus
+  // ADR-465: wind on boats — following wind lifts the speed target, and any wind pushes the hull
+  // leeward while underway (a parked boat does not drift: the early return above already fired).
+  const wv = boat ? world.env(Weather) : undefined;
+  const wb = wv ? boatWindBonus(wv.windDir, wv.windSpeed, st.heading, isMotorBoatDef(d)) : undefined;
+  // ADR-479: a sailboat's speed target comes from the sail, not the paddle/motor wind bonus — the
+  // wind IS the engine. Leeward drift is shared with every boat (boatWindBonus above).
+  const windMul = isSailBoatDef(d) && wv ? sailFactor(wv.windDir, wv.windSpeed, st.heading) : wb?.mul ?? 1;
+  stepVehicleKinematics(d, s, inp, cap, dt, boat ? boatWaterMul(world, t.x, t.y) : roadVehicleMul(world, t.x, t.y), windMul); // ADR-421: boats take water drag, never the road bonus
+  if (wb) { s.x += wb.driftX * dt; s.y += wb.driftY * dt; }
   let health = st.health;
   const blocked = boat ? boatPoseBlocked : poseBlocked;
   if (blocked(world, d, t.x, t.y, st.heading, s.x, s.y, s.heading)) {
@@ -721,7 +764,7 @@ export function validateVehicleToggle(world: World, actor: Entity, v: Entity, bi
   if (!world.isAlive(v) || !world.has(v, Vehicle)) return "not_vehicle";
   if (on > 2) return "bad_value";
   const d = vehicleDefOf(world, v); if (!d) return "not_vehicle";
-  if (d.class === "trailer" || isDrawnDef(d) || isPaddleBoatDef(d)) return "no_controls"; // trailers, drawn vehicles and paddle boats have no engine/lights; motorboats do
+  if (d.class === "trailer" || isDrawnDef(d) || isPaddleBoatDef(d) || isSailBoatDef(d)) return "no_controls"; // trailers, drawn vehicles, paddle boats and sailboats have no engine/lights; motorboats do
   if (bit === VEHICLE_ENGINE_ON && !d.fuel) return "no_engine";
   if (!netIdOf(world, actor) || world.getField(actor, Driver, "vehicleNetId") !== netIdOf(world, v) || world.getField(actor, Driver, "seat") !== 0) return "not_driver";
   if (bit === VEHICLE_ENGINE_ON && on !== 0 && (world.getField(v, Vehicle, "health") ?? 0) <= 0) return "wrecked";

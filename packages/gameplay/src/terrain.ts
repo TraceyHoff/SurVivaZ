@@ -75,7 +75,9 @@ export function waterSurfaceAt(t: Terrain, x: number, y: number): number | undef
   const id = t.tileAt(x, y); return isWaterId(id) ? renderTileHeight(id, raw(t, x, y)) : undefined;
 }
 
-function blocked(world: World, tx: number, ty: number): boolean {
+/** ADR-467: a tile is blocked for flooding when a structure, piece, node or crop stands on it (exported so
+ *  the flood system reuses the flow system's occupancy rule instead of duplicating it). */
+export function terrainTileBlocked(world: World, tx: number, ty: number): boolean {
   // ADR-266: protect the WHOLE footprint and both supporting tiles of an edge wall,
   // not just the tile containing its Transform anchor. Terrain ladders may extend with the face.
   const building = structures(world);
@@ -107,7 +109,7 @@ export function editTerrain(world: World, e: Entity, tx: number, ty: number, dir
   const h = raw(t, tx, ty); const water = isWaterId(id);
   const dig = terrainDigAt(world, tx, ty); const up = dir > 0;
   if (water && !up) return TerrainFail.BadTile;
-  if (blocked(world, tx, ty)) return TerrainFail.Occupied;
+  if (terrainTileBlocked(world, tx, ty)) return TerrainFail.Occupied;
   const level = terrainLevel(id, h); // bed level (flowing water decodes its height offset)
   const nextDig = water ? dig : dig + (up ? 1 : -1); const nextLevel = water ? level : level + (up ? 1 : -1);
   // ADR-297: absolute height-zero datum; both humans and players use this validation.
@@ -163,7 +165,7 @@ export function terrainFlowStep(world: World): number {
     if (n >= TERRAIN.flowPerStep) { st.frontier.add(k); continue; }
     if (t.loaded && !t.loaded(x, y)) continue;
     const id = t.tileAt(x, y); if (id === 0 || isWaterId(id)) continue;
-    if (terrainDigAt(world, x, y) >= 0 || blocked(world, x, y)) continue;
+    if (terrainDigAt(world, x, y) >= 0 || terrainTileBlocked(world, x, y)) continue;
     const bed = raw(t, x, y);
     let src = false;
     for (const [dx, dy] of N4) { const s = waterSurfaceAt(t, x + dx, y + dy); if (s !== undefined && s >= bed) { src = true; break; } }

@@ -4,7 +4,7 @@
  */
 import { defineResource, entityIndex, Transform, type Entity, type World } from "@engine/core";
 import { chunkKeyOf, parseChunkKey, terrainLevel, tileToChunk, tileToLocal, type ChunkKey, type ChunkManager, type NodePlacement, type ProceduralOptions, type TileMap } from "@engine/world";
-import { ChunkSurface, ResourceNode } from "./components.js";
+import { ChunkSurface, Crop, ResourceNode } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
 import type { GameDefs } from "./defs.js";
 import { spawnResourceNode } from "./spawn.js"; // not ./install.js: that edge made an ESM cycle (CROP_EVERY TDZ, ADR-115)
@@ -44,18 +44,36 @@ export const ChunkNodes = defineResource<Map<ChunkKey, Entity[]>>("gameplay.Chun
  */
 export const ChunkSurfaces = defineResource<Map<ChunkKey, Entity>>("gameplay.ChunkSurfaces");
 
+/**
+ * ADR-466: fractional snow / melt-wetness remainder per ChunkSurface entity (runtime-only — never
+ * persisted or replicated). The snow rates (0.02/s accumulate, 0.01/s melt) are far below one u8
+ * unit per pass, so the pass carries the fraction here and only writes whole units to the u8;
+ * the wet credit is the same idea for meltwater (0.5 wetness units per melted snow unit — a
+ * whole wetness unit is released only when a full unit has accrued). A reload loses at most
+ * <1 snow unit and <1 wetness unit per chunk — negligible. Entries are deleted when their
+ * surface despawns (below) and pruned in the pass.
+ */
+export const SnowRemainderRes = defineResource<Map<Entity, { snow: number; wet: number }>>("gameplay.SnowRemainder");
+/** ADR-466: fractional snow / melt-wetness remainder per ChunkSurface entity (runtime-only). */
+export function snowRemainder(world: World): Map<Entity, { snow: number; wet: number }> {
+  let m = world.getResource(SnowRemainderRes);
+  if (!m) world.setResource(SnowRemainderRes, (m = new Map()));
+  return m;
+}
+
 /** Idempotent: return the existing surface for the chunk, or spawn one (wetness 0 = dry). */
 export function ensureChunkSurface(world: World, key: ChunkKey): Entity {
   let m = world.getResource(ChunkSurfaces); if (!m) world.setResource(ChunkSurfaces, (m = new Map()));
   const ex = m.get(key); if (ex !== undefined && world.isAlive(ex) && world.has(ex, ChunkSurface)) return ex;
   const { cx, cy } = parseChunkKey(key);
-  const e = world.create(); world.add(e, ChunkSurface, { cx, cy, wetness: 0 });
+  const e = world.create(); world.add(e, ChunkSurface, { cx, cy, wetness: 0, snow: 0 });
   m.set(key, e); return e;
 }
 /** Destroy the surface for an unloaded chunk (wetness is transient weather state; rain re-wets on reload). */
 export function despawnChunkSurface(world: World, key: ChunkKey): boolean {
   const m = world.getResource(ChunkSurfaces); const e = m?.get(key);
   if (e === undefined) return false; m!.delete(key);
+  world.getResource(SnowRemainderRes)?.delete(e); // ADR-466: no stale remainder if the id is reused
   if (world.isAlive(e) && world.has(e, ChunkSurface)) world.destroy(e); return true;
 }
 /** Wetness 0..1 of the chunk containing (x,y); 0 when the chunk has no surface (unloaded / no streaming). */
@@ -63,6 +81,13 @@ export function chunkWetnessAt(world: World, x: number, y: number): number {
   const m = world.getResource(ChunkSurfaces);
   const e = m?.get(chunkKeyOf(x, y));
   if (e !== undefined && world.isAlive(e)) { const cs = world.get(e, ChunkSurface); if (cs) return cs.wetness / 255; }
+  return 0;
+}
+/** ADR-466: snow depth in u8 units (0..255 = 0..~30 cm) of the chunk containing (x,y); 0 with no surface. */
+export function chunkSnowAt(world: World, x: number, y: number): number {
+  const m = world.getResource(ChunkSurfaces);
+  const e = m?.get(chunkKeyOf(x, y));
+  if (e !== undefined && world.isAlive(e)) { const cs = world.get(e, ChunkSurface); if (cs) return cs.snow; }
   return 0;
 }
 
@@ -98,8 +123,16 @@ export function spawnChunkNodes(world: World, key: ChunkKey, nodes: readonly Nod
 }
 export function despawnChunkNodes(world: World, key: ChunkKey): number {
   const m = world.getResource(ChunkNodes); const l = m?.get(key); if (!l) return 0;
-  let n = 0; for (const e of l) if (world.isAlive(e) && world.has(e, ResourceNode)) { world.destroy(e); n++; }
+  let n = 0; for (const e of l) if (world.isAlive(e) && (world.has(e, ResourceNode) || world.has(e, Crop))) { world.destroy(e); n++; }
   m!.delete(key); return n;
+}
+/** Keep client/standalone chunk streaming lists pointing at the live entity (unload despawns it). A no-op when
+ *  `from` is in no list (a planted crop maturing, for example). ADR-469: a wild sapling is in the list, so its
+ *  matured node inherits the tracking — the chunk lifecycle (despawn on unload, worldgen respawn on load) is
+ *  the same for a regrown tree as for a worldgen one. */
+export function swapChunkNode(world: World, from: Entity, to: Entity): void {
+  const m = world.getResource(ChunkNodes); if (!m) return;
+  for (const l of m.values()) { const i = l.indexOf(from); if (i >= 0) { l[i] = to; return; } }
 }
 /** Chunk key of an entity's position. */
 export function chunkOfEntity(world: World, e: Entity): ChunkKey | undefined {

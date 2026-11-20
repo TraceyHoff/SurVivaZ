@@ -2387,6 +2387,59 @@
    "collider": {
     "radius": 1.0
    }
+  },
+  {
+   "id": "sailboat",
+   "class": "boat",
+   "size": "m",
+   "seats": 4,
+   "seatAnchors": [
+    {
+     "x": 0.9,
+     "y": 0,
+     "z": 0.25
+    },
+    {
+     "x": 0.0,
+     "y": 0.35,
+     "z": 0.25
+    },
+    {
+     "x": 0.0,
+     "y": -0.35,
+     "z": 0.25
+    },
+    {
+     "x": -0.9,
+     "y": 0,
+     "z": 0.25
+    }
+   ],
+   "mass": 160,
+   "maxSpeed": 3.0,
+   "accel": 1.4,
+   "brake": 2.2,
+   "turn": 1.8,
+   "grip": 0.9,
+   "fuel": null,
+   "stamina": null,
+   "sail": true,
+   "health": 220,
+   "storage": {
+    "slots": 8,
+    "maxWeight": 300
+   },
+   "hitches": [],
+   "interior": {
+    "stations": []
+   },
+   "footprint": {
+    "length": 3.6,
+    "width": 1.5
+   },
+   "collider": {
+    "radius": 1.0
+   }
   }
  ]
 }

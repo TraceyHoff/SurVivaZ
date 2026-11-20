@@ -44,7 +44,7 @@ export class BurningFx {
     return r;
   }
 
-  update(world: World, burning: BurningDefT, buildPiece: ComponentDef<any> | undefined, atlas: AtlasManager, vfx: VfxLayer, now: number, dt: number): void {
+  update(world: World, burning: BurningDefT, buildPiece: ComponentDef<any> | undefined, atlas: AtlasManager, vfx: VfxLayer, now: number, dt: number, wind?: { x: number; y: number }): void {
     const reg = atlas.registry; if (!reg || !world.isRegistered(burning)) return;
     const bs = world.store(burning); const tr = world.store(Transform);
     const bp = buildPiece && world.isRegistered(buildPiece) ? world.store(buildPiece) : null;
@@ -76,16 +76,18 @@ export class BurningFx {
         }
         this.flames.set(i, { key, list });
       } else for (const v of cur.list) v.scale = scale;
-      // particles: embers + smoke
+      // particles: embers + smoke. ADR-465: smoke drifts with the wind (wind already scaled by
+      // windSpeed/refSpeed by the caller, * 0.6 tiles/s); embers keep their radial spread (hot and fast).
       for (const key of [this.cfg.embers, this.cfg.smoke]) {
         const p = this.fx(reg, key); const pj = p?.def.particles; if (!p || !pj) continue;
+        const isSmoke = key === this.cfg.smoke;
         let expect = pj.rate * dt * (0.25 + inten) * Math.min(3, tiles);
         while (expect > 0) {
           if (expect < 1 && this.rnd() > expect) break; expect -= 1;
           const sp = pj.speed[0] + (pj.speed[1] - pj.speed[0]) * this.rnd(); const a = this.rnd() * Math.PI * 2; const h = pj.spread * this.rnd();
           vfx.spawn({ spriteId: p.def.sprite, anim: p.anim, x: ax + fw * this.rnd(), y: ay + fh * this.rnd(), z: z + 1 + this.rnd(),
             lifetime: p.def.lifetime * (0.7 + 0.6 * this.rnd()), emissive: p.def.blend === "additive",
-            vx: Math.cos(a) * h * sp, vy: Math.sin(a) * h * sp, vz: sp * 2, gravity: pj.gravity, fade: pj.fade,
+            vx: Math.cos(a) * h * sp + (isSmoke && wind ? wind.x * 0.6 : 0), vy: Math.sin(a) * h * sp + (isSmoke && wind ? wind.y * 0.6 : 0), vz: sp * 2, gravity: pj.gravity, fade: pj.fade,
             scaleCurve: [pj.scaleCurve[0] ?? 1, pj.scaleCurve[pj.scaleCurve.length - 1] ?? 1] });
         }
       }
@@ -119,7 +121,7 @@ export class HearthFx {
     return r;
   }
 
-  update(world: World, litPieces: ReadonlyMap<number, number> | undefined, lit: ComponentDef | undefined, buildPiece: ComponentDef<any> | undefined, atlas: AtlasManager, vfx: VfxLayer, dt: number, pieceScale?: (e: number) => number | undefined): void {
+  update(world: World, litPieces: ReadonlyMap<number, number> | undefined, lit: ComponentDef | undefined, buildPiece: ComponentDef<any> | undefined, atlas: AtlasManager, vfx: VfxLayer, dt: number, pieceScale?: (e: number) => number | undefined, wind?: { x: number; y: number }): void {
     const reg = atlas.registry; if (!reg || dt <= 0) return;
     const tr = world.store(Transform); let n = 0;
     const bp = buildPiece && world.isRegistered(buildPiece) ? world.store(buildPiece) : null;
@@ -131,14 +133,16 @@ export class HearthFx {
       const z = floorToTerrainZ(level, tr.data.z[ts]!);
       for (const [key, rate] of [[this.cfg.embers, this.cfg.emberRate], [this.cfg.smoke, this.cfg.smokeRate]] as const) {
         const p = this.fx(reg, key); const pj = p?.def.particles; if (!p || !pj) continue;
+        const isSmoke = key === this.cfg.smoke;
         let expect = pj.rate * rate * dt;
         while (expect > 0) {
           if (expect < 1 && this.rnd() > expect) break; expect -= 1;
           const sp = pj.speed[0] + (pj.speed[1] - pj.speed[0]) * this.rnd(); const a = this.rnd() * Math.PI * 2; const h = pj.spread * this.rnd();
           vfx.spawn({ spriteId: p.def.sprite, anim: p.anim, x: x + (this.rnd() - 0.5) * 0.4 * fw, y: y + (this.rnd() - 0.5) * 0.4 * fh, z: z + (this.cfg.height + 0.2 * this.rnd()) * sc, // ADR-227: a scaled-down flame emits from its own (lower) top
-           
+            // ADR-465: smoke drifts with the wind (wind already scaled by windSpeed/refSpeed by the
+            // caller, * 0.6 tiles/s); embers keep their radial spread.
             lifetime: p.def.lifetime * (0.7 + 0.6 * this.rnd()), emissive: p.def.blend === "additive", scale: 0.7 * Math.max(0.6, sc),
-            vx: Math.cos(a) * h * sp * 0.5, vy: Math.sin(a) * h * sp * 0.5, vz: sp * 1.5, gravity: pj.gravity, fade: pj.fade,
+            vx: Math.cos(a) * h * sp * 0.5 + (isSmoke && wind ? wind.x * 0.6 : 0), vy: Math.sin(a) * h * sp * 0.5 + (isSmoke && wind ? wind.y * 0.6 : 0), vz: sp * 1.5, gravity: pj.gravity, fade: pj.fade,
             scaleCurve: [pj.scaleCurve[0] ?? 1, pj.scaleCurve[pj.scaleCurve.length - 1] ?? 1] });
           this.spawned++;
         }

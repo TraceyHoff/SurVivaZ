@@ -15,6 +15,7 @@ import { CRAFT_OWED_SLOTS, CraftOwed, CraftQueue, Dead, Inventory } from "../com
 export { CraftOwed, CraftQueue };
 import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks } from "../defs.js";
+import { skillMul } from "../skills/tree.js";
 import { CraftCompleted, CraftFail, CraftFailed, CraftStarted, emit } from "../events.js";
 import { crafterIdFor } from "../economy/provenance.js";
 import { meetsSkill, recipeOutputUnlocked, recipeStationOk, stationInRange, stationUnlocked, torchCraftable } from "./crafting.js";
@@ -61,7 +62,10 @@ export function installCraftQueue(world: World, handlers?: CommandHandlers): Job
   if (!q) {
     const sched = installScheduler(world);
     q = new JobQueues(world, CraftQueue, sched, {
-      duration: (w, _e, id) => Math.max(1, secondsToTicks(recipeOf(w, id)?.seconds ?? 1, DT)),
+      // ADR-477: a practiced crafter works faster — the queue duration is divided by the speed
+      // multiplier (1.0 without speed nodes, 1.2 with all four practice nodes); the recipe, the
+      // ingredients and the output are unchanged.
+      duration: (w, _e, id) => Math.max(1, secondsToTicks((recipeOf(w, id)?.seconds ?? 1) / skillMul(w, _e, "speed"), DT)),
       onComplete: (w, e, job: JobInfo) => {
         const o = outputFor(w, e, job.recipeId); if (!o) return;
         if (!addOutput(w, e, o) && !oweCraftOutput(w, e, o)) { emit(w, CraftFailed, { entity: e, recipe: job.recipeId, reason: CraftFail.InventoryFull }); return; }
@@ -108,7 +112,7 @@ export function enqueueCraft(world: World, e: Entity, recipe: number, count = 1)
   if (!tx.ok) return "missing_ingredients";
   const slot = q.enqueue(e, recipe, count);
   if (slot < 0) { transaction(world, (t) => { for (const i of r.ingredients) { const a = t.add(e, i.item, i.count * count); if (!a.ok) return a; } return { ok: true }; }, e); return "queue_full"; }
-  emit(world, CraftStarted, { entity: e, recipe, totalTicks: Math.max(1, secondsToTicks(r.seconds, DT)) });
+  emit(world, CraftStarted, { entity: e, recipe, totalTicks: Math.max(1, secondsToTicks(r.seconds / skillMul(world, e, "speed"), DT)) }); // ADR-477: the announced total matches the sped-up duration
   return slot;
 }
 /** Does one unit of the recipe's output fit right now (dry-run transaction)? */

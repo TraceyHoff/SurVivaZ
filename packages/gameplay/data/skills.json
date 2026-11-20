@@ -268,10 +268,11 @@
    "requires": [],
    "effects": {
     "mods": {
-     "gather": 0.1
+     "gather": 0.1,
+     "speed": 0.05
     }
    },
-   "desc": "+10% gathering yield.",
+   "desc": "+10% gathering yield, +5% action speed.",
    "icon": "skill_forager"
   },
   {
@@ -940,10 +941,11 @@
    "requires": [],
    "effects": {
     "mods": {
-     "xp": 0.05
+     "xp": 0.05,
+     "speed": 0.05
     }
    },
-   "desc": "+5% XP.",
+   "desc": "+5% XP, +5% action speed.",
    "icon": "skill_tinkerer"
   },
   {
@@ -1378,10 +1380,11 @@
    "requires": [],
    "effects": {
     "mods": {
-     "cropYield": 0.1
+     "cropYield": 0.1,
+     "speed": 0.05
     }
    },
-   "desc": "+10% crop harvest yield.",
+   "desc": "+10% crop harvest yield, +5% action speed.",
    "icon": "skill_green_thumb"
   },
   {
@@ -2011,10 +2014,11 @@
    "requires": [],
    "effects": {
     "mods": {
-     "xp": 0.05
+     "xp": 0.05,
+     "speed": 0.05
     }
    },
-   "desc": "+5% XP.",
+   "desc": "+5% XP, +5% action speed.",
    "icon": "skill_carpenter"
   },
   {

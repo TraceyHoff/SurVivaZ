@@ -34,7 +34,7 @@ const gallop = (w: World, p: Entity, n: number): void => { for (let i = 0; i < n
 
 describe("ADR-358 drawn defs", () => {
   it("appends 9 defs (ids 31-39) after the 30 motor/trailer defs; every new class is covered", () => {
-    expect(G.VEHICLE_DEFS.length).toBe(45); // ADR-422: +3 motorboat defs (ids 43-45) after the paddle boats
+    expect(G.VEHICLE_DEFS.length).toBe(46); // ADR-422: +3 motorboat defs (ids 43-45) after the paddle boats; ADR-479: +1 sailboat (id 46)
     expect(G.vehicleDefId("bike_basic")).toBe(1); expect(G.vehicleDefId("semi_trailer_flatbed")).toBe(30);
     expect(["wagon_small", "wagon_small_covered", "wagon_medium", "wagon_medium_covered", "wagon_large", "wagon_large_covered", "cart", "carriage", "chariot"]
       .map((id) => G.vehicleDefId(id))).toEqual([31, 32, 33, 34, 35, 36, 37, 38, 39]);

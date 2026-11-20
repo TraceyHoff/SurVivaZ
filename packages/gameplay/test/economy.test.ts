@@ -51,7 +51,7 @@ describe("economy data", () => {
     gathered.add(id("dung")); // ADR-352: produced by dungSystem (data/dung.json), not gathered / crafted / looted
     gathered.add(id("wet_wood")); // ADR-457: produced by the rain substitution in gathering.ts (wood yields become wet_wood while raining), not a data yield / recipe
     const raw = JSON.stringify(DEFAULT_RAW_DEFS.resources);
-    const missing = [...d.items.values()].filter((it) => !crafted.has(it.id) && !gathered.has(it.id) && !raw.includes(`"${it.key}"`) && it.key !== d.items.get(d.spoiledItem)?.key && it.key !== mod.KEY_ITEM && !(it.boilSource && (crafted.has(it.boilSource) || gathered.has(it.boilSource)))); // boiled variants come from the Boil action on their raw form, not a vendor/craft/gather source
+    const missing = [...d.items.values()].filter((it) => !crafted.has(it.id) && !gathered.has(it.id) && !raw.includes(`"${it.key}"`) && it.key !== d.items.get(d.spoiledItem)?.key && it.key !== mod.KEY_ITEM && !(it.boilSource && (crafted.has(it.boilSource) || gathered.has(it.boilSource))) && !(it.wellSource && (crafted.has(it.wellSource) || gathered.has(it.wellSource)))); // boiled variants come from the Boil action on their raw form, not a vendor/craft/gather source; well variants come from drawing at a well (ADR-471) the same way
     expect(missing.map((m) => m.key)).toEqual([]);
   });
   it("coin is crafted at the anvil; stall pieces carry listing counts", () => {

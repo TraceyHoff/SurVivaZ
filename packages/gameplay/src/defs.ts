@@ -74,6 +74,14 @@ export interface ItemDef extends Visual {
   readonly boilTarget: number;
   /** Item id this boiled container reverts to when refilled with untreated water (0 = n/a). */
   readonly boilSource: number;
+  /** ADR-471: well-water container — its contents are treated (drawn from a well), so drinking never
+   *  rolls dysentery. Raw containers become their well variant by drawing at a well; refilling a
+   *  well container at untreated water reverts it to its raw variant (wellSource). */
+  readonly safeWater: boolean;
+  /** Item id this container becomes when drawn at a well (0 = cannot draw well water). */
+  readonly wellTarget: number;
+  /** Item id this well-water container reverts to when refilled with untreated water (0 = n/a). */
+  readonly wellSource: number;
   /** Disease keys this item cures when consumed (data/diseases.json keys); [] = no cure. */
   readonly cures: readonly string[];
   /** Raw meat: eating rolls food_poisoning (data/diseases.json causes.rawMeatChance). */
@@ -96,7 +104,7 @@ export interface DiseaseDef {
 }
 /** Disease tuning (data/diseases.json): roll chances per cause event, transmission and exposure thresholds. */
 export interface DiseasesTuning {
-  readonly causes: { readonly rawMeatChance: number; readonly sickFoodChance: number; readonly rottenFoodChance: number; readonly rawWaterChance: number; readonly woundChance: number };
+  readonly causes: { readonly rawMeatChance: number; readonly sickFoodChance: number; readonly rottenFoodChance: number; readonly rawWaterChance: number; readonly woundChance: number; /** ADR-471: river water is riskier than a lake, isolated (elevated / great) lakes are safest. */ readonly riverWaterChance: number; readonly isolatedWaterChance: number };
   readonly transmission: { readonly radiusTiles: number; readonly contactSeconds: number; readonly chance: number; readonly scanEveryTicks: number };
   readonly exposure: { readonly coldSeconds: number; readonly heatSeconds: number; readonly sprintSeconds: number; readonly restSeconds: number };
 }
@@ -119,10 +127,17 @@ export interface VitalsTuning {
   readonly lowNeedsThreshold: number; readonly lowNeedsStaminaRegenMul: number; readonly staminaRegenPerSec: number;
   readonly sprintStaminaDrainPerSec: number; readonly staminaRegenDelaySeconds: number; readonly bodyTempNormal: number;
   readonly bodyTempMin: number; readonly bodyTempMax: number; readonly bodyTempChangePerDegreePerSec: number; readonly bodyTempRecoverPerSec: number;
+  /** ADR-472: cold bites — when felt is below env.coldBuffBelow AND wetness >= wetMin AND windSpeed >=
+   * windMin, body temperature drains mul x faster toward the cold. All three conditions, not any one. */
+  readonly coldDrain: { readonly wetMin: number; readonly windMin: number; readonly mul: number };
   readonly hypothermiaBelow: number; readonly hyperthermiaAbove: number; readonly exposureDps: number; readonly comfortMin: number;
   readonly comfortMax: number; readonly coldHungerMul: number; readonly heatThirstMul: number;
   /** ADR-458: hot meals by the fire — item keys that count as a cooked meal, Insulation bonus, duration in seconds. */
   readonly hotMeals: { readonly items: readonly string[]; readonly insulation: number; readonly seconds: number };
+  /** ADR-470: varied diet — food groups (item keys per group, in DIET_GROUPS order). Eating from 4+ groups
+   * in the last 8 eats gives a 1.1x nutrition bonus; eating the same food in a row carries no penalty.
+   * Drinks, medicines and pet treats are not listed and never count. */
+  readonly dietGroups: { readonly [group: string]: readonly string[] };
 }
 /** ADR-239: one season's climate + weather table (entries are full WeatherDefs: base kind def + season overrides). */
 export interface SeasonDef {
@@ -146,7 +161,13 @@ export interface EnvironmentTuning {
   /** ADR-239 seasons (absent = seasons off). */
   readonly seasons?: SeasonsTuning;
   readonly altitudeLapse: number; readonly humidityPerIntensity: number; readonly windChillPerSpeed: number;
-  readonly surface: { readonly rainPerSec: number; readonly dryPerSec: number; readonly windDryMul: number; readonly sunDryMul: number };
+  /** ADR-472: wet x wind synergy — the extra felt penalty multiplier on top of the additive wet/wind terms. */
+  readonly windWetSynergyMul: number;
+  readonly surface: { readonly rainPerSec: number; readonly dryPerSec: number; readonly windDryMul: number; readonly windDryRefSpeed: number; readonly sunDryMul: number; /** ADR-466 snow: u8 units/s (0..255 = 0..~30 cm) at intensity 1; melt releases meltWetMul wetness units per melted snow unit. */ readonly snowPerSec: number; readonly meltPerSec: number; readonly meltWetMul: number };
+  /** ADR-471: wells run low — a well holds this many sips when full; rain recharges +1 sip per
+   *  rainSecondsPerSip of rain; past the 2-day drought clock (droughtTicks, shared with crops) a
+   *  well loses dryDrainSipsPerDay per further dry day. */
+  readonly wells: { readonly capacity: number; readonly rainSecondsPerSip: number; readonly dryDrainSipsPerDay: number };
   readonly wetBuffThreshold: number; readonly coldBuffBelow: number;
   /** ADR-452: seconds of unsheltered rain per +1 sip into a carried liquid container. */
   readonly rainFillSecondsPerSip: number;
@@ -277,7 +298,9 @@ export interface MovementTuning { readonly walkSpeed: number; readonly sprintMul
   /** ADR-181 depths: shallow water (shore band within shallowRadius tiles of land) is wadeable for everyone at wadeSpeedMul; deep water is swim-only (swimSpeedMul, no sprint). */ readonly wadeSpeedMul: number; readonly shallowRadius: number;
   /** ADR-125: tiles/s the character walk art was authored at (render playback = walkSpeed / this). */ readonly walkAnimRefSpeed: number;
   /** ADR-449 mud: wet ground (chunk wetness >= threshold) slows walking off-path by mudSlowMul; road tiles stay fast. */
-  readonly mudSlowMul: number; readonly mudWetnessThreshold: number }
+  readonly mudSlowMul: number; readonly mudWetnessThreshold: number;
+  /** ADR-466 snow: deep snow (chunk snow depth >= threshold, u8 units 0..255) slows walking off-path; road tiles stay fast, frozen water is exempt (already walk speed). */
+  readonly snowSlowThreshold: number; readonly snowSlowMul: number; readonly snowDeepThreshold: number; readonly snowDeepMul: number }
 
 export interface IdLock { items: Record<string, number>; resources: Record<string, number>; recipes: Record<string, number>; pieces: Record<string, number>; zombies: Record<string, number> }
 
@@ -334,7 +357,7 @@ export interface BareHandsDef { readonly maxMinTier: number; readonly tools: Rea
 interface RawVisual { sprite?: string }
 export interface RawItem extends RawVisual { key: string; name: string; category: string; maxStack: number; weight: number; food?: FoodDef; tool?: { kind: string; tier: number }; weapon?: WeaponDef; fuelSeconds?: number; spoilSeconds?: number; durability?: number; tradeable?: boolean; sips?: number;
   tier?: number; family?: string; heldLight?: number; wear?: { slot: string; insulation?: number; waterproof?: number; armor?: number; carryBonus?: number };
-  boiled?: boolean; boilTo?: string; cures?: string[]; rawMeat?: boolean; mask?: boolean;
+  boiled?: boolean; boilTo?: string; safeWater?: boolean; wellTo?: string; cures?: string[]; rawMeat?: boolean; mask?: boolean;
   ranged?: Omit<RangedDef, "ammo" | "chargeSeconds" | "minChargeMul" | "staminaCost" | "structureMul"> & { ammo: string[]; chargeSeconds?: number; minChargeMul?: number; staminaCost?: number; structureMul?: number };
   thrown?: ThrownDef; ammo?: { damageMul: number; structureMul?: number; armorPierce?: number; ignite?: boolean }; explosive?: Omit<ExplosiveDef, "ignite"> & { ignite?: boolean } }
 export interface RawRecipe { key: string; station: string; seconds: number; ingredients: { item: string; count: number }[]; output: { item: string; count: number }; skill?: { key: string; level: number }; torch?: boolean }
@@ -493,6 +516,10 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
     if (r.heldLight !== undefined && !(r.heldLight >= 0 && r.heldLight <= 12)) err(`${where}.heldLight must be 0..12 tiles`);
     if (r.boiled && r.boilTo) err(`${where}: a boiled variant cannot itself boil`);
     if (r.boilTo && !r.sips) err(`${where}.boilTo needs sips (only liquid containers boil)`);
+    if (r.wellTo && !r.sips) err(`${where}.wellTo needs sips (only liquid containers draw well water)`);
+    if (r.safeWater && r.boiled) err(`${where}: a well-water variant cannot also be boiled`);
+    if (r.safeWater && r.wellTo) err(`${where}: a well-water variant cannot itself draw well water`);
+    if (r.safeWater && !r.sips) err(`${where}.safeWater needs sips (only liquid containers hold well water)`);
     for (const c of r.cures ?? []) if (!diseaseKeys.has(c)) err(`${where}.cures: unknown disease "${c}"`);
     if (r.explosive && !(r.explosive.radius > 0 && r.explosive.fuseSeconds >= 0)) err(`${where}.explosive: radius > 0, fuseSeconds >= 0`);
     const id = itemsR.reg.tryId(r.key) ?? 0;
@@ -508,7 +535,7 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
       ammo: r.ammo ? { damageMul: r.ammo.damageMul, structureMul: r.ammo.structureMul ?? 1, armorPierce: r.ammo.armorPierce ?? 0, ignite: r.ammo.ignite ?? false } : null,
       explosive: r.explosive ? { ...r.explosive, ignite: r.explosive.ignite ?? false } : null,
       heldLight: r.heldLight ?? 0,
-      boiled: r.boiled === true, boilTarget: 0, boilSource: 0, cures: [...(r.cures ?? [])], rawMeat: r.rawMeat === true, mask: r.mask === true,
+      boiled: r.boiled === true, boilTarget: 0, boilSource: 0, safeWater: r.safeWater === true, wellTarget: 0, wellSource: 0, cures: [...(r.cures ?? [])], rawMeat: r.rawMeat === true, mask: r.mask === true,
     });
   }
 
@@ -522,6 +549,16 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
     if (!tgt.boiled) { err(`item ${r.key}.boilTo: "${r.boilTo}" is not flagged boiled`); continue; }
     items.set(src.id, { ...src, boilTarget: tgt.id });
     items.set(tgt.id, { ...tgt, boilSource: src.id });
+  }
+  // ADR-471: well pairs resolve the same way (well variants are listed after their raw form)
+  for (const r of raw.items.items) {
+    if (!r.wellTo) continue;
+    const src = items.get(itemsR.reg.tryId(r.key) ?? 0); const tgt = items.get(itemsR.reg.tryId(r.wellTo) ?? 0);
+    if (!src || !tgt) { err(`item ${r.key}.wellTo: unknown item "${r.wellTo}"`); continue; }
+    if (tgt.sips !== src.sips) { err(`item ${r.key}.wellTo: sips differ (${src.sips} vs ${tgt.sips})`); continue; }
+    if (!tgt.safeWater) { err(`item ${r.key}.wellTo: "${r.wellTo}" is not flagged safeWater`); continue; }
+    items.set(src.id, { ...src, wellTarget: tgt.id });
+    items.set(tgt.id, { ...tgt, wellSource: src.id });
   }
   // every disease cure must name an item that actually cures it
   for (const d of diseases) {

@@ -19,6 +19,7 @@ describe("vehicle crafting data", () => {
       const r = [...d.recipes.values()].find((x) => d.items.get(x.output.item)?.key === kit)!; expect(r).toBeDefined();
       expect([wb, gar, dock, sy]).toContain(r.station); expect(r.seconds).toBeGreaterThan(0);
       if (G.isPaddleBoatDef(v)) expect(r.station).toBe(dock); // ADR-421: paddle-boat kits craft at the dock (ADR-420)
+      else if (G.isSailBoatDef(v)) expect(r.station).toBe(dock); // ADR-479: sailboat kits craft at the dock (non-motorized boat, like paddle boats)
       else if (G.isMotorBoatDef(v)) expect(r.station).toBe(G.StationKind.Shipyard); // ADR-422: motorboat kits craft at the shipyard
       else if (v.class !== "bicycle" && v.class !== "trailer" && !G.isDrawnDef(v)) expect(r.station).toBe(gar); // ADR-358: wooden drawn vehicles craft at the workbench
       cost.set(v.id, r.ingredients.reduce((a: number, i) => a + i.count, 0));

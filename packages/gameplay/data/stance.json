@@ -19,5 +19,16 @@
  "timeSkipWakeHour": 6,
  "timeSkipFromHour": 19,
  "beds": { "bed": ["single"], "bed_double_*": ["left", "right"], "bunk_bed": ["lower", "upper"] },
- "underSpots": ["lower"]
+ "underSpots": ["lower"],
+ "sleepQuality": {
+   "goodHours": 6,
+   "quietOpenness": 0.1,
+   "noisyOpenness": 0.25,
+   "restedStaminaRegenMul": 1.25,
+   "restedHealthRegenPerSec": 0.25,
+   "restedSeconds": 1800,
+   "groggyMoveMul": 0.85,
+   "groggyStaminaRegenMul": 0.75,
+   "groggySeconds": 300
+ }
 }

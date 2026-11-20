@@ -9,10 +9,10 @@ import { lootBagInit } from "./loot_despawn.js";
 import { Mount, Pet } from "./components.js";
 import { luresMount, mountSpeciesOfAnimal } from "./mount_defs.js";
 import { isTameableAnimalKey } from "./tameable_defs.js";
-import { DEFAULT_TICK_HZ, Permissions, Transform, Weather, defineResource, entityIndex, type Entity, type World } from "@engine/core";
+import { DEFAULT_TICK_HZ, Permissions, SeasonId, Transform, Weather, defineResource, entityIndex, seasonAt, type Entity, type World } from "@engine/core";
 import { PopulationSpawner, type BuildingGrid, type ChunkKey, type PhaseKey, type PopulationHost, type SpawnEntry, type PopulationViewpoint } from "@engine/world";
 import { Zombie } from "./components.js";
-import { Anim, AnimState, Animal, Carrion, Tamed, Container, ContainerViewers, Dead, Health, LootBag, RopeLead, Survival } from "./components.js";
+import { Anim, AnimState, Animal, Carrion, GrazedTile, Grazing, Tamed, Container, ContainerViewers, Dead, Health, LootBag, RopeLead, Survival } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
 import { indexEntity } from "./spawn.js";
 import { currentPhaseKey, PopulationZombies, spawnZombie } from "./combat/zombies.js";
@@ -84,6 +84,131 @@ export interface CarrionTuning { crowsPerKill: number; circleRadius: number; max
 export function carrionTuning(): CarrionTuning {
   const t = populationData().ai.tuning?.carrion;
   return { crowsPerKill: t?.crowsPerKill ?? 2, circleRadius: t?.circleRadius ?? 2.5, maxSeconds: t?.maxSeconds ?? 120, nearPlayerTiles: t?.nearPlayerTiles ?? 40 };
+}
+
+/** ADR-475: wild-deer herds graze and move on when the patch is bare. The scope's migrationSystem /
+ * migrationDirectionFor / wildlife.ts do not exist in this tree — the real system is this file's
+ * animalAISystem (wander around homeX/homeY) plus the tamed graze path (husbandry.ts GrazedTile /
+ * Grazing). So a herd is a spawn-centre cohort (no Herd component): deer share a home, graze the grass
+ * tiles around it, and when the patch is bare the shared home shifts deterministically (the same new
+ * home for every deer with the same old home, so the cohort moves as a group) and each deer wanders
+ * toward it. The move is a drift, not a forced march: the deer reach the new home by wandering around
+ * it, like any other wander goal. No new per-tick scan: the graze runs inside the existing
+ * animalAISystem loop, and the bare-patch check runs only on graze completions and think ticks. */
+/** Cervid grazers v1 — only deer (not rabbits, boars, horses, or other animals). */
+export const HERD_DEER_KEYS: ReadonlySet<string> = new Set(["animal_deer", "animal_red_deer", "animal_elk", "animal_stag", "animal_moose"]);
+/** Grass terrain tile id — the same tile husbandry.ts calls GRASS_TILE. Duplicated, not imported:
+ * husbandry imports population, so population cannot import husbandry (import cycle). */
+export const HERD_GRASS_TILE = 3;
+/** Wild-graze timing — the same 20 s graze / 180 s regrow as the tamed path (husbandry.ts
+ * GRAZE_SECONDS / GRASS_REGROW_SECONDS). A wild graze depletes the same shared GrazedTile, so the
+ * timings must match; duplicated for the same cycle reason as HERD_GRASS_TILE. */
+export const HERD_GRAZE_SECONDS = 20, HERD_GRASS_REGROW_SECONDS = 180;
+/** ADR-475: herd tuning (ai.json tuning.herd; defaults when absent). */
+export interface HerdTuning { grazeCooldownSeconds: number; bareRadius: number; bareFrac: number; moveMinTiles: number; moveMaxTiles: number }
+export function herdTuning(): HerdTuning {
+  const t = populationData().ai.tuning?.herd;
+  return { grazeCooldownSeconds: t?.grazeCooldownSeconds ?? 30, bareRadius: t?.bareRadius ?? 5, bareFrac: t?.bareFrac ?? 0.5, moveMinTiles: t?.moveMinTiles ?? 40, moveMaxTiles: t?.moveMaxTiles ?? 100 };
+}
+/** Tick of the last graze START per deer (sim-local; the 30 s rate cap). */
+const lastGrazeStart = new WeakMap<World, Map<Entity, number>>();
+const lastGrazeStartOf = (w: World): Map<Entity, number> => { let m = lastGrazeStart.get(w); if (!m) lastGrazeStart.set(w, (m = new Map())); return m; };
+/** Grass terrain tiles and live (not yet regrown) grazed tiles within `radius` of the herd centre. */
+export function herdPatchState(world: World, homeX: number, homeY: number, radius: number): { grass: number; grazed: number } {
+  const terrain = world.getResource(TerrainRes);
+  let grass = 0;
+  if (terrain) {
+    const cx = Math.floor(homeX), cy = Math.floor(homeY);
+    for (let ty = cy - radius; ty <= cy + radius; ty++) for (let tx = cx - radius; tx <= cx + radius; tx++) {
+      if (Math.hypot(tx + 0.5 - homeX, ty + 0.5 - homeY) > radius) continue;
+      if (terrain.tileAt(tx, ty) === HERD_GRASS_TILE) grass++;
+    }
+  }
+  let grazed = 0;
+  for (const g of world.query([GrazedTile])) {
+    const v = world.get(g, GrazedTile)!;
+    if (v.regrowTick <= world.tick) continue; // regrown: grass again, not bare
+    if (Math.hypot(v.tx + 0.5 - homeX, v.ty + 0.5 - homeY) <= radius) grazed++;
+  }
+  return { grass, grazed };
+}
+/** Deterministic new home for a herd at (homeX, homeY): moveMinTiles..moveMaxTiles in the seasonal
+ * direction (winter west, summer east; spring/fall pick a cardinal by hash), preferring a grass tile
+ * and falling back to any walkable tile (up to 4 rotations, 90 degrees each). Deterministic from the
+ * old home + season, so every deer sharing a home computes the same new home and the cohort moves as
+ * a group. Undefined when no walkable target exists (the herd stays). */
+export function herdNewHome(world: World, homeX: number, homeY: number, tuning: HerdTuning = herdTuning()): { x: number; y: number } | undefined {
+  const season = seasonAt(world).index;
+  const hx = Math.floor(homeX), hy = Math.floor(homeY);
+  const hash = ((hx * 73856093) ^ (hy * 19349663) ^ (season * 83492791)) >>> 0;
+  const dist = tuning.moveMinTiles + (hash % (tuning.moveMaxTiles - tuning.moveMinTiles + 1));
+  let dx = 0, dy = 0;
+  if (season === SeasonId.Winter) dx = -1;
+  else if (season === SeasonId.Summer) dx = 1;
+  else { const d = hash % 4; dx = [1, -1, 0, 0][d]!; dy = [0, 0, 1, -1][d]!; }
+  const terrain = world.getResource(TerrainRes);
+  const unwalk = gameplayDefs(world).worldgen.unwalkableTiles;
+  const tileAt = (x: number, y: number): number => (terrain ? terrain.tileAt(Math.floor(x), Math.floor(y)) : -1);
+  const walkable = (x: number, y: number): boolean => { const t = tileAt(x, y); return t >= 0 && !unwalk.has(t); };
+  // Prefer a grass target (a meadow to graze); fall back to any walkable target.
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 0; i < 4; i++) {
+      const ang = Math.atan2(dy, dx) + (i * Math.PI) / 2;
+      const nx = homeX + Math.cos(ang) * dist, ny = homeY + Math.sin(ang) * dist;
+      if (!walkable(nx, ny)) continue;
+      if (pass === 0 && tileAt(nx, ny) !== HERD_GRASS_TILE) continue;
+      return { x: nx, y: ny };
+    }
+  }
+  return undefined;
+}
+/** If the patch around this deer's home is bare (> bareFrac of grass tiles grazed), shift the shared
+ * home to the deterministic new home and set this deer walking toward it. A deer whose patch is not
+ * bare (or has no grass at all) stays put. */
+function maybeMoveHerdOn(world: World, e: Entity, tuning: HerdTuning): void {
+  const a = world.get(e, Animal); if (!a) return;
+  const { grass, grazed } = herdPatchState(world, a.homeX, a.homeY, tuning.bareRadius);
+  if (grass <= 0 || grazed / grass <= tuning.bareFrac) return;
+  const next = herdNewHome(world, a.homeX, a.homeY, tuning);
+  if (!next) return;
+  world.set(e, Animal, { homeX: next.x, homeY: next.y, goalX: next.x, goalY: next.y, state: AnimalState.Wander });
+}
+/** One tick of wild-deer grazing for a deer already processed by the main loop (state/goal written
+ * back). Start: an Idle deer on ungrazed grass starts a 20 s graze (at most one start per deer per
+ * 30 s). Completion: the tile becomes a bare GrazedTile (180 s regrow, shared with the tamed path)
+ * and the patch is checked for the move-on. A deer that walked off its tile abandons the graze. */
+function herdGrazeTick(world: World, e: Entity, def: AnimalDef, tame: boolean, grazed: Map<string, number>): void {
+  if (tame || !HERD_DEER_KEYS.has(def.key)) return;
+  const tuning = herdTuning();
+  const now = world.tick;
+  const t = world.get(e, Transform); if (!t) return;
+  const tx = Math.floor(t.x), ty = Math.floor(t.y); const key = `${tx},${ty}`;
+  const g = world.get(e, Grazing);
+  if (g) {
+    if (g.tx !== tx || g.ty !== ty) { world.remove(e, Grazing); return; } // walked off the tile — restart elsewhere
+    if (g.doneTick > now) return; // still grazing
+    world.remove(e, Grazing);
+    const old = grazed.get(key);
+    const regrowTick = now + Math.round(HERD_GRASS_REGROW_SECONDS * DEFAULT_TICK_HZ);
+    if (old !== undefined && old > now) {
+      // Already grazed and still bare (another deer got there first): refresh the bare timer.
+      for (const ge of world.query([GrazedTile])) { const v = world.get(ge, GrazedTile)!; if (v.tx === tx && v.ty === ty) { world.set(ge, GrazedTile, { regrowTick }); break; } }
+      grazed.set(key, regrowTick);
+    } else {
+      const ge = world.create(); world.add(ge, GrazedTile, { tx, ty, regrowTick }); indexEntity(world, ge); grazed.set(key, regrowTick);
+    }
+    maybeMoveHerdOn(world, e, tuning);
+    return;
+  }
+  if (world.getField(e, Animal, "state") !== AnimalState.Idle) return;
+  const last = lastGrazeStartOf(world).get(e) ?? -1e9;
+  if (now - last < Math.round(tuning.grazeCooldownSeconds * DEFAULT_TICK_HZ)) return;
+  const terrain = world.getResource(TerrainRes); if (!terrain) return;
+  if (terrain.tileAt(tx, ty) !== HERD_GRASS_TILE) return;
+  const old = grazed.get(key);
+  if (old !== undefined && old > now) return; // already bare
+  world.add(e, Grazing, { tx, ty, doneTick: now + Math.round(HERD_GRAZE_SECONDS * DEFAULT_TICK_HZ) });
+  lastGrazeStartOf(world).set(e, now);
 }
 
 /** ADR-463: subscribe to Died (every creature death) — a fresh animal or zombie kill near a survivor
@@ -263,6 +388,10 @@ export function animalAISystem(world: World, dt: number): void {
   }
   const animals = cache.live;
   if (animals.length === 0) return;
+  // ADR-475: live grazed tiles (key "tx,ty" -> regrowTick), one query per run, shared by the herd
+  // graze checks below (the map is updated in place when a wild graze creates/refreshes a tile).
+  const grazed = new Map<string, number>();
+  for (const g of world.query([GrazedTile])) { const v = world.get(g, GrazedTile)!; grazed.set(`${v.tx},${v.ty}`, v.regrowTick); }
   const hStore = world.store(Health); const anStore = world.store(AnimState);
   const mountReg = world.isRegistered(Mount);
   // ADR-368: the living-zombie list, built once per run (lazily, on the first tame defender that needs
@@ -429,7 +558,16 @@ export function animalAISystem(world: World, dt: number): void {
         }
       }
       if (!decided) {
-        if (rng.next() < 0.5) state = AnimalState.Idle;
+        // ADR-475: a wild deer standing on bare ground checks whether the patch is grazed out (the
+        // completion check below cannot fire when no graze can start — e.g. a tame herd stripped it).
+        if (!tame && HERD_DEER_KEYS.has(def.key)) {
+          const gk = `${Math.floor(tx)},${Math.floor(ty)}`;
+          const gr = grazed.get(gk);
+          if (gr !== undefined && gr > world.tick) maybeMoveHerdOn(world, e, herdTuning());
+        }
+        // ADR-475: a grazing deer stays put until the graze finishes (threats still override above).
+        if (!tame && HERD_DEER_KEYS.has(def.key) && world.has(e, Grazing)) state = AnimalState.Idle;
+        else if (rng.next() < 0.5) state = AnimalState.Idle;
         else { state = AnimalState.Wander; const ang = rng.range(-Math.PI, Math.PI), r = rng.range(1, tame ? Math.min(2.5, def.wanderRadius) : def.wanderRadius); gx = aHomeX + Math.cos(ang) * r; gy = aHomeY + Math.sin(ang) * r; }
         world.setField(e, Animal, "thinkAt", world.tick + Math.round(rng.range(2, 6) * DEFAULT_TICK_HZ));
       }
@@ -471,6 +609,8 @@ export function animalAISystem(world: World, dt: number): void {
     }
     if (state !== aState) world.setField(e, Animal, "state", state);
     if (gx !== aGoalX || gy !== aGoalY) { world.setField(e, Animal, "goalX", gx); world.setField(e, Animal, "goalY", gy); }
+    // ADR-475: wild-deer grazing + the bare-patch move-on (after the state/goal write-backs).
+    herdGrazeTick(world, e, def, tame, grazed);
   }
 }
 

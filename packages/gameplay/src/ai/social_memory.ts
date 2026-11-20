@@ -79,6 +79,16 @@ export function trustOf(agent: Agent, player: number): number {
   const r = player ? socialMemoryOf(agent).relationships[String(player)] : undefined;
   return r ? r.trust : clamp(num(agent.identity.relationship));
 }
+/** ADR-478: affinity thresholds (scale -1..1, the same clamp as trust). The scope's -20 / >= 30 were
+ * written against a -100..100 scale; the shipped scale is -1..1, so the thresholds are -0.2 and 0.3.
+ * friendDefendBonus widens a friend's guard radius (see fillHireSensors). */
+export const SOCIAL_AFFINITY = { grudgeBelow: -0.2, friendAt: 0.3, friendDefendBonus: 4 } as const;
+/** ADR-478: affinity (friendship) for a player (-1..1), 0 when unknown. The first reader of affinity:
+ * until now it was recorded (noteSocialEvent) but never read by any behaviour. */
+export function affinityOf(agent: Agent, player: number): number {
+  const r = player ? socialMemoryOf(agent).relationships[String(player)] : undefined;
+  return r ? r.affinity : 0;
+}
 
 /**
  * ADR-444: world-side mirror of bot trust, so code with no Agent (the hire path) can read it. Keyed by the bot's

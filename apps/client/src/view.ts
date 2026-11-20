@@ -86,6 +86,7 @@ import { task410AtlasSources, TASK410_ATLAS_KEYS } from "./task410-art.js";
 import { task420AtlasSources, installTask420MenuIcons, TASK420_ATLAS_KEYS } from "./task420-art.js";
 import { task421AtlasSources, installBoatMenuIcons, TASK421_ATLAS_KEYS } from "./task421-art.js";
 import { task422AtlasSources, installMotorboatMenuIcons, TASK422_ATLAS_KEYS } from "./task421-art.js";
+import { task479AtlasSources, installSailboatMenuIcons, TASK479_ATLAS_KEYS } from "./task421-art.js";
 import { installGuideArt } from "./task364-art.js";
 import { installGuideMenuIcon } from "./guide-art.js";
 import { installWetWoodIcon } from "./wetwood-art.js"; // ADR-457: wet firewood's own icon
@@ -485,6 +486,8 @@ export class IsoView {
     for (const [k, src] of await task421AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-422: dedicated tier-2 motorboat atlases (world sprites keyed by def id, like ADR-421).
     for (const [k, src] of await task422AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-479: dedicated sailboat atlas (world sprite keyed by def id, like ADR-421/422).
+    for (const [k, src] of await task479AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-455: dedicated footprint atlas (one boot print, 8 facings — the ground decal for snow/mud).
     for (const [k, src] of await footprintAtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-357: the five store build-menu icons point at items_build frames 297–301, which are transparent
@@ -505,6 +508,9 @@ export class IsoView {
     // ADR-422: the three motorboat kits likewise — paint them at runtime from the motorboats' own
     // world art. Safe no-op without a canvas.
     installMotorboatMenuIcons();
+    // ADR-479: the sailboat kit likewise — paint it at runtime from the sailboat's own world art.
+    // Safe no-op without a canvas.
+    installSailboatMenuIcons();
     // ADR-364: the guide's placement-hologram image needs the ghost ore store, which has no menu-icon art
     // (it is a rendering of the store's own world art in the game's ghost treatment) — paint it at
     // runtime from the store art. Safe no-op without a canvas.

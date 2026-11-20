@@ -514,8 +514,16 @@ export class IsoRenderer implements Renderer {
     // re-layout after an atlas rebuild / fallback: keep the caller's CSS size + DPR (a hard-coded 1 here dropped phones to a DPR-1 backbuffer = blurry)
     if (this.w === 0) this.resize(this.lastCss[0] || this.canvas.clientWidth || 800, this.lastCss[1] || this.canvas.clientHeight || 600, this.lastCss[2]);
     this.vfx.update(this.time); this.statusDt = dt;
-    if (this.bindings.burning) this.burning.update(world, this.bindings.burning, this.bindings.buildPiece, this.atlas, this.vfx, this.time, dt);
-    if (this.bindings.litPieces || this.bindings.lit) this.hearth.update(world, this.bindings.litPieces?.(), this.bindings.lit, this.bindings.buildPiece, this.atlas, this.vfx, dt * (this.timeScale > 0 ? Math.min(1, this.timeScale) : 1), this.bindings.pieceScale);
+    // ADR-465: smoke drifts with the wind — world-space wind vector, scaled by windSpeed/refSpeed
+    // (same fallback as the sway wind below: Weather wind when set, else the style default). The 0.6
+    // tiles/s factor lives in BurningFx/HearthFx; this is the direction * magnitude only.
+    const wv465 = readWind(world);
+    const wDir465 = wv465.speed > 0 ? wv465.dir : style.wind.defaultDir;
+    const wSpd465 = wv465.speed > 0 ? wv465.speed : style.wind.defaultSpeed;
+    const wMag465 = Math.min(1.5, wSpd465 / Math.max(0.1, style.wind.refSpeed));
+    const smokeWind = { x: Math.cos(wDir465) * wMag465, y: Math.sin(wDir465) * wMag465 };
+    if (this.bindings.burning) this.burning.update(world, this.bindings.burning, this.bindings.buildPiece, this.atlas, this.vfx, this.time, dt, smokeWind);
+    if (this.bindings.litPieces || this.bindings.lit) this.hearth.update(world, this.bindings.litPieces?.(), this.bindings.lit, this.bindings.buildPiece, this.atlas, this.vfx, dt * (this.timeScale > 0 ? Math.min(1, this.timeScale) : 1), this.bindings.pieceScale, smokeWind);
     if (this.chimneySmoke.cfg.rateScale > 0) this.chimneySmoke.update(world, this.bindings.buildPiece, this.atlas, this.vfx, dt, this.iso);
 
     // --- 0. prep ---------------------------------------------------------------------------

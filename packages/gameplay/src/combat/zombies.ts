@@ -183,13 +183,19 @@ export function zombieAISystem(world: World, dt: number): void {
     const idx = entityIndex(z); const s = br.slot(idx); const ts = tf.slot(idx);
     const def = defs.zombies.get(world.getField(z, Zombie, "kind")!)!;
     const x = tf.data.x[ts]!, y = tf.data.y[ts]!;
+    const horde = world.has(z, HordeMember); // ADR-121: horde members roam far from players
+    // ADR-476: a horde member in siege mode is exempt from light avoidance (lamplight draws the
+    // siege — Tracey's decision: only sieging hordes seek lights, within 20 tiles, and only while
+    // the siege lasts; the siege clock lives on the member's HordeMember component, set by the
+    // director). Non-sieging horde members avoid light exactly as before.
+    const inSiege = horde && (world.getField(z, HordeMember, "siegeUntil") ?? 0) > world.tick;
+    const shyOK = avoid && !inSiege && !def.light?.ignoresLight;
     // think
     if (world.tick >= br.data.thinkAt[s]!) {
       br.data.thinkAt[s] = world.tick + ai.thinkTicks; br.markChanged(idx);
       // despawn when no player is near (Task 29: same survivors list as acquire, squared distance)
       let anyNear = false; const r2 = ai.despawnDistance * ai.despawnDistance;
       for (const p of survivors) { if (world.has(p, Dead)) continue; const t = world.get(p, Transform)!; const dx = t.x - x, dy = t.y - y; if (dx * dx + dy * dy <= r2) { anyNear = true; break; } }
-      const horde = world.has(z, HordeMember); // ADR-121: horde members roam far from players
       if (!anyNear && !horde && !world.isReplaying) { ps.delete(z); world.destroy(z); continue; }
       const state = br.data.state[s]! as ZState; const target = br.data.target[s]!;
       const aggr = horde || zombieAggressive(world, z, todT);
@@ -281,7 +287,7 @@ export function zombieAISystem(world: World, dt: number): void {
       if (dist(x, y, tt.x, tt.y) > reach) {
         if (state === ZState.AttackPlayer) { setState(world, z, ZState.Chase); continue; }
         const step0 = def.speed * swimSpeedMulAt(world, x, y) * dt;
-        const g0 = avoid && !def.light?.ignoresLight ? shyGoal(world, z, x, y, tt.x, tt.y, step0) : undefined;
+        const g0 = shyOK ? shyGoal(world, z, x, y, tt.x, tt.y, step0) : undefined;
         moveToward(world, z, g0 ? g0[0] : tt.x, g0 ? g0[1] : tt.y, step0, ts);
         continue;
       }
@@ -301,12 +307,12 @@ export function zombieAISystem(world: World, dt: number): void {
       const blocked = structures(world).count ? stepBlockerCached(world, cx, cy, px, py) : 0;
       if (blocked) { br.data.blockPiece[s] = blocked; setState(world, z, ZState.AttackStructure); continue; }
       const step = def.speed * (state === ZState.Wander ? 0.5 : 1) * swimSpeedMulAt(world, x, y) * dt;
-      const shy = avoid && !def.light?.ignoresLight ? shyGoal(world, z, x, y, gx, gy, step) : undefined;
+      const shy = shyOK ? shyGoal(world, z, x, y, gx, gy, step) : undefined;
       if (shy) { moveToward(world, z, shy[0], shy[1], step, ts); setAnim(world, z, Anim.Walk); continue; }
       if (moveToward(world, z, gx, gy, step, ts)) path.i++;
       setAnim(world, z, state === ZState.Wander ? Anim.Walk : Anim.Run);
     } else {
-      const shy = avoid && !def.light?.ignoresLight ? shyGoal(world, z, x, y, x, y, def.speed * dt) : undefined;
+      const shy = shyOK ? shyGoal(world, z, x, y, x, y, def.speed * dt) : undefined;
       if (shy) { moveToward(world, z, shy[0], shy[1], def.speed * dt, ts); setAnim(world, z, Anim.Walk); } else setAnim(world, z, Anim.Idle);
     }
   }

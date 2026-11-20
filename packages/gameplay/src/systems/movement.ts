@@ -22,7 +22,7 @@ import { GameplayHoldBits as A, INPUT } from "../input_hooks.js";
 import { isLCorner, rotParts, StructureIndexRes, type StructureIndex } from "../building/structure.js";
 import { stairRampHeight } from "../building/stairs.js";
 import type { PieceDef } from "../defs.js";
-import { TerrainRes, chunkWetnessAt } from "../world.js";
+import { TerrainRes, chunkSnowAt, chunkWetnessAt } from "../world.js";
 import { WaterDepth, waterDepthAt, installSpatialIndex } from "@engine/world";
 import { STANCE_ANIM, stanceAllowsSprint, stanceMode, stanceMoveMul } from "../stance.js";
 import { makeNoise } from "./noise.js";
@@ -63,6 +63,13 @@ export function speedMultiplier(world: World, e: Entity, sprint: boolean): numbe
     if (roadSurfaceAt(world, t.x, t.y) === RoadSurface.None) {
       const wet = chunkWetnessAt(world, t.x, t.y);
       if (wet >= mv.mudWetnessThreshold) m *= mv.mudSlowMul;
+      // ADR-466: deep snow slows walking off-path (two tiers); frozen water is already walk
+      // speed, so the snow multiplier skips tiles where the water is frozen (no double slow).
+      if (!isFrozenWaterAt(world, Math.floor(t.x), Math.floor(t.y))) {
+        const snow = chunkSnowAt(world, t.x, t.y);
+        if (snow >= mv.snowDeepThreshold) m *= mv.snowDeepMul;
+        else if (snow >= mv.snowSlowThreshold) m *= mv.snowSlowMul;
+      }
     }
   }
   return evaluate(world, e, Buffs, Stat.MoveSpeed, m, world.simTick(e)); // ADR-191: server-frame expiry while predicting

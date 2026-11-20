@@ -308,6 +308,10 @@
         "maximum": 2
        }
       }
+     },
+     "sail": {
+      "type": "boolean",
+      "description": "ADR-479: wind-driven sailboat (class boat, no fuel, no stamina). Only class boat may set it true; the sail factor in vehicles.ts drives maxSpeed from the wind, with a 0.25x paddle crawl as the floor."
      }
     }
    }

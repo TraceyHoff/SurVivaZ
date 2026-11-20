@@ -32,6 +32,7 @@ import { currentPhaseKey } from "../combat/zombies.js";
 import { UseCmd } from "../input.js";
 import type { AgentOutputWithCommands } from "./agent_output.js";
 import type { GameDefs } from "../defs.js";
+import { branchLevel } from "../skills/tree.js";
 import raw from "../../data/ai_life.json";
 
 export type LifeWantKind = "eat_favourite" | "craft_keepsake" | "visit_water" | "socialize" | "tend_garden" | "rest";
@@ -44,7 +45,7 @@ export interface LifePersonality {
   rhythm: LifeRhythm; favouriteFood: string; keepsake: string;
 }
 export interface LifeMood { label: MoodLabel; social: number; explore: number; rest: number }
-export interface LifeWantDef { id: string; kind: LifeWantKind; weight: number; traits: Partial<Record<"sociability" | "industriousness" | "bravery" | "curiosity" | "greed", number>>; cooldownTicks: number }
+export interface LifeWantDef { id: string; kind: LifeWantKind; weight: number; traits: Partial<Record<"sociability" | "industriousness" | "bravery" | "curiosity" | "greed", number>>; cooldownTicks: number; /** ADR-477: skill branch this want exercises (ai_life.json) — a bot that has practiced it drifts toward the want. */ skill?: string }
 /** ADR-445: a long-term aspiration — one short want, repeated `targetCount` times. Progress is
  *  derived from the want's completion count, so no extra counter can drift; completing the
  *  aspiration is recorded in LifeState.aspirations and the next aspiration takes over. */
@@ -323,6 +324,12 @@ export function pickWithMood(agent: Agent, world: World, view: AgentWorldView & 
     // so a bot works toward one long-term goal instead of drifting between short wants.
     if (aspiration && aspiration.want === w.id) score *= 1 + aspiration.weight;
     if (st.activeWant === w.id) score *= 1.5;
+    // ADR-477: a bot that has practiced a skill drifts toward the want that uses it — +0.1 per owned
+    // node in the want's branch (a level-5 farmer scores gardening +0.5 over a level-0 bot: enough to
+    // tip a tie, not enough to lock a bot into one want forever). Additive after the multipliers, so
+    // personality, mood and aspiration still dominate the pick. Only tend_garden (farming) and
+    // craft_keepsake (crafting) carry a skill in ai_life.json — the other wants are not skill-driven.
+    if (w.skill && self !== undefined) score += branchLevel(world, self, w.skill) * 0.1;
     let target: LifeWantTarget | undefined;
     if (w.kind === "eat_favourite") {
       if (!ix) continue;

@@ -44,6 +44,9 @@ export const MANIFEST_INDEX: readonly ManifestFragmentRef[] = [
   // ADR-422: dedicated tier-2 motorboat art (atlases painted at runtime by
   // apps/client/src/task421-art.ts; the fragment carries layout only, no PNG files).
   { name: "task422", url: "pack/task422/manifest.task422.json", optional: true },
+  // ADR-479: dedicated sailboat art (atlas painted at runtime by
+  // apps/client/src/task421-art.ts; the fragment carries layout only, no PNG files).
+  { name: "task479", url: "pack/task479/manifest.task479.json", optional: true },
   // ADR-455: dedicated footprint art (atlases painted at runtime by
   // apps/client/src/footprints-art.ts; the fragment carries layout only, no PNG files).
   { name: "task455", url: "pack/task455/manifest.task455.json", optional: true },

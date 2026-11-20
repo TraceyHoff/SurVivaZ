@@ -31,6 +31,7 @@ export const SKILL_MOD_LABEL: Readonly<Record<string, string>> = {
   fuel: `burn time of fuel in fires you tend (within ${FIRE_TENDER_RADIUS} tiles)`, vfuel: "liters per fuel item when refueling vehicles",
   repair: "vehicle repair per kit", nutrition: "nutrition from food", heal: "healing from food and medicine",
   produce: "animal produce speed (eggs, milk, wool)", tame: "taming chance", xp: "XP from all activities", noise: "noise you make (how far zombies can hear you)",
+  speed: "action speed (gathering, crafting and building)",
 };
 const DMG_NAME: Readonly<Record<string, string>> = { unarmed: "unarmed", blade: "blade", blunt: "blunt", axe: "axe", spear: "spear", bow: "bow", crossbow: "crossbow", firearm: "firearm" };
 const weapons = (cls: string): string => { const p = SKILLS.weaponClasses[cls]; return p?.length ? ` (${p.map(human).join(", ")})` : ""; };

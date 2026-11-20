@@ -751,6 +751,15 @@
       "maxStack": 1,
       "weight": 8,
       "tradeable": true
+    },
+    {
+      "key": "vehicle_kit_sailboat",
+      "sprite": "item_vehicle_kit_sailboat",
+      "name": "Sailboat Kit",
+      "category": "placeable",
+      "maxStack": 1,
+      "weight": 8,
+      "tradeable": true
     }
   ]
 }

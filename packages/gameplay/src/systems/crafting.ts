@@ -11,6 +11,7 @@ import { installSpatialIndex } from "@engine/world";
 import { CraftingStation, Crafter, Dead, Equipment, Fuel, Worn, IntentAction, Inventory, PlayerIntent, WorkerOrder, Worker, WorkerJob } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks, StationKind, WearSlot, type RecipeDef } from "../defs.js";
+import { skillMul } from "../skills/tree.js";
 import { CraftCompleted, CraftFail, CraftFailed, CraftStarted, emit } from "../events.js";
 import { exchangeItems } from "../inventory.js";
 import { crafterIdFor } from "../economy/provenance.js";
@@ -112,7 +113,10 @@ export function craftingSystem(world: World, dt: number): void {
       if (current !== 0) { fail(id, CraftFail.Busy); continue; }
       const r = defs.recipes.get(id); if (!r) { fail(id, CraftFail.UnknownRecipe); continue; }
       const why = checkRecipe(world, e, r); if (why) { fail(id, why); continue; }
-      const total = Math.min(0xffff, secondsToTicks(r.seconds, dt));
+      // ADR-477: a practiced crafter works faster — the timed job is divided by the speed
+      // multiplier (1.0 without speed nodes, 1.2 with all four practice nodes). totalTicks is a
+      // replicated Crafter field, so the client reads the sped-up total from the component.
+      const total = Math.min(0xffff, secondsToTicks(r.seconds / skillMul(world, e, "speed"), dt));
       cr.data.recipe[cs] = id; cr.data.startTick[cs] = world.tick + 1; cr.data.totalTicks[cs] = total; cr.markChanged(idx);
       emit(world, CraftStarted, { entity: e, recipe: id, totalTicks: total });
       continue; // progress starts next tick

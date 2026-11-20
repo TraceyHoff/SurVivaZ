@@ -4,18 +4,20 @@
  * Deterministic and RNG-free, so the client predicts it for its own entity.
  */
 import { thirstyPlantsInFront, waterFromContainer } from "../farming.js";
+import { drawFromWell, drinkWaterChance } from "../wells.js"; // ADR-471: river risk + well draw
 import { temperatureTier } from "../exposure-stages.js";
 import { stanceMode, STANCE } from "../stance.js";
 import { StanceMode } from "../components.js";
 import { contractDisease, cureDiseasesForItem, hasDisease } from "../diseases.js";
-import { addModifier, defineResource, entityIndex, evaluate, ModOp, Transform, type Entity, type World } from "@engine/core";
+import { addModifier, defineResource, entityIndex, evaluate, ModOp, Transform, Weather, type Entity, type World } from "@engine/core";
 import { Anim, AnimState, BodyTemp, NO_SLOT, Buffs, DamageCause, Dead, Exposure, Health, IntentAction, PlayerIntent, Stat, Survival, VitalsState, snapStamina } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks } from "../defs.js";
 import { ConsumeFail, ConsumeFailed, Died, emit, ItemConsumed, WaterDrunk, Vital, VitalDepleted } from "../events.js";
 import { setHotbarSelection, readSlots, slotFreshness, slotItem, takeFromSlot } from "../inventory.js";
 import { hasPerk, skillMul } from "../skills/tree.js";
-import { fillContainer, spoilStageIndex, spoilStages, takeSip } from "../food.js";
+import { fillContainer, dietGroupOf, spoilStageIndex, spoilStages, takeSip } from "../food.js";
+import { recordRecentFood, recentFoodGroupCount } from "../recent.js"; // ADR-470: varied diet
 import { inWater } from "./movement.js";
 import { heatAt } from "./environment.js";
 import { pendingReady } from "../ready.js";
@@ -66,8 +68,9 @@ export function consumeSystem(world: World, dt = 1 / 20): void {
       ready.set(e, world.tick + CONSUME_COOLDOWN_TICKS);
       const sv = world.get(e, Survival)!; world.setField(e, Survival, "thirst", clamp(sv.thirst + WATER_TILE_THIRST, 0, 100));
       anim(Anim.Drink); emit(world, WaterDrunk, { entity: e, item: 0, sips: 0 });
-      // Task 13: untreated water straight from the tile can carry dysentery (authority rolls; clients replicate it)
-      if (isAuthority(world)) { const c = defs.diseaseTuning.causes.rawWaterChance; if (c > 0 && world.rngFor("disease.dysentery", e).next() < c) contractDisease(world, e, "dysentery", dt); }
+      // Task 13 / ADR-471: untreated water straight from the tile can carry dysentery — the chance
+      // depends on the water feature under the drinker (river riskiest, isolated lake safest).
+      if (isAuthority(world)) { const c = drinkWaterChance(world, tf!.x, tf!.y); if (c > 0 && world.rngFor("disease.dysentery", e).next() < c) contractDisease(world, e, "dysentery", dt); }
       continue;
     }
     const { item } = slotItem(world, e, slot);
@@ -89,8 +92,14 @@ export function consumeSystem(world: World, dt = 1 / 20): void {
     // liquid containers (water_flask, canteen): one sip of food/sips per use, the container stays; empty -> refill at water
     const per = idef.sips > 0 ? 1 / idef.sips : 1;
     if (idef.sips > 0 && readSlots(world, e).durability(slot) <= 0) {
+      // ADR-471: an empty container is refilled at open water — or, on dry land, drawn from the
+      // nearest well in reach (a raw container becomes its well variant; a dry well, or no well,
+      // fails Empty — the client renders no text for failed Uses today, so that prompt is a
+      // follow-up, not shipped in v1).
       const added = wet && isAuthority(world) ? fillContainer(world, e, slot) : 0;
+      const drawn = !wet && isAuthority(world) ? drawFromWell(world, e, slot) : undefined;
       if (wet) { ready.set(e, world.tick + CONSUME_COOLDOWN_TICKS); anim(Anim.Drink); if (added) emit(world, WaterDrunk, { entity: e, item, sips: added }); }
+      else if (drawn && drawn.added > 0) { ready.set(e, world.tick + CONSUME_COOLDOWN_TICKS); anim(Anim.Drink); emit(world, WaterDrunk, { entity: e, item, sips: drawn.added }); }
       else emit(world, ConsumeFailed, { entity: e, item, reason: ConsumeFail.Empty });
       continue;
     }
@@ -102,7 +111,17 @@ export function consumeSystem(world: World, dt = 1 / 20): void {
     if (idef.sips === 0) takeFromSlot(world, e, slot);
     ready.set(e, world.tick + CONSUME_COOLDOWN_TICKS);
     anim(idef.sips > 0 || (food.thirst > 0 && food.hunger <= 0) ? Anim.Drink : Anim.Eat);
-    const sv = world.get(e, Survival)!; const hp = world.get(e, Health)!; const k = stage.nutritionMul * per * skillMul(world, e, "nutrition");
+    const sv = world.get(e, Survival)!; const hp = world.get(e, Health)!;
+    // ADR-470: varied diet — record this food's group (drinks, medicines and pet treats are not in
+    // dietGroups and never count) and scale nutrition: 4+ distinct groups in the last 8 eats earns a
+    // 1.1x bonus; eating the same food in a row carries no penalty (1.0x floor).
+    let varietyMul = 1;
+    const dietGroup = dietGroupOf(defs, idef.key);
+    if (dietGroup !== undefined) {
+      recordRecentFood(world, e, dietGroup);
+      if (recentFoodGroupCount(world, e) >= 4) varietyMul = 1.1;
+    }
+    const k = stage.nutritionMul * per * skillMul(world, e, "nutrition") * varietyMul;
     const iron = stage.sick && ironPerk; // ADR-113: no sickness, flat hp cost instead
     world.set(e, Survival, { hunger: clamp(sv.hunger + food.hunger * k, 0, 100), thirst: clamp(sv.thirst + food.thirst * k, 0, 100) });
     // ADR-234: health uses the freshness stage and the "heal" mod only; "nutrition" no longer scales bandages / medkits (or poison)
@@ -130,7 +149,7 @@ export function consumeSystem(world: World, dt = 1 / 20): void {
       if (idef.rawMeat) roll("food_poisoning", causes.rawMeatChance);
       if (stage.sick && !iron) roll("food_poisoning", causes.sickFoodChance);
       if (iron && si === stages.length - 1) roll("food_poisoning", causes.rottenFoodChance); // rotten food eaten only via iron_stomach
-      if (idef.sips > 0 && !idef.boiled) roll("dysentery", causes.rawWaterChance); // raw-water container sip
+      if (idef.sips > 0 && !idef.boiled && !idef.safeWater) roll("dysentery", causes.rawWaterChance); // raw-water container sip (ADR-471: well water never rolls)
     }
     emit(world, ItemConsumed, { entity: e, item });
   }
@@ -190,6 +209,7 @@ function predictOwnStamina(world: World, dt: number, delayTicks: number): void {
 
 export function vitalsSystem(world: World, dt: number): void {
   const vt = gameplayDefs(world).vitals;
+  const env = gameplayDefs(world).environment; // ADR-472: the cold threshold (coldBuffBelow) lives in environment.json
   const sv = world.store(Survival); const hs = world.store(Health); const vs = world.store(VitalsState);
   const intent = world.store(PlayerIntent); const ex = world.store(Exposure);
   const delayTicks = Math.min(0xffff, secondsToTicks(vt.staminaRegenDelaySeconds, dt));
@@ -216,7 +236,12 @@ export function vitalsSystem(world: World, dt: number): void {
     let body = sv.data.bodyTemp[s]!;
     if (ex.has(idx)) {
       const felt = ex.data.feltTemp[ex.slot(idx)]!;
-      if (felt < vt.comfortMin) body -= (vt.comfortMin - felt) * vt.bodyTempChangePerDegreePerSec * dt;
+      // ADR-472: cold bites — when felt is below the cold threshold AND the body is soaked AND the
+      // wind is gale-force, body temperature drains coldDrain.mul x faster toward the cold. All three
+      // conditions, not any one: cold alone, wet alone or wind alone already have their (weaker) effects.
+      // The bite only speeds the arrival at the freezing tier — it adds no second damage channel.
+      const bite = felt < env.coldBuffBelow && ex.data.wetness[ex.slot(idx)]! >= vt.coldDrain.wetMin && world.env(Weather).windSpeed >= vt.coldDrain.windMin ? vt.coldDrain.mul : 1;
+      if (felt < vt.comfortMin) body -= (vt.comfortMin - felt) * vt.bodyTempChangePerDegreePerSec * bite * dt;
       else if (felt > vt.comfortMax) body += (felt - vt.comfortMax) * vt.bodyTempChangePerDegreePerSec * dt;
       else {
         const step = vt.bodyTempRecoverPerSec * dt; const d = vt.bodyTempNormal - body;

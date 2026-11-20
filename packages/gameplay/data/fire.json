@@ -8,5 +8,7 @@
   "spreadChance": 0.08,
   "rainQuench": 40,
   "flammableTiers": [0, 1],
+  "windFan": { "minSpeed": 2, "mul": 1, "minMul": 0.1, "maxMul": 2 },
+  "vegetation": { "spreadRadius": 2.0, "spreadChance": 0.08, "maxBurning": 128 },
   "lightning": { "strikesPerStorm": 1, "radius": 15, "minDistance": 5 }
 }

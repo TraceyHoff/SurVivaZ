@@ -10,7 +10,7 @@ import { collect, makeWorld, steps } from "./helpers.js";
 
 const d = G.defaultDefs(); const id = (k: string): number => d.itemId(k);
 const NODES = G.SKILLS.nodes;
-const MODS = new Set(["gather", "cropYield", "carry", "fuel", "vfuel", "repair", "nutrition", "heal", "produce", "tame", "share", "xp", "noise"]);
+const MODS = new Set(["gather", "cropYield", "carry", "fuel", "vfuel", "repair", "nutrition", "heal", "produce", "tame", "share", "xp", "noise", "speed"]);
 const PERKS = new Set(["iron_stomach", "breeding"]);
 
 const closure = (i: number, out = new Set<number>()): Set<number> => { for (const r of G.SKILL_REQS[i]!) if (!out.has(r)) { out.add(r); closure(r, out); } return out; };
@@ -51,6 +51,14 @@ function gatherTotal(w: World, p: Entity, kind: string, item: string): number {
   return sum;
 }
 const carryCap = (w: World, p: Entity): number => G.addItem(w, p, id("stone"), 100000);
+/** ADR-477: single timed craft totalTicks for the 30 s dry_wet_wood recipe (station none) — long
+ *  enough that one +5% speed node is visible past the tick ceiling (600 vs 572 ticks). */
+function craftTicks(w: World, p: Entity): number {
+  G.addItem(w, p, id("wet_wood"), 1);
+  G.setIntent(w, p, { action: G.IntentAction.Craft, recipe: d.recipeId("dry_wet_wood") });
+  w.step(1 / 20);
+  return w.get(p, G.Crafter)!.totalTicks;
+}
 function eat(w: World, p: Entity, item: string, setup: () => void): void {
   G.addItem(w, p, id(item), 1); setup();
   G.setIntent(w, p, { action: G.IntentAction.Use, slot: 0 }); w.step(1 / 20); G.setIntent(w, p, { action: G.IntentAction.None });
@@ -142,6 +150,7 @@ function audit(i: number): string[] {
       for (const item of ["bandage", "medkit"]) { const r = pair(i, (w, p) => healGain(w, p, item)); near(r.v[1] / r.v[0], ratioOf(r.owned, mod), 1e-4, `${n.key} heal ${item}`); }
     } else if (mod === "noise") { const r = pair(i, noiseOf); near(r.v[1] / r.v[0], ratioOf(r.owned, mod), 1e-4, `${n.key} noise`); }
     else if (mod === "xp") { const r = pair(i, xpTotal); near(r.v[1] / r.v[0], ratioOf(r.owned, mod), 0.004, `${n.key} xp`); }
+    else if (mod === "speed") { const r = pair(i, craftTicks); near(r.v[1] / r.v[0], ratioOf(r.owned, mod, true), 0.01, `${n.key} speed`); }
     else if (mod === "share") {
       const r = pair(i, shareRun);
       for (const s of [0, 1] as const) near(r.v[s].mate, r.v[s].own * total(r.owned[s], "share"), 1, `${n.key} share (${s ? "with" : "without"})`);

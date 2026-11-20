@@ -16,7 +16,7 @@ import { installSpatialIndex } from "@engine/world";
 import { AttachKind, BuildPiece, Container, DoorState, Fuel, ResourceNode, Worker, Worn } from "../components.js";
 import { planDefence, type DefenceMemory } from "./defence_plan.js"; // ADR-341: the defence goal reuses ADR-338's planDefence + surplus gating (leaf module: no input.ts cycle)
 import { resolveAttachment } from "../building/links.js";
-import { countItem, readSlots } from "../inventory.js";
+import { countItem, isBrokenSlot, readSlots } from "../inventory.js";
 import { maxHpOf } from "../building/integrity.js";
 import { hasOwnClaim, pieceCost, pieceUnlocked, snapPlacement, tribeOf, validatePlacement, zoneOwnedBy, zonesAt } from "../building/place.js";
 import { PrivilegeZone } from "../components.js";
@@ -481,7 +481,7 @@ export function makePlan(p: PlanInput): Plan {
   const ix = plannerIndex(p.defs); const { world, self, defs } = p; const sl = readSlots(world, self);
   /** ADR-340: the anchor every placement / scan in the ladder reads — the built base, else the adopted ruin home. */
   const home = p.base ?? p.ruinBase;
-  const inv = new Map<number, number>(); for (let i = 0; i < sl.items.length; i++) if (sl.items[i] && sl.counts[i]) inv.set(sl.items[i]!, (inv.get(sl.items[i]!) ?? 0) + sl.counts[i]!);
+  const inv = new Map<number, number>(); for (let i = 0; i < sl.items.length; i++) if (sl.items[i] && sl.counts[i] && !isBrokenSlot(world, self, i, defs)) inv.set(sl.items[i]!, (inv.get(sl.items[i]!) ?? 0) + sl.counts[i]!); // ADR-474: a broken tool is unusable — it must not count as held here, or the planner thinks the bot can gather with it (tool map + avail) and never plans a replacement, while the repair reflex only fires when the bot already holds the repair materials (a bot that spent its last fiber crafting the axe deadlocks on fists). Excluding it makes obtainTool plan a new axe (gathering fiber as a leaf); a bot that CAN afford the repair still repairs via the reflex.
   const tool = new Map<ToolKind, number>(); const allCount = (id: number): number => (inv.get(id) ?? 0) + (p.bs?.storage?.counts.get(id) ?? 0);
   for (const d of ix.tools) if (allCount(d.id) > 0) tool.set(d.tool!.kind, Math.max(tool.get(d.tool!.kind) ?? 0, d.tool!.tier));
   const worn = new Set<number>(); const wi = world.getArray(self, Worn, "item"); if (wi) for (const x of wi) if (x) worn.add(x);

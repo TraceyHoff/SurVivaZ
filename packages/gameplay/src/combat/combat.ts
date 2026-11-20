@@ -11,7 +11,7 @@ import { Anim, AnimState, Attacker, BuildPiece, DamageCause, Dead, Equipment, He
 import { gameplayDefs, isAuthority, rangeSlack } from "../config.js";
 import { secondsToTicks, type WeaponDef } from "../defs.js";
 import { AttackSwing, Damaged, emit } from "../events.js";
-import { slotItem } from "../inventory.js";
+import { isBrokenSlot, slotItem, wearDurability } from "../inventory.js";
 import { damagePiece } from "../building/integrity.js";
 import { makeNoise } from "../systems/noise.js";
 import { distance } from "../systems/fuel.js";
@@ -29,6 +29,8 @@ export const FISTS: WeaponDef = { damage: 5, range: 1.0, cooldownSeconds: 0.4, s
 export function heldWeapon(world: World, e: Entity): WeaponDef {
   const slot = world.getField(e, Equipment, "mainHandSlot");
   if (slot === undefined || slot === NO_SLOT || !world.has(e, Inventory)) return FISTS;
+  // ADR-474: a broken weapon is unusable — the hand falls back to fists (the same fallback as an empty hand).
+  if (isBrokenSlot(world, e, slot, gameplayDefs(world))) return FISTS;
   return gameplayDefs(world).items.get(slotItem(world, e, slot).item)?.weapon ?? FISTS;
 }
 
@@ -145,6 +147,11 @@ export function combatSystem(world: World, dt: number): void {
     }
     if (mode.kind === "thrown") { applyDamage(world, target, piece ? mode.damage * w.structureMul : mode.damage, e); landThrown(world, e, mode.slot, target); makeNoise(world, e, noise.attack); continue; }
     applyDamage(world, target, piece ? w.damage * w.structureMul : w.damage, e);
+    // ADR-474: weapon wear — one durability per landed melee hit (creature or structure; attacking a wall with an
+    // axe is a melee hit). Ranged / thrown / explosive never reach this line, so they wear nothing. A weapon that
+    // reaches 0 here is broken but stays in the bag.
+    const handSlot = world.getField(e, Equipment, "mainHandSlot");
+    if (w !== FISTS && handSlot !== undefined && handSlot !== NO_SLOT) wearDurability(world, e, handSlot, gameplayDefs(world));
     makeNoise(world, e, noise.attack);
   }
 }

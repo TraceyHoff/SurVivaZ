@@ -15,5 +15,9 @@
   "shallowRadius": 2,
   "mudSlowMul": 0.85,
   "mudWetnessThreshold": 0.5,
+  "snowSlowThreshold": 64,
+  "snowSlowMul": 0.8,
+  "snowDeepThreshold": 160,
+  "snowDeepMul": 0.7,
   "walkAnimRefSpeed": 4
 }

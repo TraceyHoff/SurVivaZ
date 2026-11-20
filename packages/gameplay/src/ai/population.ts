@@ -37,7 +37,7 @@ export interface ArchetypeBehavior {
   aggro: { mode: AggroMode; range: number; leashRange: number }; flee: { hpFrac: number; range: number };
   wander: { radius: number; idleSeconds: [number, number] }; attack?: AttackData | null; loot: LootEntry[];
 }
-export interface AiData { archetypes: Record<string, ArchetypeBehavior>; tuning?: { chaseLimitTiles?: number; /** ADR-462: wild-animal drink/shade (cosmetic). */ animalDrink?: { chance?: number; radius?: number; nearPlayerTiles?: number; drinkSeconds?: [number, number] }; /** ADR-463: carrion crows circling a fresh kill (ground only). */ carrion?: { crowsPerKill?: number; circleRadius?: number; maxSeconds?: number; nearPlayerTiles?: number } } }
+export interface AiData { archetypes: Record<string, ArchetypeBehavior>; tuning?: { chaseLimitTiles?: number; /** ADR-462: wild-animal drink/shade (cosmetic). */ animalDrink?: { chance?: number; radius?: number; nearPlayerTiles?: number; drinkSeconds?: [number, number] }; /** ADR-463: carrion crows circling a fresh kill (ground only). */ carrion?: { crowsPerKill?: number; circleRadius?: number; maxSeconds?: number; nearPlayerTiles?: number }; /** ADR-475: wild-deer herds graze and move on when the patch is bare. */ herd?: { grazeCooldownSeconds?: number; bareRadius?: number; bareFrac?: number; moveMinTiles?: number; moveMaxTiles?: number } } }
 /** Fully resolved behavior (zombie fields merged from zombies.json). */
 export interface ResolvedBehavior extends ArchetypeBehavior { hp: number; speed: number; perception: Perception; attack: AttackData | null }
 

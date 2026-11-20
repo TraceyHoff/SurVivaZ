@@ -520,7 +520,12 @@
     "cured_prime_cut": 518,
     "cured_venison": 519,
     "smoked_fish": 520,
-    "wet_wood": 521
+    "wet_wood": 521,
+    "vehicle_kit_sailboat": 522,
+    "well_canteen": 523,
+    "well_water_bottle": 524,
+    "well_water_flask": 525,
+    "well_waterskin": 526
   },
   "resources": {
     "fallen_branches": 1,
@@ -1025,7 +1030,8 @@
     "cured_prime_cut": 404,
     "cured_venison": 405,
     "smoked_fish": 406,
-    "dry_wet_wood": 407
+    "dry_wet_wood": 407,
+    "vehicle_kit_sailboat": 408
   },
   "pieces": {
     "anvil": 1,

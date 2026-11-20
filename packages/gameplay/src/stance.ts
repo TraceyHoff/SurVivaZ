@@ -5,20 +5,31 @@
  * follows its carrier, block stamina break, sleep heal, the all-asleep time skip). Movement / stamina / damage / noise
  * / zombie sight read the replicated Stance, so client prediction applies the same multipliers.
  */
-import { Transform, setTimeOfDay, sunFractionOf, timeOfDay, wallHoursForSun, SUN_OFF, type Entity, type World } from "@engine/core";
+import { addModifier, DEFAULT_TICK_HZ, ModOp, Transform, setTimeOfDay, sunFractionOf, timeOfDay, wallHoursForSun, SUN_OFF, type Entity, type World } from "@engine/core";
 import raw from "../data/stance.json";
-import { Anim, AnimState, BuildPiece, Dead, Driver, Equipment, Health, LootBag, Stance, StanceMode, Survival } from "./components.js";
+import { Anim, AnimState, Buffs, BuildPiece, Dead, Driver, Equipment, Exposure, Health, LootBag, Stance, StanceMode, Stat, Survival } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
 import { netIdEntity } from "./vehicle_net.js";
 import { netIdOf } from "./vehicles.js";
 import { gridRot, rotatedSize } from "./building/structure.js";
-import { Placement } from "./defs.js";
+import { roomOpennessAt } from "./building/shelter.js";
+import { lightAt } from "./systems/lights.js";
+import { Placement, secondsToTicks } from "./defs.js";
 
+/** ADR-473: sleep-quality tunings (data/stance.json sleepQuality). A good night needs a bed, >= goodHours of
+ * sleep, a comfortable felt temperature, dark and a quiet room (openness <= quietOpenness); a bad night is
+ * no bed, < goodHours, cold/hot at wake, lit, or a noisy room (openness > noisyOpenness); anything between
+ * (e.g. one open shutter) is an ordinary night with no buff or penalty. */
+export interface SleepQualityTuning {
+  goodHours: number; quietOpenness: number; noisyOpenness: number;
+  restedStaminaRegenMul: number; restedHealthRegenPerSec: number; restedSeconds: number;
+  groggyMoveMul: number; groggyStaminaRegenMul: number; groggySeconds: number;
+}
 export interface StanceTuning {
   blockMoveMul: number; blockMeleeReduction: number; blockArcDeg: number; blockStaminaDrainPerSec: number; blockStaminaPerHit: number;
   aimMoveMul: number; crouchMoveMul: number; crouchNoiseMul: number; crouchSightMul: number; carryMoveMul: number; carryReach: number; bedReach: number;
   sleepStaminaRegenMul: number; sleepHealPerSec: number; sleepWakeGraceTicks: number; timeSkipMul: number; timeSkipWakeHour: number; timeSkipFromHour: number;
-  beds: Record<string, string[]>; underSpots: string[];
+  beds: Record<string, string[]>; underSpots: string[]; sleepQuality: SleepQualityTuning;
 }
 export const STANCE: StanceTuning = raw as StanceTuning;
 
@@ -69,10 +80,16 @@ const prevOf = (w: World): Map<Entity, number> => { let m = prevBits.get(w); if 
 const guardBroken = new WeakMap<World, Set<Entity>>();
 const brokenOf = (w: World): Set<Entity> => { let s = guardBroken.get(w); if (!s) guardBroken.set(w, (s = new Set())); return s; };
 
+/** ADR-473: game time (day + hour) when a sleeper entered Sleep mode. Game hours, not ticks: timeSkip advances
+ * game hours without advancing ticks proportionally, so a tick-derived duration would undercount a skipped night. */
+const sleepStart = new WeakMap<World, Map<Entity, { day: number; hours: number }>>();
+const sleepStartOf = (w: World): Map<Entity, { day: number; hours: number }> => { let m = sleepStart.get(w); if (!m) sleepStart.set(w, (m = new Map())); return m; };
+
 function ensure(world: World, e: Entity): void { if (!world.has(e, Stance)) world.add(e, Stance, {}); }
 function setMode(world: World, e: Entity, mode: number): void {
   const cur = world.getField(e, Stance, "mode"); if (cur === mode) return;
   world.set(e, Stance, { mode, sinceTick: world.tick });
+  if (mode === StanceMode.Sleep) { const tod = timeOfDay(world); sleepStartOf(world).set(e, { day: tod.day, hours: tod.hours }); }
   const want = STANCE_ANIM[mode] ?? Anim.Idle; const a = world.getField(e, AnimState, "anim");
   if (a === undefined) world.add(e, AnimState, { anim: want, startTick: world.tick });
   else if (a !== want) world.set(e, AnimState, { anim: want, startTick: world.tick });
@@ -141,8 +158,58 @@ export function sleepIn(world: World, e: Entity, bed: Entity, spot: number): boo
   setMode(world, e, StanceMode.Sleep); return true;
 }
 /** Wake: step out beside the bed (or stay put for a floor sleep). */
+/** ADR-473: score the night at wake time. Read before wake() moves the sleeper: the bed position is the
+ * sleeping position (felt, light and openness are all read there) and bedNetId is still set. hours is -1
+ * when the sleep start was not recorded (e.g. a restart mid-sleep): that scores ordinary — no buff, no
+ * penalty — rather than punishing a night we cannot measure. Floor sleep never enters Sleep mode (the bot
+ * "sleep" action is stand-still; only the "rest" edge with a bed calls sleepIn), so the no-bed branch is a
+ * guard for a sleeper whose bed was destroyed without waking them, not a reachable play path. */
+export interface SleepQuality { readonly kind: "rested" | "groggy" | "ordinary"; readonly hours: number; readonly inBed: boolean; readonly warm: boolean; readonly dark: boolean; readonly quiet: boolean; }
+export function sleepQualityAtWake(world: World, e: Entity): SleepQuality {
+  const sq = STANCE.sleepQuality;
+  const start = sleepStartOf(world).get(e);
+  const t = world.get(e, Transform);
+  const inBed = (world.getField(e, Stance, "bedNetId") ?? 0) !== 0;
+  const felt = world.getField(e, Exposure, "feltTemp") ?? 20;
+  const v = gameplayDefs(world).vitals;
+  const warm = felt >= v.comfortMin && felt <= v.comfortMax;
+  const dark = t === undefined || lightAt(world, t.x, t.y) === undefined;
+  const openness = t === undefined ? 1 : roomOpennessAt(world, t.x, t.y, t.z);
+  const quiet = openness <= sq.quietOpenness;
+  const noisy = openness > sq.noisyOpenness;
+  if (start === undefined) return { kind: "ordinary", hours: -1, inBed, warm, dark, quiet };
+  const tod = timeOfDay(world);
+  const hours = (tod.day - start.day) * 24 + (tod.hours - start.hours);
+  const good = inBed && hours >= sq.goodHours && warm && dark && quiet;
+  const bad = !inBed || hours < sq.goodHours || !warm || !dark || noisy;
+  return { kind: good ? "rested" : bad ? "groggy" : "ordinary", hours, inBed, warm, dark, quiet };
+}
+
+/** ADR-473: apply the night's quality as Buffs at wake time (authority only; the Buffs stack replicates).
+ * Rested: StaminaRegen x1.25 + HealthRegen +0.25 hp/s for 30 in-game minutes. Groggy: MoveSpeed x0.85 +
+ * StaminaRegen x0.75 for 5 in-game minutes. Bots share the hook: the bot rest edge calls sleepIn and
+ * damage/bed-destroyed wake paths all call wake(), so a bot in a bed wakes rested or groggy the same way. */
+function applySleepQuality(world: World, e: Entity): void {
+  if (!isAuthority(world)) return;
+  const q = sleepQualityAtWake(world, e);
+  sleepStartOf(world).delete(e);
+  if (q.kind === "ordinary") return;
+  const sq = STANCE.sleepQuality;
+  const dt = 1 / DEFAULT_TICK_HZ;
+  if (q.kind === "rested") {
+    const exp = world.tick + secondsToTicks(sq.restedSeconds, dt);
+    addModifier(world, e, Buffs, { stat: Stat.StaminaRegen, op: ModOp.Mul, value: sq.restedStaminaRegenMul, expiresAtTick: exp });
+    addModifier(world, e, Buffs, { stat: Stat.HealthRegen, op: ModOp.Add, value: sq.restedHealthRegenPerSec, expiresAtTick: exp });
+  } else {
+    const exp = world.tick + secondsToTicks(sq.groggySeconds, dt);
+    addModifier(world, e, Buffs, { stat: Stat.MoveSpeed, op: ModOp.Mul, value: sq.groggyMoveMul, expiresAtTick: exp });
+    addModifier(world, e, Buffs, { stat: Stat.StaminaRegen, op: ModOp.Mul, value: sq.groggyStaminaRegenMul, expiresAtTick: exp });
+  }
+}
+
 export function wake(world: World, e: Entity): void {
   if (stanceMode(world, e) !== StanceMode.Sleep) return;
+  applySleepQuality(world, e);
   const b = netIdEntity(world, world.getField(e, Stance, "bedNetId")!); const bt = b !== undefined ? world.get(b, Transform) : undefined;
   if (bt) { const r = bedRot(bt.facing ?? 0); const side = r & 1 ? { x: 0, y: 1.1 } : { x: 1.1, y: 0 }; world.set(e, Transform, { x: bt.x + side.x, y: bt.y + side.y }); }
   world.set(e, Stance, { bedNetId: 0, spot: 0, lie: 0 }); setMode(world, e, StanceMode.None);

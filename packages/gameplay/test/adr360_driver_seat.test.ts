@@ -325,7 +325,7 @@ describe("ADR-360 AI drives drawn vehicles", () => {
 
 describe("ADR-360 schema", () => {
   it("no new component: the world schema hash is unchanged from ADR-359", () => {
-    expect(makeWorld().getSchemaHash()).toBe(0x8890b694); // ADR-449–463: LightningFire (451) + Carrion (463) components appended (old saves keep their node bits)
+    expect(makeWorld().getSchemaHash()).toBe(0x58f1c72b); // ADR-465–479: FloodTile (467) + RecentFoods (470) + Well (471) components appended, HordeMember gains siegeUntil (476) (old saves keep their node bits)
   });
   it("the drawn drive speed is sim-local: a resource, cleared on exit, never a component", () => {
     const { w, p } = setup(); const { m, v } = rig(w, p);

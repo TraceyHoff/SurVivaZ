@@ -16,6 +16,8 @@ export * from "./compass.js";
 export * from "./install.js";
 export * from "./replication.js";
 export * from "./realism.js";
+export * from "./wells.js"; // ADR-471 river risk + wells run low
+export * from "./flood.js"; // ADR-467 rivers that flood, then recede
 export * from "./world.js";
 export * from "./frozen.js"; // ADR-450 winter ice (frozen-water predicate)
 export * from "./wildCropTopUp.js"; // ADR-429
@@ -128,6 +130,8 @@ export * from "./pets.js"; // ADR-145
 export * from "./mount_defs.js"; // ADR-319 / ADR-320
 export * from "./mount_commands.js";
 export * from "./mounts.js";
+export * from "./item_repair_commands.js"; // ADR-474: tool / weapon repair command
+export * from "./item_repair.js"; // ADR-474: tool / weapon repair (cost / check / install)
 export * from "./rope_defs.js"; // ADR-351: rope data + leadable-species helpers
 export * from "./tameable_defs.js"; // ADR-354: the single tameable-species list
 export * from "./rope_commands.js";

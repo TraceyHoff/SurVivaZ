@@ -24,6 +24,8 @@ import { consumeSystem, deathSystem, vitalsSystem } from "./systems/vitals.js";
 import { diseaseSystem } from "./systems/diseases.js";
 import { installDiseases } from "./diseases.js";
 import { installLightning } from "./combat/pvp_pieces.js";
+import { installWells } from "./wells.js"; // ADR-471: rain recharges wells, dry days drain them
+import { floodSystem, installFlood } from "./flood.js"; // ADR-467: rivers that flood, then recede
 import { installSmokeMarkers } from "./map_markers.js";
 import { installCarrion } from "./population.js";
 import { recruitmentSystem } from "./recruitment.js";
@@ -82,6 +84,7 @@ export const GAMEPLAY_SYSTEM_ORDER: readonly (readonly [Phase, string, number?])
   ["simulation", "gameplay.farmUse"], // ADR-110
   ["simulation", "gameplay.crops", CROP_EVERY], // ADR-110
   ["simulation", "gameplay.terrainFlow", TERRAIN.flowEveryTicks], // ADR-263: water flows into shovel-dug channels (authority)
+  ["simulation", "gameplay.flood", TERRAIN.flowEveryTicks], // ADR-467: rivers flood, then recede (authority; same cadence as the flow step)
   ["simulation", "gameplay.husbandryUse"], // ADR-113
   ["simulation", "gameplay.husbandry", HUSBANDRY_EVERY], // ADR-113
   ["simulation", "gameplay.pets"], // ADR-145 (after animal AI)
@@ -149,7 +152,7 @@ export function installGameplay(world: World, options: GameplayOptions | number 
     "gameplay.spoilage": spoilageSystem, "gameplay.chunkSurface": chunkSurfaceSystem,
     "gameplay.recruitment": recruitmentSystem,
     "gameplay.clearIntents": clearIntentsSystem, "gameplay.equipmentSync": equipmentSyncSystem, "gameplay.noiseDecay": noiseDecaySystem,
-    "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.storeFill": storeFillSystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.abandonedStamps": (w) => { pumpAbandonedStamps(w); }, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
+    "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.storeFill": storeFillSystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.abandonedStamps": (w) => { pumpAbandonedStamps(w); }, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.flood": floodSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
     "gameplay.hordes": hordeDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem, "gameplay.rope": ropeSystem, "gameplay.dung": dungSystem,
     ...installBuildingSystems(world), ...installCombatSystems(world),
   };
@@ -160,6 +163,8 @@ export function installGameplay(world: World, options: GameplayOptions | number 
   installLightning(world); // ADR-451: one gameplay strike per storm, on WeatherChanged (once per world)
   installSmokeMarkers(world); // ADR-453: lit campfires show as "Smoke" map markers (once per world)
   installCarrion(world); // ADR-463: crows circle a fresh kill near a player (once per world)
+  installWells(world); // ADR-471: rain recharges wells, dry days drain them (once per world)
+  installFlood(world); // ADR-467: rivers flood on heavy rain/storm, on WeatherChanged (once per world)
   for (const [phase, name, every] of GAMEPLAY_SYSTEM_ORDER) {
     const fn = sys[name]; if (!fn) throw new Error(`no system ${name}`);
     world.addSystem(phase, name, fn, every ? { every } : {});

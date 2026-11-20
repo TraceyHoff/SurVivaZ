@@ -332,6 +332,11 @@ export function instantChores(c: Ctx, o: { actions: string[] }): void {
   // Task 25: dye it (the sensor only sets view.dye while the bot holds a dye + brush and still wants today's colour;
   // the command re-validates brush + dye server-side, so a stale sensor can never spend a dye the bot no longer has).
   if (w.dye !== undefined && t - c.bb.num("dyedAt", -1e9) >= 200) { o.actions.push(`dye:${w.dye.kind}:${w.dye.slot}:${w.dye.palette}:${w.dye.index}`); c.bb.set("dyedAt", t); }
+  // ADR-474: repair a broken tool / weapon (the sensor only sets view.repairTool while the bot holds a broken
+  // tool it can afford to repair — anvil rule included; the command re-validates server-side, so a stale sensor
+  // can never spend resources the bot no longer has). Same 200-tick throttle as the dye chore, same blackboard
+  // key as the standalone tool_repair behaviour, so the two paths never double-push.
+  if (w.repairTool !== undefined && t - c.bb.num("repairedToolAt", -1e9) >= 200) { o.actions.push(`irepair:${w.repairTool.slot}`); c.bb.set("repairedToolAt", t); }
   if (w.junk && t - c.bb.num("dropAt", -1e9) >= 30) { o.actions.push(`drop:${w.junk.item}:${w.junk.count}`); c.bb.set("dropAt", t); } // ADR-252: a full bag drops what no goal uses
   if (w.food !== undefined && c.self.hunger < 0.5 && t - c.bb.num("ateAt", -1e9) >= 40 && !w.sharedMeal?.suppressLoneEat) { o.actions.push(`eat:${w.food}`); c.bb.set("ateAt", t); } // ADR-446: a pending shared meal near the hearth eats together, not alone from the bag
   if (w.water !== undefined && c.self.thirst < 0.5 && t - c.bb.num("drankAt", -1e9) >= 40) { o.actions.push(`drink:${w.water}`); c.bb.set("drankAt", t); }

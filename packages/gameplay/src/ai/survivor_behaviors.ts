@@ -9,7 +9,8 @@ import { Animal, BuildPiece, Dead, Listings, Pet, Tamed } from "../components.js
 import { GameplayConfig } from "../config.js";
 import { Customization } from "../customization.js";
 import { DyeKind, DyePalette } from "../dye.js";
-import { readSlots, countItem, slotFreshness, exchangeItems, hasBrushInHotbar } from "../inventory.js";
+import { readSlots, countItem, countUsableItem, slotFreshness, exchangeItems, hasBrushInHotbar } from "../inventory.js";
+import { checkItemRepair } from "../item_repair.js"; // ADR-474: broken-tool sensor
 import { crafterIdFor } from "../economy/provenance.js";
 import { spoilStageIndex, spoilStages } from "../food.js";
 import { pieceCost, pieceUnlocked } from "../building/place.js";
@@ -46,6 +47,11 @@ export function fillAgentSensors(world: World, self: Entity, view: AgentWorldVie
     let empty = 0, bestFood = -1, bestWater = -1, fScore = 0, wScore = 0;
     for (let i = 0; i < slots.items.length; i++) {
       const it = slots.items[i]!; if (!it || !slots.counts[i]) { if (i < slots.addLimit) empty++; continue; }
+      // ADR-474: a broken tool / weapon the bot can repair right now (first one only; the check includes the
+      // anvil rule and the cost, and the command re-validates server-side, so a stale sensor can never spend
+      // resources the bot no longer has). Scoped to BROKEN tools only — a dull tool still works, so repairing
+      // it is an optimization, not a fix.
+      if (view.repairTool === undefined && slots.durability(i) <= 0) { const d = defs.items.get(it); if (d && (d.tool || d.weapon) && (d.maxDurability ?? 0) > 0 && !checkItemRepair(world, self, i)) view.repairTool = { slot: i }; }
       const f = defs.items.get(it)?.food; if (!f || f.health < 0) continue;
       if (spoilStages(defs)[spoilStageIndex(slotFreshness(world, self, i), spoilStages(defs))]?.sick) continue; // spoiled food makes you sick (negative regen): a player bins it
       if (f.hunger > fScore) { fScore = f.hunger; bestFood = i; }
@@ -66,7 +72,7 @@ export function fillAgentSensors(world: World, self: Entity, view: AgentWorldVie
     // overwrites craftRecipe with the plan's own hand-craft step after this runs.
     const need = new Map<number, number>();
     for (const k of GOAL_CRAFTS) {
-      const d = dc.itemByKey.get(k); if (!d || countItem(world, self, d.id) > 0) continue;
+      const d = dc.itemByKey.get(k); if (!d || countUsableItem(world, self, d.id) > 0) continue; // ADR-474: a broken goal tool does not count as owned, or the bot never re-crafts it
       const gr = dc.recipeFor.get(d.id);
       if (gr && gr.station === StationKind.None) {
         need.set(d.id, 1);
@@ -113,11 +119,11 @@ export function fillAgentSensors(world: World, self: Entity, view: AgentWorldVie
       if (countItem(world, self, dyeId) > 0) view.dye = { kind: DyeKind.Hair, slot: hairSlot, palette: DyePalette.Hair, index: dyeTarget };
       else { delete view.dye; need.set(dyeId, 1); }
     } else delete view.dye;
-    const hand = dc.hand.filter((r) => { const n = need.get(r.output.item); return n !== undefined && countItem(world, self, r.output.item) < n; });
+    const hand = dc.hand.filter((r) => { const n = need.get(r.output.item); return n !== undefined && countUsableItem(world, self, r.output.item) < n; }); // ADR-474: a broken output does not count toward the need
     const goalOf = (r: (typeof hand)[number]): number => { const k = defs.items.get(r.output.item)?.key ?? ""; const i = (GOAL_CRAFTS as readonly string[]).indexOf(k); return i < 0 ? 99 : i; };
     // other hand recipes may only spend what the next unowned goal tool does not need (reserve = its ingredients)
     const reserve = new Map<number, number>();
-    for (const k of GOAL_CRAFTS) { const d = dc.itemByKey.get(k); if (!d || countItem(world, self, d.id) > 0) continue;
+    for (const k of GOAL_CRAFTS) { const d = dc.itemByKey.get(k); if (!d || countUsableItem(world, self, d.id) > 0) continue; // ADR-474: a broken goal tool does not count as owned
       const gr = dc.recipeFor.get(d.id); if (gr) for (const g of gr.ingredients) reserve.set(g.item, g.count); break; }
     const fireRes = new Map<number, number>();
     { const cf = dc.pieceByKey.get("campfire"); // and the home campfire's cost
@@ -246,6 +252,10 @@ export function survivalBehaviors(): GameBehavior[] {
         { name: "canCraft", curve: { type: "step", at: 0.5 }, input: (c) => (c.world.craftRecipe !== undefined ? cooled(c.self.tick, c.bb.num("craftedAt", -1e9), 200) : 0) },
         { name: "daylight", curve: { type: "linear", m: -0.6, b: 1 }, input: (c) => night(c.self.phase) }],
       run: (c, o) => { if (c.world.craftRecipe === undefined) return false; o.actions.push(`craft:${c.world.craftRecipe}`); c.bb.set("craftedAt", c.self.tick); return false; } },
+    { name: "tool_repair", scheduleBonus: 0.3, traits: { industriousness: 0.6 }, considerations: [ // ADR-474
+        { name: "broken", curve: { type: "step", at: 0.5 }, input: (c) => (c.world.repairTool ? cooled(c.self.tick, c.bb.num("repairedToolAt", -1e9), 200) : 0) },
+        { name: "safe", curve: { type: "step", at: 0.5 }, input: (c) => (c.memory.nearest("zombie", c.self.x, c.self.y, 0.3) ? 0 : 1) }],
+      run: (c, o) => { const r = c.world.repairTool; if (!r) return false; o.actions.push(`irepair:${r.slot}`); c.bb.set("repairedToolAt", c.self.tick); return false; } },
     { name: "build", scheduleBonus: 0.3, traits: { industriousness: 0.6 }, considerations: [
         { name: "plan", curve: { type: "step", at: 0.5 }, input: (c) => (c.world.buildPlan ? cooled(c.self.tick, c.bb.num("builtAt", -1e9), 200) : 0) },
         // ADR-203: a campfire (light + heat) is what a survivor builds at dusk / night; other pieces are daytime work

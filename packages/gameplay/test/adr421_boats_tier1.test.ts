@@ -31,7 +31,7 @@ const depthAt = (w: World, x: number, y: number): WaterDepth => G.waterDepth(w, 
 
 describe("ADR-421 boat defs", () => {
   it("appends raft/canoe/rowboat (ids 40-42) as class boat; validation, storage and art geometry agree", () => {
-    expect(G.VEHICLE_DEFS.length).toBe(45); // ADR-421: +3 paddle boats (ids 40-42); ADR-422: +3 motorboats (ids 43-45)
+    expect(G.VEHICLE_DEFS.length).toBe(46); // ADR-421: +3 paddle boats (ids 40-42); ADR-422: +3 motorboats (ids 43-45); ADR-479: +1 sailboat (id 46)
     expect(["raft", "canoe", "rowboat"].map((b) => G.vehicleDefId(b))).toEqual([40, 41, 42]);
     expect(G.VEHICLE_CLASSES).toContain("boat");
     expect(G.validateVehicleDefs(G.VEHICLE_DEFS)).toEqual([]);
@@ -56,8 +56,8 @@ describe("ADR-421 boat defs", () => {
 
   it("validation carve-out: a boat with fuel, or without stamina, fails; a boat with drawn fails", () => {
     const raft = G.VEHICLE_DEFS.find((x) => x.id === "raft")!;
-    expect(G.validateVehicleDefs([{ ...raft, fuel: { capacity: 10, perSecond: 1 } }])).toEqual(["vehicle raft: boats use fuel (motor) or stamina (paddling), never both or neither"]);
-    expect(G.validateVehicleDefs([{ ...raft, stamina: null }])).toEqual(["vehicle raft: boats use fuel (motor) or stamina (paddling), never both or neither"]);
+    expect(G.validateVehicleDefs([{ ...raft, fuel: { capacity: 10, perSecond: 1 } }])).toEqual(["vehicle raft: boats use exactly one of fuel (motor), stamina (paddling), sail (wind)"]);
+    expect(G.validateVehicleDefs([{ ...raft, stamina: null }])).toEqual(["vehicle raft: boats use exactly one of fuel (motor), stamina (paddling), sail (wind)"]);
     expect(G.validateVehicleDefs([{ ...raft, drawn: { pullMul: 1 } }])).toEqual(["vehicle raft: drawn is only for wagon/cart/carriage/chariot"]);
   });
 

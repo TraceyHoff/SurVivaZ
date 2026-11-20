@@ -21,6 +21,7 @@ import { VehicleEnterCmd, VehicleExitCmd, VehicleHitchCmd, VehicleStationCmd, Ve
 import { VehicleDeployCmd, VehicleRefuelCmd, VehicleRepairCmd } from "../vehicle_craft.js";
 import { MountDismountCmd, MountFeedCmd, MountHarnessCmd, MountRepairCmd, MountRideCmd, MountSaddleCmd, MountUnharnessCmd } from "../mount_commands.js";
 import { RopeLeadCmd } from "../rope_commands.js";
+import { ItemRepairCmd } from "../item_repair_commands.js"; // ADR-474
 
 export function actionIntent(action: string): BotIntent | undefined {
   const [k, ...rest] = action.split(":"); const n = rest.map(Number); if (n.some((v) => !Number.isFinite(v))) return undefined;
@@ -77,6 +78,7 @@ export function actionCommand(action: string): AgentCommand | undefined {
   const veh = vehicleActionCommand(action); if (veh !== null) return veh;
   const mnt = mountActionCommand(action); if (mnt !== null) return mnt;
   const rope = ropeActionCommand(action); if (rope !== null) return rope;
+  const irep = itemRepairActionCommand(action); if (irep !== null) return irep;
   if (action.startsWith("skill:")) { const n = Number(action.slice(6)); return Number.isInteger(n) && n >= 0 ? { type: UnlockSkillCmd.name, payload: { node: n } } : undefined; } // ADR-113
   if (action.startsWith("tame:")) { const [, a, b] = action.split(":"); const t = Number(a), i = Number(b); return Number.isInteger(t) && t > 0 && Number.isInteger(i) && i > 0 ? { type: PetOfferCmd.name, payload: { target: t, item: i } } : undefined; } // ADR-145
   { const [k, ...r] = action.split(":"); const n = r.map(Number); const ok = n.every((v) => Number.isInteger(v) && v >= 0) && n.length >= 1; // ADR-203 container / fire
@@ -187,7 +189,18 @@ function ropeActionCommand(action: string): AgentCommand | undefined | null {
     default: return null;
   }
 }
-const COMMAND_ACTIONS = new Set(["mfeed", "mride", "mdismount", "msaddle", "mrepair", "mharness", "munharness", "rope", "terrain", "ramp", "venter", "vexit", "vhitch", "vunhitch", "vstation", "vrefuel", "vrepair", "vdeploy", "ccreate", "cinvite", "caccept", "cleave", "cpromote", "cdemote", "ckick", "cperms", "cgoal", "cstock", "eat", "drink", "craft", "build", "open", "buy", "pinvite", "paccept", "pdecline", "pleave", "pkick", "skill", "equip", "repair", "upgrade", "copen", "cclose", "cdeposit", "fire", "cwithdraw", "wear", "door", "drop", "dye"]);
+/**
+ * ADR-474 item-repair action string: "irepair:<slot>" repairs the bot's broken tool / weapon in that inventory
+ * slot. The server re-validates (checkItemRepair: slot, repairable, damaged, skill, anvil, cost).
+ */
+function itemRepairActionCommand(action: string): AgentCommand | undefined | null {
+  const [k, ...rest] = action.split(":"); const n = rest.map(Number); const ok = (c: number) => n.length >= c && n.every((v) => Number.isInteger(v) && v >= 0);
+  switch (k) {
+    case "irepair": return ok(1) ? { type: ItemRepairCmd.name, payload: { slot: n[0]! } } : undefined;
+    default: return null;
+  }
+}
+const COMMAND_ACTIONS = new Set(["mfeed", "mride", "mdismount", "msaddle", "mrepair", "mharness", "munharness", "rope", "irepair", "terrain", "ramp", "venter", "vexit", "vhitch", "vunhitch", "vstation", "vrefuel", "vrepair", "vdeploy", "ccreate", "cinvite", "caccept", "cleave", "cpromote", "cdemote", "ckick", "cperms", "cgoal", "cstock", "eat", "drink", "craft", "build", "open", "buy", "pinvite", "paccept", "pdecline", "pleave", "pkick", "skill", "equip", "repair", "upgrade", "copen", "cclose", "cdeposit", "fire", "cwithdraw", "wear", "door", "drop", "dye"]);
 /**
  * Moves the command-type actions (eat, drink, craft, build, open, buy) out of out.actions and into out.commands, in order.
   Movement and gather/attack/sleep stay

@@ -33,7 +33,7 @@ const def = (b: string): G.VehicleDef => G.VEHICLE_DEFS.find((x) => x.id === b)!
 
 describe("ADR-422 motorboat defs", () => {
   it("appends motorboat/pontoon/speedboat (ids 43-45) as class boat with fuel, no stamina; validation and storage agree", () => {
-    expect(G.VEHICLE_DEFS.length).toBe(45);
+    expect(G.VEHICLE_DEFS.length).toBe(46); // ADR-479: +1 sailboat (id 46)
     expect(["motorboat", "pontoon", "speedboat"].map((b) => G.vehicleDefId(b))).toEqual([43, 44, 45]);
     expect(G.validateVehicleDefs(G.VEHICLE_DEFS)).toEqual([]);
     for (const b of ["motorboat", "pontoon", "speedboat"]) {
@@ -62,12 +62,12 @@ describe("ADR-422 motorboat defs", () => {
     expect(G.VEHICLE_STORAGE.max.boat).toBe(36); expect(G.VEHICLE_STORAGE.scale.boat).toBe(2);
   });
 
-  it("validation split: a boat is exactly one of motor (fuel, no stamina) or paddle (stamina, no fuel)", () => {
+  it("validation split: a boat is exactly one of motor (fuel), paddle (stamina), or sail (wind)", () => {
     const motor = def("motorboat"), paddle = def("raft");
-    expect(G.validateVehicleDefs([{ ...motor, stamina: { perSecond: 1 } }])).toEqual(["vehicle motorboat: boats use fuel (motor) or stamina (paddling), never both or neither"]);
-    expect(G.validateVehicleDefs([{ ...motor, fuel: null }])).toEqual(["vehicle motorboat: boats use fuel (motor) or stamina (paddling), never both or neither"]);
-    expect(G.validateVehicleDefs([{ ...paddle, fuel: { capacity: 10, perSecond: 1 } }])).toEqual(["vehicle raft: boats use fuel (motor) or stamina (paddling), never both or neither"]);
-    expect(G.validateVehicleDefs([{ ...paddle, stamina: null }])).toEqual(["vehicle raft: boats use fuel (motor) or stamina (paddling), never both or neither"]);
+    expect(G.validateVehicleDefs([{ ...motor, stamina: { perSecond: 1 } }])).toEqual(["vehicle motorboat: boats use exactly one of fuel (motor), stamina (paddling), sail (wind)"]);
+    expect(G.validateVehicleDefs([{ ...motor, fuel: null }])).toEqual(["vehicle motorboat: boats use exactly one of fuel (motor), stamina (paddling), sail (wind)"]);
+    expect(G.validateVehicleDefs([{ ...paddle, fuel: { capacity: 10, perSecond: 1 } }])).toEqual(["vehicle raft: boats use exactly one of fuel (motor), stamina (paddling), sail (wind)"]);
+    expect(G.validateVehicleDefs([{ ...paddle, stamina: null }])).toEqual(["vehicle raft: boats use exactly one of fuel (motor), stamina (paddling), sail (wind)"]);
     expect(G.validateVehicleDefs([{ ...motor, drawn: { pullMul: 1 } }])).toEqual(["vehicle motorboat: drawn is only for wagon/cart/carriage/chariot"]);
   });
 

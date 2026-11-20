@@ -17,6 +17,7 @@
   "bodyTempMin": 30,
   "bodyTempMax": 44,
   "bodyTempChangePerDegreePerSec": 0.01,
+  "coldDrain": {"wetMin": 0.7, "windMin": 8, "mul": 1.5},
   "bodyTempRecoverPerSec": 0.05,
   "hypothermiaBelow": 35,
   "hyperthermiaAbove": 39,
@@ -25,5 +26,13 @@
   "comfortMax": 32,
   "coldHungerMul": 1.5,
   "heatThirstMul": 1.75,
-  "hotMeals": { "items": ["cooked_meat", "cooked_fish", "cooked_venison", "cooked_poultry", "cooked_small_game", "cooked_prime_cut", "stew_bowl", "fish_stew", "vegetable_stew", "truffle_stew", "potato_soup", "meat_pie", "berry_pie", "pumpkin_pie"], "insulation": 5, "seconds": 120 }
+  "hotMeals": { "items": ["cooked_meat", "cooked_fish", "cooked_venison", "cooked_poultry", "cooked_small_game", "cooked_prime_cut", "stew_bowl", "fish_stew", "vegetable_stew", "truffle_stew", "potato_soup", "meat_pie", "berry_pie", "pumpkin_pie"], "insulation": 5, "seconds": 120 },
+  "dietGroups": {
+    "meat": ["raw_meat", "cooked_meat", "jerky", "cured_venison", "cured_poultry", "cured_prime_cut", "raw_venison", "cooked_venison", "raw_poultry", "cooked_poultry", "raw_small_game", "cooked_small_game", "raw_prime_cut", "cooked_prime_cut", "stew_bowl", "meat_pie", "canned_stew"],
+    "fish": ["fish", "cooked_fish", "salted_fish", "smoked_fish", "fish_stew", "canned_fish"],
+    "fruit": ["berries", "apple", "blueberry", "raspberry", "blackberry", "strawberry", "pear", "cherry", "orange", "peach", "coconut", "berry_pie", "fruit_salad", "stewed_berries", "stewed_blueberry", "stewed_raspberry", "stewed_blackberry", "stewed_strawberry", "stewed_cherry", "baked_apple", "baked_pear", "baked_orange", "baked_peach", "baked_coconut", "maple_syrup"],
+    "vegetable": ["mushroom", "carrot", "potato", "corn", "wild_onion", "baked_potato", "roasted_corn", "roasted_mushroom", "tomato", "pumpkin", "squash", "beans", "cabbage", "onion", "garlic", "ginseng", "lettuce", "pepper", "beetroot", "vegetable_stew", "pumpkin_pie", "baked_beans", "roasted_garlic", "roasted_carrot", "roasted_tomato", "roasted_pumpkin", "roasted_squash", "roasted_cabbage", "roasted_onion", "roasted_wild_onion", "salad", "truffle", "truffle_stew", "canned_corn", "potato_soup"],
+    "grain": ["bread", "cornbread", "honey_cake", "trail_mix", "rice", "rice_bowl"],
+    "dairy": ["egg", "honey", "fried_egg", "omelette", "milk"]
+  }
 }

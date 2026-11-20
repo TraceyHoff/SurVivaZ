@@ -25,7 +25,10 @@ function reachable(): Set<number> {
     }
     // Task 13: boiling is a container-preserving transform, not a recipe — a boiled variant is
     // reachable whenever its raw form is (use a filled container at a lit campfire).
-    for (const it of d.items.values()) if (it.boilSource && have.has(it.boilSource) && !have.has(it.id)) { have.add(it.id); grew = true; } }
+    for (const it of d.items.values()) if (it.boilSource && have.has(it.boilSource) && !have.has(it.id)) { have.add(it.id); grew = true; }
+    // ADR-471: well draw is a container-preserving transform, not a recipe — a well variant is
+    // reachable whenever its raw form is (draw the filled container at a well).
+    for (const it of d.items.values()) if (it.wellSource && have.has(it.wellSource) && !have.has(it.id)) { have.add(it.id); grew = true; } }
   return have;
 }
 /** Raw-material cost (sum of base-source units) of the cheapest recipe chain. */

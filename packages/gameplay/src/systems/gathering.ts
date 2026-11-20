@@ -10,18 +10,19 @@
 import { entityIndex, NetId, Transform, Weather, type Entity, type World } from "@engine/core";
 import { Anim, AnimState, BuildPiece, Dead, Equipment, Gatherer, GrownPlant, IntentAction, Inventory, NO_SLOT, NodeRegrow, PieceLink, PlayerIntent, ResourceNode, Road, Survival, Crop, WorkerTarget } from "../components.js";
 import { spawnResourceNode } from "../spawn.js";
-import { ChunkNodes } from "../world.js";
+import { ChunkNodes, swapChunkNode } from "../world.js";
 import { populationTile, PopulationTiles } from "../population.js";
 import { TerrainRes } from "../world.js";
 import { gameplayDefs, isAuthority, rangeSlack } from "../config.js";
 import { secondsToTicks, ToolKind, type GameDefs, type ToolDef } from "../defs.js";
 import { emit, GatherFail, GatherFailed, GatherSwing, InventoryOverflow, ItemGathered, NodeDepleted, NodeRespawned } from "../events.js";
 import { makeNoise } from "./noise.js";
-import { addItem, slotItem } from "../inventory.js";
+import { addItem, isBrokenSlot, isDullSlot, slotItem, wearDurability } from "../inventory.js";
 import { spendStamina } from "./vitals.js";
 import { scaleCount, skillMul } from "../skills/tree.js";
 import { apiaryWithin } from "../skills/husbandry.js";
 import { isRaining } from "../realism.js";
+import { spawnCrop, wildSaplingKind } from "../farming.js"; // ADR-469: wild regrow through sapling stages
 import farmingRaw from "../../data/farming.json";
 /** ADR-454: bees pollinate — planted crops near an Apiary yield +`bonus` on the first yield only (data/farming.json). */
 const POLLINATION: { radius: number; bonus: number } = (farmingRaw as unknown as { pollination?: { radius: number; bonus: number } }).pollination ?? { radius: 5, bonus: 1 };
@@ -38,6 +39,8 @@ const BARE_HANDS: ToolDef = { kind: ToolKind.None, tier: 0 };
 export function heldTool(world: World, e: Entity, defs: GameDefs): ToolDef {
   const slot = world.getField(e, Equipment, "mainHandSlot");
   if (slot === undefined || slot === NO_SLOT || !world.has(e, Inventory)) return BARE_HANDS;
+  // ADR-474: a broken tool is unusable — the hand falls back to bare hands (the existing bare-hands path).
+  if (isBrokenSlot(world, e, slot, defs)) return BARE_HANDS;
   return defs.items.get(slotItem(world, e, slot).item)?.tool ?? BARE_HANDS;
 }
 
@@ -103,7 +106,10 @@ export function respawnSystem(world: World, dt = 1 / 20): void {
       if (r.tries + 1 < cfg.maxTries) { world.set(g, NodeRegrow, { ...r, tries: r.tries + 1, respawnAtTick: world.tick + secondsToTicks(cfg.retrySeconds, dt) }); continue; }
       spot = { x: t.x, y: t.y };
     }
-    const n = spawnResourceNode(world, def.id, spot.x, spot.y);
+    // ADR-469: a wild tree regrows through its sapling stages (cropGrowthSystem grows it), not as an instant
+    // full-size tree. Species with no sapling (generic `tree`, `resin_tree`) keep instant regrow.
+    const saplingKind = wildSaplingKind(def.key);
+    const n = saplingKind ? spawnCrop(world, spot.x, spot.y, saplingKind) : spawnResourceNode(world, def.id, spot.x, spot.y);
     swapChunkNode(world, g, n); world.destroy(g);
     emit(world, NodeRespawned, { node: n, kind: def.id });
   }
@@ -120,12 +126,6 @@ export function depleteNode(world: World, node: Entity, kind: number, respawnAtT
   world.add(g, Transform, { x: t.x, y: t.y }).add(g, NodeRegrow, { kind, respawnAtTick, stumpUntilTick: stumpTicks > 0 ? world.tick + stumpTicks : 0, tries: 0 });
   swapChunkNode(world, node, g); world.destroy(node);
   return g;
-}
-
-/** Keep client/standalone chunk streaming lists pointing at the live entity (unload despawns it). */
-function swapChunkNode(world: World, from: Entity, to: Entity): void {
-  const m = world.getResource(ChunkNodes); if (!m) return;
-  for (const l of m.values()) { const i = l.indexOf(from); if (i >= 0) { l[i] = to; return; } }
 }
 
 const SWIM_OR_VOID = (tile: number): boolean => tile === 0 || tile === 1 || tile === 8; // void / water / shallow water (generator tile ids; ADR-249 generates 8)
@@ -171,9 +171,16 @@ export function gatherSystem(world: World, dt: number): void {
     const tool = heldTool(world, e, defs);
     const bare = def.requiredTool !== ToolKind.None && (tool.kind !== def.requiredTool || tool.tier < def.minTier);
     if (bare && !bareHandsCan(defs, def)) { fail(GatherFail.WrongTool); continue; }
+    // ADR-474: a dull tool (below 25 % durability) counts one tier lower for the gather bonus only — it never
+    // locks the player out (WrongTool above still uses the real tier) and never drops the yield below the base.
+    const handSlot = world.getField(e, Equipment, "mainHandSlot");
+    const effTier = tool.kind !== ToolKind.None && handSlot !== undefined && handSlot !== NO_SLOT && isDullSlot(world, e, handSlot, defs) ? Math.max(0, tool.tier - 1) : tool.tier;
     if (world.has(e, Survival) && !spendStamina(world, e, def.staminaCost, dt)) { fail(GatherFail.Exhausted); continue; }
 
-    world.setField(e, Gatherer, "cooldownUntilTick", world.tick + secondsToTicks(def.cooldownSeconds * (bare ? defs.bareHands.cooldownMul : 1), dt));
+    // ADR-477: a practiced gatherer swings faster — the cooldown is divided by the speed multiplier
+    // (1.0 without speed nodes, 1.2 with all four practice nodes), so skill makes the swing quicker
+    // without changing the yield, the stamina cost or the node itself.
+    world.setField(e, Gatherer, "cooldownUntilTick", world.tick + secondsToTicks(def.cooldownSeconds * (bare ? defs.bareHands.cooldownMul : 1) / skillMul(world, e, "speed"), dt));
     emit(world, GatherSwing, { entity: e, node });
     if (authority || world.has(e, AnimState)) setAnimOf(world, e, gatherAnimFor(def, tool)); // replicated (AnimState scope "all")
     if (!authority || world.isReplaying) continue;
@@ -181,7 +188,7 @@ export function gatherSystem(world: World, dt: number): void {
     // Per-node deterministic stream keyed by the node's NetId (same on every peer), not the shared world.rng.
     const rng = world.rngFor("gather", world.getField(node, NetId, "id") ?? node);
 
-    const bonus = def.requiredTool !== ToolKind.None && !bare ? Math.max(0, tool.tier - def.minTier) * def.bonusPerTier : 0;
+    const bonus = def.requiredTool !== ToolKind.None && !bare ? Math.max(0, effTier - def.minTier) * def.bonusPerTier : 0;
     // ADR-454: bees pollinate — a planted crop (matured into a crop_* node with GrownPlant, i.e. grown by a
     // player, not a wild node) harvested within POLLINATION.radius of an Apiary yields +bonus on the first
     // yield only. No stacking across apiaries: one Apiary in range is enough. Checked once, at harvest.
@@ -207,6 +214,10 @@ export function gatherSystem(world: World, dt: number): void {
       if (added > 0) emit(world, ItemGathered, { entity: e, node, item, count: added });
       if (added < total) emit(world, InventoryOverflow, { entity: e, item, lost: total - added });
     });
+    // ADR-474: tool wear — one durability per successful gather swing, charged on the tool that did the work
+    // (the main hand, when it holds the node's required tool at the required tier). Fists, a wrong tool and
+    // toolless harvests wear nothing. A tool that reaches 0 here is broken but stays in the bag.
+    if (!bare && tool.kind === def.requiredTool && def.requiredTool !== ToolKind.None && handSlot !== undefined && handSlot !== NO_SLOT) wearDurability(world, e, handSlot, defs);
     const left = rn.data.amount[ns]! - 1;
     rn.data.amount[ns] = left;
     rn.markChanged(nIdx);

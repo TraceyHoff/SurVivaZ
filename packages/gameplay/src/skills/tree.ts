@@ -6,7 +6,7 @@ import { entityIndex, type Entity, type World } from "@engine/core";
 import raw from "../../data/skills.json";
 import { Progression } from "../components.js";
 
-export type SkillMod = "gather" | "cropYield" | "carry" | "fuel" | "vfuel" | "repair" | "nutrition" | "heal" | "produce" | "tame" | "share" | "xp" | "noise" | `dmg_${string}`;
+export type SkillMod = "gather" | "cropYield" | "carry" | "fuel" | "vfuel" | "repair" | "nutrition" | "heal" | "produce" | "tame" | "share" | "xp" | "noise" | "speed" | `dmg_${string}`;
 /** ADR-135: keys of data/xp.json sources (the single XP table). */
 export type XpSource = keyof typeof import("../../data/xp.json")["sources"];
 export interface SkillNodeDef {
@@ -88,6 +88,13 @@ function liveTotals(world: World, e: Entity): Totals | undefined {
 }
 export function skillMod(world: World, e: Entity, mod: SkillMod): number { return liveTotals(world, e)?.mods.get(mod) ?? 0; }
 export const skillMul = (world: World, e: Entity, mod: SkillMod, min = 0.1): number => Math.max(min, 1 + skillMod(world, e, mod));
+/** ADR-477: how practiced an entity is in a skill branch — the number of owned nodes there (0 for a fresh
+ *  bot). The tree has no farming / crafting "level" keys (skillLevelOf only covers the craft professions),
+ *  so node count is the branch level the want-pick drift reads. */
+export function branchLevel(world: World, e: Entity, branch: string): number {
+  let n = 0; for (const i of ownedNodes(world, e)) if (SKILLS.nodes[i]?.branch === branch) n++;
+  return n;
+}
 export function hasPerk(world: World, e: Entity, perk: string): boolean { return liveTotals(world, e)?.perks.has(perk) ?? false; }
 /** Recipe skill level granted by nodes; undefined when the entity has no Progression (legacy / NPC crafters). */
 export function skillLevelOf(world: World, e: Entity, key: string): number | undefined { const t = liveTotals(world, e); return t ? t.skills.get(key) ?? 0 : undefined; }

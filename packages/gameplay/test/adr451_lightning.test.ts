@@ -1,7 +1,8 @@
 /**
  * ADR-451: lightning in storms — one gameplay strike per storm, rolled server-side on WeatherChanged.
- * Tree scorch = node depletion (dies, regrows; a stump for stumpSeconds). A strike on a flammable
- * piece starts a lightning fire, exempt from storm quench. Strikes land near survivors, never on them.
+ * A strike on a tree ignites it (ADR-468: a quench-exempt lightning fire that burns, can spread as a
+ * wildfire, and depletes to a stump + regrow when it burns out). A strike on a flammable piece starts
+ * a lightning fire, exempt from storm quench. Strikes land near survivors, never on them.
  */
 import { describe, it, expect } from "vitest";
 import { setTimeOfDay, Weather, type Entity, type World } from "@engine/core";
@@ -26,13 +27,21 @@ function wallAt(w: World, b: Entity, x: number, y: number): Entity {
 }
 
 describe("ADR-451 lightning in storms", () => {
-  it("a strike on a tree depletes it, leaving a stump regrow marker", () => {
+  it("a strike on a tree ignites it, and it depletes to a stump regrow marker when it burns out (ADR-468)", () => {
     const w = makeWorld();
     const p = G.spawnPlayer(w, { x: 0, y: 0 });
     const tree = G.spawnResourceNode(w, "tree", 5, 0);
     const hit = G.resolveLightningStrike(w, eastRng);
     expect(hit?.kind).toBe("tree");
     expect(hit?.entity).toBe(tree);
+    // ADR-468: the strike ignites the tree (a quench-exempt lightning fire) instead of scorching
+    // it outright — it burns first, then depletes to the same stump + regrow end state.
+    expect(w.isAlive(tree)).toBe(true);
+    expect(w.get(tree, G.Burning)?.lit).toBe(1);
+    expect(w.has(tree, G.LightningFire)).toBe(true);
+    expect([...w.query([G.NodeRegrow])].length).toBe(0);
+    // 8 burning checks at 1 s cadence burn 128 intensity down to 0 (16 per check)
+    for (let i = 0; i < 8; i++) { w.tick += 20; G.burningSystem(w, 1 / 20); }
     expect(w.isAlive(tree)).toBe(false);
     const markers = [...w.query([G.NodeRegrow])];
     expect(markers.length).toBe(1);
@@ -65,6 +74,15 @@ describe("ADR-451 lightning in storms", () => {
     }
     G.emit(w, G.WeatherChanged, { from: G.WeatherKind.Clear, to: G.WeatherKind.Storm, intensity: 1, ticks: 1200 });
     steps(w, 1); // emit is deferred: delivery happens on the step
+    // ADR-468: the strike ignites one tree (a quench-exempt lightning fire) instead of depleting
+    // it outright — it burns first, then depletes. The ring trees are ~6 tiles apart, past the
+    // 2.0 vegetation spread radius, so the fire cannot spread to them.
+    const burning = trees.filter((t) => w.get(t, G.Burning)?.lit === 1);
+    expect(burning.length).toBe(1);
+    expect(w.has(burning[0]!, G.LightningFire)).toBe(true);
+    expect(trees.filter((t) => !w.isAlive(t)).length).toBe(0);
+    expect([...w.query([G.NodeRegrow])].length).toBe(0);
+    steps(w, 200); // 10 s = 10 burning checks; the struck tree burns out at check 8
     const dead = trees.filter((t) => !w.isAlive(t));
     expect(dead.length).toBe(1);
     expect([...w.query([G.NodeRegrow])].length).toBe(1);

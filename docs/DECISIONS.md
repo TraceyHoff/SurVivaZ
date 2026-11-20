@@ -10005,3 +10005,839 @@ player -> 2 crows, bag adopted, home = death pos; crows circle 60 s (moved > 2 t
 the kill, still alive); cap expiry (gone by 150 s); bag destroyed -> crows leave at next think (<= 200
 ticks); far kill (100 tiles) -> no crows (and the rabbit really died); player death -> no crows
 (player really died).
+
+## ADR-465: Wind that does things — smoke drifts, fire fans downwind, boats catch a tailwind, wind dries clothes (SurVivaZ)
+
+**Context.** Wind state already shipped (core `Weather` carries `windDir`/`windSpeed`; Windy rolls in
+fall/spring) but did almost nothing gameplay-visible: it dried ground (ADR-449) and chilled bodies
+(ADR-312), and the renderer swayed sprites with it — but smoke ignored it, fire spread isotropically,
+boats were wind-blind, and wet clothes dried at the same rate in a gale as in calm air. The sailboat
+is a separate vehicle (ADR-479); this ADR is the wind itself.
+
+**Decision.** Four hooks, all riding systems that already run. (1) Smoke drift (render): `BurningFx`
+and `HearthFx` take an optional world-space wind vector; smoke particles gain `wind * 0.6` tiles/s
+(wind already scaled by `windSpeed/refSpeed` by the caller); embers keep their radial spread.
+`IsoRenderer` passes the vector from `readWind` (style-default fallback, same as the sway wind).
+Canvas2D keeps radial smoke — its `hearthParticles` path is separate, WebGL2 only in v1. (2) Fire
+fanning (sim): new pure `windSpreadFactor(windDir, windSpeed, from, to)` in `pvp_pieces.ts` —
+`spreadChance * (1 + mul * cos(angle - windDir))`, clamped `[minMul, maxMul]`, factor 1 below
+`windFan.minSpeed`; knobs in `data/fire.json` (`windFan: {minSpeed: 2, mul: 1, minMul: 0.1, maxMul:
+2}`). `burningSystem` multiplies its spread roll by it. ADR-468 reuses the same helper. (3) Boats:
+new pure `boatWindBonus(windDir, windSpeed, heading, isMotor)` in `vehicles.ts` — a following wind
+(within 45° of heading) adds up to +25% to maxSpeed at windSpeed 12 (motorboats half, +12.5%), any
+wind adds a leeward drift of `windSpeed * 0.02` tiles/s while underway; knobs in `VEHICLE_TUNING`.
+`stepVehicleKinematics` takes an optional `windMul` (default 1) on its speed target; `stepPowered`
+applies the bonus + drift for boats only, after the at-rest early return (a parked boat does not
+drift), and the drifted position still goes through the pose-blocked check. (4) Body drying: the
+`exposureSystem` dry branch multiplies the dry rate by `(1 + surface.windDryMul * windSpeed /
+surface.windDryRefSpeed)` when unsheltered from wind (`sh.wind > 0`); new data knob
+`surface.windDryRefSpeed: 12` in `data/environment.json` (+ `defs.ts` surface interface).
+
+**Consequences.** Smoke visibly bends downwind; a fire in a gale spreads downwind twice as fast and
+barely spreads upwind; a canoe with the wind behind it is ~25% faster and slides leeward; wet clothes
+dry 1.5× faster in a 12-speed wind. No new per-tick scan, no new per-frame work, no new state —
+the per-frame smoke loop and the 1 s fire check already ran. Map smoke markers (ADR-453) do not bend
+(they sit at the fire's fixed position).
+
+**Verification.** `packages/gameplay/test/adr465_wind.test.ts` 13/13: spread factor calm/downwind/
+upwind/crosswind/clamp/same-tile; boat bonus tailwind +25% paddle / +12.5% motor / headwind none /
+45° gate / speed scaling / calm none; kinematics windMul raises the speed target 1.25×; wind drying
+60 s: windy 0.40 vs calm 0.70 wetness (banded `dryWetness` math). `packages/render/test/adr465_wind.test.ts`
+2/2: hearth smoke gains exactly `wind * 0.6` per particle with a deterministic rnd sequence, embers
+unchanged; burning-piece smoke drifts the same way.
+
+## ADR-466: Snow that piles up — accumulation, slowing, melt (SurVivaZ)
+
+Snow depth is one `u8` per chunk (0..255 = 0..~30 cm) on the existing `ChunkSurface`, written by
+the existing `chunkSurfaceSystem` pass (every 20 ticks, 1 s): +0.02 u8/s at intensity 1 while it
+snows (a 3-minute blizzard at intensity 1 lays ~7 units, ~1 cm; a full winter of storms reaches
+deep snow), −0.01 u8/s when the seasonal base temperature is above freezing, and each melted
+unit adds 0.5 units to chunk wetness — spring is mud season, by design. Deep snow slows
+walking off-path: 0.8× at depth ≥ 64 (~7–8 cm), 0.7× at depth ≥ 160 (~19 cm); roads stay fast
+(the same `roadSurfaceAt == None` guard as mud) and frozen water is exempt (walking on ice is
+already walk speed — the snow multiplier skips tiles where `isFrozenWaterAt` is true, so ice
+travel is never double-slowed). Snow does not accumulate on chunks whose centre is water (one
+tile read per chunk per pass) — a lake chunk stays a lake. No new art: depth is numeric, and
+the existing global snow blanket (season shader, roof snow, snowcaps) already reads as snow on
+the ground; the client already receives `ChunkSurface` by replication, so a later depth visual
+needs no new plumbing.
+
+The one honest cost is stored state — unlike ADR-450 ice (a pure function of the season mean),
+accumulation is history, so it needs the `snow` field. Two implementation notes. (1) The
+rates are far below one u8 unit per pass, so the pass carries the fraction in a runtime-only
+`SnowRemainderRes` map (`{snow, wet}` per surface entity, never persisted or replicated);
+only whole units reach the component. A reload loses at most <1 snow unit and <1 wetness unit
+per chunk. Entries are deleted when their surface despawns and pruned in the pass. The melt's
+wetness share is released through the same remainder (2 melted snow units = 1 wetness unit),
+and the release is a separate write AFTER the pass's rain/dry update — if it were folded into
+the same delta, the same pass's drying would eat it and a melted drift would never actually
+wet the ground. (2) Float precision: 100 passes of −0.01 lands on 98.99999999999999, and a
+bare `Math.floor` reads 98 instead of 99 — the floor carries a +1e-9 epsilon (and the
+remainder is clamped to ≥ 0), which absorbs error within 1e-9 of an integer. Found by the
+melt test failing, not by inspection.
+
+Knobs: `environment.json` `surface.snowPerSec: 0.02`, `meltPerSec: 0.01`, `meltWetMul: 0.5`;
+`movement.json` `snowSlowThreshold: 64`, `snowSlowMul: 0.8`, `snowDeepThreshold: 160`,
+`snowDeepMul: 0.7`. Melt needs BOTH gates: seasonal base temperature above freezing AND the
+waters not frozen (`isWaterFrozen` — the season-mean predicate, so during the late-fall /
+early-spring blends the ground holds its snow even on a mild day). Ice thaws by season mean,
+snow melts by temperature + time; no code coupling between the two, just the ordering note
+(melt snow first, ice follows). Spring melt is the natural flood trigger — if ADR-467's flood
+seeds from heavy rain, "spring melt" is a second seed to decide there, not here; this ADR only
+guarantees melt produces wetness, not flood water. Footprints (ADR-455) still stamp on the
+global season cover ≥ 0.5; switching the stamp condition to chunk depth is a one-line change
+left for later, not required.
+
+Tests: `packages/gameplay/test/adr466_snow.test.ts` 12/12 — `chunkSnowAt` reads / 0 with no
+surface; slowdown tiers 0/63 → 1.0, 64/159 → 0.8, 160/255 → 0.7; mud + snow stack
+0.85 × 0.7 = 0.595; dirt path in deep snow stays 1.1×; frozen water exempt (winter lake
+1.0×, same tile in summer 0.7×); accumulation exactly 1 unit per 50 passes at intensity 1
+(and 2 at 100, 3 at 150 — the fraction is not lost); intensity scaling (0.5 → 1 per 100
+passes) and blizzards lay snow at the same intensity rate as snow (no separate multiplier);
+water-centre chunk stays 0 while a land-centre chunk reaches 2; cap 255; melt 100 → 99 in
+100 warm passes and 98 + wetness 1/255 in 200 (2 melted = 1 wetness); no melt below freezing;
+clear winter weather neither accumulates nor melts. Revert check: 11/12 fail on pre-change
+code (the 1 pass is the dirt-path control — roads were already fast). ADR-449 mud 9/9 and
+ADR-450 ice 7/7 still pass (the wetness path is unchanged when there is no snow).
+
+## ADR-467: Rivers that flood — heavy rain and spring melt swell sea-level water onto low ground, then it recedes gradually (SurVivaZ)
+
+- **Status:** Implemented 2026-11-20. Tracey's decision overrules the scope's compliant redesign
+  (permanent flood water, option 1): **floods MUST RECEDE OVER TIME — gradual slow drain over
+  in-game time, never a single-step clear after the flood.** The flood-tile store tracks the
+  gradual recession; flood water is natural-water encoded so it freezes; elevated-lake discs and
+  spillway corridors are excluded (waterfall rule). The scope's split-out seasonal lake-level half
+  is folded into this ADR (spring +1 tile outward, summer −1 tile inward) to keep the batch at
+  15 ADRs. Drain rate is a data knob (`data/flood.json`).
+- **Store (`src/flood.ts`, `components.ts`):** one persistent `FloodTile` entity per flooded tile,
+  at the tile centre (the `TerrainEdit` pattern): `origTile` (the tile id before flooding, restored
+  on drain — the raw height is the bed level and never changes), `drainTick` (when the tile starts
+  draining; u32 max = never, for a seasonal tile before summer), `kind` (0 = storm flood,
+  1 = seasonal spring band), `dist` (distance from the original water, 1..3). Persistent (a reload
+  keeps the flood and its drain schedule) but not networked — the client sees the water through
+  the terrain tilemap, and the drain is server-side state. A runtime-only `FloodRes` holds the
+  seeded frontier (`tkey -> {dist, kind}`) and the last season seen; it is lost on restart (the
+  flood stops advancing, but already-flooded tiles still drain on schedule).
+- **Seed (event-driven, no new per-tick scan):** `installFlood` subscribes to `WeatherChanged` (the
+  ADR-451 pattern); on a change to Rain (intensity >= `rainIntensityMin` 0.7) or Storm it seeds
+  the shore band (land adjacent to original sea-level water, bed <= surface) around each living
+  survivor (`seedRadius` 96). The seed scan uses a cheap predicate (`seedable`: O(1) tile lookups
+  only — the spatial-index occupancy check runs only at flood time, on the <=64 tiles the advance
+  actually processes). Spring melt seeds the same band as a seasonal tile on the season change
+  to Spring (the ADR-466 melt raises wetness; the spring season change floods the shore band).
+- **Advance (`floodSystem`, every `TERRAIN.flowEveryTicks` = 8 ticks, the flow cadence):** floods
+  seeded tiles one tile per step outward, bounded at `TERRAIN.flowPerStep` (64) per step and
+  `maxDistance` (3) tiles from the original shoreline. Flood water is NATURAL water (`WATER_TILE`
+  with the bed as its raw height — the raw height never changes, so it renders flat at surface 0
+  and freezes in winter, ADR-450), never flow-encoded. A tile with a piece / node / crop on it
+  never floods (`terrainTileBlocked`, the flow system's occupancy rule, exported from `terrain.ts`
+  so the flood reuses it instead of duplicating it); a dug tile belongs to the dug flow. Distance
+  is Manhattan, via the 4-neighbour advance (the flow system's neighbour rule).
+- **Recession (gradual, never a single-step clear):** storm tiles drain `drainAfterSeconds` (900 s
+  = 6 game-hours) after flooding, outermost first (one distance step every `drainStepSeconds`
+  300 s = 2 game-hours), at most `drainPerStep` (16) per step — a 3-tile flood shrinks back
+  toward the river over 4 game-hours. Seasonal tiles drain in summer, hash-staggered over
+  `seasonalDrainDays` (2 game-days), so the spring band thins gradually instead of vanishing at
+  once. After recession the ground is wet (chunk wetness 1.0) so the flood leaves mud behind
+  (ADR-449). A tile a player fills with earth while flooded drops its flood record (the player's
+  edit stands); a tile whose chunk unloaded defers its drain until the chunk loads again (the
+  record persists).
+- **Seasonal lake levels (folded in):** on the season change to Spring, the +1 shore band floods
+  as seasonal tiles (1 tile only — no advance); on the change to Summer, their drainTick is set
+  (hash-staggered over `seasonalDrainDays`); fall/winter do nothing. The season is read via
+  `worldSeason` on the flood cadence (a pure function of the day count, no scan).
+- **Waterfall rule (ADR-383/386):** the flood only spreads from sea-level water (surface 0) and
+  never floods a tile adjacent to water whose surface is not 0. An elevated lake and its spillway
+  are flow-encoded at their level (`flowWaterRaw`), so `waterSurfaceAt` reads them above 0 and
+  the flood stops at least one tile short — it can never connect the two levels. The seed also
+  counts ORIGINAL water only (a tile already flooded by an earlier storm is not a source), so a
+  second storm during a recession cannot push the flood past the 3-tile cap.
+- **Design note:** the flood rides the flow system's cadence and budget shape (8 ticks, 64/step)
+  with its own frontier, as a separate `gameplay.flood` system — it does not share the dug flow's
+  `FlowRes.frontier` Set, so the two never double-process a tile and the flood code stays in one
+  file (`flood.ts`) with no import cycle (`terrain.ts` does not import it; the wiring is in
+  `install.ts`). The per-step cost is the same bounded shape as the dug flow.
+- **Limits (v1):** seeding is around living survivors (a river far from any player does not flood
+  until a player is near it in a storm); a restart mid-storm loses the seeded frontier; the
+  spring band is seeded near players, not world-wide. A boat can float onto a flooded field in a
+  storm and beach when it recedes (shallow water, `boatWaterMul` 0.55 shallows / 0 land).
+- **Tests (`packages/gameplay/test/adr467_floods.test.ts`, 9/9, revert 9/9 fail with the seed +
+  advance neutered):** heavy rain seeds the shore and the flood advances to 3 tiles then stops
+  (24 tiles; dist-4 stays land; drain stagger outermost-first: dist 1 drains 2 steps after
+  dist 3); light rain (0.5) does not seed; a storm seeds at any intensity; high ground (bed 2)
+  never floods; a tile with a tree on it never floods and the tree survives; the recession is
+  gradual (jumping past the dist-3 drain recedes only the outer ring, the inner rings stay
+  flooded; jumping past dist-1 clears it) and leaves the ground wet (wetness 1.0); flood water
+  freezes in winter like the lake (`isFrozenWaterAt` true, `isFlowWater` false); the waterfall
+  rule (a tile between the lake and a flow-encoded spillway at level 5 never floods, the rest of
+  the shore does); seasonal lake levels (spring floods the +1 band as seasonal with drainTick
+  never, summer schedules the drain, jumping past the window clears it); a second storm during
+  a recession does not push past the cap (still 24 tiles). Test notes: the season check runs
+  before the advance in `floodSystem` so a spring band seeds and floods in the same call; the
+  seasonal drainTick is `tick + 1 + hash % window` (never in the same call that schedules it).
+
+## ADR-468: Wildfire — fire on vegetation and across terrain (SurVivaZ)
+
+Date: 2026-11-19. Status: implemented (this batch). Scope §4.
+
+Decision: trees, fruit trees and dry grass can burn; a burning vegetation node spreads to
+nearby fuel and, when it burns out, depletes like a harvested node (tree → stump for
+`stumpSeconds`, then regrows; grass → gone for its respawn). Grove depletion is the stand-in
+for a true spreading forest fire — the scope's v1 default, and what this ADR ships: a fire
+that runs across a grove and leaves it as stumps that regrow is a visible, bounded wildfire,
+not a permanent deforestation event.
+
+Mechanics:
+- Fuel predicate `isVegetationFuel(world, kind)` (exported pure, `pvp_pieces.ts`): axe trees
+  except `tree_stump`, plus the five fruit trees and `fiber_grass` (explicit non-axe set).
+  Berry bushes, cotton/fiber bushes, stumps and `rotten_stump` do NOT burn in v1; crops are a
+  separate kind (Crop/GrownPlant, not ResourceNode) and do not burn either.
+- `ignite()` gate: a fuel node may ignite (a Burning node decays and depletes — see below);
+  anything else still needs BuildPiece or Health. `applyDamage` on a healthless entity no-ops
+  safely, but the node branch skips the call for clarity.
+- `burningSystem` node branch: no damage (no Health); the node decays 16 per check (same as
+  creatures) and, at intensity 0, `burnOutNode` extinguishes it FIRST and then depletes it via
+  `depleteNode` (same end state as harvesting: tree → stump + `NodeRegrow` with the def's
+  respawn; grass → stumpTicks 0, no stump). Extinguish-before-deplete matters because
+  `depleteNode` destroys the entity.
+- Spread (node→node only): chance `vegetation.spreadChance` (0.08) × dryness
+  `(1 - chunkWetnessAt(candidate tile))` × the ADR-465 `windSpreadFactor` (same shared
+  directional factor the piece spread uses — ADR-465's contract: wind first, wildfire second).
+  Spread children are plain fires via `ignite()` — never `LightningFire` — so rain quenches
+  them even when the parent is an exempt lightning fire.
+- Cap: at most `vegetation.maxBurning` (128) concurrently burning vegetation nodes, counted
+  once per check from the `Burning` snapshot and incremented on each successful spread ignite,
+  so the cap holds within the pass; the spread branch skips entirely once it is reached.
+  A dry summer cannot DoS the sim with a runaway fire. Tuning lives in `data/fire.json`
+  (`vegetation: { spreadRadius: 2.0, spreadChance: 0.08, maxBurning: 128 }`,
+  `FireTuning.vegetation`).
+- Lightning (ADR-451 changed): the scope assumes a lightning-struck tree ignites ("the
+  lightning-ignited tree keeps the quench exemption", "what one strike can become"), but
+  ADR-451's code *depleted* the struck tree immediately — so no burning node would ever
+  exist to spread from. This ADR resolves the contradiction the way the scope's design
+  assumes: `resolveLightningStrike` now calls `igniteLightning` on the struck tree instead
+  of depleting it outright — the tree burns ~8 s (128 / 16 per check), can spread as a
+  wildfire, and depletes to a stump when it burns out (the same end state ADR-451's scorch
+  produced, now with a visible fire that can spread). A stump is already burnt, so
+  `tree_stump` is excluded from the lightning target filter (the old filter,
+  `requiredTool === Axe && !oneShot`, matched it, and the new ignite would refuse it — no
+  strike would have fired at all).
+- Rendering: no render change. `BurningFx.update` already handles a Burning entity with no
+  BuildPiece (the `bp` lookup is optional; the piece-scale line returns a 1×1 footprint), so
+  a burning tree renders the same flame/smoke it would have rendered as a burning creature
+  — the flame sits on the node. That is the scope's §4 default (fire rendering "just works").
+- Performance: no new per-tick scan. The spread is a `nearby()` query inside the existing
+  1 s fire check, only for burning nodes; the cap is a snapshot count, not a scan.
+
+Tests: `packages/gameplay/test/adr468_wildfire.test.ts` — 12 tests. Fuel predicate
+(all axe/fruit trees + grass true; stumps, bushes, unknown kind false); ignite gate (tree
+and grass ignite at 128, stump and berry bush refuse); tree decay 16/check → depletes at
+check 8 to a stump `NodeRegrow`; grass burns out with no stump; rain quenches a vegetation
+fire in ~3 checks (128 → 72 → 16 → 0); a lightning-ignited tree is exempt from storm quench
+(after 7 checks in a storm still lit at intensity 16 = 128 − 7×16, where a plain fire would
+have burnt out at check 3); spread dry + calm (seed 80, tick-20 draw 0.0056 < 0.08); soaked
+ground throttles spread (seed 73, draw 0.0540: spreads dry at 0.08, not at wetness 0.5 /
+chance 0.04); wind fans spread (seed 55, draw 0.1110: spreads downwind at 0.16, not calm at
+0.08 or upwind at 0.008); a spread child in a storm is quenched (no `LightningFire`) and
+burns out in ~3 checks while the exempt parent still burns; the cap (128 burning trees + 1
+neighbour: the neighbour does not ignite, 128 Burning total); `fire.json` tuning pins.
+The spread seeds were probed once — the `rngFor("fire.spread", entity)` stream is hashed
+from (seed, tick, key, entity), so the draw that matters is the one at tick 20, the first
+burning check, not the one at tick 0 (an earlier probe at tick 0 gave different draws and
+three spread tests failed until the probe was redone at tick 20; creation order player →
+burning tree → neighbour must be preserved so the burning tree is entity 2). Revert check:
+all 12 ADR-468 tests fail on pre-change code (stash of `fire.json` + `pvp_pieces.ts` only);
+the two updated ADR-451 tree tests also fail on pre-change code (14 failed / 5 passed over
+the two files — the 5 passing are the ADR-451 non-tree controls).
+Updated ADR-451 tests (`adr451_lightning.test.ts`): the tree-strike test now asserts the
+tree is alive + burning + `LightningFire` immediately and depletes to a stump `NodeRegrow`
+after 8 burning checks; the storm test asserts exactly one tree ignites (the ring trees are
+~6 tiles apart, past the 2.0 spread radius, so the fire cannot spread) and it depletes
+after 10 s. No other ADR-451 behaviour changed (piece strikes, one strike per storm,
+near-survivor placement, rain quench of pieces — all still pass).
+
+Honest cuts / follow-ups (not built):
+- Piece→node spread: a burning structure does NOT ignite nearby vegetation in v1
+  (node→node only). Recorded as a follow-up in REPORT.md.
+- A burning tree's flame renders at the node's 1×1 footprint (the existing `BurningFx`
+  null-piece path) — no tree-scale flame art was added; the fire is visible, the flame is
+  not scaled to the canopy. If Tracey wants a bigger flame on trees, that is a render follow-up.
+- Lightning can still start a wildfire that burns a whole grove to stumps in a dry summer —
+  bounded by the 128 cap and by rain, and stumps regrow; whether a grove-fire of that size
+  feels right in play is a live play-test question, not a bench one.
+
+## ADR-469: Living forests — wild trees regrow through saplings, saplings can die of drought, lightning fells a grove and leaves fallen logs (SurVivaZ)
+
+- **Status:** Implemented 2026-11-20. Tracey's decision was DEFAULT (no giants; a mature tree is
+  the endpoint). Wild regrow goes through sapling stages (no more instant full-size wild trees);
+  regrow timing reuses `respawnSeconds` per species, then the planted `growSeconds` (1,680–2,400 s)
+  to maturity; wild saplings CAN die of drought (2 in-game days without rain/water, same clock as
+  crops); a fallen log spawns on lightning-felled trees only (ADR-451 path); axe-felled trees do
+  not leave one; lightning grove: a strike depletes the nearest tree plus other axe-trees within
+  3 tiles; `strikesPerStorm` stays 1; giants cut; true spreading forest fire is out of scope.
+- **Wild sapling regrow (`systems/gathering.ts`, `farming.ts`):** `respawnSystem` now asks
+  `wildSaplingKind(def.key)` — the 1-based plantable kind whose `becomes` is that tree, or 0 —
+  and spawns a `Crop` (sapling, stage 0) at the regrow spot instead of a full `ResourceNode`.
+  `cropGrowthSystem` grows it through the 3 sapling stages into the mature node (`p.becomes` +
+  `GrownPlant`). 11 tree saplings in `data/farming.json` (oak 2,400 s, pine 1,800 s, birch
+  1,680 s, maple 2,160 s, willow 1,800 s, palm 1,920 s, apple 1,800 s, pear 1,800 s, cherry
+  1,680 s, orange 2,040 s, peach 1,800 s). **Cut: generic `tree` and `resin_tree` have no
+  sapling** (their keys never appear as a plantable `becomes`) — they keep instant full-size
+  regrow; mapping generic `tree` to an oak sapling would change the species mix over time, and
+  a new generic sapling would be new art. No new art was added.
+- **Drought death is already built in:** in `cropGrowthSystem`, `if (world.tick > wut + drought)`
+  — for `p.type === "crop"` it reverts to bare tilled soil; otherwise (sapling/bush) it DESTROYS
+  the entity and emits `PlantDied`. A wild sapling that dries out dies with no change needed.
+  Rain re-waters (`wut = tick + wateredSeconds`); water beside the plant also waters. Frost only
+  kills `p.type === "crop"` in the Crop loop; saplings are not frost-killed there (the ResourceNode
+  frost pass kills fruit trees via `frostKillsNode` — fruit trees die, timber trees and berry
+  bushes survive).
+- **Chunk tracking (`world.ts`):** `swapChunkNode` moved from `gathering.ts` to `world.ts` (where
+  `ChunkNodes` lives) and exported, so both `gathering.ts` and `farming.ts` import it with no
+  cycle. `cropGrowthSystem` calls `swapChunkNode(world, e, node)` at maturity, so a wild
+  sapling's matured node inherits its chunk tracking. `despawnChunkNodes` now also destroys
+  Crops in the chunk list (only wild saplings are ever added — planted crops are never added —
+  so any Crop in the list is wild by construction). Consequence: growth progress is lost on
+  chunk unload, same as a partially-gathered node resetting on reload.
+- **Lightning grove + fallen log (`combat/pvp_pieces.ts`):** in `resolveLightningStrike`, the
+  strike now ignites the nearest tree PLUS the other axe-trees within 3 tiles of it (filter, not
+  break — the list is sorted by distance to the strike point, not to the nearest tree).
+  `strikesPerStorm` stays 1 (one strike igniting several trees). In `burningSystem`, the
+  `LightningFire` flag is captured before `extinguish` removes it and passed to `burnOutNode`
+  (new optional `struck` param); a lightning-felled tree spawns a `fallen_log` at its position
+  via `spawnResourceNode` (full capacity 5, respawnSeconds 600). Wildfire-spread trees do NOT
+  leave logs (they carry no `LightningFire`); axe-felled trees do not either. The strike now
+  IGNITES the tree (ADR-468) instead of scorching it outright — it burns ~8 s and depletes to a
+  stump when it burns out, which calls `depleteNode` (stump + regrow).
+- **Wildfire regrow is automatic:** trees depleted by wildfire go through `depleteNode` →
+  `NodeRegrow` → `respawnSystem` → sapling, with no extra work (scope: "trees depleted by
+  wildfire regrow through saplings with no extra work here").
+- **Scope corrections:** the scope's `wildlife.ts` / `migrationSystem` / `migrationDirectionFor` /
+  `movePlan` do not exist — the real system is `animalAISystem` in `packages/gameplay/src/population.ts`
+  plus the tamed graze path in `skills/husbandry.ts` (not used here); `respawnSystem` is in
+  `systems/gathering.ts`, `cropGrowthSystem` in `farming.ts`. The import direction is safe:
+  `gathering.ts` → `systems/vitals.ts` → `farming.ts` already exists, so `gathering.ts`
+  importing `spawnCrop`/`wildSaplingKind` from `farming.ts` creates no new cycle.
+- **Tests (`packages/gameplay/test/adr469_forests.test.ts`, 7/7, revert 7/7 fail):** a depleted
+  oak regrows as a stage-0 sapling, grows through stages 0/1/2, and matures into an oak tree
+  with `GrownPlant` at the same position (no fallen log); a wild sapling past the 2-day drought
+  clock dies with `PlantDied` while a watered one survives; a strike ignites the nearest tree
+  plus the axe-trees within 3 tiles and leaves the 4-tile trees unlit; a lightning-felled tree
+  leaves a fallen log (full capacity 5) at its position when it burns out; a wildfire-burned
+  tree leaves none; generic `tree` and `resin_tree` keep instant full-size regrow; chunk
+  tracking — a wild sapling in the chunk list despawns on unload, and its matured node inherits
+  the list entry. Test notes: `waterUntilTick` is u32, so a negative "past" value wraps to a
+  huge future tick — the drought test sets it to 1 and jumps the world clock past the 2-day
+  drought (the ADR-471 tick-jump pattern); `emit` is deferred, so the `PlantDied` delivery
+  needs a step after `cropGrowthSystem`.
+
+## ADR-470: Eating well matters — a varied diet earns a bonus, eating the same food carries no penalty (SurVivaZ)
+
+**Context.** Freshness scaling shipped; no variety tracking, no food grouping, and no "same food =
+weaker" effect existed anywhere. Tracey decided the shape: a bonus for a varied diet (1.1× for 4+
+food groups), with NO penalty for eating the same food in a row (1.0× floor) — overruling the
+scope's penalty-only default.
+
+**Decision.** One new event-only component, `RecentFoods` (diet-group indices of the last 8 foods
+eaten, oldest first, capped at RECENT_MAX = 8; networked + persistent, appended to
+GAMEPLAY_COMPONENTS after Well) — a plain queue, not a deduped list, so an old group falls off once
+8 newer eats have passed. Groups are data in `vitals.json` `dietGroups` (6 groups: meat, fish,
+fruit, vegetable, grain, dairy; 94 foods), following the `hotMeals.items` precedent; drinks,
+medicines and pet treats are not listed and never count. At the successful-eat point in
+`consumeSystem`, the eaten item's group is recorded (`recordRecentFood`) and the distinct-group
+count over the window is folded into the nutrition multiplier `k` next to `stage.nutritionMul`: 4+
+groups → 1.1×, fewer → 1.0×. Health (`kh`) is untouched. Bots eat through the same `consumeSystem`
+path, so they get variety for free.
+
+**Consequences.** A varied diet pays 10% more hunger per eat once 4 groups are in the window; a
+monotonous diet is never punished. The window is the last 8 eats — 8 same-group eats push the old
+groups out and the bonus lapses.
+
+**Verification.** `packages/gameplay/test/adr470_diet.test.ts` 7/7: bonus on the 4th distinct group
+and only then; same food 8× stays 1.0×; drinks and tonics never count; window expiry after 8
+same-group eats; queue order/cap; data coverage (every real food in exactly one group, 94 foods;
+drinks/medicines/pet treats in none); `dietGroupOf` mapping. Revert check: 7/7 fail on pre-change
+code.
+
+## ADR-471: Water you can trust — river risk + wells run low (SurVivaZ)
+
+Drinking straight from a tile (or sipping a raw container) is no longer one flat rate: the
+dysentery chance now depends on the water feature under the drinker, read through the existing
+`waterFeatureAt` layout — a river is 0.05, a lake or pond keeps the old flat 0.025, an elevated
+or great lake is 0.01, and anything else (biome sea, a stray puddle) falls back to the flat
+rate. And wells run low: a well piece holds 12 sips, rain recharges +1 sip per 60 s of rain,
+and past the 2-day drought clock a well loses 2 sips per further dry day. Drawing at a well
+swaps a raw container for its well variant, and well water never rolls dysentery.
+
+Two scope assumptions were wrong on this tree and the build corrects them. First, the scope
+says the `WeatherChanged` event carries the rain's duration in `ticks` — it does not: `ticks`
+is the INCOMING weather's duration (`environment.ts`), so the recharge is tracked by a
+runtime-only `WellWaterRes` resource that records the rain-start tick on `to = Rain/Storm`
+and computes the duration when the rain ends. Second, the scope flags checking whether a well
+is a lightning target — it is not: `fire.json` `flammableTiers` is `[0, 1]` and the well piece
+is tier 2, so no exclusion was needed. `waterFeatureAt` classification is exact in the
+starter region and approximate far out (scope caveat, accepted: the drinker's own tile is
+checked first, then the 8 neighbours, so the rate follows the water you are actually drinking
+from).
+
+Design. New module `packages/gameplay/src/wells.ts`: pure `drinkWaterChance(world, x, y)`
+(the layout is computed once per call, not once per tile); new `Well {level: u8}` component
+(networked + persistent, appended to `GAMEPLAY_COMPONENTS` after `Carrion`); `wellsOf` /
+`nearestWell` / `wellLevel` / `setWellLevel` (lazy-attach at full on first touch, so a well
+stamped, placed or loaded before this ADR starts full — no migration); `drawFromWell` (nearest
+well within `containerReach + rangeSlack`, the same reach the Boil action uses; the well loses
+exactly the sips drawn; a raw container becomes its well variant, a boiled or well container
+stays itself); `wellDryCheck` (called from the top of `weatherSystem`, after the authority
+guard and before the early return while weather is still running — a few integer comparisons
+per tick, the well enumeration only runs on a crossed dry-day boundary); `installWells`
+(subscribed on `WeatherChanged` next to `installLightning`). The dry clock is the same
+`dayLengthTicks` the 2-day `droughtTicks` crop clock is built from, read directly instead of
+importing `farming.ts` — importing it would close a wells → farming → vitals → wells cycle
+(`farming.ts` imports `nearWater` from `vitals.ts`, which imports `wells.ts`).
+
+Items. Four raw containers gain `wellTo` (`items.json`); four new well variants
+(`well_waterskin`, `well_water_flask`, `well_canteen`, `well_water_bottle`, ids 523–526) with
+the same sips/food/weight as their raw form, `safeWater: true`, and `"sprite"` set to the raw
+key — no new art, the well variant draws the raw container. `ItemDef` gains `safeWater`,
+`wellTarget`, `wellSource`; `RawItem` gains `safeWater?`, `wellTo?`; the loader resolves the
+well pairs the same way as the boil pairs and validates them (`wellTo` needs sips; a safe
+variant cannot itself map or be boiled). `fillContainer` reverts a treated container on a
+refill with untreated water via `boilSource || wellSource`.
+
+Wiring. `vitals.ts` `consumeSystem`: the tile-drink roll uses `drinkWaterChance` at the
+drinker's position; the container-sip roll skips `safeWater` containers; the empty-container
+branch tries the well draw on dry land when authority (`drawFromWell`) and fails `Empty`
+when there is no well in reach or the nearest well is dry. `install.ts` calls
+`installWells(world)` after `installCarrion`. Knobs in `packages/gameplay/data`: `diseases.json`
+`causes.riverWaterChance: 0.05`, `causes.isolatedWaterChance: 0.01` (lake/pond keep
+`rawWaterChance: 0.025`); `environment.json` `wells: {capacity: 12, rainSecondsPerSip: 60,
+dryDrainSipsPerDay: 2}`.
+
+Honest cuts. (1) The client renders no text for failed Uses today, so the "Well is dry"
+prompt is a client follow-up, not shipped in v1 — the sim emits `ConsumeFailed: Empty`
+(testable). (2) The rain/drought clock is runtime-only: it resets on reload, so rain already
+falling at load recharges nothing when it ends, and a world loaded already past the drought
+clock drains one 2-sip lump (one day's worth, never a catch-up lump for days missed across a
+reload). (3) Animals do NOT drink from wells and wells do NOT water crops (v1 defaults).
+(4) Low-water well frames (a visual cue for a running-low well) stay a follow-up — v1 is
+text-only (the level replicates to the client via the `Well` component for a later HUD read).
+(5) A well's level is per-piece, not per-settlement: two wells side by side are two separate
+12-sip tanks.
+
+Tests: `packages/gameplay/test/adr471_water.test.ts` 12/12 — drinkWaterChance rates (river
+0.05, lake/pond 0.025, elevated 0.01, land fallback); tile-drink dysentery per kind with
+deterministic all-1 / all-0 cause tables (river contracts, lake and isolated do not; isolated
+contracts when its chance is 1, river does not); well-pair defs (wellTarget/safeWater/
+wellSource/sips/spriteKey); draw swaps to the well variant and drops the level 12 → 9 (3
+sips); boiled stays boiled; dry well fails Empty; no well in reach fails Empty; rain
+recharges +1 per 60 s capped at capacity and 30 s recharges nothing; dry drain 12 → 10 at
+day 2, no second drain the same day, 10 → 8 at day 3; well water never rolls dysentery while
+raw water does (same all-1 table); refill at untreated water reverts a well container to raw.
+Revert check: 11/12 fail on pre-change code (the 1 pass is the no-well-in-reach control,
+which is the old behaviour on dry land). `task13_diseases.test.ts` 14/14 (its causes literal
+gains the two new fields). Two test facts learned: `addItem` gives a FULL container
+(durability = sips), so the draw/refill tests empty the slot via the slots view first; and
+there is no great lake within 256 tiles of the origin on seed 42, so the great-lake rate is
+covered by the elevated lake through the shared `elevatedLake || greatLake` branch.
+`world.set` requires the component already attached — the lazy attach uses `world.add` and
+single-field writes use `world.setField`.
+
+## ADR-472: Cold that bites — wet x wind synergy, faster drain in the cold-soaked-gale, and the ADR-458 hot-meal wiring fix (SurVivaZ)
+
+**Context.** Felt temperature already subtracted wet chill and wind chill, and dry layers already
+mattered — but the two penalties were purely additive (no interaction), and cold drained body
+temperature at the same rate whether the victim was dry in still air or soaked in a gale. Worse,
+the ADR-458 counterplay — eat a hot meal by the fire, feel warmer — did nothing in live play: the
+Insulation +5 buff was written at eat time and never evaluated by any production code.
+
+**Decision.** Three changes, all on lines that already run. (1) Synergy: the felt formula gains
+`− windChillPerSpeed × √windSpeed × wet × windWetSynergyMul` (data knob in `environment.json`,
+0.5; soaked in a 12-speed gale ≈ −2.6 °C on top of the existing −6 wet / −5.2 wind). Walls block
+it like the wind term (`sh.wind`). (2) Bite: in `vitalsSystem`, when felt < `coldBuffBelow` (10 °C
+— the dead knob in `environment.json`, zero uses until now, wired rather than adding a new one)
+AND wetness ≥ 0.7 AND windSpeed ≥ 8, `bodyTempChangePerDegreePerSec` is multiplied by
+`coldDrain.mul` (1.5; `wetMin` / `windMin` / `mul` in `vitals.json`). All three conditions, not any
+one. The bite only speeds arrival at the freezing tier — no second damage channel; hypothermia at
+body ≤ 35 °C (`exposureDps` 2.0) stays the only cold damage. (3) ADR-458 fix: `exposureSystem`
+evaluates the Buffs stack into the worn-gear insulation —
+`evaluate(world, e, Buffs, Stat.Insulation, ins)` — before the `insShift` line, so a hot meal
+actually raises felt by +5 in the cold. The only Insulation modifier in production code is the
+hot-meal Add, so the evaluate is a no-op without a meal. No per-item wetness, no wind map, no
+layer-count bonus (Task 31 / dry-layers decisions stand); enclosed rooms still clamp felt to the
+comfort band, so cold that bites is an outdoor mechanic by construction.
+
+**Consequences.** A soaked player in a gale feels ~2.6 °C colder than before and cools 1.5× faster
+once all three conditions coincide; a hot meal by the fire now genuinely warms the eater (+5 felt
+for 120 s). Bots already respond to cold (`warm_up` / `seek_shelter`), so they feel the bite
+through the same felt line.
+
+**Verification.** `packages/gameplay/test/adr472_cold.test.ts` 9/9: synergy delta 8.6 °C (wet 6 +
+synergy 2.6) in a 12-speed gale; dry in the same gale loses only the wind term; hot meal raises
+felt by +5 in winter cold (same seed/weather/fire in both worlds) and the gain expires after
+120 s; cold + soaked + gale drains 1.5× the base rate (1.2 °C vs 0.8 °C over 10 s) while wet-just-
+under / wind-just-under each drain at the base rate; 10 s in the bite leaves hp untouched;
+tuning knobs in `environment.json` / `vitals.json`. Revert check: 6/9 fail on pre-change code (the
+3 passing are controls that hold on both).
+
+## ADR-473: Sleep that restores — a good night leaves you rested, a bad night leaves you groggy (SurVivaZ)
+
+**Context.** Sleep already healed (0.5 hp/s) and regened stamina 3×, and all-asleep skipped the
+night 30× — but every night was the same: a bed in a sealed dark room felt no different from a
+short cold doze in the open. The scope default: score the night at wake time — bed + >= 6
+game-hours + warm + dark + quiet room = rested (StaminaRegen x1.25 + HealthRegen +0.25 hp/s for
+30 in-game minutes); any of no bed / < 6 h / cold or hot at wake / lit / noisy room (openness >
+0.25) = groggy (MoveSpeed x0.85 + StaminaRegen x0.75 for 5 in-game minutes); in between (e.g. an
+open door at openness 0.25) is an ordinary night with no buff or penalty. Bots share the hook:
+the bot rest edge calls `sleepIn` and every wake path (input, bed destroyed, damage) calls
+`wake()`, so a bot in a bed wakes rested or groggy the same way.
+
+**Decision.** Score in `wake()` before the sleeper is moved (the bed position is the sleeping
+position: felt, light and openness are all read there) and apply the result as `Buffs` modifiers
+(authority only; the stack replicates). Duration is game hours from a sleep-start snapshot taken
+in `setMode` when the mode becomes Sleep — not ticks, because `timeSkip` advances game hours
+without advancing ticks proportionally, so a tick-derived duration would undercount a skipped
+night. Warmth is the ADR-472 felt temperature against the `vitals.json` comfort band [8, 32] °C;
+dark is `lightAt` returning nothing; quiet/noisy are `roomOpennessAt` against the `sleepQuality`
+tunings in `data/stance.json` (goodHours 6, quietOpenness 0.1, noisyOpenness 0.25, rested
+1.25 / +0.25 hp/s / 1800 s, groggy 0.85 / 0.75 / 300 s). A missing sleep-start record (e.g. a
+restart mid-sleep) scores ordinary — no buff, no penalty — rather than punishing a night that
+cannot be measured. The scope caveat is resolved: floor sleep by the fire does NOT enter Sleep
+mode — the bot "sleep" action is stand-still and only the "rest" edge with a bed calls `sleepIn`
+— so the no-bed branch is a guard for a sleeper whose bed was destroyed without waking them,
+not a reachable play path. No new per-tick scan, nothing per frame: the scoring runs once, at
+wake time, on top of the existing `wake()` hook.
+
+**Verification.** `packages/gameplay/test/adr473_sleep.test.ts` 10/10: full good night in a sealed
+dark room rests (StaminaRegen 1.25, HealthRegen +0.25, expiry exactly 36000 ticks); 2 h night
+groggy (MoveSpeed 0.85, StaminaRegen 0.75, expiry exactly 6000 ticks); cold wake (felt 5 °C),
+lit wake (campfire burning nearby), and outdoor bed (openness 1) each groggy after 6 h; an open
+door (openness 0.25) is ordinary; one open shutter in the 2-tile test room (openness ~0.1) still
+counts as quiet and rests; a sleeper whose bed is gone wakes groggy; a missing sleep-start record
+wakes ordinary; a bot-shaped sleeper (clientId 2) wakes rested the same way. Revert check: 10/10
+fail on pre-change code. Test note: beds placed in tests need a NetId assigned by hand (ADR-244
+pattern) — `placePiece` does not assign one, the NetServer does in live play — and a bed's
+centre is its footprint centre (rot 2 puts it at (11, 10.5) inside the 2-tile test room; rot 0/1
+puts it on the south wall line, openness 1).
+
+## ADR-474: Tools wear out, and you repair them (SurVivaZ)
+
+Tools and weapons wear: 1 durability per successful gather swing and per landed melee hit. A tool
+that reaches 0 is BROKEN but stays in the bag (Tracey: broken tools never vanish, never become a
+loot bag) and the hand falls back to the existing bare-hands / fists path, so a broken axe gathers
+like fists (a tree still yields, an oak fails WrongTool) and a broken weapon hits like fists (5).
+Below 25 % a tool is DULL: one tier lower for the gather bonus only (a dull iron axe on a tree
+gives 5 wood where a full one gives 6); WrongTool checks still use the real tier, so dull never
+locks the player out. Ranged shots, thrown weapons and explosives wear nothing (the wear hook sits
+in the melee fall-through of combatSystem, after the ranged / thrown branches `continue`).
+
+Repair is in place for ~30 % of the tool's own recipe, rounded up per ingredient (the saddle
+pattern, mounts.ts): a stone axe costs wood 1, stone 1, fiber 1; a bronze axe planks 1, bronze
+ingot 1. First-tier tools (item tier 1: stone, bone) repair anywhere with the resources in the
+bag; later tiers (tier 2+: bronze, iron, steel, alloy) need an anvil in range (Tracey). Repair is
+one command, `gameplay.itemRepair` { slot: u8 }, with the saddle-shaped `checkItemRepair` /
+`repairItem` (item_repair.ts) and a Repair button in the inventory details pane (a plain focusable
+button, so touch, D-pad and keys work alike; it shows only while the item is damaged, names the
+cost in its title, and is disabled with the blocker — "Needs an anvil nearby" / "Needs …" /
+"Needs the skill unlock" — when the check fails). The tooltip says "Broken — repair it" or
+"Dull — one tier lower" next to the Durability line. Bots repair too: `fillAgentSensors` sets
+`view.repairTool` for a BROKEN tool the bot can repair right now (check included, anvil rule
+included), the `tool_repair` behaviour pushes `irepair:<slot>` (throttled 200 ticks, safe-gated),
+and `instantChores` pushes the same action for hired workers — same blackboard key, so the two
+paths never double-push. Scoped to BROKEN tools only in v1: a dull tool still works, so repairing
+it is an optimisation, not a fix. No planner Step kind was added (the planner works on item
+counts, not slot durability — a Step would have needed wiring through every Step consumer); the
+behaviour-reflex + instantChores pattern (vehicle_service / dye) covers it instead.
+
+Scope corrections (verified in build): there is no hammer tool kind (hammers are weapons; axes are
+dual tool+weapon), so wear splits into gather-wear and melee-wear hooks, not a single hook; there
+is no whetstone item and no grindstone piece in v1; `spend()` (vehicle_craft.ts) is the OLD break
+behaviour (item removed at 0) and was NOT reused — the new `wearDurability` leaves the item in
+place at 0. The name `wearSlot` was already taken (combat/arms.ts, the Wear action for clothing),
+so the durability helper is `wearDurability`. Skill-gate note: no tool or weapon has an
+`item:<key>` unlock node in the skill tree (only the four saddles do), so `itemRepairUnlocked` is
+a pass-through for every tool/weapon today — the check follows the saddle pattern and will bind
+automatically if a tool is ever gated. First-tier vs later-tier is the item's top-level `tier`
+field (stone_axe 1, bronze_axe 2, iron_sledgehammer 3), which covers tools and weapons uniformly.
+
+Files: `packages/gameplay/src/inventory.ts` (`slotDurability`, `isBrokenSlot`, `isDullSlot`,
+`wearDurability`), `packages/gameplay/src/systems/gathering.ts` (broken gate in `heldTool`, dull
+tier in the bonus, wear after the yields loop), `packages/gameplay/src/combat/combat.ts` (broken
+gate in `heldWeapon`, wear after the melee `applyDamage`), `packages/gameplay/src/item_repair.ts`
++ `item_repair_commands.ts` (new), `packages/gameplay/src/input.ts` + `packages/gameplay/src/index.ts`
+(register + export, append-only after RAMP_COMMANDS), `packages/gameplay/src/ui/menus.ts`
+(`itemRepairIntent`, `itemRepairView`, tooltip note), `apps/client/src/gameplay-panels.ts`
+(Repair button), `apps/server/src/protocol.ts` (net bridge + `ITEM_REPAIR_REJECT_REASONS`:
+`not_repairable`, `needs_anvil`; `not_damaged` / `cannot_afford` / `skill_locked` / `empty_slot` /
+`bad_slot` already existed), `apps/server/src/game.ts` (`installItemRepairCommands`),
+`packages/gameplay/src/ai/agent_output.ts` (`irepair:<slot>`),
+`packages/gameplay/src/ai/survivor_behaviors.ts` (sensor + `tool_repair` behaviour),
+`packages/gameplay/src/ai/autonomy.ts` (`instantChores` line), `packages/gameplay/src/agents.ts`
+(`AgentWorldView.repairTool`).
+
+Tests: `packages/gameplay/test/adr474_tool_wear.test.ts`, 15/15 pass (gather wear 1/swing; wear to
+0 stays in the bag + bare-hands fallback + WrongTool on an oak; dull = one tier lower, 6 vs 5 wood
+in two identical worlds sharing the node's deterministic rng stream; wrong tool / toolless wear
+nothing; melee wear 1/hit; wear to 0 + fists fallback, fist hit 5; ranged shot wears nothing;
+repair cost 30 %; broken first-tier repair to full in place + cost spent; validation
+not_damaged / cannot_afford / not_repairable / needs_anvil; later-tier repair at an anvil; command
+round-trip accept + reject; `itemRepairView` data; bot sensor + behaviour + `irepair` mapping;
+sensor clear when unaffordable / anvil-needed / only dull). Revert check: 13/15 fail on
+pre-change code (wear tests fail on assertions, repair tests fail as "not a function"); the 2
+passes are the by-design no-wear controls (wrong tool / toolless, ranged), which pass on old code
+because they assert the absence of wear. Gameplay, client and server typechecks EXIT 0. Test
+notes: a tree is fist-gatherable (minTier 1 <= bareHands maxMinTier 1), so a broken/wrong tool on
+a tree falls back to fists and succeeds — only the oak (minTier 2) gives WrongTool; hp is f32, so
+the fist hit reads back 4.9875 — use `toBeCloseTo(5, 1)`; `mk` (arms.test.ts) needs
+`installPermissions` for PlayerId, so the dull test uses plain `spawnPlayer`.
+
+## ADR-475: Wild-deer herds graze and move on (SurVivaZ)
+
+Decision: wild deer (animal_deer, animal_red_deer, animal_elk, animal_stag, animal_moose) graze
+the grass tiles around their spawn centre and move on when the patch is bare; other animals are
+untouched. A herd is a spawn-centre cohort, not a component: deer share a home, and when more
+than half the grass within 5 tiles of that home is bare the shared home shifts deterministically
+40-100 tiles in the seasonal direction (winter west, summer east; spring/fall a cardinal by hash)
+and each deer drifts toward it by wandering. No new per-tick scan: the graze runs inside the
+existing animalAISystem loop, the bare-patch check runs only on graze completions and think ticks,
+and the rate cap is one graze start per deer per 30 s (a module-level WeakMap, sim-local).
+
+Scope corrections (the scope's migrationSystem / migrationDirectionFor / wildlife.ts / movePlan do
+not exist in this tree — the real system is animalAISystem in packages/gameplay/src/population.ts
+plus the tamed graze path in skills/husbandry.ts): (1) there are no grass nodes to deplete —
+grazing reuses the tamed GrazedTile / Grazing path exactly (same 20 s graze, same 180 s regrow,
+same shared tile state, so a tile a deer stripped is bare for a tame herd too and vice versa);
+(2) the move is a drift by wandering toward the new home, not the scope's migration machinery;
+(3) the scope's "wildlife.ts imports" do not exist — the tunings live in data/ai.json tuning.herd
+(grazeCooldownSeconds 30, bareRadius 5, bareFrac 0.5, moveMinTiles 40, moveMaxTiles 100) with a
+herdTuning() helper following the animalDrinkTuning() / carrionTuning() pattern, and the AiData
+tuning type in ai/population.ts gains the herd block. (4) The new home is deterministic from the
+old home + season (hash of floored home + season index), so every deer sharing a home computes
+the same new home and the cohort moves as a group; it prefers a grass target and falls back to
+any walkable tile (4 rotations, 90 degrees each), and stays put when no walkable target exists.
+(5) The grass tile id and the graze timings are duplicated in population.ts (HERD_GRASS_TILE 3,
+HERD_GRAZE_SECONDS 20, HERD_GRASS_REGROW_SECONDS 180) with a sync comment rather than imported
+from husbandry.ts — husbandry imports population, so population cannot import husbandry (cycle).
+A grazing deer stays put on its think tick (threat/flee still override, those branches run
+first); a deer that walks off its tile abandons the graze; a deer standing on bare ground checks
+the patch on its think tick, which covers the case where a tame herd stripped the patch without
+any wild graze completing. A patch with no grass at all never moves (avoids ping-pong in
+grassless areas). No new art: deer reuse their existing sprites.
+
+Tests: packages/gameplay/test/adr475_herds.test.ts, 10/10 pass — tuning reads ai.json; patch state
+counts grass and live grazed tiles (expired grazed tiles do not count); new home deterministic,
+40-100 tiles, winter west / summer east; an Idle deer starts a graze on the first tick and the
+tile is bare after 20 s; no second graze within the 30 s cooldown; a bare patch moves the herd on
+(home shifts to the deterministic new home, state Wander, goal = new home); a patch that is not
+bare keeps the herd; a deer on bare ground checks the patch on its think tick; a rabbit never
+grazes; a grazing deer stays put across 20 forced think ticks. Revert check: 9/10 fail on
+pre-change code; the one pass is the rabbit control, which passes on both by design (it asserts
+the absence of grazing for a non-deer).
+
+## ADR-476: Hordes hunt by sound and by lamplight (SurVivaZ)
+
+Decision: a loud survivor noise re-targets the nearest horde that can hear it to the nearest base
+near the noise, and that horde sieges the base for 30 in-game minutes (refreshed by further loud
+noise at the same base). While sieging, the horde seeks the base's lights (nearest light within
+20 tiles of its target, if that light is on a piece) and its members are exempt from shyGoal light
+avoidance. The siege re-targets an existing horde only — it never drafts individual zombies, and
+a loud noise in the open (no base within 32 tiles) draws no horde. Tracey's decision overrules
+the scope default (lamplight cut from v1): lamplight is IN, but only for hordes already in siege
+mode, within 20 tiles, exempt from shyGoal while sieging. Note in the report: lamplight needs a
+live play-test (it inverts shipped avoidance for sieging members).
+
+Scope corrections (the scope's "subscribe the director to noise events" does not exist as
+written): there is NO noise event and NO noise kind in this tree — NoiseLevel is a decaying
+per-entity level (systems/noise.ts) and makeNoise is the one place all noise flows through. So
+the director cannot subscribe; instead makeNoise records the peak survivor noise in the noise
+module (lastLoudNoise, TTL 100 ticks — the director runs every 20) and the director reads it on
+its own cadence. The "player-caused only" gate is exactly "the actor is a living survivor":
+thunder never calls makeNoise, animals never call it (footsteps are Survival-gated in
+movement.ts), zombie structure hits are not survivors. Vehicle engine noise does not exist (no
+makeNoise call for driving), so a driving player draws a horde only by what they do at the
+destination. The noise amounts make walk (12) louder than a gunshot (9), so any amount gate that
+includes gunshots includes footsteps — the hearing-radius gate (a horde hears what a walker
+would hear: 1 tile per noise level) is what keeps a far-away walker from hijacking a horde.
+The siege state lives on the HordeMember component (siegeUntil, u32; server-only, not networked)
+plus the director's runtime Horde entry — the zombie AI reads the member's field for the shyGoal
+exemption, which avoids a hordes<->zombies import cycle (hordes already imports zombies).
+The light-seek is a director target selection, not a new AI state: the director re-targets the
+siege to the piece the nearest light is on, and hordeSteer + the existing structure-attack path
+do the rest. It is self-stabilising (once the target IS a light's piece, the nearest light to it
+is itself). Siege expiry is the existing hordeSteer disband path when the base is gone, not a
+new mechanism. Tunings in data/roads.json hordes (noiseMin 8 = the gather/chop level, so
+gunshot 9 / build 10 / walk 12 / sprint 18 / explosion 27 count and door 5 / swim 7 do not;
+siegeMinutes 30, lightSeekTiles 20, noiseTargetRadius 32).
+
+Tests: packages/gameplay/test/adr476_hordes.test.ts, 8/8 pass — tuning reads roads.json;
+makeNoise records the last loud survivor noise (zombie noise and quieter noise never overwrite
+it; the record expires after its TTL); a gunshot at a base re-targets the nearest hearing horde
+and starts a siege (runtime key/target/siegeUntil and every member's HordeMember target/siegeUntil
+all move); a door does not re-target and a loud noise in the open draws no horde; a siege
+refreshes on further noise at the same base, lapses when jumped past (w.tick = N, the adr238
+pattern — stepping the whole siege would let the members destroy the foundation first), and
+starts again on fresh noise; a sieging horde re-targets to the lit torch stand; a sieging
+member walks into the torch light (min distance < 2) while a non-sieging member stays out
+(> 5, the ADR-217 behaviour); a siege never turns an individual zombie into a horde member.
+Revert check: 7/8 fail on pre-change code; the one pass is the quiet-noise / open-field
+control, which passes on both by design (it asserts no re-target happens).
+
+## ADR-477: Bots get good at things — picks drift toward practiced skills, and practice makes actions slightly faster (SurVivaZ)
+
+**Context.** Bots already picked personal wants by personality and mood (`pickWithMood` in
+`ai/life.ts`) and already earned XP and bought skill-tree nodes — but the two never met: a bot
+that had spent all its points on farming was exactly as likely to tend the garden as a bot that
+had never touched a crop, and a master forager gathered at exactly the same speed as a fresh
+spawn. Tracey decided bots should get **both better and slightly faster** (overruling the
+scope's "better, not faster" default). Two corrections to the scope's map: the scope cites
+`planner.ts` for the scoring, but the planner is a fixed ladder (first unmet, reachable goal
+wins — no scoring function to add a term to); the only scored bot pick in the tree is
+`pickWithMood`. And the scope's "skill level" has no farming / crafting level keys in the tree
+(`skillLevelOf` covers the craft professions only), so the branch level is the number of owned
+nodes in the branch — the observable measure of practice.
+
+**Decision.** (1) Picks: `pickWithMood` gains `score += branchLevel(world, self, w.skill) * 0.1`
+for the want's skill branch, additive after the aspiration / stickiness multipliers, so
+personality, mood and aspiration still dominate the pick. The want→skill mapping lives in data
+(`ai_life.json`): only `tend_garden` → `farming` and `craft_keepsake` → `crafting` carry a
+skill — the other four wants are not skill-driven. `branchLevel` (new in `skills/tree.ts`)
+counts owned nodes in a branch. A level-5 farmer scores gardening +0.5 over a level-0 bot:
+enough to tip a tie, not enough to lock a bot into one want forever. (2) Speed: new `"speed"`
+mod in the `SkillMod` union, granted +0.05 by the four tier-0 practice nodes — `forager`
+(survival), `green_thumb` (farming), `tinkerer` (crafting), `carpenter` (building) — all reusing
+their existing nodes and icons (`skill_forager` etc.); **no new icons were needed**. The label
+in `SKILL_MOD_LABEL` is "action speed (gathering, crafting and building)". `skillMul(world, e,
+"speed")` is 1.0 fresh and 1.2 with all four nodes. It divides the gather swing cooldown
+(`gathering.ts`), the single timed craft (`systems/crafting.ts` — the player flow; `totalTicks`
+is a replicated `Crafter` field, so the client reads the sped-up total from the component), and
+the craft queue duration (`craft_queue.ts`, including the `CraftStarted` `totalTicks` so the
+announced total matches the real duration). No yield, stamina, ingredient or output changes.
+**Build time is not wired: piece placement is instant on this tree**
+(`placePiece` has no duration), so there is no build duration for the speed mod to divide; a
+builder still benefits through faster gathering and crafting, and the pick term covers the
+building branch if a future want uses it. Deeper speed tiers (beyond +20%) would need new
+nodes and are a follow-up, not this ADR.
+
+**Consequences.** A bot that practices farming drifts toward the garden over sessions; a bot
+that practices crafting drifts toward keepsakes. A practiced player gathers and crafts up to
+20% faster (a 0.75 s swing in 13 ticks instead of 15; a 2 s craft in 34 ticks instead of 40).
+The drift is gradual — one farming node (+0.1) does not change a pick — and personality still
+outweighs skill at the extremes.
+
+**Verification.** `packages/gameplay/test/adr477_bot_skills.test.ts` 8/8: branch levels count
+owned nodes per branch (7 farming nodes via the `master_farmer` chain); `speedMul` 1.0 fresh,
+1.05 per practice node, 1.20 with all four, 1.0 for a bare entity with no Progression; a lazy
+bot (industriousness 0) rests unskilled (rest 0.7 vs garden 0.315), still rests with one farming
+node (0.415), and tends the garden with five (0.815); the session-length drift test runs 30 pick
+rounds with the skill level rising through practice — 10× rest as a generalist, 10× tend_garden
+as a 5-node farming specialist, then 10× craft_keepsake once crafting reaches 7 nodes, proving
+the drift is continuous (level-based) and reversible, not threshold-locked; the want→skill mapping is data-only;
+gather 15 → 13 ticks; stone_axe 40 → 39 ticks with tinkerer alone, 34 with all four, and the
+skilled craft completes 6 steps sooner in live stepping (queue) and 6 steps sooner as a single
+timed craft (40 → 34 ticks on the replicated `Crafter` total). The ADR-234 skill audit gained
+the `speed` branch (30 s `dry_wet_wood` craft, 600 vs 572 ticks per node): 144/144. The audit
+caught a real gap in the first cut — the single timed craft path (`systems/crafting.ts`) had
+its own duration and was unwired until the audit forced it. `adr219_skill_desc.test.ts` 7/7 (the
+forager pin now expects the added "+5% action speed" line). Revert check: 7 behavioral tests fail
+on pre-change wiring (adr219 forager pin, branchLevel/speed, pick flip, session drift, gather,
+craft queue, single craft); the 8 controls hold on both, and the ADR-234 audit's 144 pass on revert because
+the reverted data carries no speed mod to audit.
+
+## ADR-478: Bots that remember each other — affinity is finally read, not just recorded (SurVivaZ)
+
+**Context.** Per-pair trust and affinity memory ships (ADR-444, `ai/social_memory.ts`): shared meals,
+working together and helping write affinity, attacks write grudges. But no code ever read affinity —
+it was write-only. The scope's defaults were written against a -100..100 scale (-20 grudge cutoff,
+>= 30 guard preference); verified in build, the shipped scale is -1..1 for both trust and affinity
+(clamped in `social_memory.ts`), so the thresholds translate to grudgeBelow -0.2 and friendAt 0.3.
+Two scope claims did not survive contact with the code: there is no `ai/trust.ts` (the memory lives
+in `ai/social_memory.ts`), and there is no direct give-food-to-a-bot path with a recipient list —
+food sharing is the shared meal's communal store (ADR-446: surplus deposited, foodless bots
+withdraw). The guard path is the hired Defend / Follow bot holding its owner's anchor
+(`fillHireSensors` + `work_defend`): it already guards a person (Follow: the owner's live position)
+or a location (Defend: the owner's base), with the radius trust-modulated by ADR-444 — so the
+affinity preference is expressed as guard keenness, not as a person-vs-location pick (the job
+assignment, not the bot, picks person vs location).
+
+**Decision.** Add `affinityOf(agent, player)` — the first reader of affinity (0 when unknown) — and
+`SOCIAL_AFFINITY` (`grudgeBelow -0.2, friendAt 0.3, friendDefendBonus 4`) in `social_memory.ts`,
+next to the existing `SOCIAL_EVENTS` / `SOCIAL_MEMORY` code consts (the file's own convention: these
+tunings live in code because they tune bot temperament, not rules). Meal: in
+`fillSharedMealSensors`, the bot deposits its surplus into the shared store unless every mate at
+the meal is a grudge (affinity < -0.2) — it keeps its surplus instead. The store is communal, so
+"friends first" is expressed as sharing whenever at least one mate is not a grudge; a single grudge
+never vetoes sharing with the friends present, and a mate with no PlayerId counts as a stranger
+(affinity 0), never a grudge. The bot still eats at the hearth with its grudges; it just does not
+feed them. Guard: in `fillHireSensors`, the defend radius becomes trust < 0 -> 4 (unchanged ADR-444
+gate), else affinity < -0.2 -> 4 (reluctant guard for a grudge), else affinity >= 0.3 -> 12 + 4 = 16
+(a friend is guarded more keenly: the bot engages threats further from the friend), else 12. The
+trust gate still applies: a distrusted owner is guarded up close no matter the affinity. ADR-478
+does not change how affinity is recorded. No new per-tick scan, no new state: both changes read
+memory the behaviours already hold, on their existing cadences.
+
+**Verification.** `packages/gameplay/test/adr478_bot_memory.test.ts` 7/7: `affinityOf` reads recorded
+affinity (-0.4 after one attack, 0 for unknown) and the threshold constants; neutral mates get the
+surplus deposit (3 portions) as before; all mates grudged -> no deposit but the meal still pends;
+one grudge + one friend -> deposit still happens; a friend (affinity 0.6) is guarded out to 16
+tiles (zombie at 14 defended) while a neutral owner only to 12; a grudge with trust +0.5 is guarded
+only up close (8 tiles ignored, 3 defended); a distrusted owner (trust -0.5) is guarded up close
+even with affinity 0.6. Revert check: 6/7 fail on pre-change code (the neutral-meal control
+passes on both, as it should); a behaviour-only probe (no `affinityOf` calls) passes 2/2 on new
+code and fails 2/2 on pre-change code (deposit present when it should be absent; defend missing
+when it should be set). The grudge-with-trust case is set by direct record (precedent:
+`social_memory.test.ts` validation), because every social event moves trust and affinity the same
+way and the two cannot be separated by events alone.
+
+## ADR-479: Sailboat — a wind-driven boat (SurVivaZ)
+
+**Context.** Boats were paddle or motor: the wind (ADR-465) pushed them a little, but no boat was
+*driven* by it. Tracey approved a sailboat as the 15th ADR of the simulation batch: a new vehicle
+class on the water, wind-powered, with its own art in the game's style.
+
+**Decision.** Third boat kind: `sail: true` on the def (class `boat`, fuel null, stamina null —
+exactly one of fuel / stamina / sail, enforced by `validateVehicleDefs`; the ADR-422 "never both or
+neither" rule now reads "exactly one of the three"). New pure `sailFactor(windDir, windSpeed,
+heading)` in `vehicles.ts`: `0.25 + 1.75 * max(0, cos(windDir - heading)) * min(1, windSpeed / 12)`
+— a full tailwind at windSpeed 12 doubles the paddle-equivalent maxSpeed (3.0 -> 6.0 t/s), a
+headwind, beam wind or calm leaves only the 0.25x paddle crawl, so the driver is never stranded.
+Knobs in `VEHICLE_TUNING` (`sailTailMul: 1.75`, `sailPaddleFloor: 0.25`, reusing `windRefSpeed:
+12`). `stepPowered` uses the sail factor as the speed-target multiplier for sailboats (the wind IS
+the engine) and reuses ADR-465's `boatWindBonus` leeward drift for all boats. No stamina drain, no
+fuel burn, no engine/lights: `spawnVehicle` adds no `VehicleState`, engine/lights toggles refuse
+with `no_controls`, and the client hides the engine chip (same as a paddle boat). Def appended last
+in `vehicles.json` (APPEND ONLY, defId = index + 1): 4 seats (rowboat anchors), maxSpeed 3.0,
+footprint 3.6 x 1.5, health 220, storage 8 / 300. Kit `vehicle_kit_sailboat` (item id 522 /
+resource 408 in `ids.lock.json`, regenerated via `lock:ids`), dock recipe 120 s (planks 12, wood 6,
+cloth 4, rope 4, seat 2 — cloth is the sail), `vehicle_crafting.json` maps `sailboat` to the kit
+with fuel `none`; deploy is the ordinary kit flow (water check from `isBoatDef`). Schema
+`vehicles.schema.json` gains the optional `sail` boolean (additionalProperties is false).
+
+**Art.** Runtime-painted, in the ADR-421/422 boat family (same dark-plum outline, water shadow,
+wake, 2:1 dimetric projection, 4 cols x 6 rows, frame(phase, dir) = phase*8 + dir, idle frame 8):
+`SAILBOAT_ART` in `apps/client/src/task421-art.ts` — deep-green painted hull (distinct from the
+rowboat's blue, the speedboat's red, the motorboat's white, the pontoon's aluminium), cream trim,
+cream canvas mainsail aft + darker jib forward in the u-z plane (broadside from the beam, edge-on
+from bow/stern), dark-wood mast + boom, red masthead flag; phases are sail states (0 slack, 1 full,
+2 billowing). `boatFrameSize` uses the masthead (4.6 z) as the top, so the frame is 300x228 with
+anchor (0.5, 0.6623) — fragment `pack/task479/manifest.task479.json` carries layout only and
+declares `idle` [8] + `sail` [0, 8, 16] at 4 fps. Registered three ways (ADR-455 lesson):
+`MANIFEST_INDEX` (`packages/assets/src/manifest-index.ts`), the fragment file, vite MOUNTS
+(`apps/client/vite.config.ts`), plus `task479AtlasSources()` merged in `view.ts` and the kit menu
+icon painted at runtime from the world cell (`installSailboatMenuIcons`, style id
+`task479-menu-icons`). The renderer shows one frame per direction (no VAnim, same cut as ADR-421),
+so the sail cycle is declared for a future render hook. The sailboat has no oars in art: the
+0.25x paddle crawl is a sim fallback with no visible paddle — noted, not faked.
+
+**Consequences.** A sailboat at the dock (120 s, cloth for the sail) sails at up to 6 t/s downwind
+and 0.75 t/s into the wind, drifting leeward like every boat; it never strands, never needs fuel
+or stamina, and never shows an engine chip. No new per-tick scan, no new state, no new per-frame
+work — the wind bonus and the boat drive already ran.
+
+**Verification.** `packages/gameplay/test/adr479_sailboat.test.ts` 12/12: def (sail, boat, no fuel /
+stamina, maxSpeed 3.0, 4 seats, storage 8/300); validation (sail + fuel rejected, sail + stamina
+rejected, non-boat sail rejected, two-of-three rejected); sailFactor tailwind 2.0 / headwind 0.25 /
+beam 0.25 / calm 0.25 / half wind 1.125 / over-ref capped 2.0; kit mapping + dock recipe (cloth 4);
+spawn has no VehicleState; engine toggle `no_controls`; driven sailboat reaches ~2x paddle speed
+downwind and crawls upwind. `apps/client/test/adr479_sailboat_art.test.ts` 6/6: atlas 1200x1368
+(under the 2048 cap), frame 300x228 matching the fragment, 8 distinct direction cells, sail
+phases differ, dark-plum outline present, sail-cloth pixels present, fragment declares the atlas
++ sprite with `sail` animation, kit menu icon non-blank, geometry matches `vehicles.json`.

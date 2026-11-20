@@ -33,7 +33,7 @@ describe("ADR-219 skill descriptions", () => {
     }
   });
   test("values, signs and context", () => {
-    expect(d("forager").effects).toEqual(["+10% gathering yield"]);
+    expect(d("forager").effects).toEqual(["+10% gathering yield", "+5% action speed (gathering, crafting and building)"]); // ADR-477: forager is a speed practice node
     expect(d("light_step").effects[0]).toMatch(/^-15% noise/);
     expect(d("firekeeper").effects[0]).toContain(`within ${FIRE_TENDER_RADIUS} tiles`);
     expect(d("rally").effects[0]).toBe(`Party and clan members within ${XP_SHARE_RADIUS} tiles also get 10% of the XP you earn`);

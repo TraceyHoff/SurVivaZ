@@ -31,14 +31,19 @@ import { Px } from "./task34-art.js";
 export const TASK421_ATLAS_KEYS = ["veh_art_raft", "veh_art_canoe", "veh_art_rowboat"] as const;
 /** Atlas keys for the tier-2 motorboats (ADR-422, fragment pack/task422). */
 export const TASK422_ATLAS_KEYS = ["veh_art_motorboat", "veh_art_pontoon", "veh_art_speedboat"] as const;
+/** Atlas key for the ADR-479 sailboat (fragment pack/task479). */
+export const TASK479_ATLAS_KEYS = ["veh_art_sailboat"] as const;
 /** The three tier-1 boat def ids (ADR-421), in vehicles.json order. */
 export const BOAT_IDS = ["raft", "canoe", "rowboat"] as const;
 export type BoatId = (typeof BOAT_IDS)[number];
 /** The three tier-2 motorboat def ids (ADR-422), in vehicles.json order. */
 export const MOTORBOAT_IDS = ["motorboat", "pontoon", "speedboat"] as const;
 export type MotorBoatId = (typeof MOTORBOAT_IDS)[number];
-/** Every boat def id this module paints, tier-1 then tier-2. */
-export type AnyBoatId = BoatId | MotorBoatId;
+/** The ADR-479 sailboat def id (appended last in vehicles.json — APPEND ONLY, defId = index + 1). */
+export const SAILBOAT_ID = "sailboat" as const;
+export type SailboatId = typeof SAILBOAT_ID;
+/** Every boat def id this module paints, tier-1 then tier-2, sailboat last. */
+export type AnyBoatId = BoatId | MotorBoatId | SailboatId;
 /** Paddle-phase rows in a boat atlas: 0 raised, 1 mid-stroke (blade in the water), 2 recovery. */
 export const BOAT_PHASES = 3;
 /** Frame index for (phase 0-2, Art direction 0-7) in a boat atlas (4 cols x 6 rows, 2 rows per phase). */
@@ -74,6 +79,8 @@ const OUTBOARD_TOP: RGBA = [92, 98, 106];
 const GLASS: RGBA = [170, 205, 220];
 const CANOPY: RGBA = [232, 222, 196];
 const ALUMINUM: RGBA = [150, 158, 165];
+/** ADR-479: masthead flag red (the speedboat's hull red, reused as a tiny accent — not a hull). */
+const FLAG_RED: RGBA = [178, 52, 44];
 
 // ---- boat geometry (footprints + seat anchors copied from packages/gameplay/data/vehicles.json;
 // asserted against that file in the ADR-421 tests, so drift fails loudly) ----
@@ -81,13 +88,18 @@ export interface BoatArtDef {
   id: AnyBoatId; length: number; width: number;
   /** hull paint (top face reads lighter via the box shader) */ hull: RGBA; /** gunwale / trim */ trim: RGBA;
   /** top z of the hull silhouette (prow caps sit above it) */ topZ: number;
-  /** "paddle" (ADR-421): the paddles row; "motor" (ADR-422): outboard + prop wash, no paddles */ propulsion: "paddle" | "motor";
+  /** "paddle" (ADR-421): the paddles row; "motor" (ADR-422): outboard + prop wash, no paddles;
+   * "sail" (ADR-479): mast + boom + sails, no paddles */ propulsion: "paddle" | "motor" | "sail";
   /** paddler hand positions (u along the hull, v side): one paddle each, drawn on its v side */ paddles: { u: number; v: number }[];
   /** cargo kind painted on the floor ("none" for motorboats: benches + console instead) */ cargo: "crates" | "bedroll" | "crate_rope" | "none";
   /** motorboats: u of each bench-seat row */ benches?: number[];
   /** pontoon only: twin cylindrical hulls + flat deck instead of a single slab hull */ twinHull?: boolean;
   /** pontoon only: four posts + a flat canvas roof */ canopy?: boolean;
   /** motorboat / speedboat: console + slanted windshield ahead of the driver bench */ windshield?: boolean;
+  /** sailboat only (ADR-479): masthead height in z units + the sail cloth colours. The painter draws
+   * a mast, a boom and a mainsail (aft) + jib (forward) in the u-z plane; phases are sail states
+   * (0 slack, 1 full, 2 billowing) instead of paddle / throttle phases. */
+  sail?: { mastZ: number; cloth: RGBA; clothDark: RGBA };
 }
 export const BOAT_ART: Readonly<Record<BoatId, BoatArtDef>> = {
   raft: {
@@ -121,8 +133,18 @@ export const MOTORBOAT_ART: Readonly<Record<MotorBoatId, BoatArtDef>> = {
     propulsion: "motor", paddles: [], cargo: "none", benches: [1.5], windshield: true,
   },
 };
-/** Every boat art def this module paints, tier-1 then tier-2. */
-export const ALL_BOAT_ART: Readonly<Record<AnyBoatId, BoatArtDef>> = { ...BOAT_ART, ...MOTORBOAT_ART };
+/** The ADR-479 sailboat art def: a deep-green painted hull (distinct from the rowboat's blue, the
+ * speedboat's red, the motorboat's white and the pontoon's aluminium), cream trim, a cream canvas
+ * sail with a green reef band, a dark-wood mast + boom and a red masthead flag. Length/width match
+ * vehicles.json (asserted in the ADR-479 tests); mastZ 4.6 clears the tallest sail by the same
+ * 4px pad boatFrameSize uses for every boat. */
+export const SAILBOAT_ART: BoatArtDef = {
+  id: "sailboat", length: 3.6, width: 1.5, hull: [46, 104, 74], trim: [232, 222, 196], topZ: 0.65,
+  propulsion: "sail", paddles: [], cargo: "none",
+  sail: { mastZ: 4.6, cloth: [238, 228, 200], clothDark: [214, 200, 168] },
+};
+/** Every boat art def this module paints, tier-1 then tier-2, sailboat last. */
+export const ALL_BOAT_ART: Readonly<Record<AnyBoatId, BoatArtDef>> = { ...BOAT_ART, ...MOTORBOAT_ART, sailboat: SAILBOAT_ART };
 
 /**
  * Frame size + pivot for a boat def, mirroring render's vehicleFrame (same 2:1 dimetric projection):
@@ -131,7 +153,7 @@ export const ALL_BOAT_ART: Readonly<Record<AnyBoatId, BoatArtDef>> = { ...BOAT_A
  * from the top.
  */
 export function boatFrameSize(d: BoatArtDef): { w: number; h: number; px: number; py: number } {
-  const hl = d.length / 2, hw = d.width / 2, topZ = 1.6;
+  const hl = d.length / 2, hw = d.width / 2, topZ = d.sail ? d.sail.mastZ : 1.6; // ADR-479: the masthead, not the paddle, sets the sailboat's top
   const uMin = -hl - 0.8, uMax = hl + 0.9, vMin = -(hw + 1.1), vMax = hw + 1.1;
   let minX = 0, maxX = 0, minY = 0, maxY = 0;
   for (let dir = 0; dir < 8; dir++) {
@@ -240,6 +262,32 @@ export function paintBoatCell(px: Px, ox: number, oy: number, d: BoatArtDef, art
   box(px, -hl, hl, -hw, -hw + rt, 0.45, d.topZ, h, cx, cy, s, d.trim);
   box(px, -hl, -hl + rt, -hw, hw, 0.45, d.topZ, h, cx, cy, s, d.trim);
   box(px, hl - rt, hl, -hw, hw, 0.45, d.topZ, h, cx, cy, s, d.trim);
+  // ADR-479: the sailboat's rig — mast, boom, mainsail aft + jib forward, flag at the masthead.
+  // The sails are triangles in the u-z plane (v = belly), so they read broadside from the beam and
+  // collapse edge-on from bow/stern, like a real sail. Phases are sail states: 0 slack (lowered head,
+  // clew pulled in), 1 full, 2 billowing (belly leeward, clew out).
+  if (d.sail) {
+    const mz = d.sail.mastZ;
+    const belly = phase === 2 ? 0.18 : 0;
+    const slack = phase === 0 ? 0.8 : phase === 2 ? 1.08 : 1.0;
+    const headZ = mz - 0.15 - (phase === 0 ? 0.7 : 0);
+    // Mast + boom (dark wood, same as the paddle shafts).
+    box(px, -0.07, 0.07, -0.07, 0.07, 0.5, mz, h, cx, cy, s, WOOD_DARK);
+    box(px, -hl + 0.5, 0.15, -0.08, 0.08, 0.62, 0.72, h, cx, cy, s, WOOD_DARK);
+    const tri3 = (a: readonly [number, number, number], b: readonly [number, number, number], c: readonly [number, number, number], fill: RGBA): void => {
+      const [ax, ay] = proj(a[0], a[1], a[2], h, cx, cy, s);
+      const [bx, by] = proj(b[0], b[1], b[2], h, cx, cy, s);
+      const [tx, ty] = proj(c[0], c[1], c[2], h, cx, cy, s);
+      px.tri(Math.round(ax), Math.round(ay), Math.round(bx), Math.round(by), Math.round(tx), Math.round(ty), fill);
+    };
+    // Mainsail: mast (tack) -> boom end (clew) -> masthead. Reef band along the foot, darker.
+    tri3([0.05, belly, 0.78], [-1.3 * slack, belly, 0.78], [0.05, belly, headZ], d.sail.cloth);
+    tri3([0.05, belly, 0.78], [-1.05 * slack, belly, 0.78], [0.05, belly, 1.5], d.sail.clothDark);
+    // Jib: masthead -> bow. Darker cloth so the two sails read apart.
+    tri3([0.05, belly, 0.78], [1.45 * slack, belly, 0.78], [0.05, belly, headZ - 0.2], d.sail.clothDark);
+    // Masthead flag, flying aft.
+    tri3([0.07, 0, mz], [-0.45, 0, mz - 0.12], [0.07, 0, mz - 0.24], FLAG_RED);
+  }
   if (d.id === "canoe") {
     // Pointed ends: raised prow / stern caps, narrower than the hull.
     box(px, hl - 0.35, hl - 0.05, -hw * 0.45, hw * 0.45, 0.45, d.topZ + 0.15, h, cx, cy, s, d.trim);
@@ -356,6 +404,21 @@ export function paintTask422Atlases(): PaintedAtlas[] {
   return out;
 }
 
+/**
+ * Paint the ADR-479 sailboat atlas (pure: no DOM, unit-testable). Same layout as the tier-1/2
+ * atlases (4 cols x 6 rows, two rows per phase 0-2 — sail states here, not paddle / throttle
+ * phases). Matches the pack/task479 fragment layout exactly.
+ */
+export function paintTask479Atlases(): PaintedAtlas[] {
+  const d = SAILBOAT_ART;
+  const f = boatFrameSize(d);
+  const px = new Px(f.w * BOAT_ATLAS_COLS, f.h * BOAT_ATLAS_ROWS);
+  for (let phase = 0; phase < BOAT_PHASES; phase++)
+    for (let dir = 0; dir < 8; dir++)
+      paintBoatCell(px, (dir % BOAT_ATLAS_COLS) * f.w, (phase * 2 + Math.floor(dir / BOAT_ATLAS_COLS)) * f.h, d, dir, phase, 1);
+  return [{ key: `veh_art_${SAILBOAT_ID}`, width: f.w * BOAT_ATLAS_COLS, height: f.h * BOAT_ATLAS_ROWS, pixels: px.data }];
+}
+
 /** Rasterized pixels -> PNG blob URL (OffscreenCanvas, else a document canvas; undefined when no canvas exists). */
 async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray): Promise<string | undefined> {
   try {
@@ -400,6 +463,19 @@ export async function task421AtlasSources(): Promise<Map<string, AtlasSource>> {
 export async function task422AtlasSources(): Promise<Map<string, AtlasSource>> {
   const out = new Map<string, AtlasSource>();
   for (const a of paintTask422Atlases()) {
+    const url = await canvasToBlobURL(a.width, a.height, a.pixels);
+    if (url) out.set(a.key, { url, emissiveUrl: null });
+  }
+  return out;
+}
+
+/**
+ * Atlas sources for the ADR-479 sailboat atlas. Same shape as task422AtlasSources; view.ts merges
+ * these over the pack/task479 fragment's debug path before setRegistry.
+ */
+export async function task479AtlasSources(): Promise<Map<string, AtlasSource>> {
+  const out = new Map<string, AtlasSource>();
+  for (const a of paintTask479Atlases()) {
     const url = await canvasToBlobURL(a.width, a.height, a.pixels);
     if (url) out.set(a.key, { url, emissiveUrl: null });
   }
@@ -573,6 +649,85 @@ export function installMotorboatMenuIcons(doc?: Document, urls?: ReadonlyMap<str
   const css = motorboatMenuIconsCss(resolved);
   let style = d.getElementById("task422-menu-icons") as HTMLStyleElement | null;
   if (!style) { style = d.createElement("style"); style.id = "task422-menu-icons"; d.head.appendChild(style); }
+  style.textContent = css;
+  return true;
+}
+
+// ---- ADR-479 sailboat menu icon (same ADR-357 pattern as the tier-1/2 kit icons) ------------------
+// The sailboat kit item has no atlas cell or CSS rule either — same runtime-painted icon from the
+// world cell painter (SE view, full-sail phase 1, the most readable pose).
+
+/** Item icon key this module paints: the sailboat kit. */
+export const SAILBOAT_MENU_ICON_KEYS = ["item_vehicle_kit_sailboat"] as const;
+export type SailboatMenuIconKey = (typeof SAILBOAT_MENU_ICON_KEYS)[number];
+
+/** The def id behind the sailboat kit icon key. */
+export const sailKitDefOfIcon = (key: SailboatMenuIconKey): SailboatId | undefined => {
+  const m = /^item_vehicle_kit_(.+)$/.exec(key);
+  return m && m[1] === SAILBOAT_ID ? SAILBOAT_ID : undefined;
+};
+
+/**
+ * Paint the sailboat menu icon (128x128, pure — no DOM). Same framing as the tier-1/2 icons.
+ */
+export function paintSailboatMenuIconPixels(key: SailboatMenuIconKey): { width: number; height: number; pixels: Uint8ClampedArray } {
+  const px = new Px(128, 128);
+  const def = sailKitDefOfIcon(key);
+  if (def) {
+    const d = SAILBOAT_ART, f = boatFrameSize(d);
+    const s = Math.min(1, 118 / f.w, 104 / f.h);
+    const ox = 64 - f.px * s, oy = 100 - f.py * s;
+    paintBoatCell(px, ox, oy, d, 1, 1, s);
+  }
+  return { width: 128, height: 128, pixels: px.data };
+}
+
+/**
+ * Painted 128px sailboat icon -> PNG data URL via a document canvas (sync); undefined when no canvas exists.
+ */
+export function sailboatMenuIconDataUrl(key: SailboatMenuIconKey, doc?: Document): string | undefined {
+  try {
+    const d = doc ?? (globalThis as { document?: Document }).document;
+    if (!d) return undefined;
+    const { width, height, pixels } = paintSailboatMenuIconPixels(key);
+    const data = new ImageData(new Uint8ClampedArray(pixels), width, height);
+    const cv = d.createElement("canvas"); cv.width = width; cv.height = height;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return undefined;
+    ctx.putImageData(data, 0, 0);
+    const url = cv.toDataURL("image/png");
+    return url && url !== "data:," ? url : undefined;
+  } catch { return undefined; }
+}
+
+/** One override rule for the sailboat icon key (same shape as motorboatMenuIconsCss). */
+export function sailboatMenuIconsCss(urls: ReadonlyMap<string, string>): string {
+  const rules: string[] = [];
+  for (const key of SAILBOAT_MENU_ICON_KEYS) {
+    const url = urls.get(key);
+    if (url) rules.push(`[data-icon="${key}"]{--cz-icon:url("${url}");--cz-ipos:center;--cz-isize:contain}`);
+  }
+  return rules.join("\n");
+}
+
+/**
+ * Install the runtime menu icon for the sailboat kit: paint the icon, build the override
+ * stylesheet, and append (or replace) <style id="task479-menu-icons"> in the document head.
+ * Idempotent; safe no-op (returns false, appends nothing) when no canvas exists and no URLs are
+ * supplied. `urls` is a test seam — production callers omit it and the icon is painted from the canvas.
+ */
+export function installSailboatMenuIcons(doc?: Document, urls?: ReadonlyMap<string, string>): boolean {
+  const d = doc ?? (globalThis as { document?: Document }).document;
+  if (!d) return false;
+  const resolved = new Map<string, string>();
+  for (const key of SAILBOAT_MENU_ICON_KEYS) {
+    const u = urls?.get(key) ?? sailboatMenuIconDataUrl(key, d);
+    if (u) resolved.set(key, u);
+  }
+  if (resolved.size === 0) return false;
+  const css = sailboatMenuIconsCss(resolved);
+  let style = d.getElementById("task479-menu-icons") as HTMLStyleElement | null;
+  if (!style) { style = d.createElement("style"); style.id = "task479-menu-icons"; d.head.appendChild(style); }
   style.textContent = css;
   return true;
 }

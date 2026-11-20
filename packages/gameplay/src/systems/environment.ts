@@ -10,8 +10,8 @@
  * WeatherKind values are stable (renderer contract): 0 Clear, 1 Rain, 2 Storm, 3 Snow, 4 Fog, 5 Overcast, 6 Heat, 7 Blizzard, 8 Windy.
  *  - seasons (ADR-239): core Season on the environment; season weather tables + seasonal temperature live here.
  */
-import { addModifier, dayNoise, entityIndex, ModOp, Season, seasonFromDays, timeOfDay, sunFractionOf, Transform, Weather, type Entity, type SeasonInfo, type TimeOfDayInfo, type World } from "@engine/core";
-import { ClimateRes, climateAt, EmitterIndexRes, type BaseClimate, type ClimateContext, type ClimateModel, type ClimateSample } from "@engine/world";
+import { addModifier, dayNoise, entityIndex, evaluate, ModOp, Season, seasonFromDays, timeOfDay, sunFractionOf, Transform, Weather, type Entity, type SeasonInfo, type TimeOfDayInfo, type World } from "@engine/core";
+import { CHUNK_SIZE, ClimateRes, climateAt, EmitterIndexRes, isWaterId, type BaseClimate, type ClimateContext, type ClimateModel, type ClimateSample } from "@engine/world";
 import { Buffs, ChunkSurface, Exposure, Inventory, RoomHeat, Stat, Wetness } from "../components.js";
 import { fillContainer } from "../food.js";
 import { listSlots } from "../inventory.js";
@@ -23,8 +23,10 @@ import { shelterAt, roomOpennessAt, type Shelter } from "../building/shelter.js"
 import { waterproofOf } from "../combat/arms.js";
 import { dryWetness } from "../exposure-stages.js";
 import { inWater } from "./movement.js";
-import { FREEZING_C } from "../frozen.js"; // ADR-450: the constant lives in frozen.ts (cycle-free home)
+import { FREEZING_C, isWaterFrozen } from "../frozen.js"; // ADR-450: the constant lives in frozen.ts (cycle-free home)
+import { TerrainRes, snowRemainder } from "../world.js"; // ADR-466: snow remainder + chunk-centre water check
 import { isUnderground, TERRAIN } from "../terrain_depth.js";
+import { wellDryCheck } from "../wells.js"; // ADR-471: well dry-drain on dry-day boundaries
 
 export const EXPOSURE_EVERY = 4;
 export const SURFACE_EVERY = 20;
@@ -87,6 +89,7 @@ export function seasonalWeatherDef(env: EnvironmentTuning, si: SeasonInfo, kind:
  */
 export function weatherSystem(world: World, dt: number): void {
   if (!isAuthority(world) || world.isReplaying) return;
+  wellDryCheck(world); // ADR-471: wells drain on dry-day boundaries — a few integer comparisons per tick
   const w = world.env(Weather);
   const env = gameplayDefs(world).environment;
   const time = timeOfDay(world, world.tick + 1);
@@ -342,16 +345,25 @@ export function exposureSystem(world: World, dt: number): void {
     if (inWater(world, x, y)) wet += WATER_WET_PER_SEC * dt;
     // ADR-312: rain / snow wets in proportion to rain exposure (a roof overhead blocks most of it).
     else if (wdef.wetnessPerSec > 0 && sh.rain > 0) wet += wdef.wetnessPerSec * w.intensity * sh.rain * (1 - waterproofOf(world, e)) * dt;
-    else wet = dryWetness(wet, dt, env.dryPerSec * (heat > 0 ? env.heatDryMul : 1));
+    // ADR-465: wind dries you too when you are unsheltered from it (sh.wind > 0) — same shape as the
+    // ground wind-drying in chunkSurfaceSystem (surface.windDryMul), so a windy day dries wet clothes.
+    else wet = dryWetness(wet, dt, env.dryPerSec * (heat > 0 ? env.heatDryMul : 1) * (sh.wind > 0 ? 1 + env.surface.windDryMul * w.windSpeed / env.surface.windDryRefSpeed : 1));
     wet = Math.min(1, Math.max(0, wet));
     const ambient = isUnderground(world, x, y) ? TERRAIN.undergroundTempC : ambient0 ?? ambientTemperature(world, x, y); // ADR-263
     // Task 23: clothing insulation pulls felt toward the comfort band — it warms in the cold and shades in the heat
     // (a fur coat no longer cooks its wearer in a heat wave); higher tiers insulate more (items.json).
     // Task 31: wet clothing insulates less (effectiveInsulation); all worn insulation contributes continuously.
     const ins = ex.data.insulation[s]!;
-    const insShift = ambient > vt.comfortMax ? -effectiveInsulation(ins, wet) : ambient < vt.comfortMin ? effectiveInsulation(ins, wet) : 0;
+    // ADR-472 (fixes the ADR-458 wiring gap): the hot-meal Insulation buff is a Buffs modifier — it
+    // was written at eat time but never evaluated anywhere, so hot meals did nothing in live play.
+    // Evaluate it into the worn-gear insulation here, so a hot meal actually warms the eater.
+    const insWithBuffs = evaluate(world, e, Buffs, Stat.Insulation, ins);
+    const insShift = ambient > vt.comfortMax ? -effectiveInsulation(insWithBuffs, wet) : ambient < vt.comfortMin ? effectiveInsulation(insWithBuffs, wet) : 0;
     let felt = ambient + insShift + shelterTempShift(sh, ambient, vt, env.shelterTempBonus)
-      - env.wetChill * wet - env.windChillPerSpeed * Math.sqrt(Math.max(0, w.windSpeed)) * sh.wind; // ADR-312: walls block the wind
+      - env.wetChill * wet - env.windChillPerSpeed * Math.sqrt(Math.max(0, w.windSpeed)) * sh.wind // ADR-312: walls block the wind
+      // ADR-472: wet x wind synergy — soaked in a gale loses extra heat on top of the additive wet
+      // and wind terms (windWetSynergyMul of the wind term again, scaled by wetness; walls block it too).
+      - env.windChillPerSpeed * Math.sqrt(Math.max(0, w.windSpeed)) * wet * env.windWetSynergyMul * sh.wind;
     // Fully enclosed + roofed: protected from the elements and from death by them — felt never leaves the comfort
     // band, except for the room's own fire heat on top (a sealed room with a roaring fire can still overheat).
     if (enclosed) felt = Math.min(vt.comfortMax, Math.max(vt.comfortMin, felt)) + roomHeat;
@@ -406,7 +418,7 @@ function setMul(world: World, e: Entity, stat: Stat, value: number, expiresAtTic
   addModifier(world, e, Buffs, { stat, op: ModOp.Mul, value, expiresAtTick });
 }
 
-/** Per-chunk surface wetness 0..1 (u8), authority, every SURFACE_EVERY ticks. */
+/** Per-chunk surface wetness 0..1 (u8) and snow depth 0..255 (u8), authority, every SURFACE_EVERY ticks. */
 export function chunkSurfaceSystem(world: World, dt: number): void {
   if (!isAuthority(world)) return;
   const env = gameplayDefs(world).environment; const w = world.env(Weather);
@@ -415,12 +427,55 @@ export function chunkSurfaceSystem(world: World, dt: number): void {
   const rain = isRaining(w.kind) ? env.surface.rainPerSec * w.intensity : 0;
   const dry = env.surface.dryPerSec * (1 + env.surface.windDryMul * w.windSpeed + env.surface.sunDryMul * sun);
   const delta = (rain - (rain > 0 ? 0 : dry)) * dt;
-  if (delta === 0) return;
+  // ADR-466: snow piles up while it snows and melts when the seasonal base temperature is above
+  // freezing — frozen ground holds its snow, so there is no melt while the waters are frozen.
+  // Snow and melt are mutually exclusive in practice (snow only rolls below freezing), but the
+  // code nets them. Both rates are far below one u8 unit per pass, so the fraction is carried in
+  // the runtime-only snow remainder (world.ts) and only whole units reach the component.
+  const snowRate = isSnowing(w.kind) ? env.surface.snowPerSec * w.intensity * dt : 0;
+  const time = timeOfDay(world);
+  const melting = seasonalBaseTemp(env, worldSeason(world, env, time), time) > FREEZING_C && !isWaterFrozen(world);
+  const meltRate = melting ? env.surface.meltPerSec * dt : 0;
+  if (delta === 0 && snowRate === 0 && meltRate === 0) return;
   const st = world.store(ChunkSurface);
+  const rem = snowRemainder(world);
+  const terrain = world.getResource(TerrainRes);
   for (let k = 0; k < st.size; k++) {
+    const e = st.dense[k]!;
+    // --- snow depth (ADR-466) ---
+    let wetWhole = 0; // whole wetness units released by meltwater this pass
+    if (snowRate > 0 || meltRate > 0) {
+      const r = rem.get(e) ?? { snow: 0, wet: 0 };
+      // Snow does not accumulate on chunks whose centre is water (a lake chunk stays a lake);
+      // without a terrain there is nothing to check, so snow falls (the test-world case).
+      const cx = st.data.cx[k]!, cy = st.data.cy[k]!;
+      const centreWater = terrain ? isWaterId(terrain.tileAt(cx * CHUNK_SIZE + CHUNK_SIZE / 2, cy * CHUNK_SIZE + CHUNK_SIZE / 2)) : false;
+      const before = st.data.snow[k]! + r.snow;
+      let total = before;
+      if (snowRate > 0 && !centreWater) total += snowRate;
+      if (meltRate > 0 && total > 0) total -= meltRate;
+      const clamped = Math.max(0, Math.min(255, total));
+      const next = Math.floor(clamped + 1e-9); // epsilon: float error must not flip the floor at exact integers
+      const melted = Math.max(0, before - clamped); // the actual snow decrease this pass (float)
+      r.snow = Math.max(0, clamped - next); // [0, 1); 0 when clamped at either end (excess / loss discarded)
+      r.wet += melted * env.surface.meltWetMul;
+      wetWhole = Math.floor(r.wet);
+      r.wet -= wetWhole;
+      if (next !== st.data.snow[k]) { st.data.snow[k] = next; st.markChanged(entityIndex(e)); }
+      if (r.snow > 0 || r.wet > 0) rem.set(e, r); else rem.delete(e);
+    }
+    // --- wetness (existing rain/dry) ---
     const cur = st.data.wetness[k]! / 255; const next = Math.round(Math.min(1, Math.max(0, cur + delta)) * 255);
     // sub-step accumulation: u8 resolution is 1/255; guarantee progress on slow drying
     const v = next === st.data.wetness[k] && delta !== 0 ? Math.min(255, Math.max(0, next + Math.sign(delta) * (Math.abs(delta) * 255 >= 0.5 ? 1 : 0))) : next;
-    if (v !== st.data.wetness[k]) { st.data.wetness[k] = v; st.markChanged(entityIndex(st.dense[k]!)); }
+    if (v !== st.data.wetness[k]) { st.data.wetness[k] = v; st.markChanged(entityIndex(e)); }
+    // --- meltwater (ADR-466): released wetness units are a separate write, so the same pass's
+    // drying cannot eat them — a melted drift leaves the ground damp (spring mud season) ---
+    if (wetWhole > 0) {
+      const nv = Math.min(255, st.data.wetness[k]! + wetWhole);
+      if (nv !== st.data.wetness[k]) { st.data.wetness[k] = nv; st.markChanged(entityIndex(e)); }
+    }
   }
+  // prune remainders whose surface is gone (despawnChunkSurface deletes the primary entry)
+  if (rem.size > st.size) { const live = new Set(st.dense.slice(0, st.size)); for (const key of rem.keys()) if (!live.has(key)) rem.delete(key); }
 }

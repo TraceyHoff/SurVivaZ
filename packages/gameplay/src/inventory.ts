@@ -165,6 +165,18 @@ export function countItem(world: World, e: Entity, item: number): number {
   const L = liveSlotCount(world, e); if (!L) throw new Error("entity has no Inventory or Container");
   const st = world.store(L.def); let c = 0; for (let i = 0; i < L.n; i++) if (st.readElement(L.idx, "items", i) === item) c += st.readElement(L.idx, "counts", i) ?? 0; return c; // ADR-212: no copy
 }
+/** ADR-474: count of usable copies of an item. A broken tool / weapon (durability 0) does not count — the bot
+ *  planner / hand-craft must treat a broken tool as absent, or it never crafts a replacement (countItem counts
+ *  the broken copy as "having" the tool, so GOAL_CRAFTS skips it and the hand filter drops its recipe).
+ *  Non-durable items count in full. */
+export function countUsableItem(world: World, e: Entity, item: number): number {
+  let v: ScratchSlots; try { v = readSlots(world, e); } catch { return 0; }
+  const d = gameplayDefs(world).items.get(item);
+  const durable = !!(d && (d.tool || d.weapon) && (d.maxDurability ?? 0) > 0);
+  let c = 0;
+  for (let i = 0; i < v.slotCount; i++) { if (v.item(i) !== item || !v.count(i)) continue; if (durable && v.durability(i) <= 0) continue; c += v.count(i); }
+  return c;
+}
 export function canAddItem(world: World, e: Entity, item: number, count: number): number {
   return slotsCanAdd(readSlots(world, e), item, count, gameplayDefs(world));
 }
@@ -214,6 +226,41 @@ export function slotItem(world: World, e: Entity, slot: number): { item: number;
   if (slot < 0 || slot >= L.n) return { item: 0, count: 0 };
   const st = world.store(L.def); const item = st.readElement(L.idx, "items", slot) ?? 0;
   return { item, count: item ? st.readElement(L.idx, "counts", slot) ?? 0 : 0 };
+}
+/** ADR-474: durability left in a slot (0 for a non-durable item or an empty slot). Reads the live store — no copy. */
+export function slotDurability(world: World, e: Entity, slot: number): number {
+  const L = liveSlotCount(world, e); if (!L) return 0;
+  if (slot < 0 || slot >= L.n) return 0;
+  return world.store(L.def).readElement(L.idx, "durability", slot) ?? 0;
+}
+/** ADR-474: the slot holds a durable tool / weapon whose durability has reached 0 — broken, unusable until repaired,
+ *  but it stays in the bag (Tracey: broken tools never vanish, never become a loot bag). */
+export function isBrokenSlot(world: World, e: Entity, slot: number, defs: GameDefs): boolean {
+  if (!hasSlots(world, e)) return false;
+  const item = slotItem(world, e, slot).item; if (!item) return false;
+  const max = defs.items.get(item)?.maxDurability ?? 0;
+  return max > 0 && slotDurability(world, e, slot) <= 0;
+}
+/** ADR-474: the slot holds a durable tool / weapon below 25 % durability — dull (one tier lower for the gather bonus only). */
+export function isDullSlot(world: World, e: Entity, slot: number, defs: GameDefs): boolean {
+  if (!hasSlots(world, e)) return false;
+  const item = slotItem(world, e, slot).item; if (!item) return false;
+  const max = defs.items.get(item)?.maxDurability ?? 0; if (max <= 0) return false;
+  const d = slotDurability(world, e, slot);
+  return d > 0 && d < max * 0.25;
+}
+/** ADR-474: tool / weapon wear — one durability per successful gather swing / landed melee hit. Returns the new
+ *  durability, or undefined when the slot holds no durable item (fists, a non-durable item, no inventory). At 0 the
+ *  item is broken but stays in the slot; repair restores it to full (see item_repair.ts). */
+export function wearDurability(world: World, e: Entity, slot: number, defs: GameDefs, uses = 1): number | undefined {
+  let v: ScratchSlots; try { v = readSlots(world, e); } catch { return undefined; }
+  if (slot < 0 || slot >= v.slotCount) return undefined;
+  const item = v.item(slot); if (!item || !v.count(slot)) return undefined;
+  const max = defs.items.get(item)?.maxDurability ?? 0; if (max <= 0) return undefined;
+  const next = Math.max(0, v.durability(slot) - uses);
+  v.put(slot, item, v.count(slot), v.created(slot), next, v.crafter(slot));
+  writeSlots(world, e, v, defs);
+  return next;
 }
 /** Removes one unit from a specific slot. */
 export function takeFromSlot(world: World, e: Entity, slot: number): number {

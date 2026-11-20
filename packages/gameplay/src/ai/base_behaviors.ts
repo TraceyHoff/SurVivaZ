@@ -19,6 +19,7 @@ import { installSpatialIndex } from "@engine/world";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
 import { Animal, AttachKind, BotHome, BuildPiece, Container, Dead, Fuel, LootBag, NO_SLOT, ResourceNode, StanceMode, Survival, Viewing, Worker, Worn } from "../components.js";
 import { canUseBaseStorage } from "../building/actions.js";
+import { hasOwnClaim } from "../building/place.js"; // ADR-203 gate fix: warmOption's campfire-materials clause needs a claim check
 import { resolveAttachment } from "../building/links.js";
 import { countItem, hasBrushInHotbar, readSlots, slotFreshness } from "../inventory.js";
 import { spoilStageIndex, spoilStages } from "../food.js";
@@ -586,7 +587,16 @@ function warmOption(c: Ctx): boolean {
   for (const f of [st, vf]) if (f && near(f.x, f.y) && (f.lit || woodN > 0 || sbWood > 0)) return true;
   if (camp && near(camp.x, camp.y) && woodN > 0) return true;
   const b = c.world.base; if (b && c.world.bs?.complete && near(b.x, b.y)) return true;
-  return woodN >= 7 && (c.world.stoneTotal ?? 0) >= 4;
+  // ADR-203 gate fix: campfire materials are only a warm option when the bot can actually build
+  // the campfire — a campfire is a base piece that needs a Claim Flag covering the spot (ADR-310),
+  // so without a claim warmRun's build fails NeedClaim every time. A soaked bot with materials
+  // but no claim would otherwise stand in warm_up retrying a doomed build (and never gather for
+  // its totem, which is the actual prerequisite for a fire) instead of gathering / building.
+  // The build spot is 1.2 tiles east of the bot, where warmRun places the campfire.
+  if (woodN < 7 || (c.world.stoneTotal ?? 0) < 4) return false;
+  const wd = worldOf(c); const self = c.bb.get<Entity>("selfEntity");
+  if (!wd || !self) return true; // claim state unknown (no bound world / entity): keep the old behaviour
+  return hasOwnClaim(wd, self, c.self.x + 1.2, c.self.y);
 }
 function warmRun(c: Ctx, o: { moveX: number; moveY: number; aimX: number; aimY: number; actions: string[] }): boolean | void {
   if (!c.bb.get("warming")) return false;

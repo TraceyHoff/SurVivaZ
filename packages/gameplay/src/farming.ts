@@ -22,6 +22,7 @@ import { surfaceTemperature } from "./systems/environment.js";
 import { isRaining } from "./realism.js";
 import { isUnderground } from "./terrain_depth.js";
 import { lightAt } from "./systems/lights.js";
+import { swapChunkNode } from "./world.js"; // ADR-469: a wild sapling's matured node inherits its chunk tracking
 
 export type PlantType = "crop" | "bush" | "tree";
 export interface Plantable { seed: string; key: string; type: PlantType; growSeconds: number; stages: number; becomes: string; tiles: number[];
@@ -32,6 +33,11 @@ export const FARMING: FarmingData = raw as unknown as FarmingData;
 export const FARM_TOOL = { hoe: "hoe", wateringCan: "watering_can", fertilizer: "fertilizer", dungFertilizer: "dung_fertilizer" } as const;
 /** Crop.kind -> plantable (kind 0 = tilled soil). */
 export const plantableOf = (kind: number): Plantable | undefined => (kind > 0 ? FARMING.plantables[kind - 1] : undefined);
+/** ADR-469: the sapling plantable kind (1-based) a wild tree of this resource key regrows through, or 0 when
+ *  the species has no sapling (generic `tree`, `resin_tree` — those keep instant regrow in respawnSystem). */
+export function wildSaplingKind(becomes: string): number {
+  return FARMING.plantables.findIndex((p) => p.type === "tree" && p.becomes === becomes) + 1;
+}
 export const plantableBySeed = (seed: string): number => FARMING.plantables.findIndex((p) => p.seed === seed) + 1;
 /** ADR-247: resource node keys allowed to yield `p.seed`: its wild nodes, its `becomes` node and crop_<key>. */
 export function seedSourceNodes(p: Plantable): Set<string> { return new Set([...p.wild, p.becomes, `crop_${p.key}`]); }
@@ -276,6 +282,9 @@ export function cropGrowthSystem(world: World): void {
     const growth = Math.min(1, c.growth + (dt / p.growSeconds) * mul);
     if (growth >= 1) { const targetId = world.getField(e, WorkerTarget, "id");
       world.destroy(e); const node = spawnResourceNode(world, p.becomes, tf.x, tf.y);
+      // ADR-469: a wild sapling's matured node inherits its chunk tracking (swapChunkNode is a no-op for a
+      // planted sapling, which is in no chunk list) — the chunk lifecycle stays the same as for a regrown node.
+      swapChunkNode(world, e, node);
       world.add(node, GrownPlant, { kind: c.kind, waterUntilTick: wut, fertilizerUntilTick: fertilized ? fertilizerUntilTick : 0 });
       if (targetId) world.add(node, WorkerTarget, { id: targetId }); // a selected plot stays selected through maturity
       continue; }

@@ -54,7 +54,7 @@
  * (eat / copen / cdeposit / cwithdraw / cclose) is one a human client already sends; the
  * server re-validates reach, privilege and capacity as for players.
  */
-import { Transform, fnv1a, type Agent, type AgentContext, type Entity, type World } from "@engine/core";
+import { PlayerId, Transform, fnv1a, type Agent, type AgentContext, type Entity, type World } from "@engine/core";
 import { Survival } from "../components.js";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
 import { GameplayConfig } from "../config.js";
@@ -67,6 +67,7 @@ import { mayTakeFromStorageAt, nearbyStorage, storageDepositActions, storageWith
 import { canUseBaseStorage } from "../building/actions.js";
 import { resolveAttachment } from "../building/links.js";
 import { AttachKind } from "../components.js";
+import { affinityOf, SOCIAL_AFFINITY } from "./social_memory.js";
 
 export const MEAL = {
   /** Hunger (0..1) below which a meal pends at any non-night phase. */
@@ -244,6 +245,16 @@ export function fillSharedMealSensors(world: World, self: Entity, view: AgentWor
     delete view.sharedMeal; return;
   }
   // Guard 4: share only the surplus above KEEP_BAG, of the most-surplus ready food.
+  // ADR-478: a bot shares its surplus with the meal's shared store — unless every mate at the meal is
+  // someone it holds a grudge against (affinity < grudgeBelow), in which case it keeps its surplus. The
+  // store is communal (no per-recipient queue), so "friends first" is expressed as sharing whenever at
+  // least one mate is not a grudge; a single grudge never vetoes sharing with the friends present. A
+  // mate whose entity has no PlayerId counts as a stranger (affinity 0), never a grudge.
+  const matePids: number[] = [];
+  for (const m of [...(view.clanMembers ?? []), ...(view.partyMates ?? [])]) {
+    const pid = world.getField(m.id as Entity, PlayerId, "id") ?? 0; if (pid > 0) matePids.push(pid);
+  }
+  const allGrudged = matePids.length > 0 && matePids.every((pid) => affinityOf(agent, pid) < SOCIAL_AFFINITY.grudgeBelow);
   let deposit: SharedMeal["deposit"];
   {
     let pick: { item: number; surplus: number } | undefined;
@@ -252,7 +263,7 @@ export function fillSharedMealSensors(world: World, self: Entity, view: AgentWor
       const surplus = count - MEAL.keepBag;
       if (!pick || surplus > pick.surplus) pick = { item, surplus };
     }
-    if (pick) {
+    if (pick && !allGrudged) {
       const box = depositStore(world, self, view, fire);
       if (box) deposit = { piece: box.piece, x: box.x, y: box.y, item: pick.item, count: pick.surplus };
     }
