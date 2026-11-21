@@ -51,7 +51,7 @@ export interface CharacterPreviewOptions {
   anim?: PreviewAnimName | undefined;
   /** custom binding (default: core Appearance + resolveLayers over registry.cosmetics) */ binding?: AppearanceBinding;
   /** backdrop colour (CSS hex); only used when `transparent` is false */ backdrop?: string;
-  /** Transparent canvas (default true): no opaque clear, so the page behind (Art's ui/creator/preview_bg) shows through. */
+  /** Transparent canvas (default true): no opaque clear, so the page behind (the creator panel) shows through. */
   transparent?: boolean;
   /** degrees per drag step (pixels per 45 deg facing step), default 48 */ dragStepPx?: number;
   pollGamepad?: boolean;

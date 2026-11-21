@@ -11759,3 +11759,50 @@ python string containing backticks was executed as command substitution) and fix
 script. `collectFootprintOverlays`'s signature changed to `{ boot, track? }`, so the 3
 `collectFootprintOverlays(store, 42, …)` calls in the ADR-455 test were updated to `{ boot: 42 }`.
 `view.ts:948` needed a conditional spread for the optional `track` arg (`exactOptionalPropertyTypes`).
+
+## ADR-502: Character creator without the preview background or Face colour row (SurVivaZ)
+
+Tracey (2026-11-20 ~22:34 CST): the character display in the character creation screen should show
+just the character, no background image; and the face color option should go. She then clarified
+(~22:43 CST): "Leave the hair color and build the rest" — the Hair colour row stays untouched.
+
+The preview background was three layers, and which one showed depended on the preview phase: the host
+div's solid tan (`#EAD9B8`) plus the CSS `preview_bg.png`/`@2x` image (160×200, feet at 80,172), and
+the Canvas2D canvas painting the tan opaque in auto mode (`preview2d.ts:89` fills when `backdrop` is
+truthy; the creator only passed `""` in explicit `canvas2d` mode). The WebGL2 canvas is transparent by
+default, so the `backdrop` it received was inert there. Removal: the host cssText loses its
+`background:#EAD9B8` and the whole `artBase` background-image block; `createPreviewDriver` loses its
+`backdrop` parameter (buildGl/build2d no longer forward it — `preview.ts`/`preview2d.ts` are unchanged,
+`backdrop` is optional there); the now-unused `PREVIEW_BG` is removed. The doll now sits on the panel
+cream `#FFF3DC`, not on a transparent void — the dialog panel behind the host is opaque. The ground/blob
+shadows under the feet stay (part of the doll, not the background), the rotate/randomize icons still use
+`artBase`, and `main.ts` call sites are unchanged.
+
+"Face colour" is the beard/brows primary row (`row("Face colour", "face:color")`). Only that row is
+removed; the Hair colour row, the Face / beard piece row, and the Face secondary colour row all stay.
+Option A from the scope (keep the rolled natural value): `randomLook`/`stepLook` are untouched, so the
+beard colour is still rolled from natural colours only (Task 271 guard) and is simply no longer
+choosable at creation — it stays changeable in-game at the wardrobe (full hair palette). The Task 25
+independence tests are untouched. Stored characters are unaffected: `loadCharacter` validates only `v`,
+name, and `parts` length; `primary[]` persists untouched, and the server clamps out-of-range primaries.
+
+**PNGs left on disk unused — the snapshot push route cannot express file deletions.** The
+`push_files` schema is `files[] {path, content}` with content required and no deletion field, so
+`assets/ui/creator/preview_bg.png` (41,482 B) and `preview_bg@2x.png` (116,194 B) stay in the tree
+unreferenced; nothing loads them anymore. Removing them (~157 KB dead weight) is a follow-up for a
+route that can express deletions. Do not claim they are deleted.
+
+**Verification.** `apps/client/test/creator_starters.test.ts` ADR-115 background test rewritten to
+assert the opposite (no `dataset["bg"]`, no `backgroundImage`, no host `background`) while the three
+icon buttons keep their aria-labels and @2x srcsets; `apps/client/test/creator_face_colour_271.test.ts`
+row-existence test deleted and replaced with an ADR-502 absence test (no `creator-face:color` value or
+step buttons; Hair colour row and Face / beard piece row still present), roll test kept (2000 seeds,
+natural colours only). Revert checks: both updated test files fail on pre-change code (see REPORT.md).
+Two stale comments updated (`packages/render/src/character/preview.ts`, `packages/render/src/IsoRenderer.ts`)
+— they described the creator's preview_bg showing through the transparent canvas.
+
+**Honest cuts.** A beard can never be dyed at creation anymore (the Face colour row was the only
+creator path to dye shades); dyes remain reachable in-game via the wardrobe. The preview has no
+background in any driver path, but the sketch fallback is only reachable with no art registry and is
+not hittable on the live build — Tracey's live play-test is the check for auto (WebGL2) and
+`?creator=2d` (Canvas2D).

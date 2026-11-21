@@ -87,7 +87,8 @@ export function slotHasColor2(cat: CosmeticCatalogLike, s: WearableSlot): boolea
 
 /** Task 271: natural hair-palette keys a random beard / brows colour is rolled from. The full hair palette has dye
  *  shades (teal, mint, sky…); a rolled teal beard covers the cheeks, mouth and chin and read as the eye colour
- *  flooding the face. Dye shades stay available on the Face colour row. */
+ *  flooding the face. ADR-502: the Face colour row is gone, so dye shades are no longer reachable at creation —
+ *  they stay reachable in-game at the wardrobe (full hair palette). */
 export const FACE_NATURAL_COLOR_KEYS: readonly string[] = ["black", "espresso", "chestnut", "auburn", "ginger", "strawberry", "honey_blonde", "platinum", "ash", "silver"];
 export const naturalFaceColors = (cat: CosmeticCatalogLike): number[] => FACE_NATURAL_COLOR_KEYS.map((k) => cat.hairColors.findIndex((c) => c.key === k)).filter((i) => i >= 0);
 /** Uniform random starter look (Randomize); `rnd` is injectable for tests. */
@@ -180,13 +181,11 @@ export interface CreatorOptions {
   /** Gamepad poll (tests pass a stub); default navigator.getGamepads. */ pads?: () => readonly (Gamepad | null)[];
   /** Real sprite preview (the loaded art registry + atlas sources). mode: auto = WebGL2 then Canvas2D; "canvas2d" forces 2D. */
   preview?: CreatorPreviewSource | undefined;
-  /** ADR-115: Art's creator UI folder (`<base>art/ui/creator/`): preview_bg + ic_randomize / ic_rotate_left / ic_rotate_right (1x + @2x). Text glyphs when absent. */
+  /** ADR-115: Art's creator UI folder (`<base>art/ui/creator/`): ic_randomize / ic_rotate_left / ic_rotate_right (1x + @2x). Text glyphs when absent. ADR-502: preview_bg is no longer used — the preview has no background. */
   artBase?: string | undefined;
   /** Screenshot mode (?creator=shot): no auto-turn / animation clock, fixed facing; onReady fires once the preview has drawn. */
   shot?: { facing?: number; /** pixel-stable WebGL2 frames (frozen clock, DPR 1) */ freeze?: boolean; onStage?: (stage: string) => void; onReady: (info: { renderer: PreviewDriver["kind"] }) => void } | undefined;
 }
-/** preview_bg.png is 160x200 with the character's feet at (80,172); centred in the PREVIEW_CSS host. */
-export const PREVIEW_BG = { w: 160, h: 200, feetX: 80, feetY: 172 } as const;
 /** Glyph-only icon button art (like ic_menu_*): 40px + @2x; falls back to the text glyph on error. */
 function iconInto(b: HTMLButtonElement, base: string | undefined, name: string, label: string): void {
   b.setAttribute("aria-label", label); b.title = label; if (!base) return;
@@ -213,14 +212,14 @@ export const PREVIEW_CSS = { w: 168, h: 216 } as const;
  * deterministic GL frames. WebGL2 (render package) -> Canvas2D sheets -> undefined (caller keeps the sketch).
  * Mounts into `host`.
  */
-export async function createPreviewDriver(host: HTMLElement, src: CreatorPreviewSource, look: AppearanceValue, facing: number, backdrop = "#EAD9B8", freeze = false): Promise<PreviewDriver | undefined> {
+export async function createPreviewDriver(host: HTMLElement, src: CreatorPreviewSource, look: AppearanceValue, facing: number, freeze = false): Promise<PreviewDriver | undefined> {
   const doc = host.ownerDocument; const dpr = freeze ? 1 : Math.min(3, doc.defaultView?.devicePixelRatio || 1); const cat = src.registry.cosmetics as unknown as CosmeticCatalogLike | undefined;
   // The WebGL2 driver. The canvas is created detached and only appended once the preview is ready, so a slow
   // (background) build never covers the 2D preview — or the sketch — with a blank canvas.
   const buildGl = async (): Promise<PreviewDriver | undefined> => {
     const cv = doc.createElement("canvas"); cv.dataset["role"] = "creator-preview"; cv.dataset["renderer"] = "webgl2"; cv.style.cssText = `width:${PREVIEW_CSS.w}px;height:${PREVIEW_CSS.h}px;border-radius:12px;display:block`;
     try {
-      const pv: CharacterPreview = await (src.createGl ?? createCharacterPreview)(cv, { registry: src.registry, ...(cat && charArt() !== "v1" ? { binding: withCharArt(coreAppearanceBinding(cat), charArt(), src.registry.ids.sprites) } : {}), sources: new Map(src.sources), appearance: look, facing, anim: "idle", backdrop, pollGamepad: false, ...(freeze ? { freeze: true } : {}) });
+      const pv: CharacterPreview = await (src.createGl ?? createCharacterPreview)(cv, { registry: src.registry, ...(cat && charArt() !== "v1" ? { binding: withCharArt(coreAppearanceBinding(cat), charArt(), src.registry.ids.sprites) } : {}), sources: new Map(src.sources), appearance: look, facing, anim: "idle", pollGamepad: false, ...(freeze ? { freeze: true } : {}) });
       pv.resize(PREVIEW_CSS.w, PREVIEW_CSS.h, dpr);
       host.append(cv);
       return { kind: "webgl2", set: (a) => { void pv.setAppearance(a); }, facing: (k) => pv.setFacing(k), frame: () => undefined, dispose: () => { pv.dispose(); cv.remove(); } };
@@ -231,7 +230,7 @@ export async function createPreviewDriver(host: HTMLElement, src: CreatorPreview
     if (!cat) return undefined;
     const cv = doc.createElement("canvas"); cv.dataset["role"] = "creator-preview"; cv.dataset["renderer"] = "canvas2d"; cv.style.cssText = "border-radius:12px;display:block;image-rendering:pixelated;touch-action:none";
     try {
-      const o = { registry: src.registry, binding: charArt() === "v1" ? coreAppearanceBinding(cat) : withCharArt(coreAppearanceBinding(cat), charArt(), src.registry.ids.sprites), appearance: look, sources: src.sources, facing, backdrop };
+      const o = { registry: src.registry, binding: charArt() === "v1" ? coreAppearanceBinding(cat) : withCharArt(coreAppearanceBinding(cat), charArt(), src.registry.ids.sprites), appearance: look, sources: src.sources, facing };
       const pv = src.create2d ? src.create2d(cv, o) : new CharacterPreview2D(cv, o); pv.resize(PREVIEW_CSS.w, PREVIEW_CSS.h, dpr); host.append(cv);
       let cur = look; const loaded = pv.setAppearance(look);
       return { kind: "canvas2d", loaded, set: (a) => { cur = a; void pv.setAppearance(cur); }, facing: (k) => pv.setFacing(k), frame: (t) => pv.renderNow(t), dispose: () => cv.remove() };
@@ -298,10 +297,9 @@ export function showCharacterCreator(o: CreatorOptions): Promise<StoredCharacter
   const h = doc.createElement("h2"); h.textContent = o.title ?? (o.initial ? "Edit character" : "Create your character"); h.style.cssText = "flex:1 1 100%;margin:0";
   const left = doc.createElement("div"); left.style.cssText = "flex:1 1 220px;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px";
   // preview host: sketch canvas until the sprite preview (WebGL2 / Canvas2D) is up; drag on it turns the character
-  const host = doc.createElement("div"); host.dataset["role"] = "creator-preview-host"; host.style.cssText = `position:relative;width:${PREVIEW_CSS.w}px;height:${PREVIEW_CSS.h}px;background:#EAD9B8;border-radius:12px;touch-action:none;user-select:none`;
-  if (o.artBase) { const b = o.artBase; host.dataset["bg"] = "preview_bg"; // 1x/2x by DPR; centred so the feet anchor sits mid-host
-    host.style.backgroundImage = `image-set(url("${b}preview_bg.png") 1x, url("${b}preview_bg@2x.png") 2x)`; if (!host.style.backgroundImage) host.style.backgroundImage = `url("${b}preview_bg.png")`;
-    host.style.backgroundSize = `${PREVIEW_BG.w}px ${PREVIEW_BG.h}px`; host.style.backgroundPosition = "center"; host.style.backgroundRepeat = "no-repeat"; }
+  // ADR-502: no background on the host — the doll sits on the panel cream (#FFF3DC). preview_bg.png/@2x are left
+  // on disk unused (the snapshot push route cannot express file deletions).
+  const host = doc.createElement("div"); host.dataset["role"] = "creator-preview-host"; host.style.cssText = `position:relative;width:${PREVIEW_CSS.w}px;height:${PREVIEW_CSS.h}px;border-radius:12px;touch-action:none;user-select:none`;
   const cv = doc.createElement("canvas"); cv.width = 160; cv.height = 200; cv.dataset["role"] = "creator-preview"; cv.dataset["renderer"] = "sketch"; cv.style.cssText = `width:${PREVIEW_CSS.w}px;height:${PREVIEW_CSS.h}px;border-radius:12px`; host.append(cv);
   let g: CanvasRenderingContext2D | null = null; try { g = cv.getContext("2d"); } catch { /* no 2D canvas (tests) */ }
   const t0 = Date.now(); const draw = (): void => { if (drv) { drv.facing(dir); drv.frame(o.shot ? 0 : (Date.now() - t0) / 1000); } else if (g && cat) drawPreview(g, cat, look, ([0, 1, 1, 2, 2, 3, 3, 0] as const)[dir]!); };
@@ -314,7 +312,7 @@ export function showCharacterCreator(o: CreatorOptions): Promise<StoredCharacter
     let done = false; const go = (): void => { if (!done) { done = true; f(); } }; win0.requestAnimationFrame(go); win0.setTimeout?.(go, 100); }; f(); });
   const stage = (s: string): void => { o.shot?.onStage?.(s); };
   const ready = (kind: PreviewDriver["kind"]): void => { if (!o.shot || disposed) return; stage(`frames:${kind}`); draw(); void frames(2).then(() => { if (!disposed) { draw(); wrap.dataset["ready"] = "1"; o.shot?.onReady({ renderer: kind }); } }); };
-  stage("preview"); if (o.preview) void createPreviewDriver(host, o.preview, look, dir, o.artBase && o.preview.mode === "canvas2d" ? "" : undefined, !!o.shot?.freeze).then(async (d) => { if (!d) { ready("sketch"); return; } if (disposed) { d.dispose(); return; } drv = d; cv.remove(); wrap.dataset["preview"] = d.kind; if (d.upgraded) void d.upgraded.then(() => { if (!disposed) wrap.dataset["preview"] = d.kind; }); if (!o.shot) d.set(look); draw(); stage(`loading:${d.kind}`); await d.loaded?.catch(() => undefined); ready(d.kind); });
+  stage("preview"); if (o.preview) void createPreviewDriver(host, o.preview, look, dir, !!o.shot?.freeze).then(async (d) => { if (!d) { ready("sketch"); return; } if (disposed) { d.dispose(); return; } drv = d; cv.remove(); wrap.dataset["preview"] = d.kind; if (d.upgraded) void d.upgraded.then(() => { if (!disposed) wrap.dataset["preview"] = d.kind; }); if (!o.shot) d.set(look); draw(); stage(`loading:${d.kind}`); await d.loaded?.catch(() => undefined); ready(d.kind); });
   else queueMicrotask(() => ready("sketch"));
   const right = doc.createElement("div"); right.style.cssText = "flex:2 1 240px;min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr);gap:6px 8px;align-items:center";
   const mk = (t: string, act: string, fn: () => void, cls = "alt"): HTMLButtonElement => { const b = doc.createElement("button"); b.type = "button"; b.textContent = t; b.className = cls; b.dataset["action"] = act; b.style.minHeight = "44px"; b.addEventListener("click", fn); return b; };
@@ -390,7 +388,7 @@ export function showCharacterCreator(o: CreatorOptions): Promise<StoredCharacter
       b.addEventListener("click", () => { look = { ...look, skinTone: i }; refresh(); }); skinChips.push(b); grid.append(b); });
     right.append(grid); }
   const c2 = (s: WearableSlot, label: string): void => { if (cat && slotHasColor2(cat, s)) row(label, `${s}:color2`); };
-  row("Hair", "hair"); row("Hair colour", "hair:color"); c2("hair", "Hair secondary colour"); row("Face / beard", "face"); row("Face colour", "face:color"); c2("face", "Face secondary colour"); row("Eyes", "eyes");
+  row("Hair", "hair"); row("Hair colour", "hair:color"); c2("hair", "Hair secondary colour"); row("Face / beard", "face"); c2("face", "Face secondary colour"); row("Eyes", "eyes");
   row("Eye colour", "eyes:color"); c2("eyes", "Eye secondary colour");
   // Task 23: no clothing rows (top / bottom / shoes) and no shared secondary-colour row — a new survivor starts
   // with no clothes and crafts them in game. Say so plainly under the options.

@@ -25,10 +25,16 @@ describe("Task 271: rolled eye colour never reaches the face", () => {
       expect(["teal", "mint", "sky"]).not.toContain(cat.hairColors[v.primary[fi]!]!.key);
     }
   });
-  it("the creator shows a Face colour row so the beard colour is visible and changeable", async () => {
+  // ADR-502: the Face colour row is gone — the beard colour is rolled from natural colours only (see above) and is
+  // no longer choosable at creation; it stays changeable in-game at the wardrobe. The row-existence test that
+  // lived here (Task 271) was deleted with the row.
+  it("ADR-502: no Face colour row in the creator — and the Hair colour row stays (Tracey: leave the hair color)", async () => {
+    document.body.innerHTML = "";
     void showCharacterCreator({ root: document.body, catalog: cat, pads: () => [] });
-    expect(document.querySelector('[data-role="creator-face:color"]')).not.toBeNull();
-    const b = document.querySelector<HTMLButtonElement>('[data-action="next-face:color"]')!; const before = document.querySelector('[data-role="creator-face:color"]')!.textContent;
-    b.click(); expect(document.querySelector('[data-role="creator-face:color"]')!.textContent).not.toBe(before);
+    expect(document.querySelector('[data-role="creator-face:color"]')).toBeNull();
+    expect(document.querySelector('[data-action="next-face:color"]')).toBeNull();
+    expect(document.querySelector('[data-action="prev-face:color"]')).toBeNull();
+    expect(document.querySelector('[data-role="creator-hair:color"]')).not.toBeNull();
+    expect(document.querySelector('[data-role="creator-face"]')).not.toBeNull(); // the Face / beard piece row stays
   });
 });

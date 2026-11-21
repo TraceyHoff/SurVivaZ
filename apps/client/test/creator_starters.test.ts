@@ -22,9 +22,9 @@ it("ADR-115 (Task 23): clothing is NOT offered by the creator — a new survivor
     for (const k of CLOTHING_STARTERS) expect(keys.has(k), `${k} body ${b} (Task 23: no starting clothes)`).toBe(false);
     expect(free.filter((k) => !keys.has(k) && !/hair_|face_/.test(k) && !/^(top|bottom|shoes|hat|acc)_/.test(k))).toEqual([]); } // Task 23: clothing, hats and accessories are wardrobe items, not starter choices
 });
-it("ADR-115: creator uses Art preview_bg and icon buttons (aria-labelled, @2x)", () => {
+it("ADR-502: creator preview has no background — no preview_bg image, no tan fill; the icon buttons (aria-labelled, @2x) stay", () => {
   document.body.innerHTML = ""; const p = showCharacterCreator({ root: document.body, catalog: catalog(), artBase: "/art/ui/creator/", pads: () => [] } as any);
-  const host = document.querySelector<HTMLElement>('[data-role="creator-preview-host"]')!; expect(host.dataset["bg"]).toBe("preview_bg"); expect(host.style.backgroundImage).toContain("preview_bg");
+  const host = document.querySelector<HTMLElement>('[data-role="creator-preview-host"]')!; expect(host.dataset["bg"]).toBeUndefined(); expect(host.style.backgroundImage).toBe(""); expect(host.style.background).toBe("");
   for (const n of ["ic_rotate_left", "ic_rotate_right", "ic_randomize"]) { const img = document.querySelector<HTMLImageElement>(`img[data-icon="${n}"]`)!; expect(img.srcset).toContain(`${n}@2x.png 2x`);
     expect(img.closest("button")!.getAttribute("aria-label")).toMatch(/Rotate|Randomize/); }
   void p;

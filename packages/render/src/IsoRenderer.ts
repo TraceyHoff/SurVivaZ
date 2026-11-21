@@ -70,7 +70,7 @@ export interface IsoRendererOptions {
   /** Keep the drawing buffer (needed for toDataURL/readPixels screenshots). */
   preserveDrawingBuffer?: boolean;
   /** Transparent canvas (premultiplied alpha): clears to (0,0,0,0) and composites with the scene's coverage alpha, so
-   *  page content behind the canvas (e.g. the creator's preview_bg) shows through. Default false (opaque, sky clear). */
+   *  page content behind the canvas (e.g. the panel behind the creator preview) shows through. Default false (opaque, sky clear). */
   transparent?: boolean;
   style?: StylePatch;
   /** Building sprite pivot convention: footprint centre (default; art guide + @engine/assets sample) or front-most corner. */
