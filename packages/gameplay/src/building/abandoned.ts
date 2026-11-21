@@ -767,33 +767,67 @@ const LOOT_COMMON = ["wood", "stone", "nails", "cloth", "rope", "fiber", "sticks
 const LOOT_FOOD = ["apple", "potato", "blueberry", "carrot", "corn", "wild_onion", "bread", "salt", "raspberry"] as const;
 const LOOT_SEEDS = ["wheat_seeds", "carrot_seeds", "seed_potato", "corn_seeds", "onion_seeds", "berry_seeds"] as const;
 const LOOT_MED = ["bandage", "cloth", "medicated_bandage"] as const;
-const LOOT_RARE = ["torch", "stone_knife", "leg_splint", "stone_axe"] as const;
 const LOOT_CLOTHES = ["cloth", "padded_cloth", "cloth_gloves", "cloth_mask", "leather_boots", "leather_cap"] as const;
 
-function pickLoot(rand: () => number, wardrobe: boolean): { key: string; count: number } {
+/** ADR-499: rare finds — the valuables a rare roll can yield. The rare rate is unchanged (5% from a
+ * container, 12% from a wardrobe); only *what* is rare is per-kind now. A kind without an entry uses
+ * the default table. Counts are ranges: a coin stash is 5–20 coins, not a single coin. Every key is
+ * verified in items.json. The old global LOOT_RARE (torch, stone_knife, leg_splint, stone_axe) is
+ * retired: all four are early craftables, and a 5% roll should feel like a find. */
+export type RareFind = { key: string; min: number; max: number };
+const LOOT_RARE_DEFAULT: readonly RareFind[] = [
+  { key: "coin", min: 5, max: 20 }, { key: "iron_axe", min: 1, max: 1 }, { key: "iron_pickaxe", min: 1, max: 1 },
+  { key: "waterskin", min: 1, max: 1 }, { key: "canned_fish", min: 1, max: 2 },
+];
+const LOOT_RARE_BY_KIND: Readonly<Partial<Record<string, readonly RareFind[]>>> = {
+  fisher_hut: [{ key: "waterskin", min: 1, max: 1 }, { key: "canned_fish", min: 1, max: 3 }, { key: "coin", min: 5, max: 15 }],
+  granary: [{ key: "salt", min: 3, max: 8 }, { key: "coin", min: 5, max: 20 }, { key: "canned_fish", min: 1, max: 2 }],
+  smithy: [{ key: "iron_axe", min: 1, max: 1 }, { key: "iron_pickaxe", min: 1, max: 1 }, { key: "coin", min: 5, max: 15 }],
+  barracks: [{ key: "iron_axe", min: 1, max: 1 }, { key: "iron_pickaxe", min: 1, max: 1 }, { key: "coin", min: 5, max: 15 }],
+  workshop: [{ key: "iron_axe", min: 1, max: 1 }, { key: "iron_pickaxe", min: 1, max: 1 }, { key: "coin", min: 5, max: 15 }],
+  chapel: [{ key: "coin", min: 10, max: 30 }, { key: "canned_fish", min: 1, max: 2 }],
+  schoolhouse: [{ key: "coin", min: 10, max: 25 }, { key: "waterskin", min: 1, max: 1 }],
+  trading_post: [{ key: "coin", min: 10, max: 30 }, { key: "canned_fish", min: 1, max: 2 }, { key: "waterskin", min: 1, max: 1 }],
+  bakery: [{ key: "canned_fish", min: 2, max: 4 }, { key: "salt", min: 2, max: 6 }],
+  mill: [{ key: "salt", min: 3, max: 8 }, { key: "coin", min: 5, max: 15 }],
+  inn: [{ key: "coin", min: 10, max: 25 }, { key: "canned_fish", min: 1, max: 3 }],
+  apiary: [{ key: "honey", min: 2, max: 5 }, { key: "coin", min: 5, max: 15 }],
+};
+/** The rare table for a ruin kind (default when the kind has no entry). */
+export function rareFindsForKind(kind: AbandonedKindId): readonly RareFind[] {
+  return LOOT_RARE_BY_KIND[ABANDONED_KIND_KEYS[kind] ?? ""] ?? LOOT_RARE_DEFAULT;
+}
+
+function pickLoot(rand: () => number, wardrobe: boolean, rareFinds: readonly RareFind[]): { key: string; count: number } {
   const r = rand();
+  // ADR-499: the rare thresholds are unchanged (5% non-wardrobe, 12% wardrobe) — only what a rare
+  // pick yields is per-kind now (rareFinds, resolved by fillLoot from the ruin kind).
   const pool = wardrobe
-    ? (r < 0.62 ? LOOT_CLOTHES : r < 0.88 ? LOOT_COMMON : LOOT_RARE)
-    : r < 0.48 ? LOOT_COMMON : r < 0.72 ? LOOT_FOOD : r < 0.86 ? LOOT_SEEDS : r < 0.95 ? LOOT_MED : LOOT_RARE;
+    ? (r < 0.62 ? LOOT_CLOTHES : r < 0.88 ? LOOT_COMMON : undefined)
+    : r < 0.48 ? LOOT_COMMON : r < 0.72 ? LOOT_FOOD : r < 0.86 ? LOOT_SEEDS : r < 0.95 ? LOOT_MED : undefined;
+  if (pool === undefined) {
+    const find = rareFinds[(rand() * rareFinds.length) | 0]!;
+    return { key: find.key, count: find.min + ((rand() * (find.max - find.min + 1)) | 0) };
+  }
   const key = pool[(rand() * pool.length) | 0]!;
-  const rare = (LOOT_RARE as readonly string[]).includes(key);
-  return { key, count: rare ? 1 : 1 + (rand() * 4 | 0) };
+  return { key, count: 1 + (rand() * 4 | 0) };
 }
 
 /** ADR-382: roll the loot picks for one container from `rand` without placing them. */
-function rollLootPicks(rand: () => number, wardrobe: boolean): { key: string; count: number }[] {
+function rollLootPicks(rand: () => number, wardrobe: boolean, rareFinds: readonly RareFind[]): { key: string; count: number }[] {
   const n = 2 + (rand() * 4 | 0);
   const picks: { key: string; count: number }[] = [];
-  for (let i = 0; i < n; i++) picks.push(pickLoot(rand, wardrobe));
+  for (let i = 0; i < n; i++) picks.push(pickLoot(rand, wardrobe, rareFinds));
   return picks;
 }
 
-function fillLoot(world: World, piece: Entity, rand: () => number): void {
+function fillLoot(world: World, piece: Entity, rand: () => number, kind?: AbandonedKindId): void {
   const box = resolveAttachment(world, piece, AttachKind.Storage); if (!box) return;
   const defs = gameplayDefs(world);
   const type = world.getField(piece, BuildPiece, "type");
   const wardrobe = !!(type !== undefined && defs.pieces.get(type)?.features.wardrobe);
-  for (const pick of rollLootPicks(rand, wardrobe)) {
+  const rareFinds = kind === undefined ? LOOT_RARE_DEFAULT : rareFindsForKind(kind);
+  for (const pick of rollLootPicks(rand, wardrobe, rareFinds)) {
     try { addItem(world, box, defs.itemId(pick.key), pick.count); } catch { /* item renamed */ }
   }
 }
@@ -1022,7 +1056,7 @@ export function stampAbandonedSite(world: World, originX: number, originY: numbe
       if (!box) continue; // fillLoot consumed nothing for it either
       const type = world.getField(piece, BuildPiece, "type");
       const wardrobe = !!(type !== undefined && gameplayDefs(world).pieces.get(type)?.features.wardrobe);
-      rollLootPicks(lootRand, wardrobe);
+      rollLootPicks(lootRand, wardrobe, rareFindsForKind(plan.kind));
     }
   }
   queueOf(world).set(key, entry);
@@ -1049,7 +1083,7 @@ export function pumpAbandonedStamps(world: World, maxPieces: number = ABANDONED_
       const e = placeSpec(world, spec);
       if (!e) { if (spec.role === "roof") entry.retry.push(spec); continue; }
       entry.placed.push(e);
-      if (spec.role === "loot") fillLoot(world, e, entry.lootRand);
+      if (spec.role === "loot") fillLoot(world, e, entry.lootRand, entry.plan.kind);
       placedThisCall++; budget--;
     }
     // ADR-311 roof retry passes, still inside this tick's budget. A pass only counts when

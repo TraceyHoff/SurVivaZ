@@ -80,10 +80,10 @@ describe("Task 28: hay crop", () => {
     expect(d.items.get(iid("hay"))!.food).toBeFalsy();
     const crop = d.resources.get(d.resourceId("crop_hay"))!;
     expect(crop).toMatchObject({ capacity: 1, respawnSeconds: 600, oneShot: true });
-    expect(crop.yields).toEqual([{ item: iid("hay"), min: 2, max: 3, chance: 1 }, { item: iid("hay_seeds"), min: 1, max: 2, chance: 0.6 }]);
+    expect(crop.yields).toEqual([{ item: iid("hay"), min: 2, max: 3, chance: 1, seasonal: false }, { item: iid("hay_seeds"), min: 1, max: 2, chance: 0.6, seasonal: false }]); // ADR-491: YieldDef.seasonal is required (hay is not seasonal)
     const wild = d.resources.get(d.resourceId("wild_hay"))!;
     expect(wild).toMatchObject({ capacity: 2, respawnSeconds: 240 });
-    expect(wild.yields).toEqual([{ item: iid("hay"), min: 1, max: 2, chance: 1 }, { item: iid("hay_seeds"), min: 1, max: 1, chance: 0.4 }]);
+    expect(wild.yields).toEqual([{ item: iid("hay"), min: 1, max: 2, chance: 1, seasonal: false }, { item: iid("hay_seeds"), min: 1, max: 1, chance: 0.4, seasonal: false }]);
     // art: dedicated nature-pack hay sprites — no wheat reuse
     const has = (k: string): boolean =>
       k === "wild_hay" || k === "crop_hay" || k === "crop_hay_0" || k === "crop_hay_3"

@@ -83,8 +83,8 @@ describe("Task 31: rain wetting", () => {
     w.setField(near, G.Exposure, "wetness", 0.5); w.setField(far, G.Exposure, "wetness", 0.5);
     G.spawnStation(w, G.StationKind.Campfire, 1, 0); // lit by default
     steps(w, 15 * SEC);
-    expect(wetOf(w, near)).toBeLessThan(0.05); // Staged drying: 0.5 dries in ~12s at triple rate
-    expect(wetOf(w, far)).toBeGreaterThan(0.25); expect(wetOf(w, far)).toBeLessThan(0.35); // 0.02/s in the open
+    expect(wetOf(w, near)).toBeCloseTo(0.25, 1); // ADR-488: humidity halves the drying rate (0.5 at the default 50% humidity) — 0.5 dries to ~0.25 in 15 s by a fire instead of ~0; still faster than the open
+    expect(wetOf(w, far)).toBeCloseTo(0.425, 1); // ADR-488: 0.02/s in the open, halved by humidity (staged band 0.5)
   });
 });
 
@@ -150,7 +150,7 @@ describe("Task 31: cold, flu and the care cure", () => {
   });
 
   it("defs: flu is the 7th disease, worse than a cold, contagious, cured by Honey Tea", () => {
-    expect(d.diseases.map((x) => x.key)).toEqual(["food_poisoning", "dysentery", "common_cold", "heatstroke", "exhaustion", "wound_infection", "influenza", "broken_leg"]);
+    expect(d.diseases.map((x) => x.key)).toEqual(["food_poisoning", "dysentery", "common_cold", "heatstroke", "exhaustion", "wound_infection", "influenza", "broken_leg", "bleeding"]); // ADR-492: bleeding is the 9th (flu is still the 7th)
     const cold = d.diseases.find((x) => x.key === "common_cold")!;
     const flu = d.diseases.find((x) => x.key === "influenza")!;
     expect(flu.hpDps).toBeGreaterThan(cold.hpDps);

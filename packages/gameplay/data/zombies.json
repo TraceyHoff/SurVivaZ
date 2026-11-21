@@ -32,7 +32,15 @@
     "chaseLimitTiles": 20,
     "despawnDistance": 60,
     "corpseSeconds": 5,
-    "moonSightMul": 0.25
+    "moonSightMul": 0.25,
+    "sightFogMul": { "fog": 0.5, "blizzard": 0.35 },
+    "smell": {
+      "threshold": 0.25,
+      "carcass": { "radius": 8, "strength": 1 },
+      "rot": { "radius": 6, "strength": 1 },
+      "kill": { "radius": 6, "strength": 0.8 },
+      "fire": { "radius": 12, "strength": 1 }
+    }
   },
   "lightAvoid": { "phases": ["night", "dusk"], "gridCell": 8, "rebuildTicks": 10, "edgeMargin": 0.75, "paceSeconds": 3, "headlightRadius": 9, "minRadius": 2 },
   "noise": { "gather": 8, "build": 10, "attack": 9, "structureHit": 12, "door": 5, "walk": 12, "sprint": 18, "swim": 7, "decayPerSec": 0.2 }

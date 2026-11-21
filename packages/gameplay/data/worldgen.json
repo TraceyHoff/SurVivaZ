@@ -189,5 +189,6 @@
   ],
   "unwalkableTiles": [
     1
-  ]
+  ],
+  "sunkenCacheChance": 0.02
 }

@@ -175,6 +175,7 @@
   },
   "animal_rabbit": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 1,"day": 0.4,"dusk": 1},
    "hp": 10,
    "speed": 3.2,
    "perception": {
@@ -228,6 +229,7 @@
   },
   "animal_deer": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 1,"day": 0.4,"dusk": 1},
    "hp": 50,
    "speed": 3.6,
    "perception": {
@@ -315,6 +317,7 @@
     "range": 1.1,
     "cooldownSeconds": 1.4
    },
+   "oldLoot": [{ "item": "raw_prime_cut", "min": 2, "max": 3, "chance": 1 }, { "item": "fur_pelt", "min": 1, "max": 1, "chance": 1 }],
    "loot": [
     {
      "item": "raw_meat",
@@ -350,6 +353,8 @@
   },
   "animal_wolf": {
    "kind": "animal",
+   "pack": true,
+   "activity": {"night": 1,"dawn": 0.4,"day": 0.4,"dusk": 1},
    "hp": 70,
    "speed": 3.4,
    "perception": {
@@ -378,6 +383,7 @@
     "range": 1.0,
     "cooldownSeconds": 1.4
    },
+   "oldLoot": [{ "item": "raw_prime_cut", "min": 1, "max": 2, "chance": 1 }, { "item": "fur_pelt", "min": 1, "max": 1, "chance": 1 }],
    "loot": [
     {
      "item": "raw_meat",
@@ -638,6 +644,7 @@
   },
   "animal_chicken": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 8,
    "speed": 2.2,
    "perception": {
@@ -685,6 +692,7 @@
   },
   "animal_stag": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 1,"day": 0.4,"dusk": 1},
    "hp": 60,
    "speed": 3.6,
    "perception": {
@@ -750,6 +758,7 @@
   },
   "animal_red_deer": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 1,"day": 0.4,"dusk": 1},
    "hp": 50,
    "speed": 3.5,
    "perception": {
@@ -809,6 +818,7 @@
   },
   "animal_elk": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 1,"day": 0.4,"dusk": 1},
    "hp": 140,
    "speed": 3.2,
    "perception": {
@@ -878,6 +888,7 @@
   },
   "animal_moose": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 1,"day": 0.4,"dusk": 1},
    "hp": 220,
    "speed": 2.8,
    "perception": {
@@ -953,6 +964,7 @@
   },
   "animal_bear": {
    "kind": "animal",
+   "activity": {"night": 1,"dawn": 0.4,"day": 0.4,"dusk": 1},
    "hp": 260,
    "speed": 3.3,
    "perception": {
@@ -1022,6 +1034,7 @@
   },
   "animal_fox": {
    "kind": "animal",
+   "activity": {"night": 1,"dawn": 0.4,"day": 0.4,"dusk": 1},
    "hp": 25,
    "speed": 4.0,
    "perception": {
@@ -1069,6 +1082,7 @@
   },
   "animal_hare": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 1,"day": 0.4,"dusk": 1},
    "hp": 12,
    "speed": 4.4,
    "perception": {
@@ -1116,6 +1130,7 @@
   },
   "animal_squirrel": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 5,
    "speed": 3.8,
    "perception": {
@@ -1157,6 +1172,7 @@
   },
   "animal_turkey": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 18,
    "speed": 2.6,
    "perception": {
@@ -1204,6 +1220,7 @@
   },
   "animal_duck": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 8,
    "speed": 2.4,
    "perception": {
@@ -1251,6 +1268,7 @@
   },
   "animal_goose": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 14,
    "speed": 2.4,
    "perception": {
@@ -1308,6 +1326,7 @@
   },
   "animal_goat": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 40,
    "speed": 3.0,
    "perception": {
@@ -1371,6 +1390,7 @@
   },
   "animal_sheep": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 35,
    "speed": 2.4,
    "perception": {
@@ -1430,6 +1450,7 @@
   },
   "animal_cow": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 120,
    "speed": 2.0,
    "perception": {
@@ -1574,6 +1595,7 @@
   },
   "animal_snake": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 15,
    "speed": 2.2,
    "perception": {
@@ -1979,6 +2001,7 @@
   },
   "animal_parrot": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 14,
    "speed": 3.0,
    "perception": {
@@ -2024,6 +2047,7 @@
   },
   "animal_crow": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 14,
    "speed": 3.2,
    "perception": {
@@ -2114,6 +2138,7 @@
   },
   "animal_owl": {
    "kind": "animal",
+   "activity": {"night": 1,"dawn": 0.4,"day": 0.4,"dusk": 0.4},
    "hp": 14,
    "speed": 3.4,
    "perception": {
@@ -2204,6 +2229,7 @@
   },
   "animal_pig": {
    "kind": "animal",
+   "activity": {"night": 0.4,"dawn": 0.4,"day": 1,"dusk": 0.4},
    "hp": 70,
    "speed": 2.2,
    "perception": {
@@ -2528,6 +2554,7 @@
   "chaseLimitTiles": 18,
   "animalDrink": { "chance": 0.2, "radius": 12, "nearPlayerTiles": 40, "drinkSeconds": [3, 6] },
   "carrion": { "crowsPerKill": 2, "circleRadius": 2.5, "maxSeconds": 120, "nearPlayerTiles": 40 },
-  "herd": { "grazeCooldownSeconds": 30, "bareRadius": 5, "bareFrac": 0.5, "moveMinTiles": 40, "moveMaxTiles": 100 }
+  "herd": { "grazeCooldownSeconds": 30, "bareRadius": 5, "bareFrac": 0.5, "moveMinTiles": 40, "moveMaxTiles": 100 },
+  "old": { "chance": 0.02, "scaleMul": 1.25, "hpMul": 1.5, "eligible": ["animal_boar", "animal_wolf"] }
  }
 }

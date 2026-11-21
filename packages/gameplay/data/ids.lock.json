@@ -525,7 +525,8 @@
     "well_canteen": 523,
     "well_water_bottle": 524,
     "well_water_flask": 525,
-    "well_waterskin": 526
+    "well_waterskin": 526,
+    "fishing_rod": 527
   },
   "resources": {
     "fallen_branches": 1,
@@ -621,7 +622,8 @@
     "wild_beetroot": 91,
     "wild_lettuce": 92,
     "wild_pepper": 93,
-    "wild_rice": 94
+    "wild_rice": 94,
+    "sunken_cache": 95
   },
   "recipes": {
     "stone_axe": 1,
@@ -1031,7 +1033,8 @@
     "cured_venison": 405,
     "smoked_fish": 406,
     "dry_wet_wood": 407,
-    "vehicle_kit_sailboat": 408
+    "vehicle_kit_sailboat": 408,
+    "fishing_rod": 409
   },
   "pieces": {
     "anvil": 1,

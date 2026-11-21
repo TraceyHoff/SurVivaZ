@@ -18,6 +18,7 @@ import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks, ToolKind, WeatherKind, type PieceDef } from "../defs.js";
 import { emit, Extinguished, Ignited, RaidAlarm, WeatherChanged } from "../events.js";
 import { depleteNode } from "../systems/gathering.js";
+import { setSmellEmitter } from "../realism.js";
 import { spawnResourceNode } from "../spawn.js"; // ADR-469: fallen log for a lightning-felled tree
 import { applyDamage } from "./combat.js";
 import { damagePiece, maxHpOf } from "../building/integrity.js";
@@ -84,11 +85,18 @@ export function ignite(world: World, e: Entity, intensity = FIRE.igniteIntensity
   if (cur && cur.lit) { world.setField(e, Burning, "intensity", Math.max(cur.intensity, Math.min(255, intensity))); return true; }
   const v = { lit: 1, intensity: Math.min(255, intensity), startTick: world.tick };
   if (cur) world.set(e, Burning, v); else world.add(e, Burning, v);
+  // ADR-486: burning vegetation and burning pieces smoke — a Smell emitter on the burning entity
+  // draws zombies. A player, animal, or zombie catching fire gets none (their smell is carried
+  // rot, and a burning survivor drawing zombies to itself is out of v1).
+  if (isFuelNode(world, e) || world.has(e, BuildPiece)) setSmellEmitter(world, e, gameplayDefs(world).ai.smell.fire);
   emit(world, Ignited, { entity: e }); return true;
 }
 export function extinguish(world: World, e: Entity): void {
   if (!world.has(e, Burning)) return; world.remove(e, Burning);
   if (world.has(e, LightningFire)) world.remove(e, LightningFire); // ADR-451: the exemption ends with the fire
+  // ADR-486: the smoke goes out with the fire — but only the emitter ignite added (a vegetation
+  // node or a piece). A carrier's rot smell is the spoilage pass's business, not extinguish's.
+  if (world.has(e, ResourceNode) || world.has(e, BuildPiece)) setSmellEmitter(world, e, undefined);
   emit(world, Extinguished, { entity: e });
 }
 

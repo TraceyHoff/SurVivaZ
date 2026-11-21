@@ -16,6 +16,8 @@ export * from "./compass.js";
 export * from "./install.js";
 export * from "./replication.js";
 export * from "./realism.js";
+export * from "./river_current.js"; // ADR-490 river current (downstream push on forced rivers)
+export * from "./discoveries.js"; // ADR-498 first-visit discoveries + the Guide journal
 export * from "./wells.js"; // ADR-471 river risk + wells run low
 export * from "./flood.js"; // ADR-467 rivers that flood, then recede
 export * from "./world.js";

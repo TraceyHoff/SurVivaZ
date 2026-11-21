@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { World } from "@engine/core";
+import { setTimeOfDay, World } from "@engine/core";
 import { PopulationSpawner, type PopulationHost } from "@engine/world";
 import { Health, LootBag, Container } from "../src/components.js";
 import * as G from "../src/index.js";
@@ -33,7 +33,8 @@ describe("animals (spawns.json -> PopulationSpawner, ai.json behavior)", () => {
   it("goofy wolf: bites only at close range, flees once lightly hurt", () => {
     const wolfAi = G.populationData().ai.archetypes.animal_wolf!;
     expect(wolfAi.aggro.range).toBeLessThanOrEqual(3); expect(wolfAi.flee.hpFrac).toBeGreaterThanOrEqual(0.6);
-    const w = makeWorld(); const p = G.spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 });
+    const w = makeWorld(); setTimeOfDay(w, 0, 0); // ADR-495: wolves hunt at night (daytime activity 0.4x shrinks the 2.5-tile aggro range to 1.0, outside the 1.2-tile spawn; the far wolf at 6 tiles still does not attack)
+    const p = G.spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 });
     const far = G.spawnAnimal(w, "animal_wolf", 6, 0); const hp0 = w.get(p, Health)!.hp;
     steps(w, 10); expect(w.get(far, G.Animal)!.state).not.toBe(G.AnimalState.Attack); expect(w.get(p, Health)!.hp).toBe(hp0);
     const near = G.spawnAnimal(w, "animal_wolf", 1.2, 0); steps(w, 40);

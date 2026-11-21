@@ -18,7 +18,7 @@ import { GAMEPLAY_PANELS, gameplayBody, pageContainer, pageSkillCategory, type G
 import { buildGuidePanel } from "./guide-panel.js";
 import { iconImg, isIconFile } from "./game-icons.js";
 import { GUIDE_BOOK_ICON_FILE } from "./guide-art.js";
-import { closeContainerIntent, inventoryPanelTitle, onlineTargets, openContainerIntent, openStallIntent, isPetOwner, Pet, Viewing } from "@engine/gameplay";
+import { closeContainerIntent, discoveriesOf, inventoryPanelTitle, onlineTargets, openContainerIntent, openStallIntent, isPetOwner, Pet, Viewing } from "@engine/gameplay";
 import { DEFAULT_QUALITY_PRESET, loadPreset, parsePreset, savePreset, QUALITY_PRESETS, type QualityPreset } from "@engine/render";
 
 /** `data-chan` value per @engine/net ChatChannel number (Global 0 … System 6); omitted/unknown = "system". */
@@ -268,7 +268,12 @@ export class GameMenus {
   /** ADR-363: the guide opens stacked over the pause menu (Esc / ✕ / B closes back to pause; the pause
    *  menu stays in the stack, so singleplayer pause — main.ts keys it on isOpenId("pause") — is preserved). */
   private guidePanel(): HTMLElement {
-    const el = this.panel("guide", "Guide", [buildGuidePanel()]);
+    // ADR-498: the in-game Guide carries the journal — the local player's discoveries, read fresh on
+    // each open (the panel is built per open, so the list is current). The boot panel has no player
+    // and passes no journal, so it keeps the 15 static sections.
+    const c = this.o.gameplay?.ctx();
+    const journal = c ? discoveriesOf(c.world, c.player) : undefined;
+    const el = this.panel("guide", "Guide", [buildGuidePanel(undefined, journal)]);
     // ADR-387: the Guide page header shows the book icon (runtime-painted, guide-art.ts) instead of
     // the bare heading — the same icon as the Guide's entry buttons.
     const h2 = el.querySelector("h2");

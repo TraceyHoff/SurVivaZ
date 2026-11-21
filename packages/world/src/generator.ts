@@ -21,7 +21,7 @@ export interface ChunkProvider {
 export { hash2, valueNoise } from "./noise.js";
 import { hash2, valueNoise } from "./noise.js";
 import { isForcedWater, waterFeatureAt, waterFeatureLayout, REGION_FEATURE_SCALE, scaleElevatedLakeOptions, elevatedLakeDist, ELEVATED_LAKE_DEFAULTS, islandAt, type ElevatedLakeOptions, type Spillway, type WaterFeatureLayout } from "./waterFeatures.js";
-import { flowWaterRaw } from "./waterDepth.js";
+import { flowWaterRaw, waterDepthAt, WaterDepth, WATER_TILE } from "./waterDepth.js";
 
 /** ADR-423: the map triples. One region is now 1536x1536 tiles (was 512x512): the guaranteed-feature
  *  repeat period — the distance between one region's lake/river/pond set and the next — is 3x.
@@ -99,6 +99,11 @@ export interface ProceduralOptions {
   elevatedLakes?: false | ElevatedLakeOptions;
   /** ADR-255: place every band node kind at least once near the origin. false = off. Default on. */
   guaranteeNodes?: false;
+  /** ADR-500: sunken caches — the resource id of the `sunken_cache` node (resolved by the caller from the
+   *  gameplay defs) and the per-deep-water-tile scatter chance. Off unless the kind is set, so generators
+   *  built without it (travel, preview, spawn points, tests) are byte-identical to before. */
+  sunkenCacheKind?: number;
+  sunkenCacheChance?: number;
 }
 /** ADR-249 ground cover. shallow: water (1) within `shallowBand` noise of the shore -> 8. forest: forest-band dirt (4)
  *  at least `forestMargin` noise inside the band where a canopy field > `canopy` -> 7 (edges stay dirt / farmable).
@@ -117,6 +122,9 @@ export const DEFAULT_BANDS = [
   { max: 1.01, tile: 5, nodeKinds: [6, 7], nodeChance: 0.04, temp: 8, humidity: 0.35 }, // rock: boulder, iron
 ];
 /** Seeded procedural generator stub: biome noise + resource node placement. Pure function of (seed, cx, cy). */
+/** ADR-500: default per-deep-water-tile sunken-cache chance (~2 per lake; 1,287 deep tiles in the 49-chunk
+ *  seed-42 grid give ~26 caches). */
+export const SUNKEN_CACHE_CHANCE_DEFAULT = 0.02;
 /** ADR-255: radius (tiles) around the origin that always contains every guaranteed resource node.
  *  ADR-423: stays 160 — the guarantee is about the starter area around spawn, which region zero
  *  preserves exactly; scaling it would push guaranteed nodes away from the unchanged starter features. */
@@ -577,6 +585,10 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
   load(cx: number, cy: number): GeneratedChunk {
     const c = new Chunk(cx, cy); const nodes: NodePlacement[] = []; const seed = this.opts.seed >>> 0;
     const rng = new Rng(fnv1a(`${cx},${cy}`, seed));
+    // ADR-500: the cache stream is separate (salted `cache:`) and only advances on water tiles, so the land-node
+    // distribution is byte-identical with the pass on or off (adr500 asserts the hash).
+    const cacheRng = this.opts.sunkenCacheKind !== undefined ? new Rng(fnv1a(`cache:${cx},${cy}`, seed)) : undefined;
+    const cacheChance = this.opts.sunkenCacheChance ?? SUNKEN_CACHE_CHANCE_DEFAULT;
     const occupied = new Set<number>();
     for (let ly = 0; ly < CHUNK_SIZE; ly++) for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       const tx = cx * CHUNK_SIZE + lx, ty = cy * CHUNK_SIZE + ly;
@@ -596,9 +608,25 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
       if (tile !== 1 && tile !== 8 && band.nodeKinds?.length && rng.next() < (band.nodeChance ?? 0)) {
         nodes.push({ tx, ty, kind: rng.pick(band.nodeKinds) }); occupied.add(i);
       }
+      this.trySunkenCache(cacheRng, cacheChance, tx, ty, tile, i, nodes, occupied);
     }
     if (this.opts.guaranteeNodes !== false) this.placeGuaranteedNodes(cx, cy, nodes, occupied);
     c.dirty = false; return { chunk: c, nodes };
+  }
+
+  /**
+   * ADR-500: one tile's sunken-cache roll, called from the tile loops of load() and nodesInChunk() (the two must
+   * stay in lockstep — ADR-343). Tile 1 only (tile 8 is shallow by definition); the roll happens on every water
+   * tile in tile order, so the stream is deterministic; the depth check runs only on a hit (rare). Deep = no land
+   * within Chebyshev radius 2 (waterDepthAt, the same rule gameplay uses) — a cache is a find in open water, not
+   * on a shore. The kind is NOT in any band, so the ADR-255 guarantee pass never places it on land.
+   */
+  private trySunkenCache(rng: Rng | undefined, chance: number, tx: number, ty: number, tile: number, i: number, nodes: NodePlacement[], occupied: Set<number>): void {
+    if (!rng || tile !== WATER_TILE) return;
+    if (rng.next() >= chance) return;
+    if (waterDepthAt((x, y) => this.tileAt(x, y), tx, ty) !== WaterDepth.Deep) return;
+    if (occupied.has(i)) return;
+    nodes.push({ tx, ty, kind: this.opts.sunkenCacheKind! }); occupied.add(i);
   }
 
   /**
@@ -610,6 +638,9 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
   nodesInChunk(cx: number, cy: number): NodePlacement[] {
     const nodes: NodePlacement[] = []; const seed = this.opts.seed >>> 0;
     const rng = new Rng(fnv1a(`${cx},${cy}`, seed));
+    // ADR-500: same separate cache stream as load() (see above) — the two loops must agree exactly.
+    const cacheRng = this.opts.sunkenCacheKind !== undefined ? new Rng(fnv1a(`cache:${cx},${cy}`, seed)) : undefined;
+    const cacheChance = this.opts.sunkenCacheChance ?? SUNKEN_CACHE_CHANCE_DEFAULT;
     const occupied = new Set<number>();
     for (let ly = 0; ly < CHUNK_SIZE; ly++) for (let lx = 0; lx < CHUNK_SIZE; lx++) {
       const tx = cx * CHUNK_SIZE + lx, ty = cy * CHUNK_SIZE + ly;
@@ -620,6 +651,7 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
       if (tile !== 1 && tile !== 8 && band.nodeKinds?.length && rng.next() < (band.nodeChance ?? 0)) {
         nodes.push({ tx, ty, kind: rng.pick(band.nodeKinds) }); occupied.add(i);
       }
+      this.trySunkenCache(cacheRng, cacheChance, tx, ty, tile, i, nodes, occupied);
     }
     if (this.opts.guaranteeNodes !== false) this.placeGuaranteedNodes(cx, cy, nodes, occupied);
     return nodes;

@@ -346,6 +346,7 @@ export const GUIDE_FACTS: Readonly<Record<string, FactResolver>> = {
   "diseases.influenza.cure": () => disease("influenza").cure,
   "diseases.broken_leg.durationSeconds": () => disease("broken_leg").durationSeconds,
   "diseases.broken_leg.cure": () => disease("broken_leg").cure,
+  "diseases.bleeding.cure": () => disease("bleeding").cure,
   "diseases.exhaustion.cure": () => disease("exhaustion").cure,
   "diseases.transmission.radiusTiles": () => defaultDefs().diseaseTuning.transmission.radiusTiles,
   "diseases.transmission.contactSeconds": () => defaultDefs().diseaseTuning.transmission.contactSeconds,

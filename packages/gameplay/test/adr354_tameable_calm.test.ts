@@ -105,6 +105,7 @@ describe("ADR-354 tameable animals don't attack on sight", () => {
 
   it("the wolf still attacks on sight, and a night zombie still hunts the player (hordes exempt as before)", () => {
     const { w, p } = setup();
+    setTimeOfDay(w, 0, 0); // ADR-495: wolves hunt at night (daytime activity 0.4x shrinks the 2.5-tile aggro range to 1.0, outside the 1.2-tile spawn)
     const hp0 = hpOf(w, p);
     const wolf = G.spawnAnimal(w, "animal_wolf", 1.2, 0);
     steps(w, 40);

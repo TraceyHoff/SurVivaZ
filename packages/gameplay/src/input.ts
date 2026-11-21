@@ -65,6 +65,8 @@ export const ToggleFireCmd = defineCommand("gameplay.toggleFire", T);
 export const AttackCmd = defineCommand("gameplay.attack", T);
 /** Reload the main-hand ranged weapon from inventory ammo (also queued by the Reload edge). */
 export const ReloadCmd = defineCommand("gameplay.reload", {});
+/** ADR-493: cast a fishing line (no args — the server casts into the water tile in front of the fisher). */
+export const FishCmd = defineCommand("gameplay.fish", {});
 /** Wear / take off the clothing or armor in an inventory slot (toggle). */
 export const WearCmd = defineCommand("gameplay.wear", { slot: "u8" });
 /** Boil the filled raw-water container in an inventory slot at a lit campfire (keeps its sips). */
@@ -85,7 +87,7 @@ export const GAMEPLAY_COMMANDS: readonly [CommandDef, IntentAction][] = [
   [EquipCmd, IntentAction.Equip], [PlaceCmd, IntentAction.Place], [UpgradeCmd, IntentAction.Upgrade], [RepairCmd, IntentAction.Repair],
   [DemolishCmd, IntentAction.Demolish], [PaintCmd, IntentAction.Paint], [ToggleDoorCmd, IntentAction.ToggleDoor], [LockDoorCmd, IntentAction.LockDoor],
   [OpenContainerCmd, IntentAction.OpenContainer], [CloseContainerCmd, IntentAction.CloseContainer], [DepositCmd, IntentAction.Deposit],
-  [WithdrawCmd, IntentAction.Withdraw], [ToggleFireCmd, IntentAction.ToggleFire], [AttackCmd, IntentAction.Attack],
+  [WithdrawCmd, IntentAction.Withdraw], [ToggleFireCmd, IntentAction.ToggleFire], [AttackCmd, IntentAction.Attack], [FishCmd, IntentAction.Fish],
 ];
 /** Command fields carrying a NetId that net must resolve to a local Entity before applyGameplayInput. */
 export const COMMAND_ENTITY_FIELDS: Readonly<Record<string, readonly string[]>> = {

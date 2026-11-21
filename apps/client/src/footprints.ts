@@ -45,7 +45,8 @@ export function footprintTuning(env: EnvironmentTuning | undefined): FootprintsT
 /** Ground snow cover 0..1 for the world (the render formula: 0.82 * smooth(0.15, 0.85, winter weight)). */
 export function snowCoverOf(world: World): number { return seasonVisual(world).snow; }
 
-export interface FootprintStamp { x: number; y: number; untilTick: number; facing: number; variant: number; }
+/** ADR-501: `track` = true stamps the animal track sprite, false the boot print (players, bots, zombies). */
+export interface FootprintStamp { x: number; y: number; untilTick: number; facing: number; variant: number; track: boolean; }
 export interface FootprintLastPos { x: number; y: number; tx: number; ty: number; step: number; }
 /** Transient per-client overlay store. `version` increments on every stamp (the render loop rebuilds the overlay when it changes). */
 export class FootprintStore {
@@ -98,7 +99,8 @@ export function sampleFootprints(
     const ox = -Math.sin(heading) * side, oy = Math.cos(heading) * side;
     const key = `${tx},${ty}`;
     store.stamps.delete(key); // re-stamping a tile refreshes it (moves it to the back of the eviction order)
-    store.stamps.set(key, { x: t.x + ox, y: t.y + oy, untilTick: tick + fadeTicks, facing, variant });
+    // ADR-501: animals leave the track sprite; players, bots and zombies keep the boot print.
+    store.stamps.set(key, { x: t.x + ox, y: t.y + oy, untilTick: tick + fadeTicks, facing, variant, track: world.has(e, Animal) });
     store.lastPos.set(e, { x: t.x, y: t.y, tx, ty, step: step + 1 });
     store.version++;
   }
@@ -116,9 +118,12 @@ export function sampleFootprints(
  * `flat: true` draws the sprite on the ground plane (SpriteFlag.Flat). Expired prints are skipped
  * (the sampler prunes them, but the overlay may be built between samples). `max` bounds the
  * per-frame overlay build (nearest-first is unnecessary — the gather culls off-screen spawns).
+ * ADR-501: `sprites.track` is the animal-track sprite id; when it is undefined (fragment not
+ * loaded, old build) animal prints fall back to the boot print — the status quo, not a
+ * wrong-looking track.
  */
 export function collectFootprintOverlays(
-  store: FootprintStore, spriteId: number, tick: number, fadeTicks: number, out: VfxSpawn[], max = 128,
+  store: FootprintStore, sprites: { boot: number; track?: number }, tick: number, fadeTicks: number, out: VfxSpawn[], max = 128,
 ): void {
   out.length = 0;
   for (const s of store.stamps.values()) {
@@ -127,7 +132,7 @@ export function collectFootprintOverlays(
     if (remaining <= 0) continue;
     const alpha = Math.max(0, Math.min(1, remaining / fadeTicks));
     out.push({
-      spriteId, x: s.x, y: s.y, z: 0, anim: 0, lifetime: remaining / 20, scale: 1,
+      spriteId: s.track ? (sprites.track ?? sprites.boot) : sprites.boot, x: s.x, y: s.y, z: 0, anim: 0, lifetime: remaining / 20, scale: 1,
       facing: s.facing, emissive: false, alpha, flat: true,
     });
   }

@@ -92,8 +92,8 @@ describe("ADR-465 wind dries wet clothes", () => {
     windy.setField(wp, G.Exposure, "wetness", 1);
     calm.setField(cp, G.Exposure, "wetness", 1);
     run(windy, 60); run(calm, 60);
-    expect(wetnessOf(windy, wp)).toBeCloseTo(0.4, 1);
-    expect(wetnessOf(calm, cp)).toBeCloseTo(0.7, 1);
+    expect(wetnessOf(windy, wp)).toBeCloseTo(0.775, 1); // ADR-488: humidity halves the drying rate (0.5 at the default 50% humidity)
+    expect(wetnessOf(calm, cp)).toBeCloseTo(0.85, 1); // ADR-488: same halving in calm air
     expect(wetnessOf(windy, wp)).toBeLessThan(wetnessOf(calm, cp));
   });
   it("no wind, no extra drying (control: calm air dries at the base rate)", () => {
@@ -101,6 +101,6 @@ describe("ADR-465 wind dries wet clothes", () => {
     pinWeather(w, G.WeatherKind.Clear, 0);
     w.setField(p, G.Exposure, "wetness", 1);
     run(w, 60);
-    expect(wetnessOf(w, p)).toBeCloseTo(0.7, 1);
+    expect(wetnessOf(w, p)).toBeCloseTo(0.85, 1); // ADR-488: humidity halves the drying rate (0.5 at the default 50% humidity)
   });
 });

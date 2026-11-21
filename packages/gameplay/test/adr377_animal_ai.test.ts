@@ -11,6 +11,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { PlayerId, Rng, Transform, type Entity } from "@engine/core";
+import { setTimeOfDay } from "@engine/core";
 import * as G from "../src/index.js";
 import { Animal, Container, Health, LootBag } from "../src/components.js";
 import { room, world215 } from "./nav215_fixture.js";
@@ -55,7 +56,7 @@ function snapshot(w: ReturnType<typeof world215>["w"]): string {
   return fnv1a(parts.join("|"));
 }
 
-const GOLDEN = { open: "9d89ddf7", base: "602b24ce" }; // ADR-463 re-pin (see header)
+const GOLDEN = { open: "1ac66895", base: "e77726ce" }; // ADR-486–501 re-pin (see header): ADR-495 activity windows (daytime 0.4x), ADR-494 pack sharing, ADR-487 fog sight — deliberate behaviour change, hashes stable across runs
 
 describe("ADR-377 animalAI behaviour identity", () => {
   it("golden hash: 800 ticks, open ground", () => {
@@ -110,6 +111,7 @@ describe("ADR-377 animalAI behaviour identity", () => {
 
   it("a newly spawned animal is thought about on its very first tick (cache invalidates on spawn)", () => {
     const { w } = world215();
+    setTimeOfDay(w, 0, 0); // ADR-495: wolves hunt at night (daytime activity 0.4x shrinks the 2.5-tile aggro range to 1.0, outside the 1.2-tile spawn)
     w.addSystem("simulation", "gameplay.animalAI", G.animalAISystem);
     const p = G.spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 });
     steps(w, 5);
@@ -153,6 +155,7 @@ describe("ADR-377 animalAI behaviour identity", () => {
 
   it("nearest-threat tie breaks to the lower entity id (squared-distance ordering)", () => {
     const { w } = world215();
+    setTimeOfDay(w, 0, 0); // ADR-495: wolves hunt at night (daytime activity 0.4x shrinks the 2.5-tile aggro range to 1.0, outside the 2-tile players)
     w.addSystem("simulation", "gameplay.animalAI", G.animalAISystem);
     const p1 = G.spawnPlayer(w, { x: 2, y: 0, maxWeight: 0, clientId: 1 });
     const p2 = G.spawnPlayer(w, { x: -2, y: 0, maxWeight: 0, clientId: 2 });

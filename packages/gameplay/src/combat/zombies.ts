@@ -5,18 +5,18 @@
  * (1 + noiseRateMul x noise/10), capped by cap[phase] zombies within capRadius; spawn ring minDistance..maxDistance
  * on walkable, unbuilt tiles; kind by phase weights. world.rng (server).
  *
- * AI (every tick, thinking every ai.thinkTicks staggered by entity): Wander -> Investigate (heard noise) ->
+ * AI (every tick, thinking every ai.thinkTicks staggered by entity): Wander -> Investigate (heard noise, or smelled blood / rot / smoke — ADR-486) ->
  * Chase (sighted player) -> AttackPlayer (in range) / AttackStructure (path blocked by a wall/door: blockPiece).
  * Paths come from combat/path.ts (A* with break costs); repath every ai.repathTicks. ADR-194: no sunlight damage; by day
  * a non-horde zombie is calm (wanders, seeks / attacks no one) unless it was hit, then it retaliates against that attacker.
  * It turns aggressive at dusk and calm at dawn, staggered per zombie (zombieAggressive). Far zombies despawn.
  */
 import { isCrouched, STANCE } from "../stance.js";
-import { entityIndex, NetId, Transform, timeOfDay, sunFractionOf, type Entity, type World } from "@engine/core";
-import { installSpatialIndex } from "@engine/world";
+import { entityIndex, NetId, Transform, Weather, timeOfDay, sunFractionOf, type Entity, type World } from "@engine/core";
+import { installSpatialIndex, EmitterIndexRes } from "@engine/world";
 import { Anim, AnimState, Attacker, BodyTemp, Dead, Exposure, Health, NoiseLevel, Survival, Zombie, ZombieBrain, ZState } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
-import { secondsToTicks, type AiTuning, type ZombieDef } from "../defs.js";
+import { secondsToTicks, WeatherKind, type AiTuning, type ZombieDef } from "../defs.js";
 import { DayPhase, emit, ZombieSpawned, ZombieStateChanged } from "../events.js";
 import { indexEntity } from "../spawn.js";
 import { defineResource } from "@engine/core";
@@ -36,6 +36,7 @@ import { damagePiece } from "../building/integrity.js";
 import { BuildPiece, Fuel, HordeMember } from "../components.js";
 import { gateZombieKind } from "./zombie_gate.js";
 import { inSpawnSafeRadius } from "../spawn_points.js";
+import { EmitterKind } from "../realism.js";
 
 const PHASE_KEY = { [DayPhase.Night]: "night", [DayPhase.Dawn]: "dawn", [DayPhase.Day]: "day", [DayPhase.Dusk]: "dusk" } as const;
 export const currentPhaseKey = (world: World): "night" | "dawn" | "day" | "dusk" => PHASE_KEY[dayPhase(sunFractionOf(timeOfDay(world)))];
@@ -105,6 +106,33 @@ export function moonIllumination(day: number): number { const p = (((day / LUNAR
 export function moonSightFactor(world: World): number {
   return 1 + gameplayDefs(world).ai.moonSightMul * moonIllumination(timeOfDay(world).day);
 }
+/** ADR-487: fog that blinds — sight-range multiplier from the weather: x ai.sightFogMul.fog in Fog, x ai.sightFogMul.blizzard in Blizzard, x1 otherwise. Hearing is untouched, so fog is stealth-vs-sight only. */
+export function fogSightFactor(world: World): number {
+  const kind = world.env(Weather).kind as WeatherKind;
+  if (kind === WeatherKind.Fog) return gameplayDefs(world).ai.sightFogMul.fog;
+  if (kind === WeatherKind.Blizzard) return gameplayDefs(world).ai.sightFogMul.blizzard;
+  return 1;
+}
+
+/**
+ * ADR-486: the strongest smell near (x, y) — the nearest few Smell emitters, best sampled
+ * contribution wins — when it reaches ai.smell.threshold. The goal is the emitter's position, so the
+ * zombie walks to the source (a carcass, a rot carrier, a kill's loot bag, a lit fire). Undefined
+ * when the EmitterIndex is not installed or nothing smells strongly enough. One bounded spatial
+ * query per zombie think tick (every ai.thinkTicks, staggered), the same cadence as the sight/noise
+ * acquire it sits beside — no new scan.
+ */
+export function strongestSmell(world: World, x: number, y: number): { x: number; y: number; strength: number } | undefined {
+  const ix = world.getResource(EmitterIndexRes); if (!ix) return undefined;
+  let best: { x: number; y: number; strength: number } | undefined;
+  for (const h of ix.nearestEmitters(EmitterKind.Smell, x, y, 8)) {
+    if (h.contribution < gameplayDefs(world).ai.smell.threshold) continue;
+    if (best && h.contribution <= best.strength) continue;
+    const t = world.get(h.entity, Transform); if (!t) continue;
+    best = { x: t.x, y: t.y, strength: h.contribution };
+  }
+  return best;
+}
 
 /**
  * Nearest living player seen (sight range) or heard (noise x hearing) from (x,y).
@@ -118,7 +146,9 @@ function acquire(world: World, z: Entity, x: number, y: number, def: ZombieDef, 
   const la = lastAttacker(world, z);
   const retaliateTicks = secondsToTicks(ai.retaliateSeconds, dt);
   // ADR-461: full-moon nights make zombies bolder — sight range grows with moon illumination.
+  // ADR-487: fog blinds — sight range shrinks in Fog/Blizzard (hearing untouched).
   const moon = moonSightFactor(world);
+  const fog = fogSightFactor(world);
   let best: { e: Entity; seen: boolean; d: number } | undefined;
   for (const p of survivors) {
     if (world.has(p, Dead)) continue;
@@ -129,7 +159,7 @@ function acquire(world: World, z: Entity, x: number, y: number, def: ZombieDef, 
     // scope for the safe radius and must still reach its target.
     const recentAttacker = la !== undefined && la.e === p && world.tick - la.tick <= retaliateTicks;
     if (!recentAttacker && !world.has(z, HordeMember) && inSpawnSafeRadius(world, t.x, t.y)) continue;
-    const seen = d <= def.sightRange * moon * (isCrouched(world, p) ? STANCE.crouchSightMul : 1); const heard = d <= (world.getField(p, NoiseLevel, "value") ?? 0) * def.hearingMul;
+    const seen = d <= def.sightRange * moon * fog * (isCrouched(world, p) ? STANCE.crouchSightMul : 1); const heard = d <= (world.getField(p, NoiseLevel, "value") ?? 0) * def.hearingMul;
     if (!seen && !heard) continue;
     if (!best || d < best.d || (d === best.d && p < best.e)) best = { e: p, seen, d };
   }
@@ -220,6 +250,25 @@ export function zombieAISystem(world: World, dt: number): void {
       } else if (state === ZState.Investigate && world.tick > br.data.stateTick[s]! + secondsToTicks(ai.investigateSeconds, dt)) {
         setState(world, z, ZState.Wander);
       }
+      // ADR-486: smell — an aggressive zombie that acquired no player investigates the strongest
+      // nearby smell (blood / rot / smoke), the way noise sends it to Investigate. Re-sampled every
+      // think; a live stimulus still wins — a player re-acquired above overwrites the goal, and the
+      // Snuffer below overwrites it for light-targeting zombies. Calm (daytime) zombies and horde
+      // members (structure march) do not follow smells, and a zombie breaking a structure down does
+      // not abandon it for one. The goal is set here; the repath follows the normal cadence (no
+      // repathAt = 0) — forcing an instant repath every think made a Snuffer adjacent to its fire
+      // repath into the campfire-as-blocker and attack the piece as a structure instead of snuffing
+      // the light (ADR-108 regression, caught by the full suite).
+      if (!tgt && aggr && !horde) {
+        const st = br.data.state[s]! as ZState;
+        if (st !== ZState.AttackStructure) {
+          const smell = strongestSmell(world, x, y);
+          if (smell) {
+            br.data.goalX[s] = smell.x; br.data.goalY[s] = smell.y;
+            if (st !== ZState.Investigate) setState(world, z, ZState.Investigate);
+          }
+        }
+      }
       // ADR-121 horde: with no player in sight, march on the target structure (retarget nearby pieces when it falls)
       if (horde && !tgt?.seen) hordeSteer(world, z, x, y, s, def);
       // ADR-108 Snuffer: at night go for the nearest active light unless a player is already in reach
@@ -269,7 +318,14 @@ export function zombieAISystem(world: World, dt: number): void {
     const state = br.data.state[s]! as ZState;
     // act
     const lt = sn.get(z);
-    if (lt !== undefined && state !== ZState.AttackStructure) {
+    // ADR-486 fix (found by the full suite): a Snuffer with a light target snuffs whenever it is in
+    // range, even in AttackStructure. The old `state !== AttackStructure` guard made a Snuffer that
+    // entered AttackStructure — the path to a light is blocked by the campfire piece itself, so the
+    // repath sets AttackStructure as soon as the Snuffer is adjacent — unable to ever snuff: it just
+    // attacked the structure until the piece broke. A Snuffer's job is lights; the snuff IS its attack
+    // for that tick (the `continue` below skips the structure attack), and out of range it falls
+    // through to the structure attack as before.
+    if (lt !== undefined) {
       const L = lightGrid(world).lights.find((l) => l.e === lt);
       if (!L) { sn.delete(z); br.data.repathAt[s] = 0; }
       else if (dist(x, y, L.x, L.y) <= def.attackRange + 0.7) {

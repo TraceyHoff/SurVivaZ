@@ -5040,7 +5040,7 @@
     ,{"key": "salt_brew", "name": "Salt Brew", "category": "food", "maxStack": 10, "weight": 0.3, "food": {"hunger": 0, "thirst": 15, "health": 2}, "cures": ["dysentery"]}
     ,{"key": "honey_tea", "name": "Honey Tea", "category": "food", "maxStack": 10, "weight": 0.3, "food": {"hunger": 0, "thirst": 15, "health": 5}, "cures": ["common_cold", "influenza"]}
     ,{"key": "cooling_brew", "name": "Cooling Brew", "category": "food", "maxStack": 10, "weight": 0.3, "food": {"hunger": 0, "thirst": 20, "health": 2}, "cures": ["heatstroke"]}
-    ,{"key": "medicated_bandage", "name": "Medicated Bandage", "category": "food", "maxStack": 10, "weight": 0.2, "food": {"hunger": 0, "thirst": 0, "health": 10}, "cures": ["wound_infection"]}
+    ,{"key": "medicated_bandage", "name": "Medicated Bandage", "category": "food", "maxStack": 10, "weight": 0.2, "food": {"hunger": 0, "thirst": 0, "health": 10}, "cures": ["wound_infection", "bleeding"]}
     ,{"key": "paint_brush", "name": "Paint Brush", "category": "tool", "maxStack": 1, "weight": 0.3, "tool": {"kind": "brush", "tier": 1}, "tier": 1, "family": "brush", "durability": 200}
     ,{"key": "lettuce", "name": "Lettuce", "category": "food", "maxStack": 20, "weight": 0.1, "food": {"hunger": 6, "thirst": 8, "health": 0}, "spoilSeconds": 1800}
     ,{"key": "lettuce_seeds", "name": "Lettuce Seeds", "category": "resource", "maxStack": 50, "weight": 0.01}
@@ -5069,5 +5069,6 @@
   ,{"key": "dung", "name": "Dung", "category": "resource", "maxStack": 50, "weight": 0.1}
   ,{"key": "dung_fertilizer", "name": "Dung Fertilizer", "category": "resource", "maxStack": 30, "weight": 0.3}
   ,{"key": "harness", "name": "Harness", "category": "resource", "maxStack": 1, "weight": 4, "family": "harness"}
+  ,{"key": "fishing_rod", "name": "Fishing Rod", "category": "tool", "maxStack": 1, "weight": 1.0, "tool": {"kind": "fishing", "tier": 1}, "tier": 1, "family": "fishing_rod", "durability": 150}
   ]
 }

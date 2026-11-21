@@ -41,7 +41,7 @@ export function activeDiseases(world: World, e: Entity): DiseaseDef[] {
  */
 export function contractDisease(world: World, e: Entity, key: string, dt = 1 / 20): boolean {
   const defs = gameplayDefs(world); const idx = defs.diseaseIndex(key); if (idx < 0) return false;
-  if (key === "wound_infection" && !world.has(e, Survival)) return false;
+  if ((key === "wound_infection" || key === "bleeding") && !world.has(e, Survival)) return false;
   ensureDiseases(world, e);
   const st = world.store(Diseases); const s = st.slot(entityIndex(e)); if (s < 0) return false;
   const until = defs.diseases[idx]!.durationSeconds > 0 ? world.tick + secondsToTicks(defs.diseases[idx]!.durationSeconds, dt) : 0;
@@ -66,7 +66,7 @@ export function cureDisease(world: World, e: Entity, key: string): boolean {
 export function cureDiseasesForItem(world: World, e: Entity, item: number): string[] {
   const cured: string[] = [];
   const def = gameplayDefs(world).items.get(item);
-  if (def?.key === "bandage") treatWoundInfection(world, e);
+  if (def?.key === "bandage") { treatWoundInfection(world, e); treatBleeding(world, e); }
   for (const key of def?.cures ?? []) if (cureDisease(world, e, key)) cured.push(key);
   return cured;
 }
@@ -129,6 +129,31 @@ export function treatWoundInfection(world: World, e: Entity): boolean {
   const hz = st.data.infectionHz[s] || DEFAULT_TICK_HZ;
   st.data.untilTick[offset] = Math.min(world.tick + defs.diseases[di]!.durationSeconds * hz, until + BANDAGE_INFECTION_RELIEF_SECONDS * hz);
   st.markChanged(idx); return true;
+}
+/**
+ * ADR-492: a plain bandage staunches bleeding for a minute — it pauses the drain, it does not cure.
+ * Bleeding has durationSeconds 0, so its untilTick is normally 0 (no auto-expiry); a staunch reuses
+ * that field as a "staunched until" tick. diseaseSystem clears the field (and resumes the drain) when
+ * the tick passes, instead of expiring the disease — see systems/diseases.ts.
+ */
+export const BANDAGE_BLEED_STAUNCH_SECONDS = 60;
+export function treatBleeding(world: World, e: Entity): boolean {
+  const defs = gameplayDefs(world), di = defs.diseaseIndex("bleeding");
+  if (di < 0) return false;
+  const slot = diseaseSlot(world, e, di); if (slot < 0) return false;
+  const st = world.store(Diseases), idx = entityIndex(e), s = st.slot(idx), offset = s * MAX_DISEASES + slot;
+  const hz = st.data.infectionHz[s] || DEFAULT_TICK_HZ;
+  st.data.untilTick[offset] = world.tick + BANDAGE_BLEED_STAUNCH_SECONDS * hz;
+  st.markChanged(idx); return true;
+}
+/** True while a plain bandage is staunching the entity's bleeding (drain paused, not cured). */
+export function isBleedingStaunched(world: World, e: Entity): boolean {
+  const di = gameplayDefs(world).diseaseIndex("bleeding");
+  if (di < 0) return false;
+  const slot = diseaseSlot(world, e, di); if (slot < 0) return false;
+  const st = world.store(Diseases), s = st.slot(entityIndex(e)); if (s < 0) return false;
+  const until = st.data.untilTick[s * MAX_DISEASES + slot]!;
+  return until !== 0 && world.tick < until;
 }
 /** Disease identity/cure stays wound_infection; stage labels and dedicated atlas art are presentation, not extra diseases. */
 export function diseasePresentation(world: World, e: Entity, def: DiseaseDef): { short: string; name: string; icon: string; stage: InfectionTier | undefined } {

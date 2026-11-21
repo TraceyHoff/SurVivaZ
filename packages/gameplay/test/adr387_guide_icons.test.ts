@@ -106,7 +106,7 @@ function resolves(icon: GuideRowIcon): boolean {
 describe("ADR-387 guide fact-row icons", () => {
   it("every disease row shows that disease's status icon — broken leg shows the broken-leg icon", () => {
     const rows = allFactRows().filter((r) => /^diseases\.[a-z_]+\.(durationSeconds|cure)$/.test(r.fact));
-    expect(rows.length).toBe(15);
+    expect(rows.length).toBe(16); // ADR-492: bleeding adds one cure row (no duration — duration 0 would render "0 s")
     for (const r of rows) {
       const key = r.fact.split(".")[1]!;
       expect(r.icon).toEqual({ kind: "condition", icon: diseaseIcon(key) });
@@ -115,6 +115,10 @@ describe("ADR-387 guide fact-row icons", () => {
     expect(broken).toHaveLength(2);
     expect(broken.map((r) => r.label)).toEqual(["Broken Leg — lasts", "Broken Leg — cure"]);
     for (const r of broken) expect(r.icon).toEqual({ kind: "condition", icon: "broken_leg" });
+    const bleeding = rows.filter((r) => r.fact.startsWith("diseases.bleeding."));
+    expect(bleeding).toHaveLength(1); // cure only, no duration line
+    expect(bleeding.map((r) => r.label)).toEqual(["Bleeding — cure"]);
+    for (const r of bleeding) expect(r.icon).toEqual({ kind: "condition", icon: "ic_health.png" });
   });
 
   it("treats rows show their pet, horse rows their mount, item-format rows their item", () => {
@@ -158,13 +162,13 @@ describe("ADR-387 guide fact-row icons", () => {
     }
   });
 
-  it("pins the coverage: 146 fact rows, 67 with icons (19 file, 15 condition, 33 guide)", () => {
+  it("pins the coverage: 147 fact rows, 68 with icons (19 file, 16 condition, 33 guide)", () => { // ADR-492: bleeding adds one cure row (a condition icon)
     const rows = allFactRows();
-    expect(rows.length).toBe(146);
+    expect(rows.length).toBe(147);
     const withIcon = rows.filter((r) => r.icon);
-    expect(withIcon.length).toBe(67);
+    expect(withIcon.length).toBe(68);
     expect(withIcon.filter((r) => r.icon!.kind === "file").length).toBe(19);
-    expect(withIcon.filter((r) => r.icon!.kind === "condition").length).toBe(15);
+    expect(withIcon.filter((r) => r.icon!.kind === "condition").length).toBe(16);
     expect(withIcon.filter((r) => r.icon!.kind === "guide").length).toBe(33);
     // rows without an icon describe a number, not a thing — spot-check the shape of the gap list
     const noIcon = rows.filter((r) => !r.icon).map((r) => r.label);

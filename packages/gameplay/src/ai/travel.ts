@@ -40,7 +40,7 @@ import movementRaw from "../../data/movement.json";
 import type { AgentWorldView, GameBehavior } from "../agents.js";
 import { AbandonedSite, ClanStatus, Exposure, Health, ResourceNode, Riding, StallHeader, Survival, Wetness, Worker } from "../components.js";
 import { GameplayConfig } from "../config.js";
-import { inWater, waterDepth } from "../systems/movement.js";
+import { inDeepWater, inWater, waterDepth } from "../systems/movement.js";
 import { walkerWaypoint } from "../systems/creature_nav.js";
 import { WATER_WET_PER_SEC } from "../systems/environment.js";
 import { spendStamina } from "../systems/vitals.js";
@@ -314,13 +314,21 @@ const BAN_TILES = 8;
  *  (start chunk, kinds, excludes) for prospectCacheTtlTicks. Deterministic: fixed ring order, fixed in-chunk order, no rng. */
 export function prospectResource(world: World, x: number, y: number, kinds: ReadonlySet<number>, exclude: readonly { x: number; y: number }[] = []): { x: number; y: number; kind: number } | undefined {
   const banned = (px: number, py: number): boolean => exclude.some((e) => (e.x - px) ** 2 + (e.y - py) ** 2 <= BAN_TILES * BAN_TILES);
+  // ADR-500: a node in deep water is never a prospect — AI walkers cannot enter deep water (ADR-181),
+  // so a sunken cache (deep water only) would otherwise become the nearest source of coin / canned fish /
+  // salt / waterskin / iron_axe and send a bot on an expedition it can never complete. The bot would walk
+  // to the shore, fail, re-prospect the same cache and set out again — the ADR-252 live pad stall (bot0
+  // wandered ~200 tiles from its base and never built). Frozen water reads as land (waterDepth returns
+  // None), so a cache on a frozen lake stays prospectable, as it should.
   // live nodes in loaded chunks (a test world holds its placed nodes the same way)
   let placed: { x: number; y: number; kind: number } | undefined, pd = Infinity;
   for (const e of world.query([ResourceNode, Transform])) {
     if ((world.getField(e, ResourceNode, "amount") ?? 0) <= 0) continue;
     const kind = world.getField(e, ResourceNode, "kind")!; if (!kinds.has(kind)) continue;
     const p = world.get(e, Transform)!; const d = Math.hypot(p.x - x, p.y - y);
-    if (d > T.prospectMaxTiles || d >= pd || banned(p.x, p.y)) continue; pd = d; placed = { x: p.x, y: p.y, kind };
+    if (d > T.prospectMaxTiles || d >= pd || banned(p.x, p.y)) continue;
+    if (inDeepWater(world, p.x, p.y)) continue; // ADR-500: deep-water nodes are unreachable by AI walkers (see above)
+    pd = d; placed = { x: p.x, y: p.y, kind };
   }
   if (placed) return placed;
   const ccx = Math.floor(x / CHUNK_SIZE), ccy = Math.floor(y / CHUNK_SIZE);
@@ -338,6 +346,7 @@ export function prospectResource(world: World, x: number, y: number, kinds: Read
         if (!kinds.has(n.kind)) continue;
         const px = n.tx + 0.5, py = n.ty + 0.5;
         if (Math.hypot(px - x, py - y) > T.prospectMaxTiles || banned(px, py)) continue;
+        if (inDeepWater(world, px, py)) continue; // ADR-500: deep-water nodes are unreachable by AI walkers (unloaded terrain reads as land, so this is best-effort here; the live-nodes loop above is the decisive one)
         hit = { x: px, y: py, kind: n.kind }; break;
       }
     }

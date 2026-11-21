@@ -14,6 +14,7 @@ import { AttachKind, BuildPiece, Equipment, Exposure, Fuel, NO_SLOT, ResourceNod
 import { GameplayConfig } from "../config.js";
 import { countItem, readSlots } from "../inventory.js";
 import { bareHandsCan, heldTool } from "../systems/gathering.js";
+import { inDeepWater } from "../systems/movement.js";
 import { nearWater } from "../systems/vitals.js";
 import { ToolKind, isSnowing, type GameDefs, type ItemDef, type PieceDef, type RecipeDef, type ResourceDef } from "../defs.js";
 import { isRaining } from "../realism.js";
@@ -203,6 +204,12 @@ function computeGoalSensors(world: World, self: Entity, view: AgentWorldView, a:
       if (p.kind !== "node" || unreachable.has(p.id)) continue; const until = ban.get(p.id); if (until !== undefined) { if (until > world.tick) continue; ban.delete(p.id); }
       if (!world.isAlive(p.id) || !world.has(p.id, ResourceNode) || world.getField(p.id, ResourceNode, "amount") === 0) continue;
       const def = defs.resources.get(world.getField(p.id, ResourceNode, "kind")!); if (!def) continue;
+      // ADR-500 / ADR-252: a node in deep water can never be gathered by a walking bot (ADR-181), so it is
+      // not a gather candidate at all — scoring it first burns one of the 3 nav retries on a node the bot
+      // can never reach, and a sunken cache near the base starved the sensor until the bot gave up and
+      // explored instead of gathering local fiber. (Frozen water reads as land, so a cache on a frozen
+      // lake stays a candidate — it is reachable on foot while frozen.)
+      if (inDeepWater(world, p.x, p.y)) continue;
       const bagTool = def.requiredTool !== ToolKind.None && !(tool.kind === def.requiredTool && tool.tier >= def.minTier) ? carried.get(def.requiredTool) : undefined;
       const withTool = def.requiredTool === ToolKind.None || (tool.kind === def.requiredTool && tool.tier >= def.minTier) || (bagTool !== undefined && bagTool.tier >= def.minTier);
       const bare = !withTool && bareHandsCan(defs, def);

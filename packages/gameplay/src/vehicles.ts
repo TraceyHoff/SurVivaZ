@@ -21,6 +21,7 @@ import stationsRaw from "../data/stations.json";
 import storageRaw from "../data/vehicle_storage.json";
 import { AnimState, Container, CONTAINER_MAX_SLOTS, Dead, Driver, Health, Hitch, Mount, Survival, Vehicle, VehicleSeats, VehicleState, VEHICLE_ENGINE_ON, VEHICLE_HEADLIGHTS, VEHICLE_MAX_SEATS } from "./components.js";
 import { applyRidingMotion, DrawnDriveRes, DrawnDrivenRes, movementBlocked, waterDepth } from "./systems/movement.js";
+import { riverCurrentAt } from "./river_current.js"; // ADR-490: forced rivers push paddle/motor boats downstream
 import { isHarnessed, MOUNT_TUNING, mountSpecies } from "./mount_defs.js";
 import { gameplayDefs, isAuthority } from "./config.js";
 import { spendStamina } from "./systems/vitals.js";
@@ -440,6 +441,24 @@ function stepPowered(world: World, v: Entity, d: VehicleDef, dt: number, inputs:
       health = Math.max(0, health - Math.abs(s.speed) * (d.mass / 1000) * T.impactDamagePerSpeedTon);
       s.speed = -s.speed * T.bounce; s.drift = 0;
     } else s.speed *= 0.9; // scraping along a wall
+  }
+  // ADR-490: river current — a forced river pushes a paddle/motor boat downstream. It is applied
+  // AFTER the propulsion blocked check, with its own slide, so a current pinning a boat against a
+  // shore does not trip the scraping branch above (which damps s.speed 10% per tick — a boat
+  // drifting downstream along a bank would crawl to a stop). A drift moves the hull; it never
+  // damps the propulsion speed. A sailboat answers to wind only. A parked boat does not drift
+  // (the early return above), like the wind drift. The water check only runs on a river tile
+  // (edited dry riverbed: a river on the map, not in the world).
+  if (boat && !isSailBoatDef(d)) {
+    const cur = riverCurrentAt(world, s.x, s.y);
+    if (cur && waterDepth(world, s.x, s.y) !== WaterDepth.None) {
+      const cs = gameplayDefs(world).movement.riverCurrentTilesPerSec * dt;
+      const nx = s.x + cur.x * cs, ny = s.y + cur.y * cs;
+      if (!blocked(world, d, s.x, s.y, s.heading, nx, ny, s.heading)) { s.x = nx; s.y = ny; }
+      else if (!blocked(world, d, s.x, s.y, s.heading, nx, s.y, s.heading)) s.x = nx;
+      else if (!blocked(world, d, s.x, s.y, s.heading, s.x, ny, s.heading)) s.y = ny;
+      // else fully blocked: the current holds the boat against the shore, no movement, no damage
+    }
   }
   if (Math.abs(s.speed) < 1e-3 && mag === 0) s.speed = 0;
   if (Math.abs(s.steer) < 1e-3 && mag === 0) s.steer = 0;

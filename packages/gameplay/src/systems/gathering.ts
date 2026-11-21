@@ -22,7 +22,7 @@ import { spendStamina } from "./vitals.js";
 import { scaleCount, skillMul } from "../skills/tree.js";
 import { apiaryWithin } from "../skills/husbandry.js";
 import { isRaining } from "../realism.js";
-import { spawnCrop, wildSaplingKind } from "../farming.js"; // ADR-469: wild regrow through sapling stages
+import { spawnCrop, wildSaplingKind, isCropDormant } from "../farming.js"; // ADR-469: wild regrow through sapling stages; ADR-491: wild food sleeps while crops are dormant
 import farmingRaw from "../../data/farming.json";
 /** ADR-454: bees pollinate — planted crops near an Apiary yield +`bonus` on the first yield only (data/farming.json). */
 const POLLINATION: { radius: number; bonus: number } = (farmingRaw as unknown as { pollination?: { radius: number; bonus: number } }).pollination ?? { radius: 5, bonus: 1 };
@@ -200,8 +200,16 @@ export function gatherSystem(world: World, dt: number): void {
     // Yields store numeric item ids (resolved at loadDefs), so the comparison is by id, not key.
     const raining = isRaining(world.env(Weather).kind);
     const woodId = defs.itemId("wood"), wetWoodId = defs.itemId("wet_wood");
+    // ADR-491: wild food follows the seasons — seasonal yields (wild fruit, mushrooms, herbs) give
+    // nothing while crops are dormant (last day of Fall + Winter, same rule as isCropDormant). The
+    // plain `berries` yield is NOT seasonal: it is the dye -> Claim Flag chain, so berry bushes
+    // still give berries in winter and bot bootstrap never starves. Wild food-crop nodes carry no
+    // seasonal flag at all (seed source). One season read per gather action, next to the rain read.
+    const dormant = isCropDormant(world);
+    const mushroomId = defs.itemId("mushroom");
     def.yields.forEach((y, i) => {
       if (bare && i > 0) return; // fists: first yield only
+      if (dormant && y.seasonal) return; // ADR-491: dormant plants yield nothing
       if (y.chance < 1 && rng.next() >= y.chance) return;
       const rolled = rng.int(y.min, y.max + 1) + (i === 0 ? bonus : 0);
       const n0 = bare ? Math.max(defs.bareHands.minYield, Math.floor(rolled * defs.bareHands.yieldMul)) : rolled;
@@ -209,10 +217,12 @@ export function gatherSystem(world: World, dt: number): void {
       const n = gm === 1 ? n0 : scaleCount(n0, gm, rng.next()); // ADR-113 (no extra roll without perks: rng stream unchanged)
       const total = n + (pollinated && i === 0 ? POLLINATION.bonus : 0);
       if (total <= 0) return;
+      // ADR-491: mushrooms flush while it rains — one extra mushroom on a successful mushroom roll.
+      const rainBonus = raining && y.item === mushroomId ? 1 : 0;
       const item = y.item === woodId && raining ? wetWoodId : y.item;
-      const added = addItem(world, e, item, total);
+      const added = addItem(world, e, item, total + rainBonus);
       if (added > 0) emit(world, ItemGathered, { entity: e, node, item, count: added });
-      if (added < total) emit(world, InventoryOverflow, { entity: e, item, lost: total - added });
+      if (added < total + rainBonus) emit(world, InventoryOverflow, { entity: e, item, lost: total + rainBonus - added });
     });
     // ADR-474: tool wear — one durability per successful gather swing, charged on the tool that did the work
     // (the main hand, when it holds the node's required tool at the required tier). Fists, a wrong tool and

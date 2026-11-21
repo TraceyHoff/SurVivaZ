@@ -90,7 +90,8 @@ import { task479AtlasSources, installSailboatMenuIcons, TASK479_ATLAS_KEYS } fro
 import { installGuideArt } from "./task364-art.js";
 import { installGuideMenuIcon } from "./guide-art.js";
 import { installWetWoodIcon } from "./wetwood-art.js"; // ADR-457: wet firewood's own icon
-import { footprintAtlasSources, FOOTPRINT_SPRITE_KEY } from "./footprints-art.js"; // ADR-455: footprints' own sprite
+import { footprintAtlasSources, trackAtlasSources, FOOTPRINT_SPRITE_KEY, TRACK_SPRITE_KEY } from "./footprints-art.js"; // ADR-455: footprints' own sprite; ADR-501: the animal track's own sprite
+import { installFishingRodIcon, rodAtlasSources } from "./fishing-rod-art.js"; // ADR-493: the fishing rod's own icon + held sprite
 import { FootprintStore, sampleFootprints, collectFootprintOverlays, footprintTuning, snowCoverOf } from "./footprints.js"; // ADR-455
 import { stumpKeys } from "./stumps.js";
 import { RoofTiler, rfxStandIn, roofWallMaterial } from "./roof-tiler.js";
@@ -490,6 +491,10 @@ export class IsoView {
     for (const [k, src] of await task479AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-455: dedicated footprint atlas (one boot print, 8 facings — the ground decal for snow/mud).
     for (const [k, src] of await footprintAtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-501: dedicated animal-track atlas (two small iso-aligned ovals, 8 facings — the ground decal animals leave).
+    for (const [k, src] of await trackAtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-493: dedicated held-rod atlas (a rod at the grip, 8 facings — the held sprite for the fishing rod).
+    for (const [k, src] of await rodAtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-357: the five store build-menu icons point at items_build frames 297–301, which are transparent
     // in the shipped atlas (no binary could ship through the snapshot route) — paint them at runtime from
     // the stores' own world art so the build menu shows them. Safe no-op without a canvas.
@@ -523,6 +528,10 @@ export class IsoView {
     // from the wetwood-art painter and registered in ICON_DATA, so the inventory / hotbar / toast /
     // crafting icons for wet_wood render it. Safe no-op without a canvas.
     installWetWoodIcon();
+    // ADR-493: the fishing rod's own icon (a diagonal rod + reel + line and hook) — painted at
+    // runtime from the fishing-rod-art painter and registered in ICON_DATA, so the inventory /
+    // hotbar / toast / crafting icons for fishing_rod render it. Safe no-op without a canvas.
+    installFishingRodIcon();
     // Art's customization pack (~220 paper-doll atlases, 1008x960): the renderer packs every atlas into one 2048² texture
     // array, so these alone need ~1.7 GiB of VRAM ("Texture total allocation size is too large" -> every sprite black).
     // Until Render loads outfit layers on demand, keep them out unless the array fits (?cz=1 forces them in).
@@ -941,8 +950,9 @@ export class IsoView {
         const ft = footprintTuning(defs?.environment);
         sampleFootprints(this.footprints, net, pt.x, pt.y, net.tick, ft, snowCoverOf(v));
         if (this.footprintSpriteId === undefined) this.footprintSpriteId = this.rs(FOOTPRINT_SPRITE_KEY)?.id;
+        if (this.trackSpriteId === undefined) this.trackSpriteId = this.rs(TRACK_SPRITE_KEY)?.id;
         if (r.vfx && this.footprintSpriteId !== undefined) {
-          collectFootprintOverlays(this.footprints, this.footprintSpriteId, net.tick, Math.max(1, Math.round(ft.fadeSeconds * 20)), this.footprintOverlays);
+          collectFootprintOverlays(this.footprints, { boot: this.footprintSpriteId, ...(this.trackSpriteId === undefined ? {} : { track: this.trackSpriteId }) }, net.tick, Math.max(1, Math.round(ft.fadeSeconds * 20)), this.footprintOverlays);
           r.vfx.overlay = this.footprintOverlays;
         }
       }
@@ -998,6 +1008,8 @@ export class IsoView {
   /** ADR-455: client-side transient footprints (snow/mud) + their one-frame VFX overlay (reused scratch). */
   private readonly footprints = new FootprintStore(); private readonly footprintOverlays: VfxSpawn[] = [];
   private footprintSpriteId: number | undefined;
+  /** ADR-501: the animal-track sprite id (undefined until resolved, like footprintSpriteId). */
+  private trackSpriteId: number | undefined;
   private syncRaid(net: World, e: Entity, ve: Entity): void {
     const v = this.view; const bp = net.get(e, GPiece); const t = v.get(ve, Transform); if (!bp || !t) return;
     this.raidPieces.push({ e, x: Math.floor(t.x) + 0.5, y: Math.floor(t.y) + 0.5, z: floorToTerrainZ(v.getField(ve, VPiece, "level") ?? 0, t.z), hp: bp.hp, tier: bp.tier });
@@ -1244,7 +1256,8 @@ export class IsoView {
     if (net.isRegistered(GVehicle) && net.has(e, GVehicle)) return undefined; // ADR-170: drawn by VehicleView (syncVehicles)
     // characters: own player (Survival is owner-only) + other players and human bots (PlayerId / Appearance / Health+AnimState)
     if (net.has(e, Animal)) {
-      const k = animalDefs()[net.get(e, Animal)!.kind];
+      const a = net.get(e, Animal)!;
+      const k = animalDefs()[a.kind];
       // ADR-319: a tamed mount draws on its dedicated true-scale sheet (mount_<art>, scale 1); wild animals keep their own sheet
       const mk = net.isRegistered(Mount) && net.has(e, Mount) ? this.rs(mountSpriteKeyOf(net.getField(e, Mount, "species") ?? 0)) : undefined;
       const r = mk ?? this.rs(k?.spriteKey);
@@ -1253,7 +1266,10 @@ export class IsoView {
         // and it is not a mount sheet (mounts are already true-scale). A fallback resolution already
         // carries its own corrected scale from sprite_fallbacks.json, so it must not be multiplied again.
         const live = !mk && r.key === k?.spriteKey ? animalDrawScale(k?.key) : 1;
-        const sc = r.scale * live;
+        // ADR-496: a rare old animal draws larger — the same sprite, scaled. Only real-art species
+        // can be old (the sim never marks a fallback species), and mounts are never old either.
+        const old = !mk && a.old === 1 ? (k?.oldScaleMul ?? 1) : 1;
+        const sc = r.scale * live * old;
         return { sprite: r.id, animated: true, shadow: 0.8, ...(r.tint ? { tint: r.tint } : {}), ...(sc !== 1 ? { scale: sc, onCreate: sc } : {}) };
       }
       const ph = this.sid(`animal_${k?.key ?? ""}`) ?? this.sid("player"); // species key fallback; base sprite only if the pack lacks animal art

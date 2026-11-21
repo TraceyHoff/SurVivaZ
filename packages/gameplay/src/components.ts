@@ -33,7 +33,7 @@ export const Survival = defineComponent("Survival", {
   staminaDelayTicks: "u16", // remaining regen delay (replicates as u16 ticks, per Netcode)
 }, { networked: true });
 
-export const enum DamageCause { None = 0, Starvation = 1, Dehydration = 2, Hypothermia = 3, Hyperthermia = 4, Combat = 5, Sunlight = 6, Fire = 7, Contact = 8, Explosion = 9, Turret = 10, Trap = 11, Disease = 12, Fall = 13 }
+export const enum DamageCause { None = 0, Starvation = 1, Dehydration = 2, Hypothermia = 3, Hyperthermia = 4, Combat = 5, Sunlight = 6, Fire = 7, Contact = 8, Explosion = 9, Turret = 10, Trap = 11, Disease = 12, Fall = 13, Drowning = 14 }
 export const VitalsState = defineComponent("VitalsState", { lastDamageCause: "u8" });
 /** Buff/debuff stat ids (core modifier stacks; 1..255, append only). */
 export const enum Stat { HungerRate = 1, ThirstRate = 2, StaminaRegen = 3, HealthRegen = 4, Insulation = 5, MoveSpeed = 6 }
@@ -91,6 +91,8 @@ export const enum IntentAction {
   Move = 16,
   ToggleDoor = 20, LockDoor = 21, OpenContainer = 22, CloseContainer = 23, Deposit = 24, Withdraw = 25, ToggleFire = 26,
   Attack = 30, Reload = 31, Wear = 32, Boil = 33,
+  /** ADR-493: cast a fishing line (no target — the cast point is the water tile in front). */
+  Fish = 34,
 }
 /** Per-tick intent, written in the input phase by applyGameplayInput (sim-local; rebuilt from inputs). */
 export const PlayerIntent = defineComponent("PlayerIntent", {
@@ -155,7 +157,7 @@ export const NoiseLevel = defineComponent("NoiseLevel", { value: "f32" });
  * without entity references. Attachments are separate entities because BuildPiece entities use net's static class
  * (all their components ride the static channel, scopes don't apply).
  */
-export const enum AttachKind { Door = 1, Fire = 2, Storage = 3, Light = 4, Till = 5 }
+export const enum AttachKind { Door = 1, Fire = 2, Storage = 3, Light = 4, Till = 5, Smell = 6 }
 export const PieceLink = defineComponent("PieceLink", { tx: "i32", ty: "i32", z: "u8", side: "u8", layer: "u8", kind: "u8" }, { networked: true, persistent: true });
 /** Render-facing (renderer contract): wetness 0..255 on characters and zombies, replicated to all. */
 export const Wetness = defineComponent("Wetness", { level: "u8" }, { networked: true });
@@ -279,8 +281,8 @@ export const Burning = defineComponent("Burning", { lit: "u8", intensity: "u8", 
  * The shared registration module: registration order = component ids on every peer (append only!).
  * Includes engine-provided gameplay-facing components (world Emitter, the Buffs modifier stack).
  */
-/** Ambient wildlife (population spawner). kind = index into animalDefs() (ai.json animal_* archetypes; spawn rows in spawns.json). Not persistent: respawned by density. */
-export const Animal = defineComponent("Animal", { kind: "u8", state: "u8", homeX: "f32", homeY: "f32", goalX: "f32", goalY: "f32", thinkAt: "u32" }, { networked: true });
+/** Ambient wildlife (population spawner). kind = index into animalDefs() (ai.json animal_* archetypes; spawn rows in spawns.json). Not persistent: respawned by density. ADR-496: `old` = 1 for a rare old variant (bigger, tougher, extra loot) — appended at the end (append-only rule: registration order = component ids on every peer, so a field is only ever appended, never inserted or reordered). Absent in old data = 0 = normal. */
+export const Animal = defineComponent("Animal", { kind: "u8", state: "u8", homeX: "f32", homeY: "f32", goalX: "f32", goalY: "f32", thinkAt: "u32", old: "u8" }, { networked: true });
 
 /** Slice 5 queued crafting (core JobQueue layout, 4 slots; see systems/craft_queue.ts). */
 export const CraftQueue = defineJobQueue("gameplay.CraftQueue", 4);
@@ -453,6 +455,19 @@ export const RecentBuilds = defineComponent("RecentBuilds", {
 export const RecentFoods = defineComponent("RecentFoods", {
   group: { type: "u16", length: RECENT_MAX }, count: "u8",
 }, { networked: true, persistent: true });
+/** ADR-498: first-visit discoveries per player (most recent first, capped at DISCOVERY_MAX — well
+ * above the Recent* cap of 8, so a session's explorations fit). Networked + persistent, same class
+ * as RecentCrafts: the journal reads the owner's list on every peer, and the player codec encodes
+ * every component on the player entity, so discoveries survive save/reconnect; old saves: absent =
+ * empty. kind: 1 = a lake, 2 = a river, 3 + AbandonedKindId = a ruin of that kind. cx/cy are the
+ * chunk coords of the discovery. */
+export const DISCOVERY_MAX = 64;
+export const Discoveries = defineComponent("Discoveries", {
+  kind: { type: "u8", length: DISCOVERY_MAX },
+  cx: { type: "i16", length: DISCOVERY_MAX },
+  cy: { type: "i16", length: DISCOVERY_MAX },
+  count: "u8",
+}, { networked: true, persistent: true });
 /**
  * Task 14: a joined player's load-in state (networked, NOT persistent — re-added on every join).
  * The server adds it with ready=0 when a client joins; the client sends gameplay.ready when its second
@@ -546,6 +561,12 @@ export const Carrion = defineComponent("Carrion", { bag: "u32", untilTick: "u32"
  *  component — wells.ts lazy-attaches it at full on first touch, so a pre-existing well starts full. */
 export const Well = defineComponent("Well", { level: "u8" }, { networked: true, persistent: true });
 
+/** ADR-493: per-fisher cast state — a line in the water (presence = waiting for a bite) at the
+ * cast point (the water tile in front when the line was cast). Transient: the server and the
+ * predicting client derive it from the same Fish intent + the deterministic per-entity "fishing"
+ * rng stream, so it is neither networked nor persistent. */
+export const Fishing = defineComponent("Fishing", { waitUntilTick: "u32", castX: "f32", castY: "f32" });
+
 export const GAMEPLAY_COMPONENTS = [
   Emitter, Buffs,
   Health, ResourceNode, Survival, VitalsState, Exposure, Dead,
@@ -608,4 +629,6 @@ export const GAMEPLAY_COMPONENTS = [
   Well, // append-only (ADR-471 well water level; networked + persistent)
   RecentFoods, // append-only (ADR-470 diet groups of the last 8 foods eaten; networked + persistent)
   FloodTile, // append-only (ADR-467 flood water per tile; server-only, persistent)
+  Discoveries, // append-only (ADR-498 first-visit discoveries per player; networked + persistent)
+  Fishing, // append-only (ADR-493 per-fisher cast state; transient, derived — not networked, not persistent)
 ] as const;

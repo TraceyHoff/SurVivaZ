@@ -150,6 +150,7 @@ const EXPECTED: Record<string, string> = {
   "diseases.influenza.cure": itemName(disease("influenza").cure!),
   "diseases.broken_leg.durationSeconds": fmtDur(disease("broken_leg").durationSeconds),
   "diseases.broken_leg.cure": itemName(disease("broken_leg").cure!),
+  "diseases.bleeding.cure": itemName(disease("bleeding").cure!), // ADR-492: bleeding has no duration line (duration 0 would render "0 s")
   "diseases.exhaustion.cure": "Rest",
   "diseases.transmission.radiusTiles": `${(diseasesRaw as unknown as { transmission: { radiusTiles: number } }).transmission.radiusTiles} tiles`,
   "diseases.transmission.contactSeconds": fmtDur((diseasesRaw as unknown as { transmission: { contactSeconds: number } }).transmission.contactSeconds),
@@ -341,7 +342,7 @@ describe("ADR-362 guide content + data", () => {
     expect(resolveGuideFact("building.claimCost", "cost")).toBe("10 Pine Log, 10 Stone, 2 Dye");
     expect(resolveGuideFact("safety.safeRadiusTiles", "tiles")).toBe("20 tiles");
     expect(resolveGuideFact("inventory.totalSlots", "count")).toBe("24");
-    expect(resolveGuideFact("cooking.recipeCount", "count")).toBe("406"); // ADR-479: sailboat kit recipe // ADR-449–463: +5 recipes (cured_venison, cured_poultry, cured_prime_cut, smoked_fish, dry_wet_wood)
+    expect(resolveGuideFact("cooking.recipeCount", "count")).toBe("407"); // ADR-493: fishing_rod recipe // ADR-479: sailboat kit recipe // ADR-449–463: +5 recipes (cured_venison, cured_poultry, cured_prime_cut, smoked_fish, dry_wet_wood)
     expect(resolveGuideFact("temperature.fireHeatMaxC", "tempDelta")).toBe("+15 °C (+27 °F)");
   });
 

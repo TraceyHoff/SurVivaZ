@@ -12,6 +12,8 @@
   "lowNeedsStaminaRegenMul": 0.5,
   "staminaRegenPerSec": 15,
   "sprintStaminaDrainPerSec": 20,
+  "swimStaminaDrainPerSec": 4,
+  "drownDps": 1.0,
   "staminaRegenDelaySeconds": 1.0,
   "bodyTempNormal": 37,
   "bodyTempMin": 30,

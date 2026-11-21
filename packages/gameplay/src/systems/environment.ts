@@ -213,6 +213,20 @@ export function surfaceTemperature(world: World, x = 0, y = 0): number {
   return seasonalTemperature(env, worldSeason(world, env, time), time, w);
 }
 
+/** ADR-488: humidity (0..1) at a position — the band base plus the wet-weather bonus, via the same
+ * climateAt sample as the temperature. Without a ClimateRes there is no band to read, so the 0.5
+ * band default (defs.ts) applies everywhere. */
+export function ambientHumidity(world: World, x = 0, y = 0): number {
+  return world.getResource(ClimateRes) ? climateAt(world, x, y).humidity : 0.5;
+}
+
+/** ADR-488: damp air dries clothes slower — `max(0.25, 1 - humidity)`, floored so drying in the
+ * dampest lowlands (humidity 0.9) runs at a quarter rate instead of stalling at a tenth. */
+export function humidityDryMul(humidity: number): number { return Math.max(0.25, 1 - humidity); }
+
+/** ADR-488: damp air rots food faster — decay x `(1 + humidity)`, up to twice as fast in the dampest places. */
+export function humiditySpoilMul(humidity: number): number { return 1 + humidity; }
+
 /**
  * Task 23: the shelter's pull on air temperature at a tile (deg C): roof shade/warmth + wall insulation, toward
  * comfort (solid walls insulate twice as well as window walls, and each material tier insulates more than the last).
@@ -317,6 +331,9 @@ export function exposureSystem(world: World, dt: number): void {
   for (const e of world.query([Exposure, Transform])) {
     const idx = entityIndex(e); const s = ex.slot(idx); const ts = tf.slot(idx);
     const x = tf.data.x[ts]!, y = tf.data.y[ts]!, z = tf.data.z[ts]!;
+    // ADR-488: one climate sample per occupant per pass — the ambient temperature below and the
+    // humidity the drying rate reads share it (no extra sample when a ClimateRes is installed).
+    const sample = hasClimate ? climateAt(world, x, y) : undefined;
     const heat = emitters?.sampleField(EmitterKind.Heat, x, y, z) ?? 0;
     const sh = shelterAt(world, x, y, z, w.windDir);
     // Task 24: inside a fully enclosed room the fire's heat is not instant — the room itself warms over
@@ -347,9 +364,11 @@ export function exposureSystem(world: World, dt: number): void {
     else if (wdef.wetnessPerSec > 0 && sh.rain > 0) wet += wdef.wetnessPerSec * w.intensity * sh.rain * (1 - waterproofOf(world, e)) * dt;
     // ADR-465: wind dries you too when you are unsheltered from it (sh.wind > 0) — same shape as the
     // ground wind-drying in chunkSurfaceSystem (surface.windDryMul), so a windy day dries wet clothes.
-    else wet = dryWetness(wet, dt, env.dryPerSec * (heat > 0 ? env.heatDryMul : 1) * (sh.wind > 0 ? 1 + env.surface.windDryMul * w.windSpeed / env.surface.windDryRefSpeed : 1));
+    // ADR-488: damp air dries clothes slower (humidityDryMul, floored at 0.25); no ClimateRes reads
+    // the 0.5 band default. Clothes only in v1 — ground drying (chunkSurfaceSystem) is untouched.
+    else wet = dryWetness(wet, dt, env.dryPerSec * (heat > 0 ? env.heatDryMul : 1) * (sh.wind > 0 ? 1 + env.surface.windDryMul * w.windSpeed / env.surface.windDryRefSpeed : 1) * humidityDryMul(sample?.humidity ?? 0.5));
     wet = Math.min(1, Math.max(0, wet));
-    const ambient = isUnderground(world, x, y) ? TERRAIN.undergroundTempC : ambient0 ?? ambientTemperature(world, x, y); // ADR-263
+    const ambient = isUnderground(world, x, y) ? TERRAIN.undergroundTempC : ambient0 ?? sample!.temperature; // ADR-263
     // Task 23: clothing insulation pulls felt toward the comfort band — it warms in the cold and shades in the heat
     // (a fur coat no longer cooks its wearer in a heat wave); higher tiers insulate more (items.json).
     // Task 31: wet clothing insulates less (effectiveInsulation); all worn insulation contributes continuously.

@@ -55,7 +55,7 @@ import { inventoryOpRejectText } from "./inventory-reject.js";
 import { netIdOf, ChatChannel, type ChatDelivered } from "@engine/net";
 import { WorldRules, worldRules, ROADS, holdsRangedWeapon, Sign, signText, Road, StallHeader, buildView, listItemIntents, setStallOpenIntent, stallView, nearestStall, inventoryView, selectHotbarIntent, equipIntent, useIntent, moveSlotIntent, hotbarConsumes, gameplayDefs, BuildPiece, compassOf } from "@engine/gameplay";
 import { replicaTerrain } from "./replica-terrain.js";
-import { SocialDirectory, hasCreatedLook, setAppearanceIntent, interactPanel, petEventText, workerEventText, petRenameIntent, readyIntent, toggleDoorIntent, UseCmd, GatherCmd, farmPrompt, TerrainRes, type MenuCtx, type MenuIntent } from "@engine/gameplay";
+import { SocialDirectory, hasCreatedLook, setAppearanceIntent, interactPanel, petEventText, workerEventText, petRenameIntent, readyIntent, toggleDoorIntent, UseCmd, GatherCmd, FishCmd, farmPrompt, TerrainRes, type MenuCtx, type MenuIntent } from "@engine/gameplay";
 import { ClientSession } from "./session.js";
 import { mountNetStatus, pingLabel } from "./net-status.js";
 import type { SessionInfo } from "./game-menus.js";
@@ -769,7 +769,7 @@ camRot = attachCameraRotate({ target: () => iso?.renderer, input, root, frameBou
 farm = mountFarmPrompt(root, {
   world: () => world, player: () => session.player, device: promptDevice, hidden: () => !!menus?.nav.isOpen || buildMode.active || !!vehicleCtl?.driving,
   key: (action) => controlLabel(input.bindings(promptDevice(), "Gameplay").find((b) => b.binding.action === action)?.binding.control),
-  use: (p) => { if (p.action === "Harvest") { if (p.target !== undefined) sendIntent({ cmd: GatherCmd, args: { target: p.target }, entities: ["target"] }); } else if (p.slot !== undefined) sendIntent({ cmd: UseCmd, args: { slot: p.slot } }); },
+  use: (p) => { if (p.action === "Harvest") { if (p.target !== undefined) sendIntent({ cmd: GatherCmd, args: { target: p.target }, entities: ["target"] }); } else if (p.action === "Fish") sendIntent({ cmd: FishCmd, args: {} }); else if (p.slot !== undefined) sendIntent({ cmd: UseCmd, args: { slot: p.slot } }); },
 });
 // ADR-179: visible hotbar (inventory slots 1..8) bottom-centre; equips like the Hotbar1..8 bindings
 const hotbar = mountHotbar({ selectedSlot: () => session.player !== undefined ? world.getField(session.player, HotbarSelection, "slot") : undefined, device: promptDevice, equip: (slot) => sendIntent(selectHotbarIntent(slot)),

@@ -28,7 +28,7 @@ describe("ADR-247 seed sources", () => {
   });
   it("the validator flags a cross-species drop and a seed recipe", () => {
     const d = gameplayDefs(makeWorld()); const bush = d.resources.get(d.resourceId("berry_bush"))! as unknown as { yields: readonly YieldDef[] }; const saved = bush.yields;
-    bush.yields = [...saved, { item: d.itemId("carrot_seeds"), min: 1, max: 1, chance: 0.1 }];
+    bush.yields = [...saved, { item: d.itemId("carrot_seeds"), min: 1, max: 1, chance: 0.1, seasonal: false }];
     try { expect(seedSourceIssues(d).join("\n")).toMatch(/berry_bush.*carrot_seeds|carrot_seeds.*berry_bush/); } finally { bush.yields = saved; }
     expect(seedSourceIssues(d)).toEqual([]);
   });

@@ -3,7 +3,7 @@
 // acquire or engage survivors inside; horde zombies exempt). No starter spawn points are installed
 // anywhere in this file, so every protection here comes from the AI points alone — not Task 33.
 import { describe, expect, it } from "vitest";
-import { installPermissions, PlayerId, Transform, type Entity, type World } from "@engine/core";
+import { installPermissions, PlayerId, setTimeOfDay, Transform, type Entity, type World } from "@engine/core";
 import { Health } from "../src/components.js";
 import * as G from "../src/index.js";
 import { makeWorld, spawnLearned, steps } from "./helpers.js";
@@ -95,7 +95,8 @@ describe("ADR-326 safe spawn radius around world-wide AI spawn points", () => {
     expect(w.get(p, Health)!.hp).toBe(hp0);
   });
   it("control: without AI points the same wolf attacks the same survivor", () => {
-    const w = makeWorld(); w.addSystem("simulation", "gameplay.animalAI", G.animalAISystem);
+    const w = makeWorld(); setTimeOfDay(w, 0, 0); // ADR-495: wolves hunt at night (daytime activity 0.4x shrinks the 2.5-tile aggro range to 1.0, outside the 1.2-tile spawn)
+    w.addSystem("simulation", "gameplay.animalAI", G.animalAISystem);
     const p = G.spawnPlayer(w, { x: 400, y: 0, maxWeight: 0, clientId: 1 });
     const wolf = G.spawnAnimal(w, "animal_wolf", 401.2, 0);
     const hp0 = w.get(p, Health)!.hp;

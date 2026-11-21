@@ -17,7 +17,7 @@ import { emit, FarmFailed, PlantDied, XpActivity } from "./events.js";
 import { indexEntity, spawnResourceNode } from "./spawn.js";
 import { hasPrivilege } from "./building/place.js";
 import { populationTile } from "./population.js";
-import { nearWater } from "./systems/vitals.js";
+import { nearWater, tileIsWater } from "./systems/vitals.js";
 import { surfaceTemperature } from "./systems/environment.js";
 import { isRaining } from "./realism.js";
 import { isUnderground } from "./terrain_depth.js";
@@ -301,7 +301,7 @@ export const FARM_FAIL_TEXT: Readonly<Record<number, string>> = {
   [FarmFail.NeedsSoil]: "Needs tilled soil — use a hoe first", [FarmFail.NothingToTend]: "No crops here to tend", [FarmFail.NeedsHoe]: "You need a hoe to till soil first",
   [FarmFail.NeedsWater]: "Plant needs water", [FarmFail.TooDark]: "Too dark to grow — needs sunlight or a light",
 };
-export type FarmAction = "Till" | "Plant" | "Water" | "Fertilize" | "Harvest" | "Tame" | "Feed" | "Eat" | "Drink"; // Eat / Drink: ADR-128 quick-use consume; Tame / Feed: ADR-113 husbandryPrompt
+export type FarmAction = "Till" | "Plant" | "Water" | "Fertilize" | "Harvest" | "Tame" | "Feed" | "Eat" | "Drink" | "Fish"; // Eat / Drink: ADR-128 quick-use consume; Tame / Feed: ADR-113 husbandryPrompt; Fish: ADR-493 fishing
 export interface FarmPrompt { action: FarmAction; /** Use slot (Harvest goes through Interact / gather instead) */ slot?: number; target?: Entity; /** predicted failure (dry run) */ fail: FarmFail; label: string }
 /** Context prompt for the player's held farming item / a ripe farmed node in front (pure read; client-predicted). */
 export function farmPrompt(world: World, e: Entity): FarmPrompt | undefined {
@@ -318,6 +318,9 @@ export function farmPrompt(world: World, e: Entity): FarmPrompt | undefined {
   const ripe = new Set(FARMING.plantables.map((p) => p.becomes));
   const node = near(world, at.x, at.y, 1).find((o) => { const n = world.get(o, ResourceNode); return !!n && ripe.has(defs.resources.get(n.kind)?.key ?? ""); });
   if (node !== undefined) { const { slot: _s, ...p } = mk("Harvest", FarmFail.None, { target: node }); return p; }
+  // ADR-493: a fishing rod in hand with water in front offers Fish — before the Drink branch below
+  // (a rod-holder by the water wants to fish, not drink). The cast point is the tile in front.
+  if (key === "fishing_rod" && tileIsWater(world, at.x, at.y)) return mk("Fish", FarmFail.None);
   // ADR-128: quick-use eats/drinks the held consumable; empty hands next to water drink from the tile (slot NO_SLOT)
   const food = key ? defs.items.get(item) : undefined;
   // ADR-286: a liquid container holding water pours on a thirsty plant in front (instead of drinking)

@@ -5,7 +5,8 @@
  * ToggleFire (range-checked) lights (needs fuel) or extinguishes. Fuel/HeatSource.lit replicate to all.
  */
 import { entityIndex, Transform, type Entity, type World } from "@engine/core";
-import { BuildPiece, Container, CraftingStation, Dead, Emitter, Fuel, IntentAction, PlayerIntent } from "../components.js";
+import { Falloff, installSpatialIndex } from "@engine/world";
+import { BuildPiece, Container, CraftingStation, Dead, Emitter, Fuel, IntentAction, PieceLink, PlayerIntent } from "../components.js";
 import { emitterSpecs, EmitterKind } from "../realism.js";
 import { gameplayDefs, isAuthority, rangeSlack } from "../config.js";
 import { secondsToTicks, StationKind, type GameDefs } from "../defs.js";
@@ -14,7 +15,7 @@ import { listSlots, removeItem } from "../inventory.js";
 import { resolveAttachment } from "../building/links.js";
 import { AttachKind, Progression } from "../components.js";
 import { skillMod } from "../skills/tree.js";
-import { attachmentsOf, pieceOf } from "../building/links.js";
+import { attachmentsOf, linkAttachment, pieceOf } from "../building/links.js";
 
 function burnNext(world: World, fire: Entity, defs: GameDefs, dt: number): boolean {
   if (!world.has(fire, Container)) return false;
@@ -89,12 +90,43 @@ export function distance(world: World, a: Entity, b: Entity): number {
 
 /**
  * Emitter strength follows Fuel.lit: lit -> full strength from piece data (realism emitterSpecs), unlit -> 0.
- * The fire entity carries the heat Emitter; a sibling light entity (AttachKind.Light) carries the light Emitter.
+ * The fire entity carries the heat Emitter; a sibling light entity (AttachKind.Light) carries the light Emitter;
+ * a fired piece's smoke lives on a sibling smell entity (AttachKind.Smell, ADR-486).
  */
 export function setEmittersLit(world: World, fire: Entity, lit: number): void {
   const piece = pieceOf(world, fire);
-  const targets = piece !== undefined ? attachmentsOf(world, piece).filter((a) => world.has(a, Emitter)) : world.has(fire, Emitter) ? [fire] : [];
+  const targets = piece !== undefined ? attachmentsOf(world, piece).filter((a) => world.has(a, Emitter)) : [...(world.has(fire, Emitter) ? [fire] : []), ...attachmentsOf(world, fire).filter((a) => world.has(a, Emitter))];
+  // ADR-486: a fired piece whose Smell sibling is missing (a save from before ADR-486, or a lost
+  // attachment) grows one when its fire is lit, so old saves' fires smell too.
+  if (lit && piece !== undefined) {
+    const s = ensureSmellAttachment(world, piece, fire);
+    if (s !== undefined && !targets.includes(s)) targets.push(s);
+  }
   for (const t of targets) world.setField(t, Emitter, "strength", lit ? fullStrength(world, t, piece) : 0);
+}
+/** ADR-486: ensure a fired piece has a Smell sibling (AttachKind.Smell), creating one beside its fire
+ * attachment when missing — a save from before ADR-486, or a lost attachment. The sibling copies the
+ * fire attachment's Transform and PieceLink (every attachment of a piece shares the piece's slot), so
+ * it sits exactly where the fire is. Returns the sibling, or undefined when the piece is not fired
+ * or the fire attachment has no link to copy. */
+function ensureSmellAttachment(world: World, piece: Entity, fire: Entity): Entity | undefined {
+  for (const a of attachmentsOf(world, piece)) if (world.getField(a, PieceLink, "kind") === AttachKind.Smell) return a;
+  const t = world.getField(piece, BuildPiece, "type"); const def = t === undefined ? undefined : gameplayDefs(world).pieces.get(t);
+  if (!def?.fired) return undefined;
+  const smell = emitterSpecs(def, gameplayDefs(world).ai.smell.fire).find((x) => x.kind === EmitterKind.Smell);
+  if (!smell) return undefined;
+  const link = world.get(fire, PieceLink); const tf = world.get(fire, Transform); if (!link || !tf) return undefined;
+  const s = world.create();
+  world.add(s, Transform, { x: tf.x, y: tf.y, z: tf.z }).add(s, PieceLink, { tx: link.tx, ty: link.ty, z: link.z, side: link.side, kind: AttachKind.Smell, layer: link.layer });
+  linkAttachment(world, piece, s);
+  // No markLinked here: importing building/structure.js would cycle back through fuel.ts
+  // (structure -> modular -> combat/pvp -> spawn -> fuel) and leave FIRE_TENDER_RADIUS undefined
+  // when skills/describe.ts evaluates its module-level label, breaking the firekeeper description
+  // (ADR-219). The sibling is marked lazily by the rehydration pass instead — it re-links it
+  // (idempotent) and rehydrate.ts already verifies/fixes a Smell sibling's Emitter.
+  const tfs = world.store(Transform); const sl = tfs.slot(entityIndex(s)); if (sl >= 0) installSpatialIndex(world).hash.insert(s, tfs.data.x[sl]!, tfs.data.y[sl]!);
+  world.add(s, Emitter, { kind: smell.kind, radius: smell.radius, strength: 0, falloff: Falloff.Linear });
+  return s;
 }
 /** Free-standing stations (spawnStation): strength by station kind. */
 export const STATION_HEAT: Readonly<Record<number, { strength: number; radius: number }>> = {
@@ -104,7 +136,7 @@ function fullStrength(world: World, e: Entity, piece: Entity | undefined): numbe
   const kind = world.getField(e, Emitter, "kind")!;
   if (piece !== undefined) {
     const t = world.getField(piece, BuildPiece, "type"); const def = t === undefined ? undefined : gameplayDefs(world).pieces.get(t);
-    if (def) return emitterSpecs(def).find((x) => x.kind === kind)?.strength ?? 0;
+    if (def) return emitterSpecs(def, gameplayDefs(world).ai.smell.fire).find((x) => x.kind === kind)?.strength ?? 0;
   }
   return kind === EmitterKind.Heat ? STATION_HEAT[world.getField(e, CraftingStation, "kind") ?? 0]?.strength ?? 0 : 1;
 }

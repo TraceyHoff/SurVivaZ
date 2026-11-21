@@ -76,7 +76,7 @@ describe("Task 30: frozen stored food does not spoil", () => {
     const box = placeAs(w, p, "basic_storage_box", 1.5, 0.5); const xs = storageOf(w, box);
     summer(w);
     G.addItem(w, xs, item("cooked_meat"), 5);
-    steps(w, 24000); // 1200 s warm: well decayed, not yet rotten
+    steps(w, 16000); // 800 s warm: well decayed, not yet rotten (ADR-488: spoilage runs 1.5x at the default 50% humidity, so 800 s here decays as much as 1200 s used to)
     const f0 = G.slotFreshness(w, xs, 0); expect(f0).toBeGreaterThan(0.2); expect(f0).toBeLessThan(0.6);
     const c0 = createdOf(w, xs);
     winter(w); // below 32 F / 0 C: frozen
@@ -85,7 +85,7 @@ describe("Task 30: frozen stored food does not spoil", () => {
     expect(f1).toBeCloseTo(f0, 2); // no spoilage progress while frozen (old 0.1x floor would have lost ~0.025)
     expect(createdOf(w, xs) - c0).toBeGreaterThan(10000); // the clock was held still, not reset
     summer(w); // thaw: resumes from the frozen freshness, it does not reset to fresh
-    steps(w, 6000); // 300 s warm
+    steps(w, 4000); // 200 s warm (ADR-488: spoilage runs 1.5x at the default 50% humidity, so 200 s here decays as much as 300 s used to)
     const f2 = G.slotFreshness(w, xs, 0);
     expect(f2).toBeLessThan(0.4); expect(f2).toBeGreaterThan(0.1); // decayed on from f0, not from 1 (a reset would read ~0.85)
   });

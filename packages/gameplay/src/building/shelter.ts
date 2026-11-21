@@ -97,6 +97,10 @@ function roofCoverAt(world: World, idx: StructureIndex, tx: number, ty: number, 
 export const VENT = { solidWall: 0, lowWall: 0.5, doorClosed: 0, doorOpen: 1, doorway: 0.75, windowSealed: 0, shuttersClosed: 0.15, windowOpen: 0.6 } as const;
 /** ADR-440: heat transmitted across a window opening (0 blocked .. 1 open), by its insert. */
 export const HEAT_TRANSMIT = { openWindow: 0.7, shuttersClosed: 0.15, shuttersOpen: 0.6 } as const;
+/** ADR-486: smell transmitted across one solid cell or one wall / closed-door edge (0 blocked .. 1 open).
+ * Scent seeps: a wall halves it instead of blocking it outright (heat's edge factor, light's binary
+ * block would both be wrong — a sealed room still smells faintly of what burns or rots inside). */
+export const SMELL_TRANSMIT = 0.5;
 
 /** ADR-440: ventilation openness (0 sealed .. 1 fully open) of the edge piece `w` (a wall, window wall or doorway with its insert). */
 export function edgeVentOf(world: World, idx: StructureIndex, w: Entity): number {
@@ -217,20 +221,24 @@ export function heatTransmitOfEdge(world: World, idx: StructureIndex, tx: number
 /**
  * Emitter occlusion for the world EmitterIndex: BuildingGrid cell occlusion (world buildingOcclusion) times thin edge
  * walls / closed doors crossed on the segment (gameplay EdgeIndex). ADR-440: heat crosses edges by transmit factor
- * (open doors and shutters let it through, so a fire warms the next room); every other kind keeps the binary block.
+ * (open doors and shutters let it through, so a fire warms the next room); ADR-486: smell crosses both cells and
+ * edges at SMELL_TRANSMIT per obstruction (scent seeps); every other kind keeps the binary block.
  */
 export function structureOcclusion(world: World): OcclusionFn {
-  const idx = structures(world); const cells = buildingOcclusion(idx.grid); const lh = gameplayDefs(world).building.levelHeight;
+  const idx = structures(world); const cells = buildingOcclusion(idx.grid);
+  const smellCells = buildingOcclusion(idx.grid, { transmit: SMELL_TRANSMIT });
+  const lh = gameplayDefs(world).building.levelHeight;
   return (kind, a, b) => {
-    const c = cells(kind, a, b); if (c === 0 || idx.edges.size === 0) return c;
+    const smell = kind === EmitterKind.Smell;
+    const c = smell ? smellCells(kind, a, b) : cells(kind, a, b); if (c === 0 || idx.edges.size === 0) return c;
     const z = Math.max(0, Math.floor(b.z / lh + 1e-6));
     const d = Math.hypot(b.x - a.x, b.y - a.y); const n = Math.max(1, Math.ceil(d * 3));
     const heat = kind === EmitterKind.Heat;
     let f = c; let px = Math.floor(a.x), py = Math.floor(a.y);
     for (let i = 1; i <= n; i++) {
       const x = Math.floor(a.x + ((b.x - a.x) * i) / n), y = Math.floor(a.y + ((b.y - a.y) * i) / n);
-      if (x !== px) { f *= heat ? heatTransmitOfEdge(world, idx, Math.max(x, px), py, z, EdgeSide.West) : idx.edgeBlocker(Math.max(x, px), py, z, EdgeSide.West) ? 0 : 1; if (f === 0) return 0; }
-      if (y !== py) { f *= heat ? heatTransmitOfEdge(world, idx, x, Math.max(y, py), z, EdgeSide.North) : idx.edgeBlocker(x, Math.max(y, py), z, EdgeSide.North) ? 0 : 1; if (f === 0) return 0; }
+      if (x !== px) { f *= heat ? heatTransmitOfEdge(world, idx, Math.max(x, px), py, z, EdgeSide.West) : smell ? (idx.edgeBlocker(Math.max(x, px), py, z, EdgeSide.West) ? SMELL_TRANSMIT : 1) : idx.edgeBlocker(Math.max(x, px), py, z, EdgeSide.West) ? 0 : 1; if (f === 0) return 0; }
+      if (y !== py) { f *= heat ? heatTransmitOfEdge(world, idx, x, Math.max(y, py), z, EdgeSide.North) : smell ? (idx.edgeBlocker(x, Math.max(y, py), z, EdgeSide.North) ? SMELL_TRANSMIT : 1) : idx.edgeBlocker(x, Math.max(y, py), z, EdgeSide.North) ? 0 : 1; if (f === 0) return 0; }
       px = x; py = y;
     }
     return f;

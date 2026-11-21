@@ -22,7 +22,7 @@ export const enum WearSlot { Head = 0, Torso = 1, Legs = 2, Feet = 3, Hands = 4,
 /** ADR-135: 8 wear slots (6 clothing/armor + off hand + accessory). Waterproof still averages over the 6 body slots. */
 export const WEAR_SLOTS = 8;
 export const BODY_WEAR_SLOTS = 6;
-export const enum ToolKind { None = 0, Axe = 1, Pickaxe = 2, Shovel = 3, Knife = 4, Brush = 5 }
+export const enum ToolKind { None = 0, Axe = 1, Pickaxe = 2, Shovel = 3, Knife = 4, Brush = 5, Fishing = 6 }
 export const enum StationKind { None = 0, Campfire = 1, Workbench = 2, Furnace = 3, Anvil = 4, Garage = 5,
   /** ADR-420: deep-water boatbuilding stations (dock tier 1, shipyard tier 2). */
   Dock = 6, Shipyard = 7 }
@@ -32,7 +32,7 @@ export const enum SocketKind { Edge = 1, Door = 2, Window = 3, Hatch = 4 }
 
 const CATEGORY: Record<string, ItemCategory> = { resource: ItemCategory.Resource, food: ItemCategory.Food, tool: ItemCategory.Tool, placeable: ItemCategory.Placeable, weapon: ItemCategory.Weapon, clothing: ItemCategory.Clothing, armor: ItemCategory.Armor, ammo: ItemCategory.Ammo, explosive: ItemCategory.Explosive };
 const WEAR: Record<string, WearSlot> = { head: WearSlot.Head, torso: WearSlot.Torso, legs: WearSlot.Legs, feet: WearSlot.Feet, hands: WearSlot.Hands, back: WearSlot.Back, offhand: WearSlot.OffHand, accessory: WearSlot.Accessory };
-const TOOL: Record<string, ToolKind> = { none: ToolKind.None, axe: ToolKind.Axe, pickaxe: ToolKind.Pickaxe, shovel: ToolKind.Shovel, knife: ToolKind.Knife, brush: ToolKind.Brush };
+const TOOL: Record<string, ToolKind> = { none: ToolKind.None, axe: ToolKind.Axe, pickaxe: ToolKind.Pickaxe, shovel: ToolKind.Shovel, knife: ToolKind.Knife, brush: ToolKind.Brush, fishing: ToolKind.Fishing };
 const STATION: Record<string, StationKind> = { none: StationKind.None, campfire: StationKind.Campfire, workbench: StationKind.Workbench, furnace: StationKind.Furnace, anvil: StationKind.Anvil, garage: StationKind.Garage, dock: StationKind.Dock, shipyard: StationKind.Shipyard };
 const WEATHER: Record<string, WeatherKind> = { clear: WeatherKind.Clear, rain: WeatherKind.Rain, storm: WeatherKind.Storm, snow: WeatherKind.Snow, fog: WeatherKind.Fog, overcast: WeatherKind.Overcast, heat: WeatherKind.Heat, blizzard: WeatherKind.Blizzard, windy: WeatherKind.Windy };
 export const WEATHER_KEYS: readonly string[] = Object.keys(WEATHER);
@@ -105,12 +105,14 @@ export interface DiseaseDef {
 /** Disease tuning (data/diseases.json): roll chances per cause event, transmission and exposure thresholds. */
 export interface DiseasesTuning {
   readonly causes: { readonly rawMeatChance: number; readonly sickFoodChance: number; readonly rottenFoodChance: number; readonly rawWaterChance: number; readonly woundChance: number; /** ADR-471: river water is riskier than a lake, isolated (elevated / great) lakes are safest. */ readonly riverWaterChance: number; readonly isolatedWaterChance: number };
+  /** ADR-492: bleeding — chance per heavy hit, and the post-armor damage that counts as heavy. */
+  readonly bleed: { readonly chance: number; readonly minDamage: number };
   readonly transmission: { readonly radiusTiles: number; readonly contactSeconds: number; readonly chance: number; readonly scanEveryTicks: number };
   readonly exposure: { readonly coldSeconds: number; readonly heatSeconds: number; readonly sprintSeconds: number; readonly restSeconds: number };
 }
 export interface ItemCount { readonly item: number; readonly count: number }
 export interface RecipeDef { readonly id: number; readonly key: string; readonly station: StationKind; readonly seconds: number; readonly ingredients: readonly ItemCount[]; readonly output: ItemCount; readonly skill: { readonly key: string; readonly level: number } | null; /** ADR-262: also craftable while holding the beginning torch */ readonly torch?: boolean }
-export interface YieldDef { readonly item: number; readonly min: number; readonly max: number; readonly chance: number }
+export interface YieldDef { readonly item: number; readonly min: number; readonly max: number; readonly chance: number; /** ADR-491: yields nothing while crops are dormant (last day of Fall + Winter). */ readonly seasonal: boolean }
 export interface ResourceDef extends Visual {
   readonly id: number; readonly key: string; readonly requiredTool: ToolKind; readonly minTier: number; readonly capacity: number;
   readonly respawnSeconds: number; readonly cooldownSeconds: number; readonly staminaCost: number; readonly bonusPerTier: number; readonly yields: readonly YieldDef[]; /** ADR-110: removed when depleted (harvested crops) */ readonly oneShot: boolean;
@@ -126,6 +128,9 @@ export interface VitalsTuning {
   readonly starvationDps: number; readonly dehydrationDps: number; readonly healthRegenPerSec: number; readonly wellFedThreshold: number;
   readonly lowNeedsThreshold: number; readonly lowNeedsStaminaRegenMul: number; readonly staminaRegenPerSec: number;
   readonly sprintStaminaDrainPerSec: number; readonly staminaRegenDelaySeconds: number; readonly bodyTempNormal: number;
+  /** ADR-489: swimming drains stamina at swimStaminaDrainPerSec; an exhausted swimmer (0 stamina) in
+   * deep water drowns at drownDps. */
+  readonly swimStaminaDrainPerSec: number; readonly drownDps: number;
   readonly bodyTempMin: number; readonly bodyTempMax: number; readonly bodyTempChangePerDegreePerSec: number; readonly bodyTempRecoverPerSec: number;
   /** ADR-472: cold bites — when felt is below env.coldBuffBelow AND wetness >= wetMin AND windSpeed >=
    * windMin, body temperature drains mul x faster toward the cold. All three conditions, not any one. */
@@ -287,14 +292,25 @@ export interface AiTuning {
   readonly chaseLimitTiles: number;
   /** ADR-461: moon boldness — sight range multiplier at full moon (sight x(1 + moonSightMul) at full moon, x1 at new moon). */
   readonly moonSightMul: number;
+  /** ADR-487: fog that blinds — sight-range multiplier per weather kind (sight x fog in Fog, x blizzard in Blizzard, x1 otherwise). */
+  readonly sightFogMul: { readonly fog: number; readonly blizzard: number };
+  /** ADR-486: smell — a zombie investigates a smell whose sampled contribution reaches `threshold`
+   * (see strongestSmell in combat/zombies.ts). One radius/strength pair per source: carcass is the
+   * strongest and shortest, fire the widest, carried rot and a fresh kill's loot bag in between. */
+  readonly smell: { readonly threshold: number; readonly carcass: SmellSpec; readonly rot: SmellSpec; readonly kill: SmellSpec; readonly fire: SmellSpec };
 }
+
+/** ADR-486: one smell source's field shape — radius in tiles, strength at the source (linear falloff). */
+export interface SmellSpec { readonly radius: number; readonly strength: number }
 export interface NoiseTuning { readonly gather: number; readonly build: number; readonly attack: number; readonly structureHit: number; readonly door: number; readonly walk: number; readonly sprint: number; readonly swim: number; readonly decayPerSec: number }
 export interface WorldgenBand { readonly max: number; readonly tile: number; readonly nodes: readonly number[]; readonly nodeChance: number; readonly temp: number; readonly humidity: number }
-export interface WorldgenDef { readonly bands: readonly WorldgenBand[]; readonly unbuildableTiles: ReadonlySet<number>; readonly unwalkableTiles: ReadonlySet<number> }
+export interface WorldgenDef { readonly bands: readonly WorldgenBand[]; readonly unbuildableTiles: ReadonlySet<number>; readonly unwalkableTiles: ReadonlySet<number>; /** ADR-500: per-deep-water-tile chance a sunken cache is scattered (generator placement exception). */ readonly sunkenCacheChance: number }
 
 export interface MovementTuning { readonly walkSpeed: number; readonly sprintMul: number; readonly encumberedFrom: number; readonly encumberedMinMul: number; readonly wetSlowMul: number; readonly bodyRadius: number;
   /** ADR-212: walker stand height on a foundation deck / an upper floor (z above the level floor), step-up ease rate (z/s). */ readonly deckStandHeight: number; readonly floorStandHeight: number; readonly stepRate: number;
   /** ADR-107 swimming: terrain ids players may swim in, and the speed multiplier there. */ readonly swimTiles: ReadonlySet<number>; readonly swimSpeedMul: number;
+  /** ADR-489: an exhausted swimmer (zero stamina) crawls at this multiplier of swim speed in deep water. */ readonly exhaustedSwimMul: number;
+  /** ADR-490: downstream push (tiles/s) a forced river gives a swimmer/wader or a paddle/motor boat. A swimmer swims ~1.45 tiles/s, so 0.3 is noticeable but fightable; a boat feels a gentle push. */ readonly riverCurrentTilesPerSec: number;
   /** ADR-181 depths: shallow water (shore band within shallowRadius tiles of land) is wadeable for everyone at wadeSpeedMul; deep water is swim-only (swimSpeedMul, no sprint). */ readonly wadeSpeedMul: number; readonly shallowRadius: number;
   /** ADR-125: tiles/s the character walk art was authored at (render playback = walkSpeed / this). */ readonly walkAnimRefSpeed: number;
   /** ADR-449 mud: wet ground (chunk wetness >= threshold) slows walking off-path by mudSlowMul; road tiles stay fast. */
@@ -337,6 +353,8 @@ export interface GameDefs {
   animalSkillTree(kind: string): AnimalSkillTree | undefined;
   readonly environment: EnvironmentTuning;
   readonly movement: MovementTuning;
+  /** ADR-493: fishing tuning (data/fishing.json). */
+  readonly fishing: FishingTuning;
   readonly worldgen: WorldgenDef;
   /** Updated id lock (persist to data/ids.lock.json when it changes). */
   readonly lock: IdLock;
@@ -344,6 +362,13 @@ export interface GameDefs {
   readonly hashes: { readonly items: number; readonly pieces: number; readonly all: number };
   itemId(key: string): number; recipeId(key: string): number; resourceId(key: string): number; pieceId(key: string): number; zombieId(key: string): number;
   piece(key: string): PieceDef;
+}
+
+export interface FishingTuning {
+  readonly biteDelaySeconds: readonly [number, number];
+  readonly biteChance: number; readonly dawnDuskBonus: number; readonly dawnDuskDelayMul: number;
+  readonly rainBonus: number; readonly deepWaterBonus: number; readonly deepWaterExtraFish: number;
+  readonly staminaCost: number; readonly fishMin: number; readonly fishMax: number;
 }
 
 /** resources.json `depletion` (ADR-134): respawn delay multiplier, tree stump time, and relocation rules (tiles). */
@@ -361,7 +386,7 @@ export interface RawItem extends RawVisual { key: string; name: string; category
   ranged?: Omit<RangedDef, "ammo" | "chargeSeconds" | "minChargeMul" | "staminaCost" | "structureMul"> & { ammo: string[]; chargeSeconds?: number; minChargeMul?: number; staminaCost?: number; structureMul?: number };
   thrown?: ThrownDef; ammo?: { damageMul: number; structureMul?: number; armorPierce?: number; ignite?: boolean }; explosive?: Omit<ExplosiveDef, "ignite"> & { ignite?: boolean } }
 export interface RawRecipe { key: string; station: string; seconds: number; ingredients: { item: string; count: number }[]; output: { item: string; count: number }; skill?: { key: string; level: number }; torch?: boolean }
-export interface RawResource extends RawVisual { key: string; requiredTool: string; minTier: number; capacity: number; respawnSeconds: number; cooldownSeconds: number; staminaCost: number; bonusPerTier: number; yields: { item: string; min: number; max: number; chance: number }[]; oneShot?: boolean }
+export interface RawResource extends RawVisual { key: string; requiredTool: string; minTier: number; capacity: number; respawnSeconds: number; cooldownSeconds: number; staminaCost: number; bonusPerTier: number; yields: { item: string; min: number; max: number; chance: number; seasonal?: boolean }[]; oneShot?: boolean }
 export interface RawWeather { kind: string; weight: number; durationSeconds: number[]; intensity: number[]; tempOffset: number; wetnessPerSec: number; thirstMul: number; staminaRegenMul: number; windSpeed?: number[] }
 export interface RawSeasonWeather { kind: string; weight: number; durationSeconds?: number[]; intensity?: number[]; tempOffset?: number; windSpeed?: number[] }
 export interface RawSeason { meanTemp: number; dayNightAmplitude: number; dailyVariation: number; tempRange: number[]; heatWaveRange?: number[]; weather: RawSeasonWeather[] }
@@ -385,7 +410,7 @@ export interface RawPiece extends RawVisual {
 }
 export interface RawZombie extends RawVisual { key: string; hp: number; speed: number; damage: number; structureDamage: number; attackRange: number; attackCooldownSeconds: number; sightRange: number; hearingMul: number; variants: number; tint?: [number, number, number]; light?: ZombieLightDef }
 export interface RawDisease { key: string; name: string; short: string; color: string; contagious?: boolean; durationSeconds: number; hpDps?: number; hungerMul?: number; thirstMul?: number; staminaDrainPerSec?: number; moveMul?: number; cure?: string | null }
-export interface RawDiseases { $comment?: string; diseases: RawDisease[]; causes: DiseasesTuning["causes"]; transmission: DiseasesTuning["transmission"]; exposure: DiseasesTuning["exposure"] }
+export interface RawDiseases { $comment?: string; diseases: RawDisease[]; causes: DiseasesTuning["causes"]; transmission: DiseasesTuning["transmission"]; exposure: DiseasesTuning["exposure"]; bleed: DiseasesTuning["bleed"] }
 /** One animal skill node (data/animal_skills.json). `requires` names the previous rank in the same tree (null = no prereq). */
 export type AnimalSkillEffectType = "produce" | "produceSpeed" | "fertility" | "damage" | "health" | "speed";
 export interface RawAnimalSkillNode { key: string; name: string; desc: string; cost: number; requires?: string; effect: { type: AnimalSkillEffectType; value: number } }
@@ -404,8 +429,9 @@ export interface RawDefs {
   pieces: { pieces: RawPiece[] };
   tiers: { tiers: (Omit<TierDef, "id" | "cost" | "raid"> & { cost: { item: string; count: number }[]; raid?: Partial<RaidMuls> })[]; building: BuildingTuning };
   zombies: { zombies: RawZombie[]; spawning: SpawnTuning; ai: AiTuning; noise: NoiseTuning; lightAvoid?: LightAvoidTuning };
-  movement: Omit<MovementTuning, "swimTiles" | "swimSpeedMul" | "walkAnimRefSpeed" | "wadeSpeedMul" | "shallowRadius" | "deckStandHeight" | "floorStandHeight" | "stepRate"> & { deckStandHeight?: number; floorStandHeight?: number; stepRate?: number; $comment?: string; swimTiles?: number[]; swimSpeedMul?: number; walkAnimRefSpeed?: number; wadeSpeedMul?: number; shallowRadius?: number };
-  worldgen: { bands: { max: number; tile: number; nodes: string[]; nodeChance: number; temp?: number; humidity?: number }[]; unbuildableTiles: number[]; unwalkableTiles: number[] };
+  movement: Omit<MovementTuning, "swimTiles" | "swimSpeedMul" | "walkAnimRefSpeed" | "wadeSpeedMul" | "shallowRadius" | "deckStandHeight" | "floorStandHeight" | "stepRate"> & { deckStandHeight?: number; floorStandHeight?: number; stepRate?: number; $comment?: string; swimTiles?: number[]; swimSpeedMul?: number; walkAnimRefSpeed?: number; wadeSpeedMul?: number; shallowRadius?: number; exhaustedSwimMul?: number; riverCurrentTilesPerSec?: number };
+  worldgen: { bands: { max: number; tile: number; nodes: string[]; nodeChance: number; temp?: number; humidity?: number }[]; unbuildableTiles: number[]; unwalkableTiles: number[]; sunkenCacheChance?: number };
+  fishing: FishingTuning & { $comment?: string };
 }
 
 export class DefsError extends Error {
@@ -448,7 +474,7 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
   const diseases: DiseaseDef[] = [];
   {
     const rd = raw.diseases; const where = "diseases";
-    if (!rd || !Array.isArray(rd.diseases) || rd.diseases.length === 0 || rd.diseases.length > 8) err(`${where}: need 1..8 diseases (Diseases component width)`);
+    if (!rd || !Array.isArray(rd.diseases) || rd.diseases.length === 0 || rd.diseases.length > 16) err(`${where}: need 1..16 diseases (kind index fits in the u8 slot encoding; MAX_DISEASES = 8 still caps concurrent diseases per entity)`);
     const seen = new Set<string>();
     for (const d of rd?.diseases ?? []) {
       if (!KEY.test(d.key)) err(`${where}: bad key "${d.key}"`); if (seen.has(d.key)) err(`${where}: duplicate key ${d.key}`); seen.add(d.key);
@@ -459,10 +485,11 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
     }
     const chance = (v: number | undefined, name: string): void => { if (!(v !== undefined && v >= 0 && v <= 1)) err(`${where}.causes.${name} must be in [0, 1]`); };
     for (const [k, v] of Object.entries(rd?.causes ?? {})) chance(v, k);
+    const bl = rd?.bleed; if (!(bl && bl.chance >= 0 && bl.chance <= 1 && bl.minDamage >= 0)) err(`${where}.bleed: need chance in [0, 1], minDamage >= 0`);
     const tr = rd?.transmission; if (!(tr && tr.radiusTiles > 0 && tr.contactSeconds > 0 && tr.chance >= 0 && tr.chance <= 1 && Number.isInteger(tr.scanEveryTicks) && tr.scanEveryTicks >= 1)) err(`${where}.transmission: need radiusTiles > 0, contactSeconds > 0, chance in [0, 1], scanEveryTicks >= 1`);
     const ex = rd?.exposure; if (!(ex && ex.coldSeconds > 0 && ex.heatSeconds > 0 && ex.sprintSeconds > 0 && ex.restSeconds > 0)) err(`${where}.exposure: cold/heat/sprint/rest seconds must be > 0`);
   }
-  const diseaseTuning: DiseasesTuning = { causes: { ...raw.diseases.causes }, transmission: { ...raw.diseases.transmission }, exposure: { ...raw.diseases.exposure } };
+  const diseaseTuning: DiseasesTuning = { causes: { ...raw.diseases.causes }, transmission: { ...raw.diseases.transmission }, exposure: { ...raw.diseases.exposure }, bleed: { chance: raw.diseases.bleed.chance, minDamage: raw.diseases.bleed.minDamage } };
   const diseaseKeys = new Set(diseases.map((d) => d.key));
 
   // animal skill trees (Task 15): one small tree per tameable/farmable animal kind.
@@ -589,7 +616,7 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
       const w = `${where}.yields[${i}]`;
       if (!(Number.isInteger(y.min) && Number.isInteger(y.max) && y.min >= 0 && y.max >= y.min)) err(`${w}: need integers 0 <= min <= max`);
       if (!(y.chance > 0 && y.chance <= 1)) err(`${w}.chance must be in (0,1]`);
-      return { item: itemRef(y.item, w), min: y.min, max: y.max, chance: y.chance };
+      return { item: itemRef(y.item, w), min: y.min, max: y.max, chance: y.chance, seasonal: y.seasonal === true };
     });
     if (yields.length === 0) err(`${where}: needs at least one yield`);
     const id = resR.reg.tryId(r.key) ?? 0;
@@ -705,6 +732,10 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
     max: b.max, tile: b.tile, nodeChance: b.nodeChance, temp: b.temp ?? 15, humidity: b.humidity ?? 0.5,
     nodes: b.nodes.map((k) => { const id = resR.reg.tryId(k); if (id === undefined) err(`worldgen.bands[${i}]: unknown resource "${k}"`); return id ?? 0; }),
   }));
+  // ADR-500: per-deep-water-tile sunken-cache chance (0.02 = ~2 per lake; 1,287 deep tiles in the 49-chunk
+  // seed-42 grid give ~26 caches). Absent = the default; outside [0, 1] is a data error.
+  const sunkenCacheChance = raw.worldgen.sunkenCacheChance ?? 0.02;
+  if (!(sunkenCacheChance >= 0 && sunkenCacheChance <= 1)) err("worldgen.sunkenCacheChance must be in [0, 1]");
 
   const spoiledItem = itemsR.reg.tryId(env.spoilage.spoiledItem); if (spoiledItem === undefined) err(`environment.spoilage.spoiledItem: unknown item "${env.spoilage.spoiledItem}"`);
   if (issues.length) throw new DefsError(issues);
@@ -718,6 +749,15 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
   const strip = <T extends { $comment?: string }>(o: T): Omit<T, "$comment"> => { const { $comment: _c, ...rest } = o; return rest; };
   const { weather: _w, seasons: _s, ...envRest } = strip(env);
   const lock: IdLock = { items: itemsR.lock, resources: resR.lock, recipes: recR.lock, pieces: pieceLock, zombies: zomR.lock };
+  // ADR-493: fishing tuning (data/fishing.json) — a cast is a wait + a bite roll, so the numbers are all here.
+  const f = raw.fishing;
+  if (!f || !Array.isArray(f.biteDelaySeconds) || f.biteDelaySeconds.length !== 2 || !(f.biteDelaySeconds[0] > 0) || !(f.biteDelaySeconds[1] >= f.biteDelaySeconds[0])) err("fishing.biteDelaySeconds must be [min, max] with 0 < min <= max");
+  if (!(f.biteChance > 0 && f.biteChance <= 1)) err("fishing.biteChance must be in (0, 1]");
+  for (const [k, v] of [["dawnDuskBonus", f.dawnDuskBonus], ["rainBonus", f.rainBonus], ["deepWaterBonus", f.deepWaterBonus]] as const) if (!(v >= 0 && v <= 1)) err(`fishing.${k} must be in [0, 1]`);
+  if (!(f.dawnDuskDelayMul > 0 && f.dawnDuskDelayMul <= 1)) err("fishing.dawnDuskDelayMul must be in (0, 1]");
+  if (!Number.isInteger(f.deepWaterExtraFish) || f.deepWaterExtraFish < 0) err("fishing.deepWaterExtraFish must be a non-negative integer");
+  if (!(f.staminaCost >= 0)) err("fishing.staminaCost must be >= 0");
+  if (!Number.isInteger(f.fishMin) || f.fishMin < 1 || !Number.isInteger(f.fishMax) || f.fishMax < f.fishMin) err("fishing.fishMin/fishMax must be integers with 1 <= min <= max");
   const lookup = (r: StableIdRegistry) => (key: string): number => r.id(key);
   const pieceHash = pieceRegistry!.hash;
   const diseaseHash = fnv1a(diseases.map((d) => d.key).join(";"));
@@ -728,8 +768,9 @@ export function loadDefs(raw: RawDefs, opts: LoadDefsOptions = {}): GameDefs {
     animalSkills, animalSkillsTuning, animalSkillTree: (kind: string): AnimalSkillTree | undefined => animalSkills.get(kind),
     zombieKinds: raw.zombies.zombies.map((z) => zomR.reg.id(z.key)), spoiledItem: spoiledItem ?? 0,
     spawning: raw.zombies.spawning, ai: raw.zombies.ai, noise: raw.zombies.noise, lightAvoid: raw.zombies.lightAvoid ?? DEFAULT_LIGHT_AVOID,
-    vitals: strip(raw.vitals), environment: { ...envRest, weather, ...(seasons ? { seasons } : {}) }, movement: { ...strip(raw.movement), deckStandHeight: raw.movement.deckStandHeight ?? 0.75, floorStandHeight: raw.movement.floorStandHeight ?? 0.3125, stepRate: raw.movement.stepRate ?? 6, swimTiles: new Set(raw.movement.swimTiles ?? []), swimSpeedMul: raw.movement.swimSpeedMul ?? 1, wadeSpeedMul: raw.movement.wadeSpeedMul ?? 1, shallowRadius: raw.movement.shallowRadius ?? 2, walkAnimRefSpeed: raw.movement.walkAnimRefSpeed ?? raw.movement.walkSpeed },
-    worldgen: { bands, unbuildableTiles: new Set(raw.worldgen.unbuildableTiles), unwalkableTiles: new Set(raw.worldgen.unwalkableTiles) },
+    vitals: strip(raw.vitals), environment: { ...envRest, weather, ...(seasons ? { seasons } : {}) }, movement: { ...strip(raw.movement), deckStandHeight: raw.movement.deckStandHeight ?? 0.75, floorStandHeight: raw.movement.floorStandHeight ?? 0.3125, stepRate: raw.movement.stepRate ?? 6, swimTiles: new Set(raw.movement.swimTiles ?? []), swimSpeedMul: raw.movement.swimSpeedMul ?? 1, wadeSpeedMul: raw.movement.wadeSpeedMul ?? 1, shallowRadius: raw.movement.shallowRadius ?? 2, exhaustedSwimMul: raw.movement.exhaustedSwimMul ?? 0.5, riverCurrentTilesPerSec: raw.movement.riverCurrentTilesPerSec ?? 0.3, walkAnimRefSpeed: raw.movement.walkAnimRefSpeed ?? raw.movement.walkSpeed },
+    fishing: strip(raw.fishing),
+    worldgen: { bands, unbuildableTiles: new Set(raw.worldgen.unbuildableTiles), unwalkableTiles: new Set(raw.worldgen.unwalkableTiles), sunkenCacheChance },
     lock, hashes: { items: itemsR.reg.hash, pieces: pieceHash, all }, bareHands, depletion,
     itemId: lookup(itemsR.reg), recipeId: lookup(recR.reg), resourceId: lookup(resR.reg), zombieId: lookup(zomR.reg),
     pieceId: (key) => pieceRegistry!.byKey(key).id,

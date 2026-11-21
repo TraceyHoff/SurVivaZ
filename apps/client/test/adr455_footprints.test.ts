@@ -150,7 +150,7 @@ describe("ADR-455 footprints in snow and mud", () => {
     step(store, w, 5.5, 5.5, snow);
     move(w, p, 6.5, 5.5); step(store, w, 6.5, 5.5, snow);
     const out: import("@engine/render").VfxSpawn[] = [];
-    collectFootprintOverlays(store, 42, w.tick, 60 * 20, out);
+    collectFootprintOverlays(store, { boot: 42 }, w.tick, 60 * 20, out);
     expect(out.length).toBe(1);
     const o = out[0]!;
     expect(o.spriteId).toBe(42);
@@ -159,11 +159,11 @@ describe("ADR-455 footprints in snow and mud", () => {
     expect(o.facing).toBe(0);
     // Halfway through the fade the alpha is ~0.5.
     w.tick += 30 * 20;
-    collectFootprintOverlays(store, 42, w.tick, 60 * 20, out);
+    collectFootprintOverlays(store, { boot: 42 }, w.tick, 60 * 20, out);
     expect(out[0]!.alpha).toBeCloseTo(0.5, 2);
     // Past expiry the overlay is empty (even before the sampler prunes).
     w.tick += 31 * 20;
-    collectFootprintOverlays(store, 42, w.tick, 60 * 20, out);
+    collectFootprintOverlays(store, { boot: 42 }, w.tick, 60 * 20, out);
     expect(out.length).toBe(0);
   });
 

@@ -22,7 +22,7 @@ import { gameplayDefs, isAuthority, rangeSlack } from "../config.js";
 import { Placement, SocketKind, StationKind, type GameDefs, type ItemCount, type PieceDef } from "../defs.js";
 import { BuildFail, emit, PiecePlaced } from "../events.js";
 import { countItem, exchangeItems } from "../inventory.js";
-import { emitterSpecs } from "../realism.js";
+import { emitterSpecs, EmitterKind } from "../realism.js";
 import { makeNoise } from "../systems/noise.js";
 import { recordRecentBuild } from "../recent.js";
 import { TerrainRes } from "../world.js";
@@ -467,7 +467,7 @@ export function spawnAttachments(world: World, piece: Entity, def: PieceDef, sn:
     return a;
   };
   if (def.door) world.add(link(AttachKind.Door), DoorState, { open: 0, lockTribe: def.features.clanLock ? world.getField(piece, Tribe, "id") ?? 0 : 0 });
-  const specs = emitterSpecs(def);
+  const specs = emitterSpecs(def, gameplayDefs(world).ai.smell.fire);
   if (def.fired) {
     const f = link(AttachKind.Fire);
     world.add(f, Fuel, { burnUntilTick: 0, lit: 0 }).add(f, Container, { slotCount: Math.max(1, def.container) }).add(f, ContainerViewers);
@@ -483,6 +483,10 @@ export function spawnAttachments(world: World, piece: Entity, def: PieceDef, sn:
   } else if (def.container > 0) world.add(link(AttachKind.Storage), Container, { slotCount: def.container }).add(out[out.length - 1]!, ContainerViewers);
   const light = specs.find((s) => s.kind === 2);
   if (light) world.add(link(AttachKind.Light), Emitter, { kind: light.kind, radius: light.radius, strength: def.fired ? 0 : light.strength, falloff: Falloff.Quadratic });
+  // ADR-486: a fired piece smokes — a Smell sibling beside the fire and light attachments, starting
+  // unlit (strength 0); setEmittersLit turns it on with the fire and off when the fire goes out.
+  const smell = specs.find((s) => s.kind === EmitterKind.Smell);
+  if (smell) world.add(link(AttachKind.Smell), Emitter, { kind: smell.kind, radius: smell.radius, strength: 0, falloff: Falloff.Linear });
   return out;
 }
 

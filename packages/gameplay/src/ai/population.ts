@@ -10,6 +10,7 @@ import zombiesRaw from "../../data/zombies.json";
 import itemsRaw from "../../data/items.json";
 import type { SpawnEntry as WorldSpawnEntry } from "@engine/world";
 import { TRAIT_KEYS, scheduledAt, type Imperfections, type ScheduleSlot, type Traits } from "@engine/core";
+import { isTameableAnimalKey } from "../tameable_defs.js";
 export type TraitKey = (typeof TRAIT_KEYS)[number];
 
 export type SpawnPhase = "night" | "dawn" | "day" | "dusk";
@@ -32,12 +33,24 @@ export type AggroMode = "hostile" | "territorial" | "defensive" | "passive";
 export interface Perception { sightRange: number; hearingMul: number; fovDeg: number }
 export interface AttackData { damage: number; range: number; cooldownSeconds: number; structureDamage?: number }
 export interface LootEntry { item: string; min: number; max: number; chance: number }
+/** ADR-495: per-phase activity multipliers for an animal archetype — 1.0 = fully active, ~0.4 =
+ * sluggish (bedded down, rarely wanders, slow to engage). All four phases are required when the
+ * field is present; a species with no entry is unwindowed (1.0 at every phase = today's behaviour). */
+export interface ActivityWindow { night: number; dawn: number; day: number; dusk: number }
+/** ADR-496: rare old animals — the extra loot an old variant drops on top of its normal table.
+ * Only species in tuning.old.eligible carry these rows (and only real-art species are eligible). */
 export interface ArchetypeBehavior {
   kind: "zombie" | "animal" | "human"; fromZombies?: boolean; hp?: number; speed?: number; perception?: Perception;
   aggro: { mode: AggroMode; range: number; leashRange: number }; flee: { hpFrac: number; range: number };
   wander: { radius: number; idleSeconds: [number, number] }; attack?: AttackData | null; loot: LootEntry[];
+  /** ADR-495: night-activity window (animals only; zombies/humans ignore it). */
+  activity?: ActivityWindow;
+  /** ADR-496: extra loot rows rolled only for old variants of this species. */
+  oldLoot?: LootEntry[];
+  /** ADR-494: pack hunter — a target-less animal of this archetype joins a packmate's hunt. */
+  pack?: boolean;
 }
-export interface AiData { archetypes: Record<string, ArchetypeBehavior>; tuning?: { chaseLimitTiles?: number; /** ADR-462: wild-animal drink/shade (cosmetic). */ animalDrink?: { chance?: number; radius?: number; nearPlayerTiles?: number; drinkSeconds?: [number, number] }; /** ADR-463: carrion crows circling a fresh kill (ground only). */ carrion?: { crowsPerKill?: number; circleRadius?: number; maxSeconds?: number; nearPlayerTiles?: number }; /** ADR-475: wild-deer herds graze and move on when the patch is bare. */ herd?: { grazeCooldownSeconds?: number; bareRadius?: number; bareFrac?: number; moveMinTiles?: number; moveMaxTiles?: number } } }
+export interface AiData { archetypes: Record<string, ArchetypeBehavior>; tuning?: { chaseLimitTiles?: number; /** ADR-462: wild-animal drink/shade (cosmetic). */ animalDrink?: { chance?: number; radius?: number; nearPlayerTiles?: number; drinkSeconds?: [number, number] }; /** ADR-463: carrion crows circling a fresh kill (ground only). */ carrion?: { crowsPerKill?: number; circleRadius?: number; maxSeconds?: number; nearPlayerTiles?: number }; /** ADR-475: wild-deer herds graze and move on when the patch is bare. */ herd?: { grazeCooldownSeconds?: number; bareRadius?: number; bareFrac?: number; moveMinTiles?: number; moveMaxTiles?: number }; /** ADR-496: rare old animals — 2% of spawns of the eligible species are old (bigger, tougher, extra loot). `eligible` is the only species list: real-art species only (boar/wolf in the live pack — deer has the only other animal_* art, but deer is a mount species, so the tameable exclusion removes it), never a tameable species. */ old?: { chance?: number; scaleMul?: number; hpMul?: number; eligible?: string[] } } }
 /** Fully resolved behavior (zombie fields merged from zombies.json). */
 export interface ResolvedBehavior extends ArchetypeBehavior { hp: number; speed: number; perception: Perception; attack: AttackData | null }
 
@@ -111,9 +124,38 @@ export function validateAiData(d: AiData): string[] {
     if (a.aggro?.mode !== "passive" && !a.fromZombies && !a.attack) err.push(`${k}: aggressive archetype needs attack`);
     if (!frac(a.flee?.hpFrac) || !nonNeg(a.flee?.range)) err.push(`${k}: flee`);
     if (!nonNeg(a.wander?.radius) || !range(a.wander?.idleSeconds, nonNeg)) err.push(`${k}: wander`);
+    // ADR-495: an activity window is all four phases, each a multiplier in (0, 1] — 0 would be a hard
+    // window (never active in that phase), which the ADR rejects in favour of soft multipliers.
+    if (a.activity !== undefined) {
+      for (const ph of ["night", "dawn", "day", "dusk"] as const) {
+        const v = a.activity[ph];
+        if (!(num(v) && v > 0 && v <= 1)) err.push(`${k}: activity.${ph} must be in (0, 1]`);
+      }
+    }
     for (const l of a.loot ?? []) {
       if (!ITEM_KEYS.has(l.item)) err.push(`${k}: unknown loot item ${l.item}`);
       if (!(Number.isInteger(l.min) && l.min >= 0 && Number.isInteger(l.max) && l.max >= l.min) || !frac(l.chance)) err.push(`${k}: loot ${l.item}`);
+    }
+    // ADR-496: old-variant extra loot rows have the same shape as loot, and a species only carries
+    // them when it is in tuning.old.eligible (otherwise the rows could never roll — dead data).
+    for (const l of a.oldLoot ?? []) {
+      if (!ITEM_KEYS.has(l.item)) err.push(`${k}: unknown oldLoot item ${l.item}`);
+      if (!(Number.isInteger(l.min) && l.min >= 0 && Number.isInteger(l.max) && l.max >= l.min) || !frac(l.chance)) err.push(`${k}: oldLoot ${l.item}`);
+    }
+    if (a.oldLoot !== undefined && !(d.tuning?.old?.eligible ?? []).includes(k)) err.push(`${k}: oldLoot needs the species in tuning.old.eligible`);
+    if (a.pack !== undefined && typeof a.pack !== "boolean") err.push(`${k}: pack must be boolean`);
+  }
+  // ADR-496: old-variant tuning — a chance in (0, 1), scales at or above 1 (an "old" animal is
+  // never smaller or frailer), and the eligible list is animal archetypes only, never tameable.
+  const old = d.tuning?.old;
+  if (old !== undefined) {
+    if (old.chance !== undefined && !(num(old.chance) && old.chance > 0 && old.chance < 1)) err.push("tuning.old.chance must be in (0, 1)");
+    if (old.scaleMul !== undefined && !(num(old.scaleMul) && old.scaleMul >= 1)) err.push("tuning.old.scaleMul must be >= 1");
+    if (old.hpMul !== undefined && !(num(old.hpMul) && old.hpMul >= 1)) err.push("tuning.old.hpMul must be >= 1");
+    for (const k of old.eligible ?? []) {
+      const a = d.archetypes[k];
+      if (!a || a.kind !== "animal") err.push(`tuning.old.eligible: ${k} is not an animal archetype`);
+      else if (isTameableAnimalKey(k)) err.push(`tuning.old.eligible: ${k} is tameable — old variants exclude tameable species`);
     }
   }
   return err;

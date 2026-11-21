@@ -22,6 +22,9 @@ import type { AtlasSource } from "@engine/render";
 /** The atlas key (fragment + painter agree) and the sprite key the renderer resolves. */
 export const FOOTPRINT_ATLAS_KEY = "footprint";
 export const FOOTPRINT_SPRITE_KEY = "footprint";
+/** ADR-501: the animal track's own atlas + sprite key (same fragment/painter contract as the boot print). */
+export const TRACK_ATLAS_KEY = "animal_track";
+export const TRACK_SPRITE_KEY = "animal_track";
 
 type RGBA = readonly [number, number, number, number?];
 const PRINT: RGBA = [46, 38, 30, 200]; // dark warm grey-brown print, semi-transparent (ground shows through)
@@ -51,6 +54,32 @@ export function paintFootprintCell(px: Px, ox: number, f: number): void {
 export function paintFootprintPixels(): { width: number; height: number; pixels: Uint8ClampedArray } {
   const px = new Px(FRAME * 8, FRAME);
   for (let f = 0; f < 8; f++) paintFootprintCell(px, f * FRAME, f);
+  return { width: FRAME * 8, height: FRAME, pixels: px.data };
+}
+
+/**
+ * ADR-501: paint one animal track in frame `f` — two small iso-aligned ovals along the facing
+ * axis, in the same colours as the boot print so it reads on both white snow and brown mud. The
+ * front pad is a touch larger than the rear pad, so the track has a direction (like the boot's
+ * toe/heel), and the left/right alternation comes from the stamp's lateral offset, not from
+ * mirroring the sprite. Deliberately smaller than the boot print (~24 px long vs ~37 px): a track
+ * is a paw, not a boot. One generic track in v1 — per-species tracks (hoof vs paw vs claw) are a
+ * follow-up art task, not part of this ADR.
+ */
+export function paintTrackCell(px: Px, ox: number, f: number): void {
+  const [dx, dy] = TASK34_DIR_VEC[f & 7]!;
+  const ang = Math.atan2(dy, dx);
+  const cx = ox + FRAME / 2, cy = FRAME / 2;
+  // Front pad: the larger leading oval.
+  px.ellipseRot(cx + dx * 7, cy + dy * 7, 5, 3.5, ang, PRINT_DARK, null);
+  // Rear pad: smaller, behind, with a gap between the pads.
+  px.ellipseRot(cx - dx * 7, cy - dy * 7, 4.5, 3.5, ang, PRINT, null);
+}
+
+/** Paint the whole track atlas (8 frames in a row, 512x64), pure — no DOM. */
+export function paintTrackPixels(): { width: number; height: number; pixels: Uint8ClampedArray } {
+  const px = new Px(FRAME * 8, FRAME);
+  for (let f = 0; f < 8; f++) paintTrackCell(px, f * FRAME, f);
   return { width: FRAME * 8, height: FRAME, pixels: px.data };
 }
 
@@ -86,5 +115,14 @@ export async function footprintAtlasSources(): Promise<Map<string, AtlasSource>>
   const a = paintFootprintPixels();
   const url = await canvasToBlobURL(a.width, a.height, a.pixels);
   if (url) out.set(FOOTPRINT_ATLAS_KEY, { url, emissiveUrl: null });
+  return out;
+}
+
+/** ADR-501: atlas sources for the animal-track atlas (same contract as footprintAtlasSources). */
+export async function trackAtlasSources(): Promise<Map<string, AtlasSource>> {
+  const out = new Map<string, AtlasSource>();
+  const a = paintTrackPixels();
+  const url = await canvasToBlobURL(a.width, a.height, a.pixels);
+  if (url) out.set(TRACK_ATLAS_KEY, { url, emissiveUrl: null });
   return out;
 }

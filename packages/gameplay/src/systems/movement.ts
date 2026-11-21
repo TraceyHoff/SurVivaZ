@@ -12,6 +12,7 @@ import { shaftAwareHeight, updateShaftOccupancy } from "../building/terrain-hatc
  */
 import { roadSpeedMul, roadSurfaceAt } from "../roads.js";
 import { isFrozenWaterAt } from "../frozen.js"; // ADR-450: frozen still water is walkable land
+import { riverCurrentAt } from "../river_current.js"; // ADR-490: forced rivers push swimmers downstream
 import { entityIndex, evaluate, defineResource, Transform, type Entity, type World } from "@engine/core";
 import { contractDisease, diseaseMoveMul, hasDisease } from "../diseases.js";
 import { Anim, AnimState, DamageCause, Health, LootBag, Buffs, Dead, Driver, EdgeSide, Inventory, Mount, PlayerIntent, Riding, RoadSurface, Stat, Survival, Wetness } from "../components.js";
@@ -246,6 +247,23 @@ export function applyTerrainFall(world: World, e: Entity, x: number, y: number, 
 }
 
 /** Applies one tick of movement input (server authority + client prediction). Writes PlayerIntent.moving/sprint. */
+/**
+ * ADR-490: push (x, y) downstream by the river current for one tick, when the tile is a forced
+ * river and the entity is actually in water at ground level. The river lookup runs first (cheap:
+ * a cached layout + ~30 flops) and the water check only runs on a river tile, so land entities
+ * pay almost nothing. Applied through the same per-axis blocked moves as steering, so a drift
+ * step into a bank slides or stops instead of clipping. Returns the (possibly unchanged) position.
+ */
+function driftDownstream(world: World, e: Entity, x: number, y: number, level: number, dt: number): [number, number] {
+  if (level !== 0) return [x, y];
+  const cur = riverCurrentAt(world, x, y); if (!cur) return [x, y];
+  if (waterDepth(world, x, y) === WaterDepth.None) return [x, y]; // edited dry tile: a river on the map, not in the world
+  const cs = gameplayDefs(world).movement.riverCurrentTilesPerSec * dt;
+  const nx = bodyAxisMove(world, x, y, x + cur.x * cs, 0, level, true, undefined, e);
+  const ny = bodyAxisMove(world, nx, y, y + cur.y * cs, 1, level, true, undefined, e);
+  return [nx, ny];
+}
+
 export function applyMovementInput(world: World, e: Entity, actions: number, dt: number, analog?: { x?: number | undefined; y?: number | undefined }): void {
   const t = world.get(e, Transform); if (!t) return;
   if (world.has(e, Driver)) {
@@ -267,10 +285,11 @@ export function applyMovementInput(world: World, e: Entity, actions: number, dt:
     const st = world.store(PlayerIntent); const i = entityIndex(e); const s = st.slot(i);
     if (st.data.moving[s] !== moving || st.data.sprint[s] !== sprint) { st.data.moving[s] = moving; st.data.sprint[s] = sprint; st.markChanged(i); }
   }
+  const level = Math.max(0, Math.round(t.z / gameplayDefs(world).building.levelHeight)); // hoisted: the river drift below needs it even when idle
   if (moving) {
-    const level = Math.max(0, Math.round(t.z / gameplayDefs(world).building.levelHeight));
     const swim = level === 0; // ground level only: no swimming off a deck
-    const sp = gameplayDefs(world).movement.walkSpeed * speedMultiplier(world, e, sprint === 1) * (swim ? swimSpeedMulAt(world, t.x, t.y) : 1) * dt;
+    // ADR-489: an exhausted swimmer crawls at half swim speed (exhaustedSwimMul, deep water only).
+    const sp = gameplayDefs(world).movement.walkSpeed * speedMultiplier(world, e, sprint === 1) * (swim ? swimSpeedMulAt(world, t.x, t.y) * exhaustedSwimMul(world, e) : 1) * dt;
     let x = t.x, y = t.y;
     x = bodyAxisMove(world, x, y, x + dx * sp, 0, level, swim, undefined, e);
     if (level === 0) applyTerrainFall(world, e, t.x, t.y, x, y, dt);
@@ -282,6 +301,8 @@ export function applyMovementInput(world: World, e: Entity, actions: number, dt:
     if (x === t.x && dx && !dy) y = doorAssist(world, x, y, dx, 0, sp, level, swim, e);
     else if (y === t.y && dy && !dx) x = doorAssist(world, x, y, dy, 1, sp, level, swim, e);
     if (level === 0) applyTerrainFall(world, e, assistX, assistY, x, y, dt);
+    // ADR-490: river current — the river pushes the swimmer downstream on top of their steering.
+    if (!dead) [x, y] = driftDownstream(world, e, x, y, level, dt);
     // ADR-305: turn toward the move even when a wall or ledge blocks the step, and never reset facing on idle.
     const nextFacing = turnFacing(t.facing ?? 0, Math.atan2(dy, dx), dt);
     if (x !== t.x || y !== t.y) {
@@ -294,6 +315,10 @@ export function applyMovementInput(world: World, e: Entity, actions: number, dt:
         makeNoise(world, e, wet ? n.swim : sprint ? n.sprint : n.walk);
       }
     } else world.set(e, Transform, { facing: nextFacing });
+  } else if (!dead && level === 0) {
+    // ADR-490: an idle swimmer treads water — and drifts downstream with the river.
+    const [nx, ny] = driftDownstream(world, e, t.x, t.y, level, dt);
+    if (nx !== t.x || ny !== t.y) world.set(e, Transform, { x: nx, y: ny });
   }
   settleStandZ(world, e, dt); // ADR-212: decks are walked on at deck-top height
 }
@@ -349,6 +374,22 @@ export function waterDepth(world: World, x: number, y: number): WaterDepth {
   return waterDepthAt(terrain.tileAt, tx, ty, gameplayDefs(world).movement.shallowRadius);
 }
 export function inDeepWater(world: World, x: number, y: number): boolean { return waterDepth(world, x, y) === WaterDepth.Deep; }
+/** ADR-489: deep-water swim at ground level with hoisted terrain (the animSettleSystem pattern — no
+ * per-call getResource/gameplayDefs, so landlubbers cost one tile lookup, not a resource read per
+ * entity per tick). Treading water counts; frozen water reads as land. */
+export function isSwimmingAt(world: World, x: number, y: number, z: number, terrain: { tileAt: (tx: number, ty: number) => number } | undefined, shallowRadius: number): boolean {
+  if (!terrain || z >= 0.5) return false;
+  const tx = Math.floor(x), ty = Math.floor(y);
+  return waterDepthAt(terrain.tileAt, tx, ty, shallowRadius) === WaterDepth.Deep && !isFrozenWaterAt(world, tx, ty);
+}
+/** ADR-489: an exhausted swimmer (zero stamina, Survival) crawls at exhaustedSwimMul of swim speed in
+ * deep water. Gated on the stamina read first, so the depth lookup only runs for entities already at
+ * zero stamina. Entities without Survival (mounts, animals) never crawl. */
+export function exhaustedSwimMul(world: World, e: Entity): number {
+  if ((world.getField(e, Survival, "stamina") ?? 1) > 0) return 1;
+  const t = world.get(e, Transform); if (!t || t.z >= 0.5) return 1;
+  return inDeepWater(world, t.x, t.y) ? gameplayDefs(world).movement.exhaustedSwimMul : 1;
+}
 /** Speed multiplier at (x, y): swimSpeedMul in deep water, wadeSpeedMul in shallow, else 1 (players, zombies, animals). */
 export function swimSpeedMulAt(world: World, x: number, y: number): number {
   const d = waterDepth(world, x, y); const mv = gameplayDefs(world).movement;

@@ -14,7 +14,7 @@ import { Falloff } from "@engine/world";
 import { AttachKind, BuildPiece, Container, ContainerViewers, CraftingStation, Emitter, Fuel, PieceLink, PieceStability, PrivilegeZone, StallHeader, StallSign } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { StationKind } from "../defs.js";
-import { emitterSpecs } from "../realism.js";
+import { emitterSpecs, EmitterKind } from "../realism.js";
 import { setEmittersLit } from "../systems/fuel.js";
 import { recomputeRegion } from "./integrity.js";
 import { pieceOf } from "./links.js";
@@ -40,7 +40,7 @@ export function rehydrateLoadedStructures(world: World): void {
   for (const a of atts) {
     if (!world.isAlive(a)) continue; const p = pieceOf(world, a); if (p === undefined) continue;
     const def = defs.pieces.get(world.getField(p, BuildPiece, "type") ?? 0); if (!def) continue;
-    const kind = world.getField(a, PieceLink, "kind") ?? 0; const specs = emitterSpecs(def);
+    const kind = world.getField(a, PieceLink, "kind") ?? 0; const specs = emitterSpecs(def, defs.ai.smell.fire);
     if (world.has(a, Container) && !world.has(a, ContainerViewers)) world.add(a, ContainerViewers);
     if (kind === AttachKind.Fire) {
       const heat = specs.find((s) => s.kind === 1);
@@ -50,6 +50,13 @@ export function rehydrateLoadedStructures(world: World): void {
       const light = specs.find((s) => s.kind === 2);
       if (light && !world.has(a, Emitter)) world.add(a, Emitter, { kind: light.kind, radius: light.radius, strength: def.fired ? 0 : light.strength, falloff: Falloff.Quadratic });
       else if (light && world.getField(a, Emitter, "radius") !== light.radius) world.setField(a, Emitter, "radius", light.radius); // ADR-216: saves keep the old radius
+    } else if (kind === AttachKind.Smell) {
+      // ADR-486: a loaded Smell sibling keeps its Emitter (re-added when the save predates the
+      // emitter, radius fixed like the light above); a sibling missing entirely is grown by
+      // setEmittersLit when the fire is next lit (see systems/fuel.ts).
+      const smell = specs.find((s) => s.kind === EmitterKind.Smell);
+      if (smell && !world.has(a, Emitter)) world.add(a, Emitter, { kind: smell.kind, radius: smell.radius, strength: 0, falloff: Falloff.Linear });
+      else if (smell && world.getField(a, Emitter, "radius") !== smell.radius) world.setField(a, Emitter, "radius", smell.radius);
     } else if (kind === AttachKind.Storage && world.has(a, StallHeader) && !world.has(a, StallSign)) world.add(a, StallSign, { soldOut: 1 });
   }
   for (const a of atts) if (world.isAlive(a) && world.getField(a, Fuel, "lit")) setEmittersLit(world, a, 1);

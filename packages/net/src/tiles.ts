@@ -53,6 +53,13 @@ export interface TileSyncOptions {
   tiles: TileMap;
   /** Per-client bytes per tick for full chunk sends (deltas are never budgeted). Default 8 KiB; at least one chunk/tick. */
   budgetBytes?: number;
+  /**
+   * ADR-498: called when a client first receives a chunk — a Full send for a chunk the client holds
+   * no cached copy of (a Hit is a re-entry from cache, not a first receipt; a post-eviction re-send
+   * is the client's first receipt in this session window, and the gameplay store dedups it). The
+   * server wires this to the discovery journal; the hook is optional and defaults to nothing.
+   */
+  onFirstChunk?: (clientId: number, key: ChunkKey) => void;
 }
 
 /** Server side. `new TileSync(server, { tiles })`. */
@@ -130,7 +137,11 @@ export class TileSync {
         for (const [key] of scored) {
           const c = tiles.getChunkByKey(key)!; const b = this.full(c);
           if (sent && w.bitLength + b.bits > budget) break;
+          // ADR-498: a first receipt — the client holds no cached copy of this chunk (a Hit would
+          // have been a re-entry; a stale cached version would still be in the mirror).
+          const first = !s.cache.has(key);
           section(TileSection.Full, key); w.appendBits(b.bytes, b.bits); s.cache.delete(key); s.subs.set(key, c.version); s.fulls++; sent++;
+          if (first) this.opts.onFirstChunk?.(sess.clientId, key);
         }
       }
       if (!any) continue;

@@ -7,7 +7,7 @@ export const Attachments = defineResource<Map<Entity, Entity[]>>("gameplay.Attac
 /** attachment entity -> piece entity. */
 export const AttachmentOwner = defineResource<Map<Entity, Entity>>("gameplay.AttachmentOwner");
 
-const MARK: Readonly<Record<AttachKind, import("@engine/core").ComponentDef>> = { [AttachKind.Door]: DoorState, [AttachKind.Fire]: Fuel, [AttachKind.Storage]: Container, [AttachKind.Light]: Emitter, [AttachKind.Till]: Container };
+const MARK: Readonly<Record<AttachKind, import("@engine/core").ComponentDef>> = { [AttachKind.Door]: DoorState, [AttachKind.Fire]: Fuel, [AttachKind.Storage]: Container, [AttachKind.Light]: Emitter, [AttachKind.Till]: Container, [AttachKind.Smell]: Emitter };
 
 /** Resolves a command target (the piece or the attachment itself) to the attachment of `kind`. */
 export function resolveAttachment(world: World, target: Entity, kind: AttachKind): Entity | undefined {

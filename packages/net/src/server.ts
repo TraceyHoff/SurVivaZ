@@ -181,6 +181,17 @@ export interface NetServerOptions {
   pingIntervalMs?: number;
   /** Lag-compensation window in ticks (default tickHz = 1 s). */
   positionHistoryTicks?: number;
+  /**
+   * ADR-500: entities whose NetId assignment is deferred to the end of the replication pass, after every
+   * other entity lacking one — they still take ordinary low-range ids, but they never sit ahead of a
+   * pre-existing entity in the assignment order. The gameplay layer passes its sunken-cache predicate
+   * here: a cache created during worldgen interleaved with resource nodes would otherwise shift every
+   * subsequently created node's NetId, and the gather yield stream is seeded by NetId, so one new entity
+   * type silently re-rolls every node's yields and can flip a deterministic canary like ADR-252. The
+   * initial world's chunks all load before the first replication, so deferring caches within that pass
+   * keeps every initial node's NetId identical to a world without caches. Default (unset) = no deferral.
+   */
+  deferNetId?: (world: World, e: Entity) => boolean;
 }
 
 function defaultToken(): Uint8Array {
@@ -241,6 +252,8 @@ export class NetServer {
   private replMustEs: EntityState[] = [];
   private replRest: number[] = [];
   private replRestEs: EntityState[] = [];
+  /** ADR-500: per-tick scratch for deferNetId entities (see replicate): length-reset, then assigned after the pass. */
+  private deferredNetIds: Entity[] = [];
   private prioScore = new Float64Array(0);
   private prioSorted = new Float64Array(0);
   /** Reused prioritize() output: only the first `ids.length` entries are valid; the buffer is overwritten on the next call. */
@@ -657,10 +670,15 @@ export class NetServer {
     // Spread is deliberate here: adopt() can write the NetId store being iterated, so a snapshot preserves the old behaviour.
     for (const index of [...ns.changedIndices()]) { const e = ns.dense[ns.slot(index)]!; if (this.netIds.netIdOf(e) === undefined) this.netIds.adopt(e); }
     // ADR-369: iterate the generator directly (no per-store snapshot array); assign() only writes the NetId store, never `st`.
+    // ADR-500: deferNetId entities (sunken caches) are collected and assigned after the pass, so they never
+    // sit ahead of a pre-existing entity in the low-range assignment order. The initial world's chunks all
+    // load before the first replication, so that pass gives every initial node its no-cache NetId.
+    const deferred = this.deferredNetIds; deferred.length = 0;
     for (const st of this.schema.stores) for (const index of st.changedIndices()) {
       const e = st.dense[st.slot(index)]!;
-      if (!w.has(e, NetId)) this.netIds.assign(e);
+      if (!w.has(e, NetId)) { if (this.opts.deferNetId?.(w, e)) deferred.push(e); else this.netIds.assign(e); }
     }
+    for (const e of deferred) if (!w.has(e, NetId)) this.netIds.assign(e);
     this.positions.record();
     const cur = captureState(w, this.schema, this.prevState, this.excluded);
     this.prevState = cur;

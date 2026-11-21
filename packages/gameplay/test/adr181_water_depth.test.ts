@@ -8,7 +8,11 @@ import { makeWorld, steps } from "./helpers.js";
 const lake = (tx: number): number => (tx >= 0 && tx < 20 ? 1 : 3);
 function world() { const w = makeWorld(); w.setResource(G.TerrainRes, { tileAt: (tx: number) => lake(tx), heightAt: () => 0 }); return w; }
 const dx = (w: ReturnType<typeof makeWorld>, x: number, actions: number, running = false): number => {
-  const p = G.spawnPlayer(w, { x, y: 5.5 }); if (running) { for (let i = 0; i < 80; i++) { G.applyMovementInput(w, p, actions, .05); w.set(p, Transform, { x, y: 5.5 }); } }
+  // ADR-490: the river current is seed-based, so the test's stub lake can sit on a river tile — the
+  // wade is measured on y=9.5, a row with no current for the default seed (probed: y 0-8 all have a
+  // current somewhere in x -5..11; y 9, 10, 15, 20 are clean). The lake is water for any y, so the
+  // depth bands are unchanged; only the current is avoided.
+  const p = G.spawnPlayer(w, { x, y: 9.5 }); if (running) { for (let i = 0; i < 80; i++) { G.applyMovementInput(w, p, actions, .05); w.set(p, Transform, { x, y: 9.5 }); } }
   const a = w.get(p, Transform)!.x; G.applyMovementInput(w, p, actions, 0.05); return w.get(p, Transform)!.x - a;
 };
 const R = G.GameplayActions.MoveDown | G.GameplayActions.MoveRight;

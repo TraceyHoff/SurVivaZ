@@ -12,7 +12,7 @@ import { gameplayDefs, isAuthority, rangeSlack } from "../config.js";
 import { secondsToTicks, type GameDefs } from "../defs.js";
 import { ConsumeFail, ConsumeFailed, emit } from "../events.js";
 import { readSlots, slotItem, writeSlots } from "../inventory.js";
-import { contractDisease, cureDisease, ensureDiseases, hasDisease, activeDiseases, nearLitCampfire, wearsMask, CARE_CURE_SECONDS, FLU_AFTER_SECONDS, careStatus, coldContractedTick, infectionTier } from "../diseases.js";
+import { contractDisease, cureDisease, ensureDiseases, hasDisease, activeDiseases, nearLitCampfire, wearsMask, CARE_CURE_SECONDS, FLU_AFTER_SECONDS, careStatus, coldContractedTick, infectionTier, isBleedingStaunched } from "../diseases.js";
 import { wetIllnessTimeMul, wetnessStage } from "../exposure-stages.js";
 import { pendingReady } from "../ready.js";
 
@@ -80,11 +80,15 @@ export function diseaseSystem(world: World, dt: number): void {
     if (pendingReady(world, e)) continue; // Task 14: no exposure counters or symptom ticks while loading in
     ensureDiseases(world, e);
     const st = world.store(Diseases); const s = st.slot(entityIndex(e)); if (s < 0) continue;
-    // expiry (untilTick 0 = no auto-expiry)
+    // expiry (untilTick 0 = no auto-expiry). ADR-492: bleeding reuses untilTick as "staunched until" —
+    // when the staunch passes, clear the field and resume the drain instead of expiring the disease.
     let expired = false;
     for (let i = 0; i < MAX_DISEASES; i++) {
       const d = st.data.disease[s * MAX_DISEASES + i]!; const until = st.data.untilTick[s * MAX_DISEASES + i]!;
-      if (d !== 0 && until !== 0 && world.tick >= until) { st.data.disease[s * MAX_DISEASES + i] = 0; st.data.untilTick[s * MAX_DISEASES + i] = 0; expired = true; }
+      if (d !== 0 && until !== 0 && world.tick >= until) {
+        if (defs.diseases[d - 1]!.key === "bleeding") { st.data.untilTick[s * MAX_DISEASES + i] = 0; expired = true; }
+        else { st.data.disease[s * MAX_DISEASES + i] = 0; st.data.untilTick[s * MAX_DISEASES + i] = 0; expired = true; }
+      }
     }
     if (expired) st.markChanged(entityIndex(e));
     // symptom drains (direct, like vitals damage: no Buffs slots, so disease penalties never clobber trap roots)
@@ -93,7 +97,7 @@ export function diseaseSystem(world: World, dt: number): void {
       const sv = world.get(e, Survival)!; const hp = world.get(e, Health)!;
       let hunger = sv.hunger, thirst = sv.thirst, stamina = sv.stamina, hpV = hp.hp, hurt = false;
       for (const d of actives) {
-        const hpDps = d.key === "wound_infection" && infectionTier(world, e) !== "septic" ? 0 : d.hpDps;
+        const hpDps = (d.key === "wound_infection" && infectionTier(world, e) !== "septic") || (d.key === "bleeding" && isBleedingStaunched(world, e)) ? 0 : d.hpDps;
         if (hpDps > 0) { hpV = Math.max(0, hpV - hpDps * dt); hurt = true; }
         hunger = Math.max(0, hunger - vt.hungerDecayPerSec * (d.hungerMul - 1) * dt);
         thirst = Math.max(0, thirst - vt.thirstDecayPerSec * (d.thirstMul - 1) * dt);

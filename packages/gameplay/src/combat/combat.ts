@@ -17,6 +17,7 @@ import { makeNoise } from "../systems/noise.js";
 import { distance } from "../systems/fuel.js";
 import { spendStamina } from "../systems/vitals.js";
 import { checkHit, tagCombat } from "./pvp.js";
+import { contractDisease } from "../diseases.js";
 import { installSpatialIndex } from "@engine/world";
 import { Animal, Mount, Pet, Riding } from "../components.js";
 import { mountOfRider, MOUNT_TUNING } from "../mount_defs.js";
@@ -66,7 +67,7 @@ export function lastAttacker(world: World, e: Entity): { e: Entity; tick: number
 }
 /** ADR-244: blocks only stop melee: the attacker stands within 2.5 tiles. */
 function isMeleeRange(world: World, a: Entity, b: Entity): boolean { const ta = world.get(a, Transform), tb = world.get(b, Transform); return !!ta && !!tb && Math.hypot(ta.x - tb.x, ta.y - tb.y) <= 2.5; }
-export function applyDamage(world: World, target: Entity, amount: number, source: Entity, cause: DamageCause = DamageCause.Combat, pierce = 0): void {
+export function applyDamage(world: World, target: Entity, amount: number, source: Entity, cause: DamageCause = DamageCause.Combat, pierce = 0, nested = false): void {
   if (!isAuthority(world) || world.isReplaying || amount <= 0 || !world.isAlive(target)) return;
   if (cause === DamageCause.Combat && world.has(source, Progression)) { // ADR-113 weapon mastery / berserker
     const eq = world.get(source, Equipment); const held = eq && eq.mainHandSlot !== NO_SLOT ? slotItem(world, source, eq.mainHandSlot) : undefined;
@@ -77,7 +78,7 @@ export function applyDamage(world: World, target: Entity, amount: number, source
   if ((cause === DamageCause.Combat || cause === DamageCause.Explosion) && world.isRegistered(Riding) && world.has(target, Riding)) {
     // ADR-319: the mount takes its share of a hit on its rider (each side then reduced by its own armor + saddle)
     const m = mountOfRider(world, target);
-    if (m !== undefined && m !== source && !world.has(m, Dead)) { const share = MOUNT_TUNING.riderDamageShare; applyDamage(world, m, amount * (1 - share), source, cause, pierce); amount *= share; }
+    if (m !== undefined && m !== source && !world.has(m, Dead)) { const share = MOUNT_TUNING.riderDamageShare; applyDamage(world, m, amount * (1 - share), source, cause, pierce, true); amount *= share; }
   }
   if (cause === DamageCause.Combat || cause === DamageCause.Explosion) amount = armorReduce(world, target, amount, pierce);
   if (stanceMode(world, target) === StanceMode.Sleep) wake(world, target); // ADR-244: damage wakes a sleeper
@@ -88,6 +89,14 @@ export function applyDamage(world: World, target: Entity, amount: number, source
   world.setField(target, Health, "hp", Math.max(0, hp - amount));
   if (world.has(target, VitalsState)) world.setField(target, VitalsState, "lastDamageCause", cause);
   emit(world, Damaged, { target, source, amount, cause });
+  // ADR-492: bleeding wounds — a heavy hit (post-armor, post-block) can leave a survivor bleeding.
+  // Outermost call only (nested = the mount-share recursion: a rider hit must not roll once for the
+  // mount and once for the rider). Combat/Contact/Fall only — damage from disease or starvation
+  // must not cause bleeding — and only when the target survived the hit.
+  if (!nested && hp - amount > 0 && world.has(target, Survival) && (cause === DamageCause.Combat || cause === DamageCause.Contact || cause === DamageCause.Fall)) {
+    const tun = gameplayDefs(world).diseaseTuning.bleed;
+    if (amount >= tun.minDamage && tun.chance > 0 && world.rngFor("disease.bleed", target).next() < tun.chance) contractDisease(world, target, "bleeding");
+  }
   if (source !== 0 && source !== target && world.isAlive(source)) lastHitsOf(world).set(target, { e: source, tick: world.tick }); // ADR-194 retaliation
   if (cause === DamageCause.Combat || cause === DamageCause.Explosion) tagCombat(world, source, target);
   // ADR-193: sourceless hits (sunlight, a creature's own fire) carry no attacker: no Hurt anim / knockback flinch,

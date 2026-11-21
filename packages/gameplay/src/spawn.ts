@@ -7,7 +7,7 @@ import {
 } from "./components.js";
 import { gameplayDefs } from "./config.js";
 import { StationKind } from "./defs.js";
-import { EmitterKind } from "./realism.js";
+import { EmitterKind, setSmellEmitter } from "./realism.js";
 import { STATION_HEAT } from "./systems/fuel.js";
 
 /** New entities are not in the spatial index until postSim; spawn helpers insert directly so same-tick queries see them. */
@@ -38,8 +38,22 @@ export function spawnResourceNode(world: World, kind: number | string, x: number
   const def = defs.resources.get(id); if (!def) throw new Error(`unknown resource ${kind}`);
   const e = world.create();
   world.add(e, Transform, { x, y }).add(e, ResourceNode, { kind: id, amount: def.capacity });
+  // ADR-486: a carcass node smells — the strongest, shortest smell source (zombies find carrion).
+  if (def.key === "animal_carcass") setSmellEmitter(world, e, defs.ai.smell.carcass);
   indexEntity(world, e);
   return e;
+}
+
+/** ADR-500: is this entity a sunken-cache resource node? Used by the NetServer's deferNetId predicate so a
+ *  cache's NetId assignment is deferred to the end of the pass (which would otherwise shift every subsequently
+ *  created resource node's NetId and re-roll its NetId-seeded gather stream). False when the defs are not
+ *  installed or the world predates the sunken_cache kind (no cache exists there to identify). */
+export function isSunkenCacheNode(world: World, e: Entity): boolean {
+  if (!world.has(e, ResourceNode)) return false;
+  let defs: ReturnType<typeof gameplayDefs>;
+  try { defs = gameplayDefs(world); } catch { return false; }
+  const kind = world.getField(e, ResourceNode, "kind");
+  return kind !== undefined && defs.resources.get(kind)?.key === "sunken_cache";
 }
 
 /** Free-standing station (tests/tools; placed stations come from building). Fired kinds get Fuel + fuel slots. */

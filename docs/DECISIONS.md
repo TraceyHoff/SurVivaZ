@@ -11068,3 +11068,694 @@ scales are readable-policy-based (~5% apart, within the pixel-measurement noise)
 drawn size shifts by that much if its art goes missing and the fallback fires. The pixel heights
 were measured on the f40445b5 pack: if a sheet is repainted at a different size, the table must
 be re-measured.
+
+## ADR-486: Smell is a sense — blood, rot, and smoke draw zombies (SurVivaZ)
+
+Zombies smell. A zombie that acquires no player investigates the strongest nearby smell the way
+noise sends it to Investigate — one bounded spatial query per zombie think tick (every
+`ai.thinkTicks`, staggered), beside the sight/noise acquire, never a new scan. Smell sources are
+`EmitterKind.Smell = 3` (append-only; `packages/gameplay/src/realism.ts`), sampled by
+`strongestSmell(world, x, y)` in `packages/gameplay/src/combat/zombies.ts`, which takes the best
+contribution among the 8 nearest Smell emitters when it reaches `ai.smell.threshold` (0.25) and
+returns the emitter's position as the Investigate goal. A live stimulus still wins: a player
+re-acquired above overwrites the goal, and the Snuffer below overwrites it for light-targeting
+zombies. Calm (daytime) zombies do not follow smells, horde members keep their structure march,
+and a zombie breaking a structure down does not abandon it for one. Tuning lives in
+`packages/gameplay/data/zombies.json` `ai.smell`: threshold 0.25; carcass radius 8 strength 1
+(strongest, shortest); rot radius 6 strength 1; kill (loot bag) radius 6 strength 0.8; fire radius
+12 strength 1 (widest). All falloffs are linear.
+
+Smell emitters attach at events, never by a scan. A carcass node gets one at spawn
+(`spawnResourceNode`, `animal_carcass` only). A kill's loot bag gets one at creation
+(`dropAnimalLoot` / `dropZombieLoot`) while it holds spoilable meat or rot; the spoilage pass
+(every 20 ticks, the pass that already visits every holder) refreshes it — a ground loot bag smells
+while it holds spoilable food or rot, and stops the pass after the meat is gone. The same pass
+refreshes carried rot: a player or bot carrying rot smells (radius 6), and stops smelling the pass
+after the rot leaves. Stored containers are out of v1 — a storage box full of rot never smells.
+Burning vegetation and burning pieces smoke: `ignite` attaches a Smell emitter to a burnable
+vegetation node or a BuildPiece, `extinguish` removes it (a burning player, animal, or zombie gets
+none — their smell is carried rot). A fired piece smokes through a sibling entity
+(`AttachKind.Smell = 6`, mirroring the Light sibling): `placePiece` creates it unlit (strength 0)
+and `setEmittersLit` turns it on with the fire and off when the fire goes out; `rehydrate` repairs
+a loaded sibling's Emitter the way it repairs light, and `setEmittersLit` grows a missing sibling
+for a save from before this ADR when the fire is next lit, so old saves' fires smell too.
+Free-standing stations (`spawnStation`, tests/tools only) carry no Smell emitter in v1 — their Heat
+emitter already occupies the station entity's one Emitter slot, and a bare sibling would lose its
+(non-persistent) Emitter on reload with no rehydrate path to restore it; placed fired pieces (the
+real-play path) carry the sibling.
+
+Walls halve a smell instead of blocking it. `structureOcclusion`
+(`packages/gameplay/src/building/shelter.ts`) gives Smell a partial transmit of 0.5 per solid cell
+and per wall / closed-door edge (`SMELL_TRANSMIT`), so a sealed room still smells faintly of what
+burns or rots inside; heat keeps its edge factors and every other kind keeps the binary block. A
+`realism.ts` comment that read "0 linear, 1 quadratic" for the EmitterSpec falloff was wrong
+against the world's Falloff enum (0 constant, 1 linear, 2 quadratic) and is corrected — the Smell
+specs use `Falloff.Linear`, like the fire's Heat.
+
+**Verification.** `packages/gameplay/test/adr486_smell.test.ts` 12/12: the tuning values; the
+strongest smell wins over the nearer one and below-threshold smells are nothing; a zombie
+investigates a carcass smell it cannot see a player from (goal = the source); a zombie ignores a
+below-threshold smell, follows a seen player over a smell, and ignores smell while calm at noon;
+carried rot smells and stops when the rot leaves (a storage box of rot never smells); a kill's
+loot bag smells while it holds meat and stops when emptied; a carcass node smells and an ordinary
+tree does not; burning vegetation smokes and extinguishing clears it (a burning player gets no
+emitter); a lit campfire smokes at strength 1 through its sibling and an unlit one reads 0; smell
+through one wall is half the open-air value (0.375 vs 0.75 at 3 tiles). Revert check: 9 failed |
+3 passed on reverted code — the 3 passing are the vacuous controls (below-threshold, player over
+smell, calm daytime), which assert absence and hold without the feature.
+
+**Honest cuts.** Zombies only in v1 — predators need a separate hook (animals have no Investigate
+state). No death-spawned carcass node: the kill's loot bag is the fresh-kill source. A lit fired
+piece that also catches fire smells twice as strong (the lit-fire sibling plus the burning-piece
+emitter) — both are real smoke, so it is left as is. Newly rotted food starts smelling on the next
+spoilage pass (<= 1 s later); losing rot stops the smell on the same pass. The smell radii and the
+0.5 wall transmit are first-pass tuning, not play-tested — a lived-in world with many rot bags may
+want the radii trimmed. No per-frame or per-tick cost: one spatial query per zombie think tick,
+emitters maintained by the existing spoilage pass and the existing ignite/extinguish and
+lit/unlit events.
+
+## ADR-487: Fog that blinds (SurVivaZ)
+
+Fog and blizzards cut sight. One multiplier in the existing sight check: `fogSightFactor(world)`
+(`packages/gameplay/src/combat/zombies.ts`) reads `world.env(Weather).kind` — Fog 0.5, Blizzard 0.35,
+anything else 1 — and `acquire()` multiplies the sight range by it (`def.sightRange * moon * fog *
+crouchMul`). The tuning lives in `packages/gameplay/data/zombies.json` `ai.sightFogMul` (`{ "fog":
+0.5, "blizzard": 0.35 }`, loaded into `AiTuning.sightFogMul` in `packages/gameplay/src/defs.ts`).
+Animals get the same treatment in `packages/gameplay/src/population.ts`: `animalAISystem` hoists the
+factor once per run and applies it to the aggro range and the flee range in the `wants` / flee
+branches; the threat-scan radius itself is unchanged, so nothing re-scans — the fog only shrinks
+what counts as seen.
+
+**Verification.** `packages/gameplay/test/adr487_fog_blinds.test.ts` 10/10: the tuning values; the
+factor by weather (Fog 0.5, Blizzard 0.35, Clear 1); a walker at 7 tiles acquires in clear weather
+and does not in fog (sight 10 × 0.5 = 5); a wolf at 2 tiles acquires in clear weather at night and
+does not in fog (aggro 2.5 × 0.5 = 1.25); a deer still flees from a player at 5 tiles in fog
+(fleeRange 12 × 0.5 = 6). Revert check: 4 failed | 6 passed on reverted code — the 6 passing are
+the non-fog controls (clear-weather acquire, the factor itself, the below-range cases), which hold
+without the feature.
+
+**Honest cuts.** `provoker()` is not fogged — a zombie that already saw you keeps coming; the fog
+only stops new acquisitions. Blizzard is weight 0 outside winter, so the blizzard multiplier is
+winter-only in practice. The wolf tests set night explicitly (`setTimeOfDay(w, 0, 0)`): ADR-495's
+activity window makes wolves 0.4× in the daytime, which would have masked the fog effect in the
+clear-weather control.
+
+## ADR-488: Humidity that matters (SurVivaZ)
+
+Damp air slows drying and speeds rot. `packages/gameplay/src/systems/environment.ts` gains
+`ambientHumidity(world, x, y)` (the `ClimateRes` humidity at the tile, or the 0.5 band default with
+no climate), `humidityDryMul(h) = max(0.25, 1 - h)` (drying never stalls completely — the floor
+matters: at humidity 1.0 clothes still dry at a quarter rate), and `humiditySpoilMul(h) = 1 + h`
+(rot up to twice as fast in saturated air). The exposure pass samples `climateAt` once per occupant
+per pass and shares that sample between the drying branch (rate × `humidityDryMul`) and the ambient
+line (which now reads `sample.temperature` instead of a per-entity `ambientTemperature` call —
+exactly equivalent, one fewer lookup). The spoilage pass does the same: one `climateAt` sample per
+holder, temperature from `surface0 ?? sample.temperature`, and the spoilage rate multiplied by
+`humiditySpoilMul`. The two formulas are code constants (exported, tested), not `environment.json`
+knobs — the scope's suggested defaults are formulas, not knob names.
+
+**Verification.** `packages/gameplay/test/adr488_humidity.test.ts` 5/5: drying orders 0.35 < 0.5
+(default) < 0.9 over 800 ticks at wetness 1.0, and the 1.0 floor dries exactly as slowly as 0.9;
+spoilage in two identical storage boxes at humidity 0.9 vs 0.35 runs at the 1.9/1.35 ≈ 1.407 ratio
+(asserted in [1.38, 1.43], the shared temperature cancelling); a world with no ClimateRes behaves
+exactly as before (the 0.5 default). Revert check: 4 failed | 1 passed on reverted code — the
+passing one is the no-ClimateRes control, which legitimately passes without the feature. The floor
+test was strengthened during the run to also assert 1.0 dries slower than the 0.5 default, since on
+reverted code 1.0 == 0.9 == 0.5 vacuously.
+
+**Honest cuts.** Clothes only in v1 — ground drying (`chunkSurfaceSystem`) is untouched. No Guide
+line was added (the scope's likely files don't list `guide.json`; the player reads humidity through
+wetness and freshness presentation). No new per-tick scan: one `climateAt` sample per occupant or
+holder per pass, piggybacking on passes that already run.
+
+## ADR-489: Swimming costs stamina, and deep water can drown you (SurVivaZ)
+
+Swimming is work now. `packages/gameplay/data/vitals.json` gains `swimStaminaDrainPerSec: 4` and
+`drownDps: 1.0` (inside the scope's 3–6/s and 0.5–1.0 HP/s bands; 4/s means a 20-tile crossing costs
+80 stamina, and drowning runs at the starvation rate); `packages/gameplay/data/movement.json` gains
+`exhaustedSwimMul: 0.5`. `packages/gameplay/src/systems/vitals.ts` `stepStamina` gains a `swimming`
+parameter: while swimming it drains `swimStaminaDrainPerSec` when stamina is above zero, and — unlike
+sprinting — it holds `staminaDelayTicks` even at zero stamina, so a swimmer cannot stop and regen
+mid-lake (without that the swimmer would yo-yo: 1 s drowning, ~9 s regen, and almost never drown).
+`vitalsSystem` hoists the terrain and shallow radius once per run, computes `swimming` per entity
+with the exported `isSwimmingAt(world, x, y, z, terrain, shallowRadius)` (treading water counts;
+frozen water reads as land), and the damage section adds `hurt(vt.drownDps * dt,
+DamageCause.Drowning)` when swimming with stamina at zero (`DamageCause.Drowning = 14`,
+append-only, in `packages/gameplay/src/components.ts`). `predictOwnStamina` shares the same
+prediction. The crawl is the second touchpoint: `applyMovementInput` multiplies swim speed by
+`exhaustedSwimMul(world, e)` (gated on the stamina read first, so it costs nothing for a fresh
+swimmer), and the mount path is deliberately untouched — a rider at zero stamina does not slow
+their horse. A Guide line in the seasons-weather section says it plainly.
+
+**Verification.** `packages/gameplay/test/adr489_swimming.test.ts` 8/8: deep water drains 4/s
+(100 → ~96 in 20 ticks) while shallow water and land cost nothing; stamina hits 0 and stays 0 over
+100 ticks with HP dropping; an exhausted swimmer drowns at 1 HP/s with `lastDamageCause ===
+Drowning`; a 5 HP swimmer dies with `Dead.cause === Drowning`; the crawl ratio is ≈ 0.5; a bot
+drains (bots spawn via `spawnPlayer` + `setAiHumanPredicate`, so they flow through `vitalsSystem`).
+Revert check: 8/8 fail on pre-change code.
+
+**Honest cuts.** The scope allowed gating on `AnimState.Swim`, but that gate was rejected:
+`spawnPlayer` never adds `AnimState` — it is added lazily by stance changes, one-shot anims, or
+other spawns — so a plain walking player may have no `AnimState` server-side and the gate would
+silently never fire. The hoisted-terrain check is used instead. Frozen-water safety is by
+construction via `waterDepth` (ADR-450) and was not re-tested.
+
+## ADR-490: Rivers push you downstream (SurVivaZ)
+
+Forced rivers have a current. `packages/gameplay/src/river_current.ts` (new) resolves the river
+layout for a position — region-aware, cached in a `WeakMap<World, Map<string, WaterFeatureLayout>>`
+(cap 16, the generator's own cap): region size 1536, half 768, feature scale 3 outside region zero,
+`fnv1a("rx,ry", seed)`. `riverCurrentAt(world, x, y)` returns the unit downstream direction, or
+`undefined` when the floored tile is not a forced river tile; the direction comes from the meander
+derivative at the entity's continuous region-local `u` (smooth, no tile-step jumps), +u downstream
+by convention. The river math is taken from `packages/world/src/waterFeatures.ts` (`riverLocal`:
+`u = tx·cos(angle) + ty·sin(angle)`, `v = −tx·sin(angle) + ty·cos(angle) − offset`, meander
+`amp·sin(u/period + phase)`; amp (6 + hash·8)·scale, period (18 + hash·14)·scale, halfLen
+(70 + floor(hash·30))·scale, width 1.15–1.7 not scaled, offset ±12·scale). The knob is
+`riverCurrentTilesPerSec: 0.3` in `movement.json` — a swimmer swims ~1.45 tiles/s, so 0.3 is
+noticeable but fightable, and a boat feels a gentle push. The swimmer hook sits in
+`applyMovementInput` as a separate step (it must also apply to an idle swimmer treading water in a
+river): inside the moving block and in the idle path, gated on level 0 (ground only) + actually on
+a water tile at any depth (`waterDepth !== None` — frozen water reads as land) + a defined current,
+applied per axis through `bodyAxisMove` (blocking-aware); dead entities do not drift. The boat hook
+sits in `vehicles.ts` `stepPowered` beside the wind drift, so the `boatPoseBlocked` per-axis slide
+beaches or slides the boat instead of letting the current push it onto land; it is gated on boat
+and not-sailboat (the sailboat is wind-only), and a parked boat gets no current — the same as wind
+drift, deliberately.
+
+**Verification.** `packages/gameplay/test/adr490_river_current.test.ts` 8/8: the tuning value; the
+unit direction matches the independently-computed meander derivative (dot with the base angle >
+0.78, inside the ~38° meander swing), deterministic, undefined on land and on a lake tile; a river
+in region (1,0) is found (the default-layout call returns "none" there — the scope's central trap);
+an idle swimmer drifts ~0.3 tiles in 1 s; a steering swimmer's downstream + upstream
+along-displacements sum to ~0.6 (2 × 0.3 — a sum, not a difference, which the first version got
+wrong); land does not drift; a paddle boat underway drifts downstream vs the same boat on a control
+lake, a sailboat does not, and a parked boat does not. Revert check: 8/8 fail on pre-change code.
+
+**Honest cuts.** Forced rivers only. The elevated-lake precedence uses the hash disc, while the
+generated world's lake may be relocated ±20 tiles — a river tile under a relocated lake's hash disc
+reads as lake, not river. Animals and zombies do not drift (they are not moved by
+`applyMovementInput`); mounts and riders do not drift (the Driver / Riding branches return early).
+The helper is gameplay-side with its own `WeakMap` cache, not a world-side helper (a world-side
+helper would need `REGION_SIZE` from `generator.ts` — a cycle) and not `travel.ts`'s generator (the
+siting / bands ambiguity). Deterministic: a pure function of (seed, position), no RNG, no new
+replicated state. One test assertion was vacuous in the first version (the lake field is `{x, y,
+r}`, not `{cx, cy}`) and was fixed to use `.x` / `.y`.
+
+## ADR-491: Wild food follows the seasons (SurVivaZ)
+
+Wild fruit, mushrooms and herbs yield nothing on the last day of fall and all winter. `YieldDef`
+gains a required `seasonal: boolean` (`packages/gameplay/src/defs.ts`); `resources.json` flags 31
+yields `seasonal: true` across 19 lines — berry_bush mushroom / berry_seeds; blueberry, raspberry,
+blackberry and strawberry bushes fruit + seeds; apple, pear, cherry, orange and peach trees fruit
+only; tree apple only; wild_mushroom mushroom / mushroom_spores; herb_patch herbs / mushroom /
+wild_onion / herbs_seeds; wild_yarrow, wild_ginseng and wild_aloe plus their seeds; rotten_stump,
+mossy_log and fallen_log mushroom. Not flagged: plain `berries` (dye → the Claim Flag chain —
+zeroing them all winter would starve bot bootstrap), wood / sticks / fiber, fruit-tree saplings
+(planting stock), all wild food-crop nodes and wild_garden (seed source), any `crop_*` node.
+`gathering.ts` reads `isCropDormant(world)` once per gather action and, in the yield roll, skips a
+seasonal yield while dormant (`if (dormant && y.seasonal) return;` — after the bare-hands check,
+before the chance roll). Mushrooms flush while it rains: +1 mushroom per successful mushroom roll
+while raining. A Guide line in the seasons-weather section says it plainly, including the berries
+exception.
+
+**Verification.** `packages/gameplay/test/adr491_seasonal_food.test.ts` 8/8: the flag table (berry
+bush mushroom seasonal, plain berries not; apple_tree fruit seasonal, sticks and saplings not);
+berry_bush yields nothing in Winter and on the last day of Fall, and yields again in Spring; the
+mushroom rain bonus (+1 while raining). Revert check: 8/8 fail on pre-change code.
+
+**Honest cuts.** In Winter the gate's distinct effect is only on frost-proof berry bushes: frost
+already kills frost-susceptible wild nodes first (`CROP_EVERY` is 20 ticks, so the frost kill pass
+runs inside any multi-step test; Winter's temperature range is always below the 40°F frost kill),
+so for frost-susceptible nodes (wild_mushroom, apple_tree, wild_potato) the gate bites on the last
+day of Fall on a mild day. `wild_onion` from `herb_patch` is seasonal but from `wild_garden` is
+not — per-yield precision, not per-item. The mushroom bonus is while-raining only: no recent-rain
+state exists, and none was added (no `lastRainEndTick`). Test-ordering traps found and recorded:
+`setTimeOfDay` must run before `setSeason` (setSeason compensates for the current day), and rain on
+world day 0 re-rolls at once (the first-day no-rain rule) — the test's `setWeather` helper sets noon
+on day 1 first.
+
+## ADR-492: Bleeding wounds (SurVivaZ)
+
+A heavy hit can leave you bleeding, and it will not stop on its own. `diseases.json` gains a
+`bleeding` entry (`hpDps: 0.4`, `durationSeconds: 0`, cure `medicated_bandage`, `moveMul: 1`, color
+`#A93226`) and a top-level `"bleed": { "chance": 0.25, "minDamage": 15 }` object. The roll sits in
+`applyDamage` (`packages/gameplay/src/combat/combat.ts`, after the hp write and the `Damaged` emit,
+on the post-armor, post-block, post-share amount): only when the target survives the hit, has
+Survival, the cause is Combat / Contact / Fall, the amount is at least 15, and
+`world.rngFor("disease.bleed", target).next() < 0.25` does it call `contractDisease(world, target,
+"bleeding")`. `applyDamage` gains an optional 7th parameter `nested = false`, passed as `true` by
+the mount-share recursion so a rider hit does not roll once for the mount and once for the rider.
+A plain bandage staunches it for a minute; a medicated bandage cures it outright: `cureDiseasesForItem`
+(`packages/gameplay/src/diseases.ts`) gains `treatBleeding` / `isBleedingStaunched` with
+`BANDAGE_BLEED_STAUNCH_SECONDS = 60`. The staunch reuses the disease's `untilTick` field as a
+"staunched until" tick — bleeding has duration 0, so its `untilTick` is normally 0 (no auto-expiry);
+the drain pauses for 60 s, it does not cure. The expiry loop in
+`packages/gameplay/src/systems/diseases.ts` special-cases bleeding: when the staunch tick passes
+it clears `untilTick` only and resumes the drain instead of expiring the disease, and the
+symptom-drain loop zeroes bleeding `hpDps` while staunched. `medicated_bandage` in `items.json`
+now cures `["wound_infection", "bleeding"]`. The Guide gets a cure fact item and a text line; there
+is deliberately no duration Guide line for bleeding — `formatDuration(0)` would render "0 s" and
+wrongly tell players bleeding lasts 0 seconds (the exhaustion precedent: cure line only for
+duration-0 diseases).
+
+**Verification.** `packages/gameplay/test/adr492_bleeding.test.ts` 10/10: the tuning values and the
+loader (chance, minDamage, the medicated cure); a 20-damage hit bleeds at ~25% (statistical, 200
+hits); a 10-damage hit never bleeds; a light hit, starvation and fire never bleed; zombies cannot
+bleed (no Survival); the drain is 0.4 HP/s while bleeding and 0 while staunched; a plain bandage
+pauses the drain for 60 s and it resumes after; a medicated bandage cures; the Guide carries the
+cure line and no duration line. Revert check: 7 failed | 3 passed on reverted code — the 3 passing
+are the vacuous guard tests (light hits, starvation/fire, zombies can't bleed), which assert absence
+and hold without the feature.
+
+**Honest cuts.** Two loader corrections the scope missed. First, `defs.ts` validated `diseases.length
+≤ 8` ("need 1..8 diseases (Diseases component width)") — a 9th kind did not fit as written. The
+component stores `idx + 1` in a u8 slot, so the encoding supports up to 255 kinds; only the
+concurrent-slots cap (8) is real. Validation is widened to 1..16 with that rationale. Second, the
+`causes` validator requires every causes entry to be in [0, 1], so `bleedMinDamage: 15` could not
+live in `causes` — both bleed knobs moved to the new top-level `bleed` object in `diseases.json`.
+The `nested` parameter is defense-in-depth: the Survival guard is what observably prevents mount
+bleeding (mounts have no Survival), and no separate mount test was written.
+
+## ADR-493: Fishing from shore and boat (SurVivaZ)
+
+Fish with a rod: stand by the water, face it, and use the rod — the line stays in while you hold
+on. The rod is a new item (`fishing_rod`, tool kind `Fishing = 6` append-only in `ToolKind`,
+`packages/gameplay/src/defs.ts`; hand-crafted from 2 wood + 1 rope in 2 s, station none; item id
+527, recipe id 409 in `ids.lock.json`; durability 150). The cast is tap-to-cast, not hold-to-fish:
+`clearIntentsSystem` wipes `PlayerIntent.action` every tick, and the held Gather bit is re-derived
+into a Gather intent per tick only in the server's `applyInput` (nodes / loot bags only, no water
+knowledge) — so a one-shot Fish command cannot sustain a cast through the intent. One Fish command
+(`gameplay.fish`, `IntentAction.Fish = 34`, `packages/gameplay/src/input.ts`) starts the cast; the
+cast then holds as `Fishing` state (`{ waitUntilTick, castX, castY }`, transient — server and
+predicting client derive it from the same Fish intent and the deterministic per-entity `"fishing"`
+rng stream, neither networked nor persistent) while the fisher stands still facing the same water
+tile, and reels in when they move, turn, or switch the held item. The bite auto-reels in v1 — no
+timing minigame, no new UI. `fishingSystem` (`packages/gameplay/src/systems/fishing.ts`,
+registered in the `sys` map and the phase list right after `gameplay.gather` and before
+`clearIntents`, so the Fish intent is visible this tick) pays 2 stamina per cast, waits 4–8 s
+(`biteDelaySeconds`, × 0.75 at dawn/dusk), then rolls the bite (`biteChance` 0.7 + 0.15 dawn/dusk +
+0.1 rain + 0.1 deep water, capped at 1) and the count (1–2 fish, +1 in deep water — the count is
+rolled on both peers even on a miss, so the rng streams never diverge; only the authority adds the
+fish via `addItem`, emitting `InventoryOverflow` with the lost count when the bag is full). No
+`ItemGathered` emit: that event names a ResourceNode (the progression handler reads its kind for
+the XP source), and fishing has no node — fishing awards no XP in v1, and the inventory change is
+replicated so the catch is visible; a "fish" XP source is a follow-up. The cast point is the tile in front (`plantSpot`); depth comes from `waterDepth` (frozen
+water reads as land). The prompt is a `farmPrompt` branch (`Fish`, before the Drink branch — a
+rod-holder by the water wants to fish, not drink) that fires only when the exact cast point is
+water, and the client `use` handler sends `FishCmd` for it (`apps/client/src/main.ts`). Tuning lives
+in `packages/gameplay/data/fishing.json`. A Guide line in the cooking section says it plainly.
+The rod art is painted at runtime (`apps/client/src/fishing-rod-art.ts`): a 128×128 icon (diagonal
+rod, cork grip, metal reel, hanging line and hook, in the wetwood bark / cut wood / dark metal /
+pale line ramps) installed into `ICON_DATA` as `fishing_rod.png`, and a 48×48 × 8-facing held sprite
+(the rod held at its butt, angling up-forward along the facing direction, grip anchor (-3, -5) like
+the axe) in its own atlas `held_fishing_rod` — the `held` atlas is full (120/120 frames), so the rod
+could not go there; `emitHeld` resolves the sprite's own atlas, so that is all it needs. The
+fragment (`packages/assets/pack/task493/manifest.task493.json`) carries layout only, registered in
+`manifest-index.ts` and the vite allow-list like the footprints / track fragments.
+
+**Verification.** Gameplay 8/8 (`packages/gameplay/test/adr493_fishing.test.ts`): the tuning values,
+the rod item and recipe, `FishCmd` in `GAMEPLAY_COMMANDS`, the lock ids; the prompt offers Fish with
+a rod facing water and not without a rod or facing land; one Fish command casts, holds without
+further intents, and lands fish; no rod / no water means no cast; moving, turning, or switching the
+rod reels in; an exhausted fisher (stamina 0) cannot cast; deep water yields more than shallow over
+1,200 ticks; a boat driver casts like a shore fisher (a bare `Driver` component — the Driver branch
+never touches `PlayerIntent.action`, and `gatherSystem` does not check Driver, so driver-gather was
+verified by reading and by test). Client 5/5 (`apps/client/test/adr493_fishing_rod.test.ts`): the
+icon paint (diagonal, bark ramp, reads at 24 px), the 8 held frames, the fragment keys / layout /
+grip anchors, `rodAtlasSources()` no-op without a canvas, `installFishingRodIcon()` a safe no-op
+without a canvas. Revert check: both files fail to collect on reverted code (the gameplay file at
+`loadDefs` reading `biteChance` — the reverted `data.ts` no longer passes `fishing`; the client
+file at the missing `fishing-rod-art.js`). The revert stashed the code, item, recipe, lock, Guide
+and art, but not `defs.ts` — stashing it would break the loader on the ADR-492 diseases data (the
+9th disease exceeds the base ≤8 cap); the fishing tuning is inert without the code.
+
+**Honest cuts.** Stamina 2/cast is flavour, not an AFK bound (regen is 15/s): an AFK fisher lands
+1–2 raw fish per 4–8 s, slower than gathering a shoal (1–2 per 1.5 s cooldown), so fishing is never
+the best way to get fish. The rod's durability 150 is inert in v1 — fishing never wears it (no
+`wearDurability` call); that is a follow-up. Touch boat-fishing is blocked in v1: the farm prompt
+is hidden while driving, so the touch Use button does not show on a boat — keyboard and gamepad
+reach it through QuickUse, which fires the prompt even while driving; showing the prompt while
+driving when the action is Fish (or a vehicle-controls fishing button) is the follow-up. The held
+rod has no isolated draw test (no harness reaches `emitHeld` in isolation) — Tracey's eyes on the
+live build are the check, the same honest cut as the ADR-485 / ADR-496 view multiplies. The fixed
+seed's first bite draws miss, so the cast test needs 800 ticks (not 400) to land a fish.
+
+## ADR-494: Wolves hunt in packs (SurVivaZ)
+
+A wolf that sees a packmate hunting joins the hunt. `ArchetypeBehavior` gains `pack?: boolean`
+(`packages/gameplay/src/ai/population.ts`); only `animal_wolf` has `"pack": true` in `ai.json` —
+the wolf is the only hostile species (the bear is territorial and solitary; dogs are
+defensive / tameable-adjacent). `packShareTarget(world, self, kind, tx, ty, radius, animals)`
+(`packages/gameplay/src/population.ts`, exported) scans the already-built live list (`cache.live`,
+passed in) with store-direct reads and a squared-distance early-out; the radius is measured from
+the sharing wolf to the packmate's goal (the prey's position), not to the packmate. The share sits
+in the think branch, before the drink / wander logic: `if (def.pack && !tame && !wants && state !==
+AnimalState.Flee)` — on a real think tick it scans with radius `def.aggro.leashRange` (7); on a hit
+it sets `state = Attack`, `gx` / `gy` to the mate's goal, `thinkAt` to tick + 2–6 s, and `shared =
+true`. Between thinks an Attack wolf sets `shared = true` with no re-scan (keep-alive), and the
+drink block is gated on `!shared` and the wander block on `!shared && !decided`.
+
+**Verification.** `packages/gameplay/test/adr494_pack_hunt.test.ts` 6/6: the table (wolf pack true,
+only wolf, non-boolean pack errors); the `packShareTarget` unit (no mate → undefined; a mate
+attacking with prey 6 away → the goal; prey 12 away → undefined; an idle mate → undefined; the self
+excluded; an attacking bear → undefined — kind mismatch); the full loop (player at (400, 0), wolf A
+at (401, 0), wolf B at (406, 0): B shares, state Attack, within 2 tiles after 60 steps); the
+control (B at (410, 0), prey 10 > 7: not Attack, still > 2.5 away after 60 steps); own-target (two
+players: B attacks the nearer one, goalX not the first player's); the bear control (a bear at 6
+tiles stays out). Revert check: 3 failed | 3 passed — the 3 passing are the controls (out-of-range,
+own-target, bear), which assert no-share behaviours that hold with and without the feature.
+
+**Honest cuts.** The keep-alive is a deliberate deviation from the scope's letter: the think
+branch runs every tick for Attack wolves, so without it the share would die after one tick and the
+joining wolf would re-roll drink / wander on the next tick. The next think re-validates, and a wolf
+whose pack stopped hunting falls through to drink / wander and gives up; a wolf in Attack with no
+threat keeps pressing toward its last goal for at most one think interval (≤ 6 s) — bounded,
+wolf-only, arguably natural. Target-less means `!wants`, not `threat === undefined`: a wolf 6 tiles
+from the player has a scanned threat (scan radius 8) but no engagement, so the `threat ===
+undefined` form would never fire. A biting wolf's goal is its own position, so a shared goal is at
+most 1.4 tiles off the prey — harmless (B walks there, then its own `wants` fires within 2.5). The
+test delays the joining wolf's first `thinkAt` past the attacker's first attack, or B thinks on
+tick 1, finds A still Idle, and rolls a 2–6 s `thinkAt` past the window.
+
+## ADR-495: Night belongs to the night animals (SurVivaZ)
+
+Animals keep their own hours. `ArchetypeBehavior` gains `activity?: ActivityWindow` (`{ night,
+dawn, day, dusk }`, all four required when present; each value in (0, 1] — 0 is rejected, because
+it would be a hard window) in `packages/gameplay/src/ai/population.ts`; `AnimalDef` gains the
+optional `activity` (`packages/gameplay/src/population.ts`, written with a conditional spread for
+`exactOptionalPropertyTypes`) and the exported `activityMul(def, phase)` (default 1).
+`animalAISystem` reads `currentPhaseKey(world)` once per run; per animal the `wants` aggro range
+becomes `def.aggro.range * fog * activity` (the engaged / retaliating leash branch is unchanged —
+only new engagements are windowed) and the wander roll becomes `rng.next() < 1 - 0.5 * activity` →
+Idle, so the wander share is 0.5 × activity. Flee is unchanged. Bed-down is emergent from the
+wander multiplier (the Idle pose), not a separate branch. `ai.json` carries 23 activity entries,
+binary 1.0 active / 0.4 sluggish: owl night 1 only; wolf, bear and fox night + dusk 1; deer, stag,
+red_deer, elk, moose, rabbit and hare dawn + dusk 1 (bedded at night); chicken, turkey, duck, goose,
+sheep, cow, pig, goat, snake, crow, parrot and squirrel day 1. Unwindowed (no entry = today's
+behaviour): dogs, cats, bee, turtle, plus the unlisted alpaca, bison, boar, donkey, ferret, horse
+and yak — the scope did not assign them. Spawn weights were not retuned.
+
+**Verification.** `packages/gameplay/test/adr495_night_animals.test.ts` 5/5: the table (wolf
+night/dusk 1, day/dawn 0.4; deer dawn/dusk 1, night/day 0.4; owl night 1; chicken day 1; dog, bee,
+turtle and horse all 1); validation (0, 1.5 and a missing phase all error); the wolf aggro
+behavioural (a player at 2.4 tiles: Attack at night hour 0, not at day hour 12); the chicken wander
+statistical (150 forced thinks each, same rng stream both runs: wander shares 0.2 at night vs 0.5
+in the day; asserts night < day − 20, night < 60, day > 55); the flee control (a deer still flees
+from a player at 5 tiles at night). Revert check: 4 failed | 1 passed — the passing one is the
+flee test, a control: flee was never windowed.
+
+**Honest cuts.** The first implementation used `rng.next() < 0.5 * activity`, which inverted the
+sense (the roll is Idle-first: Idle probability 0.2 at night means more wandering, not less); the
+test caught it, and the correct form is `1 - 0.5 * activity`. The wolf window broke the ADR-487
+clear-weather wolf test during verification (it ran at the default daytime, 0.4×) — both 487 wolf
+tests now set night explicitly. No day/night rhythm for animals existed before this ADR; the window
+is a multiplier on the existing think-tick behaviour, not a schedule.
+
+## ADR-496: Rare old animals (SurVivaZ)
+
+One animal in fifty is old — bigger, tougher, and worth more. `Animal` gains an append-only `old:
+"u8"` field at the end (`packages/gameplay/src/components.ts`; append-only because registration
+order is component ids on every peer, and absent in old data reads as 0 = normal; Animal is not
+persistent, so there is no save-migration issue). `ArchetypeBehavior` gains `oldLoot?: LootEntry[]`
+and `AiData.tuning` gains `old?: { chance, scaleMul, hpMul, eligible }`
+(`packages/gameplay/src/ai/population.ts`; validation: oldLoot rows have the same shape as loot,
+oldLoot requires the species in `tuning.old.eligible`, chance in (0, 1), scaleMul ≥ 1, hpMul ≥ 1,
+and eligible entries must be animal archetypes and not tameable). `population.ts` gains `AnimalDef`
+`oldLoot` + `oldScaleMul`, the exported `oldVariantTuning()` (defaults chance 0.02, scaleMul 1.25,
+hpMul 1.5, eligible []) and `maybeMarkOld(world, e)` — called only from the spawner host `spawn`,
+never from `spawnAnimal`, so husbandry babies are born normal. The roll uses the per-entity
+`world.rngFor("pop.old", e)`; on success it sets `Animal.old = 1` and Health to
+`round(def.hp * hpMul)` for hp and max. `dropAnimalLoot` rolls the extra `def.oldLoot` after the
+base roll, continuing the same `"animal.loot"` stream — a normal animal's loot is byte-identical to
+before. `ai.json` sets `tuning.old` to `{ chance: 0.02, scaleMul: 1.25, hpMul: 1.5, eligible:
+["animal_boar", "animal_wolf"] }`, with oldLoot on boar (raw_prime_cut 2–3 + fur_pelt 1) and wolf
+(raw_prime_cut 1–2 + fur_pelt 1), both chance 1. The view reads it in `classify`
+(`apps/client/src/view.ts`): `sc = r.scale * live * old`, where `old` is the species' `oldScaleMul`
+when `a.old === 1` (mounts never old; only real-art species can be old).
+
+**Verification.** `packages/gameplay/test/adr496_old_animals.test.ts` 5/5: the tuning (0.02 / 1.25 /
+1.5, eligible sorted [boar, wolf], all non-tameable, oldLoot containing raw_prime_cut + fur_pelt
+with resolving ids, no other species with oldLoot, deer oldLoot empty); validation (good tuning
+passes; chance 0 / 1.5, scaleMul 0.5, eligible horse / deer / zombie_walker all error; stray oldLoot
+on rabbit errors); `spawnAnimal` never marks old (50 wolves, old 0, HP 70); the host-path roll
+statistical (300 wolves, seed 7: old count in [1, 15], old wolves HP/max 105 = 70 × 1.5, normal 70;
+100 chickens, zero old); loot (the first old wolf's bag: raw_meat ≥ 1 + raw_prime_cut ≥ 1 + fur_pelt
+1; 20 normal wolves never drop prime or pelt). Revert check: 5/5 fail on pre-change code.
+
+**Honest cuts.** Eligible is {boar, wolf} only. The live pack manifest has only three `animal_*`
+keys with their own art — boar, deer, wolf — and deer is a mount species (and therefore tameable),
+so the scope's tameable exclusion removes it; the first implementation listed deer and the
+validator caught it. The view multiply has no isolated test (`classify` is private) — Tracey's eyes
+on the live build are the check, the same honest cut as ADR-485. No `PROTOCOL_VERSION` bump: the
+envelope version is unchanged and the schema derives from the same build on both peers, the same
+as prior component additions (e.g. ADR-463 Carrion). The only open question for old deer is the
+1.5× HP mount — a follow-up decision for Tracey if she wants old deer or stags.
+
+## ADR-497: Raiders probe your defences (SurVivaZ)
+
+Raiders find the weakest wall and hit it. `ClanSensors` gains `rivalWeakWall?: { id, x, y, hpFrac }`
+and `CLAN_AI` gains `probeRadius: 20, probeEvery: 30` (`packages/gameplay/src/ai/clan_behaviors.ts`
+— the only file this ADR touches). The wall scan lives in `fillClanSensors`, as the scope requires
+(`chooseClanGoal` stays pure): the exported `weakestWallNear(world, cx, cy)` follows the `homeScan`
+pattern — a `WeakMap<World, Map<string, { tick, wall? }>>` keyed by the rounded centre, 30-tick
+validity plus destroyed-wall invalidation, one pass over `world.query([BuildPiece, Transform])` with
+store-direct Transform reads, radius 20 (d2 ≤ 400), `def.family === "wall"`, weakest by HP fraction
+with ties breaking toward the lowest max HP. The data was verified first: `pieces.json` holds four
+wall pieces — `wall` (250 HP), `wall_low` (150), `wall_window` (220), `wall_doorway` (220) — so
+doorways are included. `fillClanSensors` calls it at the rival stall when one is sensed, else at
+the clan's raid goal (the goal-centred fallback: the leader shares the target via the clan goal, so
+members at the wall can re-derive the weakest wall near the shared goal even when the stall is out
+of their 14-tile sensor range). `chooseClanGoal`'s `rival` gains an optional `weakWall?: { x, y }`
+and the raid branch returns the weak-wall coords when present, else the stall coords (the old
+behaviour, preserved). `clan_manage` passes it through. A new `clan_raid` behaviour (before
+`clan_goal`; traits `{ bravery: 0.6 }`, inertia 0.4) owns the raid when a weak wall is sensed:
+consideration = goal is Raid and `rivalWeakWall` sensed; run: `toward` the wall at speed 1, within
+1.4 tiles slow (`moveX *= 0.2`) and, when `since(c, "hitAt", 10)` (the existing local `since`
+helper), push `attack:<wall.id>` and set `hitAt`; return true (keep running until the wall is gone
+or the goal changes). `clan_goal`'s "far" consideration returns 0 when the goal is Raid and a weak
+wall is sensed, so `clan_raid` owns the raid; when no walls remain, `rivalWeakWall` is undefined,
+`clan_raid` scores 0, and `clan_goal` takes over and walks to the goal / stall — the old raid
+behaviour, the settled fallback. No clan behaviour attacked anything before this ADR, so the attack
+behaviour and the re-pick-after-breach loop are both new; the re-pick is driven by the 30-tick
+sensor refresh, not the leader's 2-minute `goalCooldown`.
+
+**Verification.** `packages/gameplay/test/adr497_raiders.test.ts` 4/4: the tuning values; the
+weakest wall is the damaged door (hpFrac ~0.09, picked over a full-HP wall); a raid walks to the
+weak wall and attacks it (the wall's HP falls); with no walls the clan falls back to the goal.
+Revert check: 4/4 fail on reverted code (the file fails to collect without the feature). The
+existing clan behaviour tests still pass 5/5 (9 total together).
+
+**Honest cuts.** `fillClanSensors` runs server-side on the full world, so a raider "knows" the
+weakest wall of a base it has only seen the stall of; the scan is restricted to radius 20 around
+the stall / goal as a footprint proxy — flagged, not hidden. The weakest wall is picked by HP
+fraction even at full HP (the soft spot is the lowest-tier wall; ties break toward lowest max HP).
+The goal-centred fallback is a deliberate extension of the scope's letter (the scope said the
+stall; the leader shares the target via the goal, so members re-derive it there).
+
+## ADR-498: First-visit discoveries, a Guide journal (SurVivaZ)
+
+The places you find are written down. `Discoveries` is a new component (`DISCOVERY_MAX = 64`,
+`kind: u8[64]`, `cx: i16[64]`, `cy: i16[64]`, `count: u8`, networked + persistent, the same class as
+RecentCrafts, appended to `GAMEPLAY_COMPONENTS` after FloodTile in
+`packages/gameplay/src/components.ts`). `packages/gameplay/src/discoveries.ts` (new) defines
+`DiscoveryKind = { Lake: 1, River: 2, RuinBase: 3 }` (ruin kinds are 3 + AbandonedKindId),
+`discoveryLabel(kind)` ("A lake", "A river", ruin keys title-cased per word + " ruins" — "Chapel
+ruins", "Fisher Hut ruins", "Two Story Farmhouse ruins"), `chunkDiscoveries(world, cx, cy)` (a ruin
+via `planAbandonedChunk`; lake / river via a 1,024-tile region-layout scan once per chunk per player
+at first-send time — lake-family lake / greatLake / pond is one lake discovery, river is one river
+discovery, a chunk can hold up to 3), `recordChunkDiscoveries(world, e, cx, cy)` (dedups by (kind,
+chunk), most recent first, cap 64, returns the newly recorded ones) and `discoveriesOf(world, e)`
+(most recent first). Store access mirrors `recent.ts` (`pushRecent` pattern: store-direct arrays,
+`markChanged`). The hook is a new `TileSync` hook in `packages/net/src/tiles.ts`: `TileSyncOptions`
+gains `onFirstChunk?: (clientId, key: ChunkKey) => void`; in the Full-send loop the `first =
+!s.cache.has(key)` flag is captured before `s.cache.delete(key)`, and the hook fires after the
+send. A Hit is a re-entry (not first); a post-eviction re-send is the client's first receipt in
+this session window and is deduped by the gameplay store. The server wires it in
+`apps/server/src/game.ts:424` — `recordChunkDiscoveries(world, p.entity, cx, cy)` on first chunk.
+The client renders it in the Guide: `buildGuidePanel(initialId?, journal?)`
+(`apps/client/src/guide-panel.ts`) appends a 16th "Discoveries" section button (text-only, no icon)
+after the 15 static sections when a journal is supplied, with a `renderJournal` detail (one
+`.guide-fact` row per discovery: label + `(cx, cy)`; an empty journal gets an invitation line); the
+button-state loop was factored into `markSelected(id)`. `game-menus.ts` `guidePanel()` passes
+`discoveriesOf(c.world, c.player)` fresh on each open; the boot panel passes no journal and keeps
+15 static sections. `river_current.ts` exports `layoutForRegion` / `regionLayoutFor`, which 498
+reuses (the 490 region resolution).
+
+**Verification.** 11/11 across three packages: gameplay 5/5
+(`packages/gameplay/test/adr498_discoveries.test.ts` — the data, the labels, chunkDiscoveries on a
+ruin / river / lake / empty chunk found by scanning with `planAbandonedChunk` + `waterFeatureLayout`
++ `riverPoint` at seed 42, record / dedup / most-recent-first, the cap 64 by scanning a 25×25 grid
+until ≥ 70 recorded); net 1/1 (`packages/net/test/adr498_first_chunk.test.ts` — the hook fires 9
+times for the 3×3 AOI around chunk (1,1), 9 more after moving 6 chunks east, and 0 new calls on
+moving back, 0 new Fulls); client 5/5 (`apps/client/test/adr498_discoveries.test.ts` — no journal →
+15 sections and no Discoveries button; a journal → 16 sections with rows in order; an empty journal
+→ the invitation; `initialId="discoveries"` opens on the journal; a real gameplay world through a
+fake `GameplaySource` shows the player's discoveries, and gamepad LB/RB cycling 15 times from the
+first section lands on Discoveries). Revert check: gameplay 5 fail, net 1 fails, the client file
+fails to collect (its `@engine/gameplay` imports do not exist without the feature).
+
+**Honest cuts.** Journal only in v1 — no discovery XP. Waterfalls are a follow-up (no runtime
+waterfall lookup exists). Lake-family (lake / greatLake / pond) is one lake discovery. A chunk can
+hold up to 3 discoveries (ruin + lake + river). `CHUNK_SIZE` is 32, so a chunk is 1,024 tiles — the
+scope's "1,024 lookups/chunk" was right (an early "256" comment was wrong and fixed). The lake field
+is `{x, y, r}`, not `{cx, cy}` — the same mistake made the ADR-490 test's lake assertion vacuous
+and was fixed there too. The hook must be the new `TileSync` hook, not the chunk-load path: the
+ADR-382 pump cannot attribute first visits per player.
+
+## ADR-499: Rare finds in ruins (SurVivaZ)
+
+Ruins keep better loot now. The rare rate is already 5% — this ADR is pool contents only, plus one
+kind parameter plumbed from `abandoned.ts:1052`. `packages/gameplay/src/building/abandoned.ts`
+(not `src/abandoned.ts`) gains `RareFind = { key, min, max }`, `LOOT_RARE_DEFAULT` (coin 5–20,
+iron_axe 1, iron_pickaxe 1, waterskin 1, canned_fish 1–2) and `LOOT_RARE_BY_KIND` keyed by
+snake_case kind name — FisherHut (waterskin / canned_fish / coin), Granary (salt / coin /
+canned_fish), Smithy / Barracks / Workshop (iron tools / coin), Chapel / Schoolhouse / TradingPost
+(coin-heavy), Bakery (canned_fish / salt), Mill (salt / coin), Inn (coin / canned_fish), Apiary
+(honey / coin) — with the exported `rareFindsForKind(kind)` falling back to the default. The old
+global `LOOT_RARE` (torch, stone_knife, leg_splint, stone_axe) is removed — all four are early
+craftables. `pickLoot(rand, wardrobe, rareFinds)` keeps the rare thresholds unchanged (non-wardrobe
+r ≥ 0.95, wardrobe r ≥ 0.88); a rare pick draws uniformly from the kind's finds with the count
+rolled in [min, max] (3 rand draws for rare vs 2 before — the stream changes but stays deterministic
+per seed; adr301's determinism assertions still hold); non-rare picks are unchanged.
+`rollLootPicks` and `fillLoot(world, piece, rand, kind?)` take the kind through, and the call site
+at :1052 passes `entry.plan.kind`. `abandoned.json` contains only `stampPiecesPerTick` — no per-kind
+data structure — so the tables live as a const in `abandoned.ts`, which SCOPE.md allows.
+
+**Verification.** `packages/gameplay/test/adr499_rare_finds.test.ts` 4/4: `rareFindsForKind` unit
+checks (Smithy → iron tools; FisherHut → waterskin / canned_fish; Shed → default; every find's
+item id resolves > 0); behavioural via `stampAbandonedSite` + `drainAbandonedStamps` (the adr301
+pattern): ~20 Smithy stamps → iron_axe / iron_pickaxe appear, zero old-rare items anywhere; ~30–40
+Chapel stamps → a coin slot with count ≥ 10 (Chapel coin is 10–30, 1 of 2 finds); 40 Cottage
+stamps, > 100 picks, zero old-rare items. Revert check: 4/4 fail on pre-change code (the Cottage
+test was strengthened from 10 to 40 seeds during the run — the 10-seed version passed vacuously on
+reverted code because zero rare rolls happened).
+
+**Honest cuts.** Per-kind `chance` overrides are cut in v1 — the rate stays 5% / 12% everywhere.
+Verified item keys: coin, iron_axe, iron_pickaxe, waterskin, canned_fish (no `canned_food` exists —
+it is `canned_fish`), salt, honey. Wardrobe-specific rare draws are not separately tested (they
+share the per-kind table by construction). The resume path at `abandoned.ts:1059` called
+`rollLootPicks(lootRand, wardrobe)` with 2 args — the 3rd parameter (`rareFinds`) is required, and
+the fix (`rareFindsForKind(plan.kind)`) is a real bug, not just a type error: the resume path
+replays loot rolls to keep the stream aligned with an uninterrupted stamp, so it must consume the
+same draws (same per-kind table) as the stamp path, or later loot diverges.
+
+## ADR-500: Sunken caches in deep water (SurVivaZ)
+
+Lost stashes wait in open water. The generator never placed any node on water tiles (the tile
+loop's `tile !== 1 && tile !== 8` guard), and a deep-water-only restriction is not expressible in
+band data, so the cache is placed by its own scatter pass inside the generator. `ProceduralOptions`
+gains `sunkenCacheKind?: number` and `sunkenCacheChance?: number`
+(`packages/world/src/generator.ts`); `trySunkenCache` is called from the tile loops of both
+`load()` and `nodesInChunk()` (the ADR-343 mirror — the two must agree exactly). The cache stream
+is a separate `Rng` (`fnv1a(`cache:${cx},${cy}`, seed)`) that only advances on tile-1 tiles in tile
+order; the main stream is untouched (water tiles never drew from it), so the land-node distribution
+is byte-identical with the pass on or off. Tile 8 is shallow by definition and is never rolled; the
+depth check (`waterDepthAt` — the same rule gameplay uses, no land within Chebyshev radius 2) runs
+only on a hit, which is rare. The kind is in no band, so the ADR-255 guarantee pass never places
+it on land. The server wires it in `apps/server/src/game.ts:170` (`sunkenCacheKind:
+defs.resourceId("sunken_cache")`, `sunkenCacheChance: defs.worldgen.sunkenCacheChance`); generators
+built without it (travel, preview, spawn points, tests) are byte-identical to before. The node is
+`sunken_cache` in `resources.json` (sprite `"basket"` — the fallback table draws it as
+`storage_box` at 0.6 scale, tinted `#d0b070`; `oneShot`, capacity 1, respawnSeconds 600 inert per
+the crop convention, cooldown 1.5, staminaCost 2; yields coin 5–15 chance 1, canned_fish 1–2 0.5,
+salt 1–2 0.4, waterskin 1 0.3, iron_axe 1 0.25; resource id 95 in `ids.lock.json`) — a one-shot
+node, gathered once and gone forever (no regrow), a find rather than a farm. The chance knob is
+`sunkenCacheChance: 0.02` in `worldgen.json`, validated in `defs.ts` (0..1, default 0.02) and carried
+on `WorldgenDef`. Placement runs at generator time (chunk generation) only — no per-tick or
+per-frame cost; the cache is a normal node once placed, and gathering needs no change
+(`gatherSystem` has no swim check — a wading or swimming player gathers from the adjacent tile,
+and the ADR-489 swim drain is the cost of looting it).
+
+**Verification.** `packages/gameplay/test/adr500_sunken_caches.test.ts` 6/6: the data (basket art,
+oneShot, capacity 1, the loot table with resolving ids, the 0.02 chance); placement (caches exist
+across the 49-chunk grid, every one on a tile-1 deep-water tile, none on land, shore, or a land
+node's tile); the distribution proof (see below); `load()` and `nodesInChunk()` agreeing exactly on
+4 chunks; spawn (`spawnChunkNodes` through the production path spawns a real cache node, kind +
+amount 1); gather (a wading player loots a deep-water cache from the tile beside it — coin ≥ 5
+lands — and the node is gone after). Revert check: 6/6 fail on reverted code (generator.ts +
+game.ts + resources.json + ids.lock.json + worldgen.json stashed; `defs.ts` not stashed — it would
+break the loader on the ADR-492 diseases data, the same constraint as ADR-493).
+
+**ADR-252 regression — NetId deferral (follow-up fix, same ADR).** Adding the cache kind regressed
+the ADR-252 canary (2/8: raised pad + 2×2 base never built). Root cause, proven by observation
+(scratch test, since deleted; logs `~/workspace/realism486-tmp/adr252-obs5/6/9*.log`): NetIds are
+monotonic, assigned in entity-creation order at replication, and the gather yield stream is seeded
+by NetId (`world.rngFor("gather", NetId)` in `gathering.ts`) — so the 32 cache entities created
+before the bot's berry bush shifted that bush's NetId (1667 → 1699) and re-rolled its yields. First
+observable divergence, tick 102: base gathers berries=2 + mushroom=1 (sensor newSlots 1, score
+−13.8); batch gathers berries=3, no mushroom (newSlots 2, score −8.8). The 5-point score gap moves
+the bot, the agent-rng stream diverges, the tick-614 trip goes NORTH (−146,−107) instead of SOUTH
+(−128,−171), the bot never sees the southern fiber_bush@(−138.5,−167.5), and the pad misses the
+5,200-tick window. The two earlier fixes (deep-water skips in `prospectResource` and the gather
+sensor) are correct and stay — the cache was never the sensor's pick; the poison was the NetId
+shift. Fix: `NetServer` gains a `deferNetId` predicate option (`packages/net/src/server.ts`);
+entities matching it are collected during the replication pass (server-level scratch array, ADR-375
+pattern) and assigned NetIds after every other entity in the pass — still ordinary low-range ids,
+so `replicate()`'s NetId-indexed dense arrays (ADR-369) are untouched. The gameplay layer passes
+`isSunkenCacheNode` (`packages/gameplay/src/spawn.ts` — resource kind key `sunken_cache`, false
+when the defs are absent), wired in `apps/server/src/game.ts` (covers the real server and the local
+server). The initial world's chunks all load before the first replication, so that pass gives every
+initial node its no-cache NetId — verified: the berry bush's NetId is 1667 on base and on the fixed
+batch (1699 on the broken batch), tick-102 inventory berries=2 + mushroom=1, trip south at tick 614.
+A high-range NetId (0x40000000) was tried first and rejected: `replicate()` allocates
+`Float64Array(maxId * 2 + 1)` indexed by NetId, so a high id tried to allocate ~8 GB and crashed
+with `RangeError: Array buffer allocation failed`. Regression test:
+`packages/net/test/adr500_deferred_netid.test.ts` 2/2 (deferral at the NetServer level + a control
+showing the old interleaving); revert check 1 failed / 1 passed on pre-fix `server.ts` (the
+deferral test fails, the control passes). ADR-252 passes 8/8 on two consecutive runs after the fix.
+
+**Distribution proof.** The baseline was recorded on the pre-change tree (a scratch test, since
+deleted): the 49-chunk grid (cx, cy −3..3), seed 42, production bands — 3,120 land nodes, 2,025
+water tiles, 1,287 deep tiles, fnv1a hash 1781826264 (0x6a3482d8) over the sorted
+(cx, cy, tx, ty, kind) tuples. With the pass on: 25 caches (expected ~26 at 0.02 × 1,287) and the
+filtered (non-cache) hash is still 1781826264 with the node count still 3,120. Without the kind:
+the same hash, zero caches.
+
+**Honest cuts.** The cache renders as a basket sitting on the water surface — verified in code, not
+in a live build: the water surface is terrain (IsoRenderer scene pass a, opaque, depth write) and
+the node is a dynamic sprite (pass d, sorted back-to-front, per-vertex depth), so the raised sprite
+draws in front of the surface and only its base line is at the surface. Tracey's eyes on the live
+build are the check: if it reads as "floating" rather than "sunken", that is a presentation
+follow-up (a slight sink / bob or a darker tint). The 0.02 chance is first-pass tuning (25 caches
+in the 49-chunk seed-42 grid). One node kind, one fixed table in v1 — no per-depth or per-biome
+variation. Caches appear only in chunks generated after the push: stored chunks keep their own
+nodes, and the ADR-429 top-up covers wild crops only, not caches — so Tracey finds them as she
+explores new water, not in lakes she has already visited.
+
+## ADR-501: Animal tracks in snow and mud (SurVivaZ)
+
+Animals already left footprints — boot prints, the same as players (`isMover` includes Animal and
+Zombie, sampled from `view.ts:942`). This ADR gives them their own track instead. Client-only,
+WebGL2-only like the footprint system (ADR-455). `apps/client/src/footprints-art.ts` gains
+`TRACK_ATLAS_KEY` / `TRACK_SPRITE_KEY = "animal_track"`, `paintTrackCell(px, ox, f)` (two small
+iso-aligned ovals along the facing axis in the same PRINT colours as the boot print — front pad 5×3.5
+at +7, rear pad 4.5×3.5 at −7, a gap between; ~24 px long vs the boot's ~37 px), `paintTrackPixels()`
+(512×64, 8 frames) and `trackAtlasSources()` mirroring `footprintAtlasSources()`.
+`apps/client/src/footprints.ts`: `FootprintStamp` gains `track: boolean`; the sampler sets `track:
+world.has(e, Animal)` (animals → track; players, bots and zombies → boot print, per the scope
+decision); `collectFootprintOverlays` takes `(store, sprites: { boot: number; track?: number },
+tick, fadeTicks, out, max = 128)` — per-stamp pick, with `track` undefined falling back to boot
+(the status quo, not a wrong-looking track). The three registrations, the same triple as ADR-455
+(caught by the ADR-248 parity test): the fragment
+`packages/assets/pack/task501/manifest.task501.json` (atlas `animal_track` 8×1 64×64 + sprite
+`animal_track`, 8 directions, dirStride 1; layout only, pointing at the items_build PNG / KTX2 twin
+like task455), the `manifest-index.ts` task501 entry after task455, and the vite allow-list regex
+gaining `task501` in `apps/client/vite.config.ts:29`. `apps/client/src/view.ts` resolves the track
+sprite id and passes `{ boot, track }` to the overlay call.
+
+**Verification.** `apps/client/test/adr501_animal_tracks.test.ts` 5/5 + the 13 ADR-455 tests still
+pass (18 total): the sampler selection (a winter world; player → boot, rabbit → track, zombie →
+boot, three stamps on rows y = 5.5 / 7.5 / 9.5); the overlay selection (`{ boot: 42, track: 77 }` →
+player stamp 42, animal stamp 77; `{ boot: 42 }` → both 42); the paint (512×64, 8 frames each >
+20 painted px, track total < boot total, opposite facings differ, track pixels ≠ boot pixels); the
+fragment (atlas / sprite keys, 8 cols, 1 row, 8 directions, dirStride 1); `trackAtlasSources()`
+no-op in a canvas-less environment. Revert check: 5/5 fail on pre-change code (the file fails to
+collect — the stashed `footprints-art.ts` does not export the new functions).
+
+**Honest cuts.** One generic track in v1 — per-species tracks are a follow-up. The track-fragment
+`$comment` was corrupted by bash backtick substitution during writing (a double-quoted inline
+python string containing backticks was executed as command substitution) and fixed with a heredoc
+script. `collectFootprintOverlays`'s signature changed to `{ boot, track? }`, so the 3
+`collectFootprintOverlays(store, 42, …)` calls in the ADR-455 test were updated to `{ boot: 42 }`.
+`view.ts:948` needed a conditional spread for the optional `track` arg (`exactOptionalPropertyTypes`).

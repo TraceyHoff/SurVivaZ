@@ -238,10 +238,10 @@ describe("Task 32: new crops", () => {
     ] as const) {
       const wild = d.resources.get(d.resourceId(wildKey))!;
       expect(wild).toMatchObject({ capacity: 2, respawnSeconds: 240 });
-      expect(wild.yields).toEqual([{ item: iid(produce), min: 1, max: 2, chance: 1 }, { item: iid(`${produce}_seeds`), min: 1, max: 1, chance: 0.3 }]);
+      expect(wild.yields).toEqual([{ item: iid(produce), min: 1, max: 2, chance: 1, seasonal: false }, { item: iid(`${produce}_seeds`), min: 1, max: 1, chance: 0.3, seasonal: false }]); // ADR-491: YieldDef.seasonal is required (wild food-crop nodes are not seasonal — seed source)
       const crop = d.resources.get(d.resourceId(cropKey))!;
       expect(crop).toMatchObject({ capacity: 1, respawnSeconds: 600, oneShot: true });
-      expect(crop.yields).toEqual([{ item: iid(produce), min: 2, max, chance: 1 }, { item: iid(`${produce}_seeds`), min: 1, max: 2, chance: 0.6 }]);
+      expect(crop.yields).toEqual([{ item: iid(produce), min: 2, max, chance: 1, seasonal: false }, { item: iid(`${produce}_seeds`), min: 1, max: 2, chance: 0.6, seasonal: false }]);
     }
     // ADR-247: every seed drops only from its own species (wild nodes are placed by worldgen, crops return seeds)
     expect(G.seedSourceIssues(d)).toEqual([]);

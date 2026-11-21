@@ -133,7 +133,7 @@ describe("Task 33: water wets you in clear weather", () => {
     // Step onto dry land: wetness falls again at the normal dry rate (0.02/s, no fire).
     w.set(p, Transform, { x: 0.5, y: 0.5 });
     steps(w, 200);
-    expect(wetness(w, p)).toBeLessThan(0.15);
+    expect(wetness(w, p)).toBeCloseTo(0.2, 1); // ADR-488: humidity halves the drying rate (0.5 at the default 50% humidity) — 0.3 dries to 0.2 in 10 s instead of 0.1
   });
   it("standing on dry land in the same clear weather stays dry (control)", () => {
     const w = makeWorld(); wet(w);

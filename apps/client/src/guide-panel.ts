@@ -17,7 +17,7 @@
  * composed by ./task364-art.ts (GUIDE_ACTION_IMAGES) plus the caption. Tiles are spans, never `<img>` —
  * the same rule as the section icons — and every tile key is pinned to real pixels by the ADR-364 tests.
  */
-import { defaultDefs, getGuideSections, iconForItem, resolvedGuideSection, type GuideIconRef, type GuideRowIcon, type ResolvedGuideSection } from "@engine/gameplay";
+import { defaultDefs, discoveryLabel, getGuideSections, iconForItem, resolvedGuideSection, type Discovery, type GuideIconRef, type GuideRowIcon, type ResolvedGuideSection } from "@engine/gameplay";
 import { conditionIconImg, iconImg } from "./game-icons.js";
 import { installGuideMenuIcon } from "./guide-art.js";
 import { buildIconKey, iconKeysFromCss } from "./gameplay-panels.js";
@@ -162,11 +162,39 @@ function renderGuideSection(s: ResolvedGuideSection, has: (k: string) => boolean
 }
 
 /**
+ * ADR-498: render the journal detail — the player's discoveries, most recent first. A row is the
+ * discovery's label with its chunk coords; an empty journal gets an invitation, not a blank page.
+ * Uses the same .guide-fact rows as the static sections, so no new stylesheet is needed.
+ */
+function renderJournal(journal: Discovery[]): Node[] {
+  const out: Node[] = [];
+  const h = document.createElement("h3"); h.dataset["role"] = "guide-title"; h.append("Discoveries");
+  const intro = document.createElement("p"); intro.className = "guide-intro"; intro.dataset["role"] = "guide-intro";
+  intro.textContent = journal.length
+    ? "Places you have found — the journal grows as you explore new ground."
+    : "No discoveries yet — explore new ground and the places you find will be written here.";
+  out.push(h, intro);
+  for (const d of journal) {
+    const row = document.createElement("div"); row.className = "guide-fact"; row.dataset["role"] = "guide-discovery";
+    const l = document.createElement("span"); l.className = "guide-fact-label";
+    l.append(document.createTextNode(discoveryLabel(d.kind)));
+    const v = document.createElement("b"); v.textContent = `(${d.cx}, ${d.cy})`;
+    row.append(l, v); out.push(row);
+  }
+  return out;
+}
+
+/**
  * Build the guide body: the section list (quick-jump; `[data-tabs=tab]` so gamepad LB/RB cycles it like
  * other tabbed panels) above the selected section's detail. Works inside a gm-modal and inside a boot
  * panel; the caller owns the shell, the close button and the pause flow.
+ *
+ * ADR-498: when `journal` is supplied (the in-game Guide, from the local player's Discoveries), a
+ * 16th "Discoveries" section is appended — a dynamic section, not a guide.json entry (the Guide
+ * model is static data; a per-player journal cannot live there). The boot panel passes no journal,
+ * so the main-menu Guide keeps its 15 static sections.
  */
-export function buildGuidePanel(initialId?: string): HTMLElement {
+export function buildGuidePanel(initialId?: string, journal?: Discovery[]): HTMLElement {
   installGuideCss();
   // ADR-387: opening the Guide ensures its book icon exists — the boot menu can show the Guide
   // before the view runs its startup installs, and this is idempotent (same pattern as installGuideCss).
@@ -178,17 +206,26 @@ export function buildGuidePanel(initialId?: string): HTMLElement {
   const list = document.createElement("div"); list.className = "guide-sections"; list.dataset["tabs"] = "tab";
   list.setAttribute("aria-label", "Guide sections");
   const detail = document.createElement("div"); detail.className = "guide-detail"; detail.dataset["role"] = "guide-detail";
-  let selectedId = sections.find((s) => s.id === initialId)?.id ?? sections[0]!.id;
-  const render = (id: string): void => {
-    const s = resolvedGuideSection(id);
-    if (!s) return;
-    selectedId = id;
+  let selectedId = (initialId === "discoveries" && journal !== undefined ? "discoveries" : sections.find((s) => s.id === initialId)?.id) ?? sections[0]!.id;
+  const markSelected = (id: string): void => {
     for (const b of Array.from(list.querySelectorAll<HTMLButtonElement>("button"))) {
       const on = b.dataset["guideSection"] === id;
       // Same tab convention as the chat channels: selected is the plain (green) button, the rest are "alt" —
       // cycleTabs (gamepad LB/RB) reads the current tab from aria-pressed / the missing "alt" class.
       b.className = on ? "" : "alt"; b.setAttribute("aria-pressed", String(on));
     }
+  };
+  const render = (id: string): void => {
+    if (id === "discoveries" && journal !== undefined) {
+      selectedId = id;
+      markSelected(id);
+      detail.replaceChildren(...renderJournal(journal));
+      return;
+    }
+    const s = resolvedGuideSection(id);
+    if (!s) return;
+    selectedId = id;
+    markSelected(id);
     detail.replaceChildren(...renderGuideSection(s, has));
   };
   for (const s of sections) {
@@ -202,6 +239,16 @@ export function buildGuidePanel(initialId?: string): HTMLElement {
     }
     b.append(document.createTextNode(s.title)); b.setAttribute("aria-pressed", "false");
     b.addEventListener("click", () => render(s.id));
+    list.append(b);
+  }
+  // ADR-498: the dynamic journal section — appended after the 15 static sections, only when the
+  // caller supplied a journal (the in-game Guide). No icon: it renders text-only, like a section
+  // whose stylesheet has no art for its key.
+  if (journal !== undefined) {
+    const b = document.createElement("button"); b.type = "button";
+    b.dataset["guideSection"] = "discoveries"; b.dataset["key"] = "guide-discoveries";
+    b.append(document.createTextNode("Discoveries")); b.setAttribute("aria-pressed", "false");
+    b.addEventListener("click", () => render("discoveries"));
     list.append(b);
   }
   el.append(list, detail);

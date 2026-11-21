@@ -4,11 +4,12 @@ import { friendSpawn } from "./friend-spawn.js";
 import { giveSandboxKit, sandboxPetKit, sandboxPetCorner, sandboxSpawn } from "./sandbox.js";
 import { handLootTarget, Viewing, TerrainRes, terrainFromTileMap } from "@engine/gameplay";
 import { applyStanceInput, stanceBlocksActions, GameplayEdgeBits } from "@engine/gameplay"; // ADR-244
-import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSignCommands, installPetCommands, installReadyCommands, markReady, PlayerReady, PetEvent, setWorldRules, worldRules, type WorldRulesOpts, installAnimalSkillCommands, installWorkerCommands, installDyeCommands, WorkerEvent, installTerrainCommands, installRampCommands, installItemRepairCommands } from "@engine/gameplay";
+import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSignCommands, installPetCommands, installReadyCommands, markReady, PlayerReady, PetEvent, setWorldRules, worldRules, type WorldRulesOpts, installAnimalSkillCommands, installWorkerCommands, installDyeCommands, WorkerEvent, installTerrainCommands, installRampCommands, installItemRepairCommands, recordChunkDiscoveries } from "@engine/gameplay";
+import { parseChunkKey } from "@engine/world";
 /** Authoritative game server: world + gameplay + streaming chunks + persistence + NetServer sessions. */
 import { ChannelRegistry, CommandRejected, DEFAULT_TICK_HZ, FixedLoop, installCommandHandlers, cosmeticsHashes, type CosmeticCatalogLike, Membership, Owner, PlayerId, Season, SEASON_COUNT, TimeOfDay, Transform, World, type Entity, type PermissionsRes } from "@engine/core";
 import { CHUNK_SIZE, ChunkManager, ProceduralGenerator, computeSpawnPoints, chunkKeyOf, type BuildingGrid, type PopulationSpawner } from "@engine/world";
-import { computeAiSpawnPoints, pickAiSpawnPoint, setAiSpawnPoints, spawnPoints, addTemporarySafeSpawnPoint, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, drainAbandonedStamps, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, worldgenBands, computeWildCropTopUp, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
+import { computeAiSpawnPoints, pickAiSpawnPoint, setAiSpawnPoints, spawnPoints, addTemporarySafeSpawnPoint, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, drainAbandonedStamps, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, isSunkenCacheNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, worldgenBands, computeWildCropTopUp, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
   appearanceServerHooks, applyReplication, installStallBuyHook, installViewBonus, setHitValidator, installPvp, PVP, installBedRespawn, installCraftQueue, installExpressionCommands, installVehicleCommands, installVehicleCraftCommands, installVehicleGuard, requestEmote, CraftQueue, CraftQueuesRes, playerNames, stallListing, listingRevision, stallOf, tillOf, StallHeader, StallOwnerKind, installMapMarkerCommands, MapMarker } from "@engine/gameplay";
 import { AppearanceServer, ChatServer, NameSync, NetServer, StallResult, StallServer, TileSync, validateHit, type ClientSession, type ServerTransport, type StallHooks } from "@engine/net";
 import { createAgentStore, type AgentIdentityStore } from "./agents.js";
@@ -166,7 +167,10 @@ export function createGameServer(o: GameServerOptions): GameServer {
   // Without `bands` it fell back to DEFAULT_BANDS (7 fossil kinds) and no wild crop / fruit tree
   // could ever spawn in a live world, on either the embedded or the dedicated server.
   const defs = gameplayDefs(world);
-  const generator = new ProceduralGenerator({ seed, bands: worldgenBands(defs) });
+  // ADR-500: sunken caches — the generator scatters them on deep water only (its own rng stream, so the
+  // land-node distribution is unchanged). The kind + chance come from the gameplay defs (resources.json /
+  // worldgen.json); without them the pass is off.
+  const generator = new ProceduralGenerator({ seed, bands: worldgenBands(defs), sunkenCacheKind: defs.resourceId("sunken_cache"), sunkenCacheChance: defs.worldgen.sunkenCacheChance });
   // Four far-apart starter-biome spawn points, deterministic per seed (ADR-106).
   setSpawnPoints(world, o.spawnPoints?.length ? o.spawnPoints : computeSpawnPoints(generator));
   // ADR-325: AI humans spawn over world-wide seeded points (built lazily on the first bot spawn); explicit spawnPoints
@@ -210,6 +214,9 @@ export function createGameServer(o: GameServerOptions): GameServer {
 
   const net: NetServer = new NetServer({
     world, tickHz, transport: o.transport,
+    // ADR-500: sunken caches are deferred to the end of the NetId assignment pass, so adding the cache
+    // kind can never shift a pre-existing node's NetId (and its NetId-seeded gather stream) — ADR-252.
+    deferNetId: (w, e) => isSunkenCacheNode(w, e),
     ...(o.maxClients !== undefined ? { maxClients: o.maxClients } : {}), ...(o.serverFullDetail ? { serverFullDetail: o.serverFullDetail } : {}),
     ...(o.distantThrottle ? { distantThrottle: o.distantThrottle } : {}),
     commands: DEMO_COMMANDS, events: DEMO_EVENTS,
@@ -421,7 +428,13 @@ export function createGameServer(o: GameServerOptions): GameServer {
 
   // Clan roster (owner-scoped, members only) + online-player directory: see social_sync.ts.
   new SocialSync({ net, world, groups: permissions.groups, names: nameSync, claimed: function* () { for (const [c, p] of players) if (p.claimed) yield [c, p.entity] as [number, Entity]; } });
-  new TileSync(net, { tiles: chunks }); // tile replication: full chunks on AOI entry + per-tick deltas (sole tileChanges() drainer)
+  // ADR-498: a first chunk receipt is a first visit — record the chunk's discoveries (ruin / lake /
+  // river) into the player's journal. The gameplay store dedups re-visits.
+  new TileSync(net, { tiles: chunks, onFirstChunk: (clientId, key) => {
+    const p = players.get(clientId); if (!p) return;
+    const { cx, cy } = parseChunkKey(key);
+    recordChunkDiscoveries(world, p.entity, cx, cy);
+  } }); // tile replication: full chunks on AOI entry + per-tick deltas (sole tileChanges() drainer)
 
   function leave(clientId: number, why: string): void {
     const p = players.get(clientId); if (!p) return;

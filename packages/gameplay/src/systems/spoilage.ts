@@ -6,13 +6,14 @@
  * Multiplier = container spoilMul (piece data) x clamp(1 + mulPerDegree x (temp - tempRefC), minMul, maxMul).
  */
 import { entityIndex, Transform, type Entity, type World } from "@engine/core";
-import { ClimateRes } from "@engine/world";
-import { BuildPiece, Container, Exposure, Inventory, type InvSchema } from "../components.js";
+import { ClimateRes, climateAt } from "@engine/world";
+import { BuildPiece, Container, Exposure, Inventory, LootBag, type InvSchema } from "../components.js";
+import { setSmellEmitter } from "../realism.js";
 import { pieceOf } from "../building/links.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { countItem, freshness, mapSlots, rebaseCreated, removeItem, slotsAdd } from "../inventory.js";
 import { pendingReady } from "../ready.js";
-import { ambientTemperature, FREEZING_C, surfaceTemperature } from "./environment.js";
+import { FREEZING_C, humiditySpoilMul, surfaceTemperature } from "./environment.js";
 import { isUnderground, TERRAIN } from "../terrain_depth.js";
 import type { ComponentDef } from "@engine/core";
 
@@ -86,16 +87,32 @@ export function spoilageSystem(world: World, dt: number): void {
       // temperature / piece / salt lookups run for every holder — only the per-item
       // decay/conversion loop is skipped. Salt still only burns while food is present.
       const slot = st.slot(idx); const n = Math.min(st.data.slotCount[slot]!, def.schema.items.length);
-      let spoilable = false;
-      for (let i = 0; i < n; i++) { const item = st.readElement(idx, "items", i) ?? 0; if (item && defs.items.get(item)?.spoilSeconds) { spoilable = true; break; } }
+      let spoilable = false; let hasRot = false;
+      for (let i = 0; i < n; i++) { const item = st.readElement(idx, "items", i) ?? 0; if (!item) continue; if (defs.items.get(item)?.spoilSeconds) spoilable = true; if (item === defs.spoiledItem) hasRot = true; if (spoilable && hasRot) break; }
+      // ADR-486: smell — a holder carrying rot (or a ground loot bag holding fresh meat / rot)
+      // smells, and stops smelling when the rot / meat is gone. Refreshed here, on the pass that
+      // already visits every holder every 20 ticks — no new scan. Stored containers (a storage box
+      // full of rot) are out of v1: only carried rot and ground loot bags smell. The refresh runs
+      // before the spoilable early-continue below, so a rot-only holder (nothing left to decay)
+      // still loses its smell the pass after the rot leaves — and newly rotted food starts smelling
+      // on the next pass (<= 1 s later).
+      const isBag = def === Container && world.has(e, LootBag);
+      setSmellEmitter(world, e, def === Inventory ? (hasRot ? defs.ai.smell.rot : undefined) : isBag ? (spoilable || hasRot ? defs.ai.smell.kill : undefined) : undefined);
+      // ADR-488: one climateAt sample per holder gives both the ambient temperature and the humidity
+      // (damp air rots food faster, x(1 + humidity)). Holders with no position use the 0.5 band
+      // default; the no-ClimateRes path keeps the hoisted surface temperature, as before.
+      const px = world.has(e, Transform) ? world.getField(e, Transform, "x")! : undefined;
+      const py = px !== undefined ? world.getField(e, Transform, "y")! : undefined;
+      const sample = px !== undefined && hasClimate ? climateAt(world, px, py!) : undefined;
       const temp = world.has(e, Exposure) ? world.getField(e, Exposure, "feltTemp")!
-        : world.has(e, Transform) ? (isUnderground(world, world.getField(e, Transform, "x")!, world.getField(e, Transform, "y")!) ? TERRAIN.undergroundTempC : surface0 ?? ambientTemperature(world, world.getField(e, Transform, "x")!, world.getField(e, Transform, "y")!))
+        : px !== undefined ? (isUnderground(world, px, py!) ? TERRAIN.undergroundTempC : surface0 ?? sample!.temperature)
         : sp.tempRefC;
+      const humidity = sample?.humidity ?? 0.5;
       const frozen = temp <= FREEZING_C;
       if (spoilable && def === Container && !frozen) burnSalt(world, e); // Task 28: salt burns before the multiplier is read this pass
       const tempMul = Math.min(sp.maxMul, Math.max(sp.minMul, 1 + sp.mulPerDegree * (temp - sp.tempRefC)));
       const cur = st.data.spoilMul[k]!;
-      const want = frozen ? cur : baseMul(world, e) * tempMul;
+      const want = frozen ? cur : baseMul(world, e) * tempMul * humiditySpoilMul(humidity);
       const rebase = !frozen && Math.abs(want - cur) > sp.rebaseThreshold * cur;
       if (!spoilable) { if (rebase) { st.data.spoilMul[st.slot(idx)] = want; st.markChanged(idx); } continue; }
       mapSlots(world, e, (v) => {

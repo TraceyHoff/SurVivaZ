@@ -10,7 +10,7 @@ import { stanceMode, STANCE } from "../stance.js";
 import { StanceMode } from "../components.js";
 import { contractDisease, cureDiseasesForItem, hasDisease } from "../diseases.js";
 import { addModifier, defineResource, entityIndex, evaluate, ModOp, Transform, Weather, type Entity, type World } from "@engine/core";
-import { Anim, AnimState, BodyTemp, NO_SLOT, Buffs, DamageCause, Dead, Exposure, Health, IntentAction, PlayerIntent, Stat, Survival, VitalsState, snapStamina } from "../components.js";
+import { Anim, AnimState, BodyTemp, NO_SLOT, Buffs, DamageCause, Dead, Driver, Exposure, Health, IntentAction, PlayerIntent, Riding, Stat, Survival, VitalsState, snapStamina } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks } from "../defs.js";
 import { ConsumeFail, ConsumeFailed, Died, emit, ItemConsumed, WaterDrunk, Vital, VitalDepleted } from "../events.js";
@@ -18,7 +18,8 @@ import { setHotbarSelection, readSlots, slotFreshness, slotItem, takeFromSlot } 
 import { hasPerk, skillMul } from "../skills/tree.js";
 import { fillContainer, dietGroupOf, spoilStageIndex, spoilStages, takeSip } from "../food.js";
 import { recordRecentFood, recentFoodGroupCount } from "../recent.js"; // ADR-470: varied diet
-import { inWater } from "./movement.js";
+import { inWater, isSwimmingAt } from "./movement.js";
+import { isFrozenWaterAt } from "../frozen.js"; // ADR-450: frozen still water is walkable land
 import { heatAt } from "./environment.js";
 import { pendingReady } from "../ready.js";
 import { TerrainRes } from "../world.js";
@@ -40,6 +41,17 @@ export function nearWater(world: World, x: number, y: number): boolean {
   const wet = (px: number, py: number): boolean => (probe ? swim.has(probe.tileAt(Math.floor(px), Math.floor(py))) : inWater(world, px, py));
   for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (wet(x + dx * 0.75, y + dy * 0.75)) return true;
   return false;
+}
+/**
+ * ADR-493: true when the single tile (x, y) is water — the farm prompt's cast-point check. Same
+ * TerrainRes / WaterProbeRes fallback as nearWater (client replicas without TerrainRes), but one
+ * tile, not a 3x3: the prompt must only offer Fish when the cast itself will land in water.
+ */
+export function tileIsWater(world: World, x: number, y: number): boolean {
+  const terrain = world.getResource(TerrainRes); const probe = terrain ? undefined : world.getResource(WaterProbeRes);
+  const tile = terrain ? terrain.tileAt(Math.floor(x), Math.floor(y)) : probe?.tileAt(Math.floor(x), Math.floor(y));
+  if (tile === undefined) return false;
+  return gameplayDefs(world).movement.swimTiles.has(tile) && !isFrozenWaterAt(world, Math.floor(x), Math.floor(y));
 }
 function setAnimOf(world: World, e: Entity, anim: Anim): void {
   const cur = world.getField(e, AnimState, "anim");
@@ -174,7 +186,7 @@ export function spendStamina(world: World, e: Entity, amount: number, dt: number
  * client's prediction of its own entity: the replica has no VitalsState (not networked), so before ADR-147 the client
  * never predicted stamina and its sprint ran out a few ticks after the server's, a visible singleplayer rubber-band.
  */
-function stepStamina(world: World, e: Entity, idx: number, s: number, hunger: number, thirst: number, dt: number, delayTicks: number, events: boolean): void {
+function stepStamina(world: World, e: Entity, idx: number, s: number, hunger: number, thirst: number, dt: number, delayTicks: number, events: boolean, swimming: boolean): void {
   const vt = gameplayDefs(world).vitals; const sv = world.store(Survival); const intent = world.store(PlayerIntent);
   const max = sv.data.maxStamina[s]!; let stamina = sv.data.stamina[s]!;
   const sprinting = intent.has(idx) && intent.data.sprint[intent.slot(idx)] === 1 && intent.data.moving[intent.slot(idx)] === 1;
@@ -186,6 +198,15 @@ function stepStamina(world: World, e: Entity, idx: number, s: number, hunger: nu
     stamina = Math.max(0, stamina - vt.sprintStaminaDrainPerSec * dt);
     sv.data.staminaDelayTicks[s] = delayTicks;
     if (stamina === 0 && events) emit(world, VitalDepleted, { entity: e, vital: Vital.Stamina });
+  } else if (swimming) {
+    // ADR-489: swimming costs stamina — treading water counts too. The delay is held while swimming
+    // even at zero stamina: unlike sprinting, a swimmer cannot stop, so no mid-lake regen (the
+    // drowning drain in vitalsSystem only bites while stamina stays at zero).
+    if (stamina > 0) {
+      stamina = Math.max(0, stamina - vt.swimStaminaDrainPerSec * dt);
+      if (stamina === 0 && events) emit(world, VitalDepleted, { entity: e, vital: Vital.Stamina });
+    }
+    sv.data.staminaDelayTicks[s] = delayTicks;
   } else if (sv.data.staminaDelayTicks[s]! > 0) {
     sv.data.staminaDelayTicks[s] = sv.data.staminaDelayTicks[s]! - 1;
   } else {
@@ -200,10 +221,18 @@ function stepStamina(world: World, e: Entity, idx: number, s: number, hunger: nu
 function predictOwnStamina(world: World, dt: number, delayTicks: number): void {
   if (isAuthority(world) || !world.predicted.size) return;
   const sv = world.store(Survival);
+  // ADR-489: hoisted once per call — the swim check is one tile lookup per predicted entity.
+  const terrain = world.getResource(TerrainRes);
+  const shallowR = terrain ? gameplayDefs(world).movement.shallowRadius : 0;
   for (const e of world.predicted) {
     if (!world.isAlive(e) || !world.has(e, Survival) || world.has(e, VitalsState) || world.has(e, Dead) || pendingReady(world, e)) continue;
     const idx = entityIndex(e); const s = sv.slot(idx);
-    stepStamina(world, e, idx, s, sv.data.hunger[s]!, sv.data.thirst[s]!, dt, delayTicks, false);
+    const t = world.get(e, Transform);
+    // ADR-489: a boat driver / mount rider is ON the water, not IN it — they neither drain stamina
+    // nor drown while driving / riding (the ADR-479 sailboat and ADR-422 motorboat drivers drained
+    // while sailing, caught by the full suite).
+    const swimming = t ? isSwimmingAt(world, t.x, t.y, t.z, terrain, shallowR) && !world.has(e, Driver) && !world.has(e, Riding) : false;
+    stepStamina(world, e, idx, s, sv.data.hunger[s]!, sv.data.thirst[s]!, dt, delayTicks, false, swimming);
   }
 }
 
@@ -213,6 +242,9 @@ export function vitalsSystem(world: World, dt: number): void {
   const sv = world.store(Survival); const hs = world.store(Health); const vs = world.store(VitalsState);
   const intent = world.store(PlayerIntent); const ex = world.store(Exposure);
   const delayTicks = Math.min(0xffff, secondsToTicks(vt.staminaRegenDelaySeconds, dt));
+  // ADR-489: hoisted once per run — the swim check is one tile lookup per survival entity.
+  const terrain = world.getResource(TerrainRes);
+  const shallowR = terrain ? gameplayDefs(world).movement.shallowRadius : 0;
 
   for (const e of world.query([Survival, Health, VitalsState], [Dead])) {
     if (pendingReady(world, e)) continue; // Task 14: nothing drains while the player is still loading in
@@ -230,7 +262,12 @@ export function vitalsSystem(world: World, dt: number): void {
     if (hunger0 > 0 && hunger === 0) emit(world, VitalDepleted, { entity: e, vital: Vital.Hunger });
     if (thirst0 > 0 && thirst === 0) emit(world, VitalDepleted, { entity: e, vital: Vital.Thirst });
 
-    stepStamina(world, e, idx, s, hunger, thirst, dt, delayTicks, true);
+    // ADR-489: deep water at ground level, treading water included; computed once, shared by the
+    // stamina drain below and the drowning drain in the damage section. A boat driver / mount rider
+    // is ON the water, not IN it (see the predict path above).
+    const t = world.get(e, Transform);
+    const swimming = t ? isSwimmingAt(world, t.x, t.y, t.z, terrain, shallowR) && !world.has(e, Driver) && !world.has(e, Riding) : false;
+    stepStamina(world, e, idx, s, hunger, thirst, dt, delayTicks, true, swimming);
 
     // body temperature drifts toward the felt temperature outside the comfort band
     let body = sv.data.bodyTemp[s]!;
@@ -260,6 +297,8 @@ export function vitalsSystem(world: World, dt: number): void {
     const tier = temperatureTier(body);
     if (tier === "freezing") hurt(vt.exposureDps * dt, DamageCause.Hypothermia);
     if (tier === "overheating") hurt(vt.exposureDps * dt, DamageCause.Hyperthermia);
+    // ADR-489: an exhausted swimmer drowns — slow drain, only while stamina stays at zero in deep water.
+    if (swimming && sv.data.stamina[s]! <= 0) hurt(vt.drownDps * dt, DamageCause.Drowning);
     // ADR-277: one exposure damage channel, only at the final body-temperature tier.
     let hp = hs.data.hp[h]!;
     if (dmg > 0) { hp -= dmg; vs.data.lastDamageCause[v] = cause; }

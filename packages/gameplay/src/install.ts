@@ -18,6 +18,7 @@ import { chunkSurfaceSystem, clockSystem, exposureSystem, EXPOSURE_EVERY, gamepl
 import { craftingSystem } from "./systems/crafting.js";
 import { fuelSystem } from "./systems/fuel.js";
 import { gatherSystem, respawnSystem } from "./systems/gathering.js";
+import { fishingSystem } from "./systems/fishing.js";
 import { noiseDecaySystem } from "./systems/noise.js";
 import { spoilageSystem, SPOILAGE_EVERY } from "./systems/spoilage.js";
 import { consumeSystem, deathSystem, vitalsSystem } from "./systems/vitals.js";
@@ -76,6 +77,7 @@ export const GAMEPLAY_SYSTEM_ORDER: readonly (readonly [Phase, string, number?])
   ["simulation", "gameplay.fuel"],
   ["simulation", "gameplay.respawn"],
   ["simulation", "gameplay.gather"],
+  ["simulation", "gameplay.fish"], // ADR-493: cast–wait–bite (beside gather; before clearIntents, so the Fish intent is visible this tick)
   ...BUILDING_SYSTEMS.actions,
   ["simulation", "gameplay.craft"],
   ...COMBAT_SYSTEMS.sim,
@@ -147,7 +149,7 @@ export function installGameplay(world: World, options: GameplayOptions | number 
 
   const sys: Record<string, (w: World, dt: number) => void> = {
     "gameplay.commands": commandIntentSystem, "gameplay.clock": clockSystem, "gameplay.weather": weatherSystem,
-    "gameplay.wear": wearSystem, "gameplay.exposure": exposureSystem, "gameplay.fuel": fuelSystem, "gameplay.respawn": respawnSystem, "gameplay.gather": gatherSystem,
+    "gameplay.wear": wearSystem, "gameplay.exposure": exposureSystem, "gameplay.fuel": fuelSystem, "gameplay.respawn": respawnSystem, "gameplay.gather": gatherSystem, "gameplay.fish": fishingSystem,
     "gameplay.craft": craftingSystem, "gameplay.consume": consumeSystem, "gameplay.vitals": vitalsSystem, "gameplay.death": deathSystem, "gameplay.diseases": diseaseSystem,
     "gameplay.spoilage": spoilageSystem, "gameplay.chunkSurface": chunkSurfaceSystem,
     "gameplay.recruitment": recruitmentSystem,
