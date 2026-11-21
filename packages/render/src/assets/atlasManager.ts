@@ -1032,7 +1032,14 @@ export class AtlasManager {
         const g = this.poolGeom(lazy, k); const layers = Math.ceil(minSlots / g.perLayer);
         const room = k > 1 ? Math.floor(freeLayers / 2) : freeLayers;
         // ADR-251: a visible stream pool keeps full res with fewer slots (LRU) down to STREAM_FLOOR_SLOTS before it blurs
-        if (layers > room) { if (cls === "stream" && room > 0 && room * g.perLayer >= Math.min(minSlots, STREAM_FLOOR_SLOTS)) { pick = mk(k, g, room); break; } continue; }
+        if (layers > room) {
+          // ADR-449: a visible pool keeps full res with fewer slots (LRU pages the rest) down to the stream floor
+          // before it blurs as a whole: vehicles / building tiers used to drop to 0.5x/0.25x when the free layers
+          // ran short, so every vehicle on screen went soft at once. Stream already had this floor; veh/bld take
+          // it at 1x only (a 2x slot would waste a double-size layer on a 1x sheet, a 0.5x floor would lock the blur in).
+          if (room > 0 && room * g.perLayer >= Math.min(minSlots, STREAM_FLOOR_SLOTS) && (cls === "stream" || (k === 1 && (cls === "veh" || cls === "bld")))) { pick = mk(k, g, room); break; }
+          continue;
+        }
         pick = mk(k, g, layers); break;
       }
     } else {
