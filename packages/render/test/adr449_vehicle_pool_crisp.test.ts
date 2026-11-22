@@ -30,8 +30,7 @@ function am(budget: number): any {
 }
 /** ADR-512: fitBudget runs with the pools' reserve (rebuild() passes it); 85 MB is the A16 256 MB plan's keep / 1x floor. */
 const KEEP = 85 * 1048576;
-const TRIMMED_H: Record<string, number> = { buildings_twig: 568, openings: 464, furniture: 732, decor: 492, defenses: 168, defenses_glow: 180, cz_mirror: 272, vitems_garage: 536, vitems_garage_t2: 536, vitems_garage_t3: 536,
-  building_tw: 560, pets_trough: 40, decor_apiary: 204, decor_ore_store: 196, decor_log_store: 128, decor_stick_store: 168, decor_crop_store: 124, decor_stone_store: 196, decor_dock: 160, decor_shipyard: 216 };
+const TRIMMED_H: Record<string, number> = { buildings_twig: 896, openings: 640, furniture: 1152, decor: 1024, defenses: 384, defenses_glow: 192, cz_mirror: 384, decor_log_store: 256, decor_stick_store: 256, decor_crop_store: 256 };
 /** Resident atlas list from the real merged manifests (ADR-438 harness): fitBudget packs it for real. */
 function residentList(): any[] {
   const atl = new Map<string, any>();

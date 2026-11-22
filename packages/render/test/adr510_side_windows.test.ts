@@ -18,8 +18,7 @@ function am(budget: number): any {
 }
 /** ADR-512: fitBudget runs with the pools' reserve (rebuild() passes it); 85 MB is the A16 256 MB plan's keep / 1x floor. */
 const KEEP = 85 * 1048576;
-const TRIMMED_H: Record<string, number> = { buildings_twig: 568, openings: 464, furniture: 732, decor: 492, defenses: 168, defenses_glow: 180, cz_mirror: 272, vitems_garage: 536, vitems_garage_t2: 536, vitems_garage_t3: 536,
-  building_tw: 560, pets_trough: 40, decor_apiary: 204, decor_ore_store: 196, decor_log_store: 128, decor_stick_store: 168, decor_crop_store: 124, decor_stone_store: 196, decor_dock: 160, decor_shipyard: 216 };
+const TRIMMED_H: Record<string, number> = { buildings_twig: 896, openings: 640, furniture: 1152, decor: 1024, defenses: 384, defenses_glow: 192, cz_mirror: 384, decor_log_store: 256, decor_stick_store: 256, decor_crop_store: 256 };
 function residentList(): any[] {
   const atl = new Map<string, any>();
   for (const p of ["../../assets/pack/manifest.json", "../../assets/pack/nature/manifest.nature.json", "../../../assets/manifest.json"]) {
@@ -100,12 +99,14 @@ describe("ADR-510 packing and budget on the real resident set", () => {
     expect(pool.layers).toBe(6);
     const S = a.layerSize, rgba = (S * S * 4 * 4) / 3, side1 = ((S >> 2) * (S >> 2) * 4 * 4) / 3;
     const resL = a.layers - pool.layers;
-    // fitBudget does not place the list (layout() packs it), so bound the resident side layers by the 3 side arrays the
-    // resident set carries (emissive, sheen, sway; no resident tint mask) on every resident layer
+    // ADR-512: the resident side layers as upload() allocates them (ADR-510 windows), from the plan fitBudget chose
     expect(list.some((x) => x.masks.tintmask)).toBe(false);
-    const resSide = 3 * resL;
+    const k = (x: any) => (a.pinnedKeys.has(x.key) ? 1 : x.cold ? a.coldDownscale : a.downscale);
+    const packed = list.map((x) => ({ ...x, img: { width: Math.max(1, Math.floor(x.img.width * k(x))), height: Math.max(1, Math.floor(x.img.height * k(x))) } }));
+    const L = a.layers; a.pack(packed); expect(a.layers).toBe(resL); const resBytes = a.residentBytes(packed); a.layers = L;
     // pool colour is at most RGBA8 (compressed own array when a KTX2 target exists), plus its own side layers
-    const poolMax = pool.layers * (rgba + side1 * ((pool.tint ? 1 : 0) + (pool.emis ? 1 : 0)));
-    expect((resL * rgba + resSide * side1 + poolMax) / MB).toBeLessThanOrEqual(256 * 1.01);
+    const lv = a.ownLevelsFor([pool]); let col = 0; for (let l = 0, w = S; l < lv; l++, w = Math.max(1, w >> 1)) col += w * w * 4; // RGBA8 at the levels planOwn allocates
+    const poolMax = pool.layers * (col + side1 * ((pool.tint ? 1 : 0) + (pool.emis ? 1 : 0)));
+    expect((resBytes + poolMax) / MB).toBeLessThanOrEqual(256 * 1.01);
   });
 });

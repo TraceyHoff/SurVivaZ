@@ -17,8 +17,7 @@ function am(budget: number): any {
   return a;
 }
 /** trimmed heights measured by trimGridAtlas on the shipped sheets (width unchanged) */
-const TRIMMED_H: Record<string, number> = { buildings_twig: 568, openings: 464, furniture: 732, decor: 492, defenses: 168, defenses_glow: 180, cz_mirror: 272, vitems_garage: 536, vitems_garage_t2: 536, vitems_garage_t3: 536,
-  building_tw: 560, pets_trough: 40, decor_apiary: 204, decor_ore_store: 196, decor_log_store: 128, decor_stick_store: 168, decor_crop_store: 124, decor_stone_store: 196, decor_dock: 160, decor_shipyard: 216 };
+const TRIMMED_H: Record<string, number> = { buildings_twig: 896, openings: 640, furniture: 1152, decor: 1024, defenses: 384, defenses_glow: 192, cz_mirror: 384, decor_log_store: 256, decor_stick_store: 256, decor_crop_store: 256 };
 function residentList(): any[] {
   const atl = new Map<string, any>();
   for (const p of ["../../assets/pack/manifest.json", "../../assets/pack/nature/manifest.nature.json", "../../../assets/manifest.json"]) {
@@ -45,7 +44,8 @@ describe("ADR-512: trim plan", () => {
       if (!b) { expect(f).toEqual({ x: 0, y: 0, w: TRIM_ALIGN, h: TRIM_ALIGN, dx: 0, dy: 0 }); return; }
       expect(f.dx % TRIM_ALIGN).toBe(0); expect(f.dy % TRIM_ALIGN).toBe(0); expect(f.x % TRIM_ALIGN).toBe(0); expect(f.y % TRIM_ALIGN).toBe(0);
       expect(f.dx + f.w).toBeLessThanOrEqual(fw); expect(f.dy + f.h).toBeLessThanOrEqual(fh);
-      expect(f.dx).toBeLessThanOrEqual(Math.max(0, b[0] - TRIM_GUTTER)); expect(f.dy).toBeLessThanOrEqual(Math.max(0, b[1] - TRIM_GUTTER));
+      expect(f.dx).toBeLessThanOrEqual(Math.max(0, b[0] - TRIM_GUTTER));
+      expect(f.dy).toBe(0); expect(f.h).toBe(fh); // columns only: the quad keeps the cell's rows, so per-vertex depth is unchanged
       expect(f.dx + f.w).toBeGreaterThanOrEqual(Math.min(fw, b[2] + 1 + TRIM_GUTTER)); expect(f.dy + f.h).toBeGreaterThanOrEqual(Math.min(fh, b[3] + 1 + TRIM_GUTTER));
     });
   });
@@ -86,14 +86,14 @@ describe("ADR-512: atlas sets", () => {
 
 describe("ADR-512: the 256 MB plan keeps base pieces at 1x", () => {
   const KEEP = 85 * MB; // the A16 plan's pool keep / 1x floor
-  it("with the pools' reserve held, every base sheet is pinned at 1x next to the core set, cold no worse than ADR-510", async () => {
+  it("with the pools' reserve held, doors / windows / furniture / decor are pinned at 1x next to the core set, cold no worse than ADR-510", async () => {
     const list = residentList(); const a = am(256);
     for (const k of ["tiles", "characters", "zombies", "resources", "nature_trees", "furniture", "openings", "decor", "buildings_twig"]) a.recentlyUsed.add(k);
     await a.fitBudget(list, KEEP, KEEP, KEEP);
     expect(a.downscale).toBe(0.5);
     expect(a.coldDownscale).toBeGreaterThanOrEqual(BASE_PIN_COLD_FLOOR);
     const pinned = new Set<string>(a.pinnedKeys);
-    for (const x of list) if (BASE_PIN_RE.test(x.key)) expect(pinned.has(x.key)).toBe(true);
+    for (const k of ["openings", "furniture", "decor"]) expect(pinned.has(k)).toBe(true);
     for (const x of list) if (CORE_PIN_RE.test(x.key) && !x.cold) expect(pinned.has(x.key)).toBe(true);
     expect(a.fitInfo.reserveMB).toBe(85);
     expect(a.residentBytes(list) / MB + 85).toBeLessThanOrEqual(256);

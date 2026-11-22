@@ -1,11 +1,10 @@
 /**
- * ADR-512: lossless trim-repack of resident grid atlases (base building art: openings, furniture, decor, twig walls,
- * defenses, stores). Grid sheets reserve a whole cell (128x128) per frame although the art covers ~1/3 of it: at 1x
- * openings + furniture + decor + twig + defenses + stores were ~15.5 M texels, of which ~6 M are art. Each frame is
- * cropped to the union of its colour alpha and its side images (emissive / masks) plus a transparent gutter, the crops are
- * shelf-packed on a narrower page and every frame keeps its cell offset (dx, dy) so anchors stay in cell px. Pixels are
- * copied 1:1 (no resample, no colour change): the frames draw identically from about 40% of the texels, which is the
- * room that lets these atlases stay at 1x on the 256 MB phone budget.
+ * ADR-512: lossless column trim of resident grid atlases (base building art: openings, furniture, decor, twig walls,
+ * defenses, stores; resident vehicle art). Grid sheets reserve a whole cell per frame although the art covers part of it.
+ * Each frame keeps its full cell height and is cropped to the columns holding colour alpha or side-image texels (emissive /
+ * masks) plus a transparent gutter; crops are shelf-packed and every frame keeps its cell offset (dx) so anchors stay in
+ * cell px. Rows are never cropped: the sprite shader interpolates depth per vertex from the quad's top / bottom height,
+ * so a shorter quad would re-slope every pixel's depth. Pixels are copied 1:1 (no resample, no colour change).
  */
 import type { ImageLike } from "./atlasManager.js";
 
@@ -28,10 +27,13 @@ export function planTrim(cols: number, rows: number, fw: number, fh: number, pag
     const cx = (i % cols) * fw, cy = Math.floor(i / cols) * fh; const b = opaque(cx, cy, cx + fw, cy + fh);
     if (!b) { crops.push({ i, dx: 0, dy: 0, w: 0, h: 0 }); continue; }
     // gutter inside the cell when there is room (the original cell's own transparent margin), aligned down
-    const x0 = Math.max(0, b[0] - cx - TRIM_GUTTER), y0 = Math.max(0, b[1] - cy - TRIM_GUTTER);
-    const dx = Math.floor(x0 / TRIM_ALIGN) * TRIM_ALIGN, dy = Math.floor(y0 / TRIM_ALIGN) * TRIM_ALIGN;
+    // columns only: the sprite shader derives depth per vertex from the quad's top / bottom height over the pivot
+    // (max(hp, 0) interpolated between the two rows), so a vertically cropped quad would re-slope every pixel's depth
+    // (doors and windows sank behind their doorway / wall). Full cell height keeps the vertex rows - and depth - exact.
+    const x0 = Math.max(0, b[0] - cx - TRIM_GUTTER);
+    const dx = Math.floor(x0 / TRIM_ALIGN) * TRIM_ALIGN, dy = 0;
     // never past the cell: the original sheet's neighbour cell starts there (frames that touch their cell edge had no gutter before either)
-    const w = Math.min(fw - dx, al(b[2] - cx + 1 + TRIM_GUTTER - dx)), h = Math.min(fh - dy, al(b[3] - cy + 1 + TRIM_GUTTER - dy));
+    const w = Math.min(fw - dx, al(b[2] - cx + 1 + TRIM_GUTTER - dx)), h = fh;
     crops.push({ i, dx, dy, w, h });
   }
   // shelf pack, tallest first (stable by index); an empty frame gets one shared transparent cell at the origin

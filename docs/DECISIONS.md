@@ -12010,3 +12010,39 @@ Ruled out on the way: no reduced-resolution cutaway / see-through target, no sca
 - Tests that hard-coded 3 levels / 48 px now read `FLOOR_HEIGHT_LEVELS` / `levelHeight` (adr142, adr372, adr412, adr417, adr432 ×2, adr433, batch9, modular depth). The depth key's level term is now 80 px × uZPerPx = 5/3 rows per floor (was exactly 1): the same metric as the per-pixel height term, so ordering is unchanged; a front wall's top still out-ranks the upper deck behind it through its height term.
 
 **Validation.** `apps/client/test/adr510_floor80.test.ts`, the inverted adr504 test, Art's `adr504_building_80px` test, adr404 (all forms × live wall tiers), adr503 (stairs page group), the full suite. Renders with the player doll in `/workspace/share/build_scale/after80_*.png`: lineups, house, cabin, two-story cottage outside / inside cutaway / upstairs / on the stairs, barn, heavily ruined farmhouse, occlusion fade behind a cabin, barn ruin and cottage chimney in WebGL2 and Canvas2D.
+
+## ADR-512: crisp base pieces on the 256 MB phone budget (accurate pool reserve, retired wave-2 sheets, column trim, base pin tier)
+
+**Context.** Tracey: "make the doors, windows, beds, and other base building pieces that appear blurry crisp." Measured on the
+A16 profile (915×412 @ DPR 2.625, Mali-G57 → 256 MB texture budget): on main (6860324d) every resident base sheet
+(`openings` doors / windows / hatches, `furniture` beds / chests / stations, `decor`, `buildings_twig`, `defenses`, stores)
+drew at **0.25x**: ADR-511's stairs bld group tipped fitBudget, the hot tier fell from 0.5 to 0.25 and every pin (zombies,
+trees) was lost. Root cause: `poolReserveBytes` charged every pool layer as RGBA8 plus all four side arrays with full mips
+(~9.6 MB a layer where ~4–7 MB is allocated), so fitBudget held a ~165 MB reserve for ~85 MB of real pools.
+
+**Decision.**
+1. `poolLayerCost` charges a pool layer as upload() allocates it since ADR-510: the own-tail colour layer (block-compressed
+   when a KTX2 target exists, at the levels planOwn allocates) plus only the pool's own tint / emissive side layers.
+   fitBudget's resident side uses `residentBytes` (RGBA8 layers + the ADR-510 side windows).
+2. The wave-2 `buildings`, `buildings_stone`, `buildings_metal` sheets are retired while tier streaming is on
+   (`RETIRED_BUILD_RE`): no piece resolves to them; they were only the streaming fallback (48 px-floor art).
+3. Base grid sheets (`BASE_PIN_RE`) and resident vehicle art are **column-trimmed** on load (`trimAtlas.ts`): each frame
+   keeps its full cell height and only the empty columns (beyond a 2 px gutter, 4 px aligned) are dropped; texels are
+   copied 1:1 and the anchor stays in cell px (`ResolvedFrame.ax -= dx`). Rows are never cropped: the sprite shader
+   interpolates depth per vertex from the quad's top / bottom height over the pivot, so a vertically cropped quad
+   re-slopes every pixel's depth (measured: doors and window shutters sank behind their doorway / wall).
+4. fitBudget pin tier 4 = core pins + base sheets at 1x, tried before core alone, with `BASE_PIN_SUBSETS` (whole set →
+   openings / furniture / decor / twig → openings / furniture / decor → openings / furniture). It never drops the cold
+   tier below `BASE_PIN_COLD_FLOOR` (0.25, the ADR-510 plan) when core alone would hold more. At each hot scale a pin
+   tier wins over the bigger of the two reserves; the smaller never goes under the pools' 1x floor (`floorBytes`).
+   Base sheets are never demoted to cold.
+
+**Result (A16 profile, Full preset, ruin farmhouse + player base).** hot 0.5 / cold 0.25 (main: 0.25 / 0.25); doors,
+windows, hatches, beds, chests, workbench, furnace, anvil, table, chair, decor at **1x** (main 0.25x, ADR-510 0.5x);
+twig walls, defenses, stores, mirror, garages at 0.5x (main 0.25x); core pins (zombies, trees, plants, resources) back at
+1x; streamed tier walls / stairs / roofs / rustic furniture pools unchanged at 1x (ADR-510 shape). GPU 253.3 / 256 MB
+(main 193.3 MB with the halved tier). No assets added. Before / after crops in `/workspace/share/crisp_pieces/`.
+
+**Not done.** Streamed pages (tier walls, stairs, roofs, rustic / fine furniture, hearths, door swings) stay ETC1S
+(≈26 dB vs the PNGs); lossless RGBA8 for those pools needs ~90–130 MB more than 256 MB holds. The phone render scale
+(mobile start tier 0.75, ceiling 0.9; Full = native) is unchanged. The A16 was measured in emulation (SwiftShader).

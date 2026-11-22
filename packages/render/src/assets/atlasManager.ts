@@ -337,11 +337,14 @@ export const CORE_PIN_RE = /^(resources(_tall|_huge)?|nature_(trees|crops|sprout
  * with the core set (fitBudget pin tier 4) so base pieces draw from full-resolution texels on the 256 MB phone budget.
  */
 export const BASE_PIN_RE = /^(openings|furniture|decor|buildings_twig|building_tw|defenses|defenses_glow|decor_(apiary|dock|shipyard|(crop|log|ore|stick|stone)_store)|cz_mirror|pets_trough|vitems_garage(_t\d)?)$/;
-/** ADR-512: grid sheets trim-repacked on load: the base set + resident vehicle art (boats / wagons / bikes: ~45% empty cell
- *  padding). Lossless (same texels, same anchors); the vehicle share is what lets tier 4 pack in the ADR-510 layer count. */
+/** ADR-512: grid sheets trim-repacked on load: the base set + resident vehicle art (boats / wagons / bikes: wide empty cell
+ *  margins). Lossless (same texels, same rows, same anchors). */
 export const TRIM_ATLAS_RE = new RegExp(`${BASE_PIN_RE.source}|^veh_art_\\w+$`);
 /** ADR-512: the cold scale pin tier 4 (base pieces at 1x) may cost, never below: the ADR-510 256 MB plan ran cold at 0.25. */
 export const BASE_PIN_COLD_FLOOR = 0.25;
+/** ADR-512: base subsets pin tier 4 tries in order when the whole set does not fit: doors / windows / hatches and beds /
+ *  chests / stations first (the sheets a base interior is made of), then decor and the twig walls. */
+export const BASE_PIN_SUBSETS: readonly RegExp[] = [BASE_PIN_RE, /^(openings|furniture|decor|buildings_twig|building_tw)$/, /^(openings|furniture|decor)$/, /^(openings|furniture)$/];
 /**
  * ADR-512: the Cozy-Wild wave 2 wood / stone / metal sheets, superseded by Art's streamed tier pages (building_t1..t4,
  * ADR-211 / ADR-511). With tier streaming on, no piece resolves to them; they only served as the streaming fallback,
@@ -872,7 +875,7 @@ export class AtlasManager {
       // masks (and the 1x emissive page) are resized to the chosen page so they line up under the same UVs
       if (emis) emis = await fitToPage(emis, img.width, img.height);
       for (const m of Object.keys(masks) as MaskName[]) { const f = await fitToPage(masks[m]!, img.width, img.height); if (f) masks[m] = f; else { delete masks[m]; delete maskUrls[m]; } }
-      // ADR-512: base building / vehicle grid sheets are trim-repacked losslessly (same texels, ~40% of the page), see trimAtlas.ts
+      // ADR-512: base building / vehicle grid sheets are column-trimmed losslessly (same texels, same rows), see trimAtlas.ts
       let trim: TrimFrame[] | undefined;
       if (this.trimAtlases && TRIM_ATLAS_RE.test(a.key) && !src.rects && scale === 1 && !masks.sheen && !masks.sway && !dirRectAtlases.has(a.key)) {
         const t = trimGridAtlas(img, emis, masks as Record<string, ImageLike>, a.columns, a.rows, a.frameW, a.frameH);
@@ -1198,7 +1201,9 @@ export class AtlasManager {
     const corePin = list.map((a) => !a.cold && CORE_PIN_RE.test(a.key));
     // ADR-512: base-building sheets (trim-repacked) join every pin tier, and with the core set form tier 4, tried before core alone
     const basePin = list.map((a) => !a.cold && BASE_PIN_RE.test(a.key) && a.scale === 1); // 1x page only: a pinned @2x page would be stored at 2x
-    const baseCorePin = list.map((_, i) => basePin[i]! || corePin[i]!);
+    // ADR-512: tier 4 tries the whole base set, then smaller subsets (BASE_PIN_SUBSETS: doors / windows / beds first)
+    const baseSub = (re: RegExp) => list.map((a, i) => corePin[i]! || (basePin[i]! && re.test(a.key)));
+    let baseCorePin = baseSub(BASE_PIN_RE);
     const pinned = list.map((a, i) => visPin[i]! || corePin[i]! || basePin[i]! || (!a.cold && FIDELITY_ATLAS_RE.test(a.key) && (this.recentlyUsed.size ? this.recentlyUsed.has(a.key) : !RESIDENT_CREATURE_RE.test(a.key))));
     const visCorePin = list.map((_, i) => visPin[i]! || corePin[i]! || basePin[i]!);
     let pin = 0; // 2 = creature + visible + core pins, 1 = ADR-251 visible + ADR-438 core pins, 4 = ADR-512 base + core pins, 3 = ADR-438 core pins only, 0 = none
@@ -1268,10 +1273,16 @@ export class AtlasManager {
       // zombies to the halved hot scale. The smaller reserve never drops below the pools' 1x floor (`floorBytes`: every
       // visible pool's 1x working set + the wear floor), so the resident art never takes the room a roof / stream page needs.
       for (let h = 0.5; h >= MIN_ATLAS_DOWNSCALE && !best; h /= 2) for (const tier of [2, 1, 4, 3, 0]) for (const r of [keepBytes, Math.max(keepBytes / 2, Math.min(keepBytes, floorBytes))]) {
-        if (best) break; keptReserve = r; let c = fitsTier(tier, h, full - r);
+        if (best) break; keptReserve = r; let c: number | null = null;
+        if (tier !== 4) c = fitsTier(tier, h, full - r);
         // the base tier never drops the cold tier below the core tier's scale AND below BASE_PIN_COLD_FLOOR (the ADR-510
         // phone plan's cold scale): a cold tier the core set alone would lift above that floor may go back to it, never below
-        if (c !== null && tier === 4) { const c3 = fitsTier(3, h, full - r); pin = 4; if (c3 !== null && c3 > c && c < BASE_PIN_COLD_FLOOR) c = null; }
+        else for (const re of BASE_PIN_SUBSETS) {
+          baseCorePin = baseSub(re); if (!baseCorePin.some((v, i) => v && !corePin[i])) continue;
+          c = fitsTier(4, h, full - r); if (c === null) continue;
+          const c3 = fitsTier(3, h, full - r); pin = 4; if (c3 !== null && c3 > c && c < BASE_PIN_COLD_FLOOR) { c = null; continue; }
+          break;
+        }
         if (c !== null) best = [h, c];
       }
       // ADR-251: the pools are forced to their floor anyway (body, wear floor, one layer per visible pool), so a smaller
