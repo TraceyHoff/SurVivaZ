@@ -1068,8 +1068,14 @@ export class AtlasManager {
       }
     }
     if (!pick && freeLayers <= 0) {
-      // no budget left at all: one layer at the smallest scale (over budget is reported by vramStats.withinBudget)
-      const ks = this.poolScales(lazy); const k = ks[ks.length - 1]; if (k === undefined) return;
+      // no budget left at all: one layer (over budget is reported by vramStats.withinBudget), at the LARGEST scale (<= 1x)
+      // whose layer still holds the pool's working set. ADR-503: this branch used to take the smallest scale, so on the
+      // 256 MB phone budget the building-tier, roof and stream pools each got one layer at 0.25x — the walls, floors,
+      // doors and rustic furniture inside every ruin drawn from quarter-res pages (16 device px per texel on a 2.6 DPR
+      // phone). One layer costs the same bytes at any scale; at 0.5x it still holds every tier page / the stream minSlots.
+      const ks = this.poolScales(lazy); if (!ks.length) return;
+      const want = Math.max(1, Math.min(minSlots, lazy.length));
+      const k = ks.find((x) => x <= 1 && this.poolGeom(lazy, x).perLayer >= want) ?? ks[ks.length - 1]!;
       pick = mk(k, this.poolGeom(lazy, k), 1);
     }
     if (!pick) return;
