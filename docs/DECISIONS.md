@@ -12148,3 +12148,27 @@ and a picked-up sign (`removeSign`); both lost what did not fit. I audited every
 return. Gathering and fishing overflow is new loot, already reported by `InventoryOverflow`, so it is left as is.
 Station produce simply isn't made when the station is full. Loot / dung / dead-mount bags are sized for their contents.
 Test: `packages/gameplay/test/adr516_attached_refunds.test.ts`.
+
+## ADR-517: pieces a demolish brings down refund the demolisher (SurVivaZ)
+
+When a Demolish removes support and other pieces collapse because of it (in the same stability pass or a later
+iteration of it), each collapsed piece and its attachments (opening, edge mounts) refunds the player who demolished,
+by the ADR-516 rule: 100% for their own build, 50% (min 1 each) for anyone else's. `destroyPiece` takes an optional
+`CollapseCredit { by, pid }`; the Demolish intent passes it, and every neighbour queued for recompute carries it
+(`StructureIndex.collapseCredit`). A credited `Collapse` calls `CollapseRefundRes.piece` while the piece is intact;
+attachments recurse with the same credit, so each piece refunds exactly once. A `Demolish` never refunds inside
+`destroyPiece` (the intent already paid `demolishRefundAll`). AI base relocation (recruitment) passes no credit: it
+has its own full salvage.
+
+No free resources from raids: damage, decay, explosions and every other uncredited removal refund nothing, and a
+collapsing piece is credited only if it is in a credited start's region and NOT reachable from any uncredited start in
+the same iteration (conservative when a raid and a demolish hit one structure at once). If the demolisher entity is
+gone, the half rule applies.
+
+Payout (`building/collapse_refund.ts`), once per stability pass per player: alive, not Dead and within
+`COLLAPSE_REFUND_NEAR` (16 tiles) of the first collapsed piece → into the pack, overflow in an owned bag at their feet
+(`refundOrDrop`); otherwise (far, dead, offline) → a Dropped bag owned by their PlayerId at the first collapse spot
+(`dropOwnedBag`, new in overflow.ts, also used by `refundOrDrop`). The demolish preview still shows host +
+attachments only: the cascade would need a full stability recompute (it mutates `PieceStability`), which isn't cheap
+or side-effect free per hover.
+Test: `packages/gameplay/test/adr517_collapse_refund.test.ts`.

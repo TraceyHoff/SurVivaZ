@@ -5,7 +5,7 @@
  */
 import { Mount, Pet } from "../components.js";
 import { canOpenSaddlebag } from "../mount_defs.js";
-import { entityIndex, Owner, Transform, type Entity, type World } from "@engine/core";
+import { entityIndex, Owner, PlayerId, Transform, type Entity, type World } from "@engine/core";
 import { refundOrDrop } from "../overflow.js";
 import { canLootBag } from "../combat/pvp.js";
 import { isPetOwner } from "../pets.js";
@@ -77,7 +77,7 @@ export function buildActionSystem(world: World, dt: number): void {
       const why = demolishPermission(world, e, p); if (why) { fail(why); continue; }
       // ADR-516: what comes down with it (door / window / hatch / wall insert) refunds too, each by its own builder rule
       refundOrDrop(world, e, demolishRefundAll(world, e, p).items); // ADR-515: a full pack no longer eats the refund
-      destroyPiece(world, p, DestroyCause.Demolish);
+      destroyPiece(world, p, DestroyCause.Demolish, { by: e, pid: world.isRegistered(PlayerId) && world.has(e, PlayerId) ? world.getField(e, PlayerId, "id") ?? 0 : 0 }); // ADR-517: what it brings down refunds e
       continue;
     }
     if (!hasPrivilege(world, e, pt.x, pt.y)) { fail(BuildFail.NoPrivilege); continue; } // ADR-207: repair too (outsiders may not touch a claimed base)

@@ -13,7 +13,7 @@
 import { reseatSmallOn, smallPiecesOn } from "./surface.js";
 import { spillStall } from "../economy/stall.js";
 import { onPieceDamaged } from "../combat/pvp_pieces.js";
-import { Transform, type Entity, type World } from "@engine/core";
+import { defineResource, Transform, type Entity, type World } from "@engine/core";
 import { raidScaled } from "./modular.js";
 import { Placement } from "../defs.js";
 import { AttachKind, BuildPiece, Container, type DamageCause, ContainerViewers, Fuel, LootBag, PieceLink, PieceStability, StallHeader, Viewing } from "../components.js";
@@ -120,15 +120,28 @@ export function attachedPieces(world: World, e: Entity, out: Entity[] = []): Ent
   if (d && s && d.placement === Placement.Edge && !d.features.mount) for (const m of idx.mountsOn(s.tx, s.ty, s.z, s.side)) if (!out.includes(m)) { out.push(m); attachedPieces(world, m, out); }
   return out;
 }
-/** Destroy a piece (server): removes attachments and the hosted opening, records neighbors for recompute. */
-export function destroyPiece(world: World, e: Entity, cause: DestroyCause): void {
+/** ADR-517: who a demolish-caused collapse refunds (the demolisher's entity and PlayerId). */
+export interface CollapseCredit { by: Entity; pid: number }
+/** ADR-517: collapse refund hooks (building/collapse_refund.ts): `piece` collapses for `credit` (called while it is
+ *  still intact), then `flush` once per stability pass pays what accumulated. Absent = no collapse refunds. */
+export const CollapseRefundRes = defineResource<{ piece(world: World, credit: CollapseCredit, piece: Entity): void; flush(world: World): void }>("gameplay.CollapseRefund");
+/**
+ * Destroy a piece (server): removes attachments and the hosted opening, records neighbors for recompute.
+ * ADR-517: `credit` marks a demolish (cause Demolish) or a collapse it caused (cause Collapse). The neighbours it
+ * queues for the stability pass carry the credit, and a credited Collapse refunds the piece (and, through the
+ * recursion, its attachments) to that player. A Demolish never refunds here: the Demolish intent already paid
+ * demolishRefundAll. Damage / decay / uncredited collapses pass no credit and refund nothing.
+ */
+export function destroyPiece(world: World, e: Entity, cause: DestroyCause, credit?: CollapseCredit): void {
   const idx = structures(world); if (!idx.info.has(e)) return;
+  if (credit && cause === DestroyCause.Collapse) world.getResource(CollapseRefundRes)?.piece(world, credit, e);
   const type = world.getField(e, BuildPiece, "type") ?? 0;
-  const op = idx.opening(e); if (op) destroyPiece(world, op, cause);
-  { const d = idx.def(e); const s = idx.info.get(e)?.slot; if (d && s && d.placement === Placement.Edge && !d.features.mount) for (const m of idx.mountsOn(s.tx, s.ty, s.z, s.side)) destroyPiece(world, m, cause); }
+  const op = idx.opening(e); if (op) destroyPiece(world, op, cause, credit);
+  { const d = idx.def(e); const s = idx.info.get(e)?.slot; if (d && s && d.placement === Placement.Edge && !d.features.mount) for (const m of idx.mountsOn(s.tx, s.ty, s.z, s.side)) destroyPiece(world, m, cause, credit); }
   const sc: [Entity, number][] = [];
-  for (const [n] of idx.supports(e, sc).list) idx.removedNeighbors.add(n);
-  for (const n of idx.dependents(e)) idx.removedNeighbors.add(n);
+  const queue = (n: Entity): void => { idx.removedNeighbors.add(n); if (credit && !idx.collapseCredit.has(n)) idx.collapseCredit.set(n, credit); };
+  for (const [n] of idx.supports(e, sc).list) queue(n);
+  for (const n of idx.dependents(e)) queue(n);
   for (const a of unlinkPiece(world, e)) {
     if (!world.isAlive(a)) continue;
     // close the container for viewers before it vanishes
@@ -138,9 +151,9 @@ export function destroyPiece(world: World, e: Entity, cause: DestroyCause): void
     spillStorage(world, a); // ADR-250: chest contents drop as a loot bag (demolish / pickup / raid / decay alike)
     unmarkLinked(world, a); world.destroy(a);
   }
-  if ((idx.def(e)?.surfaceHeight ?? 0) > 0) for (const m of smallPiecesOn(world, e)) idx.removedNeighbors.add(m); // ADR-162 decor on it drops
+  if ((idx.def(e)?.surfaceHeight ?? 0) > 0) for (const m of smallPiecesOn(world, e)) queue(m); // ADR-162 decor on it drops
   if ((idx.def(e)?.surfaceHeight ?? 0) > 0 && isAuthority(world)) reseatSmallOn(world, e, e);
-  idx.removePiece(e); idx.removedNeighbors.delete(e);
+  idx.removePiece(e); idx.removedNeighbors.delete(e); idx.collapseCredit.delete(e);
   emit(world, PieceDestroyed, { piece: e, type, cause });
   world.destroy(e);
 }
@@ -190,9 +203,24 @@ export function stabilitySystem(world: World): void {
   if (idx.dirty.size) { const d = [...idx.dirty].sort((a, b) => a - b); idx.dirty.clear(); propagateUp(world, idx, d); }
   for (let guard = 0; idx.removedNeighbors.size && guard < 64; guard++) {
     const starts = [...idx.removedNeighbors].filter((e) => world.isAlive(e)); idx.removedNeighbors.clear();
+    const credits = new Map(idx.collapseCredit); idx.collapseCredit.clear();
     const nodes = region(idx, starts);
-    for (const e of recomputeRegion(world, idx, nodes)) destroyPiece(world, e, DestroyCause.Collapse);
+    const collapsed = recomputeRegion(world, idx, nodes);
+    // ADR-517: a collapsing piece refunds the demolisher whose removal reached it, unless anything uncredited
+    // (raid damage, decay, explosions) also reaches it: those collapses never mint resources.
+    const owner = collapsed.length && credits.size ? collapseCredits(idx, starts, credits) : undefined;
+    for (const e of collapsed) destroyPiece(world, e, DestroyCause.Collapse, owner?.get(e));
   }
+  world.getResource(CollapseRefundRes)?.flush(world);
+}
+/** ADR-517: region member -> credit, from the credited starts' regions minus anything the uncredited starts reach. */
+function collapseCredits(idx: StructureIndex, starts: readonly Entity[], credits: ReadonlyMap<Entity, CollapseCredit>): Map<Entity, CollapseCredit> {
+  const plain = starts.filter((s) => !credits.has(s)); const tainted = plain.length ? region(idx, plain) : new Set<Entity>();
+  const groups = new Map<number, { c: CollapseCredit; starts: Entity[] }>();
+  for (const s of starts) { const c = credits.get(s); if (!c) continue; const k = c.pid || -c.by; let g = groups.get(k); if (!g) groups.set(k, (g = { c, starts: [] })); g.starts.push(s); }
+  const out = new Map<Entity, CollapseCredit>();
+  for (const g of [...groups.values()].sort((a, b) => a.c.pid - b.c.pid)) for (const e of region(idx, g.starts)) if (!tainted.has(e) && !out.has(e)) out.set(e, g.c);
+  return out;
 }
 
 /** BuildingGrid.stabilityRule: a grid instance is stable when its piece entity meets minStability. */

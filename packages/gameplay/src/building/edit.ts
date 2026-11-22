@@ -81,7 +81,7 @@ export function demolishPermission(world: World, actor: Entity, piece: Entity): 
 export function demolishRefund(world: World, actor: Entity, piece: Entity): { items: ItemCount[]; full: boolean } {
   const defs = gameplayDefs(world); const bp = world.get(piece, BuildPiece); const def = bp && defs.pieces.get(bp.type);
   if (!bp || !def) return { items: [], full: false };
-  const cost = pieceCost(defs, def, bp.tier); const full = builtByActor(world, piece, actor);
+  const cost = pieceCost(defs, def, bp.tier); const full = world.isAlive(actor) && builtByActor(world, piece, actor); // ADR-517: a gone actor gets the half rule
   if (full) return { items: cost, full };
   const k = defs.building.demolishRefund;
   return { items: cost.map((c) => ({ item: c.item, count: Math.max(1, Math.floor(c.count * k)) })), full };

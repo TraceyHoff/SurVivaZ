@@ -95,6 +95,8 @@ export class StructureIndex {
   /** server: pieces whose stability must be (re)computed this tick; removals trigger region recompute. */
   readonly dirty = new Set<Entity>();
   readonly removedNeighbors = new Set<Entity>();
+  /** ADR-517: removedNeighbors entries a demolish (or a collapse it caused) queued, with who gets the collapse refund. */
+  readonly collapseCredit = new Map<Entity, { by: Entity; pid: number }>();
   /** server: hp damage batched per tick. */
   readonly pendingDamage = new Map<Entity, number>();
   /** entity -> where it is indexed (removal works even after the entity died). */

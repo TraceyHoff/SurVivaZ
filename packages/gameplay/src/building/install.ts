@@ -2,6 +2,7 @@
 import type { World } from "@engine/core";
 import { installEmitterIndex } from "@engine/world";
 import { buildActionSystem, containerSystem, doorSystem, installDoorLookup } from "./actions.js";
+import { installCollapseRefund } from "./collapse_refund.js";
 import { ghostSystem } from "./ghost.js";
 import { installStabilityRule, stabilitySystem, structureDamageSystem } from "./integrity.js";
 import { structureOcclusion } from "./shelter.js";
@@ -19,7 +20,7 @@ export const BUILDING_SYSTEMS: { pre: readonly Entry[]; actions: readonly Entry[
 
 export function installBuildingSystems(world: World): Record<string, (w: World, dt: number) => void> {
   const idx = structures(world);
-  installStabilityRule(world, idx); installDoorLookup(world); installBuildingRaidRule(world);
+  installStabilityRule(world, idx); installCollapseRefund(world); installDoorLookup(world); installBuildingRaidRule(world);
   installEmitterIndex(world, { occlusion: structureOcclusion(world) });
   return {
     "gameplay.structureIndex": (w: World) => { structureIndexSystem(w); rehydrateLoadedStructures(w); } /* ADR-212 */, "gameplay.build": buildActionSystem, "gameplay.doors": doorSystem,
