@@ -12046,3 +12046,34 @@ twig walls, defenses, stores, mirror, garages at 0.5x (main 0.25x); core pins (z
 **Not done.** Streamed pages (tier walls, stairs, roofs, rustic / fine furniture, hearths, door swings) stay ETC1S
 (≈26 dB vs the PNGs); lossless RGBA8 for those pools needs ~90–130 MB more than 256 MB holds. The phone render scale
 (mobile start tier 0.75, ceiling 0.9; Full = native) is unchanged. The A16 was measured in emulation (SwiftShader).
+
+## ADR-513: bug pass — gamepad grid navigation and phone text fit (SurVivaZ)
+
+**Context.** Tracey asked for a pass for real bugs. Headless play of the production build (A16 412×915 portrait, 915×412
+landscape, 1280×720 desktop; SwiftShader) plus the ADR-213 Xbox harness (`apps/client/e2e/xbox-nav.mjs`) found no console
+errors or exceptions in menus, sandbox play, a 150 s soak, building / roofs / stairs, but two player-facing UI bugs:
+
+1. **D-pad in grid modals** (inventory). `FocusManager.navigate` accepted a candidate 0.5 px "further" (Down on Feet picked
+   Hotbar 8 on the same row) and let a near neighbour in another column beat the next cell in the same column (Up from the
+   pack's right column jumped to Back; Left from Head went to Back). At an edge, `UINav.move` stepped in DOM order, so Down
+   on Hotbar 8 went UP into the equipment panel and looped Main hand → Hands → Feet → Hotbar 8. The harness could not reach
+   Iron Sword / Cooked Meat / Pine Log from the equipment panel.
+   *Fix:* a candidate must lie a quarter of the smaller control further along the axis; one with no cross-axis overlap
+   also pays the focused control's size along the axis; the edge wraps to the far end of the same column / row
+   (`edgeWrap`), DOM order only when nothing shares it. Test: `apps/client/test/adr513_pad_grid_nav.test.ts`.
+2. **Cut-off / covered text on the phone.** Build tile costs ended in "…" ("8 Pine Plank…"), recipe names were clamped
+   ("Rope (plant…"), the selected ✓ badge (placed from the padding box, i.e. inside the 14/16 px gold frame) sat on labels
+   ("×1", "Screen shake: On"), and the HUD weather read "Cle…" at 412 px. *Fix:* tiles grow (min height kept) and names /
+   costs wrap; badge at top −18 / right −20 (on the frame corner); the ×1/×5/×10 segment shows selection by colour like
+   the other segmented rows; the HUD clock row wraps the weather onto its own line (panel width unchanged).
+   Test: `apps/client/test/adr513_ui_text_fit.test.ts`.
+
+**Checked, no change.** Nothing of the broken 22e09bd7 trim-repack remains (4bbb33ee's column trim is the code on main).
+No remaining 3-level / 48 px floor hard-codes in gameplay (all floor math reads `building.levelHeight` / `FLOOR_HEIGHT_LEVELS`).
+
+**Found, not fixed.** (a) Vehicles are sized against `PLAYER_HEIGHT_PX = 74` (`packages/render/src/vehicles/scale.ts`)
+while the doll is 53 px (ADR-504), so every vehicle draws ~1.4× its intended size; changing it rescales all vehicle art and
+needs Tracey's eyes. (b) Saves written before ADR-511 store Transform.z in 3-level floors: a player who logged out on the
+2nd floor or higher restores one floor lower (1st floor and ground are fine). A migration cannot tell pre-flip saves from
+saves made since the flip (no floor marker in the world meta), so it would mis-move players in newer saves; left as is.
+Evidence in `/workspace/share/bug_pass/`.
