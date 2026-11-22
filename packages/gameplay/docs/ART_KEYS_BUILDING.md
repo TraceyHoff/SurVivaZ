@@ -14,6 +14,7 @@ This doc is the source of truth for gameplay building sprite keys (assets/buildi
 - **Attach:** `roof_chimney` has `attach.smoke` at {x:0, y:-46}. Gameplay emits no smoke entity; the attach is render-only.
 - **Height:** 1 floor = `FLOOR_HEIGHT_LEVELS` (3, in @engine/world) terrain z levels = 48 px wall.
   - gameplay `building.levelHeight` was 2 and is now 3. A test asserts it equals FLOOR_HEIGHT_LEVELS.
+  - ADR-504: 48 px walls are head height for the 53 px player and doorways open only 31 px. The realistic 80 px set (5 levels) is specified in `docs/art-requests/ADR504_BUILDING_SCALE.md`; `packages/gameplay/data/building_scale.json` is the contract and `adr504_building_scale.test.ts` checks it.
 
 ## Keys (104 total, 26 pieces × 4 tiers; ❌ = not in manifest.building.json)
 | piece | keys |
