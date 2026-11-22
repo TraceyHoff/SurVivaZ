@@ -5,10 +5,13 @@
  */
 import { Mount, Pet } from "../components.js";
 import { canOpenSaddlebag } from "../mount_defs.js";
-import { entityIndex, Owner, Transform, type Entity, type World } from "@engine/core";
+import { entityIndex, Owner, PlayerId, Transform, type Entity, type World } from "@engine/core";
+import { lootBagInit } from "../loot_despawn.js";
+import { LootSource, tagLootSource } from "../loot_labels.js";
+import { indexEntity } from "../spawn.js";
 import { canLootBag } from "../combat/pvp.js";
 import { isPetOwner } from "../pets.js";
-import { AttachKind, BuildPiece, PieceLink, StallHeader, Container, ContainerViewers, Dead, DoorState, IntentAction, MAX_VIEWERS, PieceStability, PlayerIntent, Tribe, Viewing } from "../components.js";
+import { AttachKind, BuildPiece, PieceLink, StallHeader, Container, ContainerViewers, Dead, DoorState, IntentAction, LootBag, MAX_VIEWERS, PieceStability, PlayerIntent, Tribe, Viewing } from "../components.js";
 import { gameplayDefs, isAuthority, rangeSlack } from "../config.js";
 import { pieceAccepts, secondsToTicks } from "../defs.js";
 import {
@@ -36,6 +39,19 @@ function inReach(world: World, e: Entity, target: Entity, reach: number): boolea
   return distance(world, e, target) <= reach + rangeSlack(world, e);
 }
 
+/** ADR-515: refund items into the actor's pack; what does not fit drops in a Dropped loot bag at its feet (it was lost). */
+export function refundOrDrop(world: World, e: Entity, items: readonly { item: number; count: number }[]): Entity | undefined {
+  const defs = gameplayDefs(world); const left: { item: number; count: number }[] = [];
+  for (const c of items) { const n = addItem(world, e, c.item, c.count); if (n < c.count) left.push({ item: c.item, count: c.count - n }); }
+  if (!left.length) return undefined;
+  const t = world.get(e, Transform)!; const bag = world.create();
+  const slots = left.reduce((a, c) => a + Math.ceil(c.count / Math.max(1, defs.items.get(c.item)?.maxStack ?? 1)), 0);
+  world.add(bag, Transform, { x: t.x, y: t.y, z: t.z }).add(bag, Container, { slotCount: Math.max(4, slots) }).add(bag, ContainerViewers)
+    .add(bag, LootBag, lootBagInit(world, ownerPidOf(world, e), "dropped", LootSource.Dropped));
+  for (const c of left) addItem(world, bag, c.item, c.count);
+  tagLootSource(world, bag, LootSource.Dropped); indexEntity(world, bag); return bag;
+}
+const ownerPidOf = (world: World, e: Entity): number => (world.isRegistered(PlayerId) && world.has(e, PlayerId) ? world.getField(e, PlayerId, "id") ?? 0 : 0);
 export function buildActionSystem(world: World, dt: number): void {
   if (!isAuthority(world)) return;
   const defs = gameplayDefs(world); const b = defs.building; const it = world.store(PlayerIntent); const idx = structures(world);
@@ -74,7 +90,7 @@ export function buildActionSystem(world: World, dt: number): void {
     const bp = world.get(p, BuildPiece)!; const def = defs.pieces.get(bp.type)!;
     if (action === IntentAction.Demolish) { // ADR-317: permission gate + 100% (own build) / 50% (anything else) refund
       const why = demolishPermission(world, e, p); if (why) { fail(why); continue; }
-      for (const c of demolishRefund(world, e, p).items) addItem(world, e, c.item, c.count);
+      refundOrDrop(world, e, demolishRefund(world, e, p).items); // ADR-515: a full pack no longer eats the refund
       destroyPiece(world, p, DestroyCause.Demolish);
       continue;
     }

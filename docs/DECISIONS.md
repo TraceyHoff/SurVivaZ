@@ -12078,6 +12078,11 @@ needs Tracey's eyes. (b) Saves written before ADR-511 store Transform.z in 3-lev
 saves made since the flip (no floor marker in the world meta), so it would mis-move players in newer saves; left as is.
 Evidence in `/workspace/share/bug_pass/`.
 
+*Correction (ADR-515):* (a) above is wrong. All vehicle art is `scaleMode: "native"`, so its drawn size does not depend on
+`PLAYER_HEIGHT_PX`; that constant only drives seat z, placeholder boxes and the occluder threshold. The art itself is drawn
+~2× too tall for its length next to the 53 px doll (sedan 208×95 px vs ~189×44 px real-scale); resizing it is an art
+decision, left with Tracey.
+
 ## ADR-514: floor-height stamp in saves; pre-ADR-511 heights re-seat on load (SurVivaZ)
 
 **Bug (ADR-513 "found, not fixed" b).** ADR-511 moved a building floor from 3 to 5 terrain levels, but saves keep raw
@@ -12101,3 +12106,10 @@ The rule is idempotent: a re-seated chunk is dirtied and re-saved past the stamp
 Tests: `packages/gameplay/test/adr514_legacy_floor_z.test.ts` (rule, idempotence, deck probe),
 `packages/persist/test/adr514_legacy_floor_chunks.test.ts` (chunk record round trip),
 `apps/server/test/adr514_legacy_floor_save.test.ts` (stamp written; stamped z kept; pre-stamp player re-seated 6.31 → 10.31).
+
+## ADR-515: bug pass 3 — live hunt fixes (SurVivaZ)
+
+**Demolish refund with a full pack.** `buildActionSystem` paid the ADR-317 refund with `addItem` and ignored the count
+it returned, so whatever did not fit the pack was destroyed with the piece. `refundOrDrop` (building/actions.ts) now puts
+the remainder in a Dropped loot bag (owner = the demolisher's PlayerId, ordinary dropped-bag lifetime) at the actor's
+feet. Test: `packages/gameplay/test/adr515_demolish_full_pack.test.ts`.
