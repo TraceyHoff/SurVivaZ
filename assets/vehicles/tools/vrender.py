@@ -6,8 +6,14 @@ from PIL import Image, ImageDraw, ImageFilter
 
 SS = 4
 U = 64 / math.sqrt(2)           # ground px per tile edge (1x)
-ZK = U * math.cos(math.radians(30))  # vertical px per tile of height (true 2:1 dimetric)
-VIEW = np.array([0.0, math.cos(math.radians(30)), math.sin(math.radians(30))])  # toward camera in (u,v,z)
+# True scale (2026-11 vehicles pass): 1 tile = 1 m of footprint (U = 45.25 px per m along the E/W view, U/2 in depth) and
+# heights at the player doll's scale: 53 px = 1.75 m -> ZK = 30.29 px per m of height. Model z units are metres.
+PX_PER_M_V = 53.0 / 1.75
+ZK = PX_PER_M_V
+KR = ZK / U  # x-radius factor that keeps a wheel disc round on screen in the E/W view (vertical px/m != horizontal px/m)
+# screen = (u*U, v*U/2 - z*ZK): the projection's null direction (the camera ray) is (0, ZK, U/2), so backface culling and
+# painter depth use exactly that ray (was (0, cos30, sin30) when ZK = U*cos30).
+VIEW = np.array([0.0, ZK, 0.5 * U]); VIEW /= np.linalg.norm(VIEW)  # toward camera in (u,v,z)
 LIGHT = np.array([-0.55, -0.35, 0.95]); LIGHT /= np.linalg.norm(LIGHT)
 INK = (52, 36, 60)
 DIRS = ["E", "SE", "S", "SW", "W", "NW", "N", "NE"]
@@ -93,7 +99,9 @@ def bike_wheel(x, y, r, tyre_px, color="#3b3440", rim="#c9c2b8", spokes=8, n=20,
     pts = [np.array([x + math.cos(2 * math.pi * i / n) * r, y, cz + math.sin(2 * math.pi * i / n) * r]) for i in range(n)]
     segs = [(pts[i], pts[(i + 1) % n]) for i in range(n)]
     sp = [((x, y, cz), (x + math.cos(2 * math.pi * i / spokes) * r * 0.9, y, cz + math.sin(2 * math.pi * i / spokes) * r * 0.9)) for i in range(spokes)]
-    return [Prim(rods=[(a, b, tyre_px, M_TYRE, hexc(color)) for a, b in segs]), rods(sp, 0.45, M_METAL, hexc(rim))]
+    out = [Prim(rods=[(a, b, tyre_px, M_TYRE, hexc(color)) for a, b in segs]), rods(sp, 0.45, M_METAL, hexc(rim))]
+    for p_ in out: p_.name = "bike_wheel"; p_.center = np.array([x, y, cz], float)  # kept round on screen under the fit
+    return out
 
 # ---------------------------------------------------------------- projection
 def heading(d):
@@ -157,7 +165,7 @@ def render(prims, d, xf=None, canvas=None, pivot=None):
             dc.polygon(pts, fill=fc + (255,)); dm.polygon(pts, fill=m)
             de.polygon(pts, fill=(tuple(e) if (m == M_LAMP and e is not None) else (0, 0, 0)))
             line = lerp(fc, INK, 0.55) if m != M_GLASS else lerp(fc, INK, 0.35)
-            dc.line(pts + [pts[0]], fill=line + (255,), width=max(1, int(SS * 0.7)), joint="curve")
+            dc.line(pts + [pts[0]], fill=line + (255,), width=SS, joint="curve")  # 1 px part line at 1x (cel)
             if m == M_GLASS and len(pts) == 4 and n[2] < 0.8:  # glass glint streak
                 a, b, cc, dd = [np.array(p) for p in pts]
                 g0 = a + (b - a) * 0.25; g1 = dd + (cc - dd) * 0.45
@@ -188,27 +196,48 @@ def _noise(w, h, cell, seed):
     return np.asarray(im, np.float32)[:h, :w] / 255.0
 
 def finish(L, shadow_poly=None, effects=None, seed=0, pivot=None, grass=False):
-    """L: render layers. Adds painterly grain, damage effects, contact shadow, ink outline. Returns RGBA (SS), mat L, emi RGB."""
+    """L: render layers. Solid cel (no grain): damage effects, optional grass. Returns (body RGBA at SS, contact shadow L at SS
+    or None, tint, emi). Alpha is binarised and the bold outline added per output scale in cel() below."""
     col = np.asarray(L["col"], np.float32).copy(); mat = np.asarray(L["mat"]).copy(); emi = np.asarray(L["emi"], np.float32).copy()
-    H, W = mat.shape; a = col[..., 3] / 255.0
-    n1 = _noise(W, H, 6 * SS, seed); n2 = _noise(W, H, 2 * SS, seed + 1)
-    grain = 0.955 + 0.06 * n1 + 0.03 * (n2 - 0.5)
-    col[..., :3] *= grain[..., None]
     tint = (mat == M_PAINT).astype(np.float32)
     if effects: col, tint, emi = effects(col, mat, tint, emi, seed)
     col = np.clip(col, 0, 255)
     img = Image.fromarray(col.astype(np.uint8), "RGBA")
-    # soft ink outline
-    al = img.split()[3]; dil = al.filter(ImageFilter.MaxFilter(int(SS * 1.4) * 2 + 1)).filter(ImageFilter.GaussianBlur(SS * 0.35))
-    out = Image.new("RGBA", img.size, INK + (0,)); out.putalpha(dil)
-    base = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    sh = None
     if shadow_poly is not None:
         sh = Image.new("L", img.size, 0); ImageDraw.Draw(sh).polygon(shadow_poly, fill=95)
-        sh = sh.filter(ImageFilter.GaussianBlur(SS * 2.2)); shimg = Image.new("RGBA", img.size, (40, 26, 50, 0)); shimg.putalpha(sh)
-        base = Image.alpha_composite(base, shimg)
-    base = Image.alpha_composite(base, out); base = Image.alpha_composite(base, img)
-    if grass and pivot is not None: base = add_grass(base, shadow_poly, seed)
-    return base, tint, emi
+        sh = sh.filter(ImageFilter.GaussianBlur(SS * 2.2))
+    if grass and pivot is not None: img = add_grass(img, shadow_poly, seed)
+    return img, sh, tint, emi
+
+OUTLINE_K = 0.62  # outline = neighbour colour pulled 62% toward INK (bold, slightly dark, not black)
+SHADOW_RGB = (40, 26, 50)
+
+def cel(body, sh, f, ring=1):
+    """Downsample an SS body by f (premultiplied box filter), binarise alpha (>= 50% coverage), add a `ring`-px bold outline
+    of the darkened neighbour colour, and put the soft contact shadow (the one allowed soft effect) underneath."""
+    w, h = body.size[0] // f, body.size[1] // f
+    b = np.asarray(body.resize((w, h), Image.BOX)).astype(np.float32)
+    solid = b[..., 3] >= 128
+    rgb = b[..., :3] * solid[..., None]
+    # mean colour of the solid neighbours of each ring pixel (frames carry >= 2 px empty gutters, so np.roll never wraps art)
+    acc = np.zeros_like(rgb); cnt = np.zeros(solid.shape, np.float32)
+    for dy in range(-ring, ring + 1):
+        for dx in range(-ring, ring + 1):
+            r2 = np.roll(np.roll(rgb, dy, 0), dx, 1); s2 = np.roll(np.roll(solid, dy, 0), dx, 1)
+            acc += r2 * s2[..., None]; cnt += s2
+    edge = (~solid) & (cnt > 0)
+    ink = np.array(INK, np.float32)
+    nb = acc / np.maximum(cnt, 1)[..., None]
+    out = np.zeros((h, w, 4), np.float32)
+    if sh is not None:
+        s = np.asarray(sh.resize((w, h), Image.BOX), np.float32)
+        s = np.round(s / 16.0) * 16.0  # a few flat steps, not a 95-level gradient (smaller palette, still soft)
+        out[..., :3] = SHADOW_RGB; out[..., 3] = s
+    out[edge, :3] = nb[edge] * (1 - OUTLINE_K) + ink * OUTLINE_K; out[edge, 3] = 255
+    out[solid, :3] = b[solid, :3]; out[solid, 3] = 255
+    out[out[..., 3] == 0] = 0
+    return np.clip(out + 0.5, 0, 255).astype(np.uint8), solid | edge
 
 def add_grass(img, poly, seed):
     rng = np.random.default_rng(seed + 77); d = ImageDraw.Draw(img)
@@ -226,3 +255,25 @@ def add_grass(img, poly, seed):
 
 def downs(img, f, mode=Image.LANCZOS):
     return img.resize((img.size[0] // f, img.size[1] // f), mode)
+
+def save_indexed(arr, path):
+    """Byte-lean RGBA page: indexed PNG with tRNS. Opaque art (alpha 255) gets <= 256 - k palette entries (exact when it has
+    that few colours, else median cut, no dither), the k soft contact-shadow alpha steps one entry each, index 0 = clear."""
+    arr = np.asarray(arr); a = arr[..., 3]; op = a == 255; semi = (a > 0) & (a < 255)
+    levels = sorted(set(np.unique(a[semi]).tolist())); n_op = 255 - len(levels)
+    idx = np.zeros(a.shape, np.uint8); pal = [(0, 0, 0)]; trns = [0]
+    for lv in levels:
+        idx[semi & (a == lv)] = len(pal); pal.append(SHADOW_RGB); trns.append(lv)
+    rgb = arr[..., :3][op]
+    if len(rgb):
+        key = (rgb[:, 0].astype(np.uint32) << 16) | (rgb[:, 1].astype(np.uint32) << 8) | rgb[:, 2]
+        uq, inv = np.unique(key, return_inverse=True)
+        if len(uq) <= n_op:
+            cols = np.stack([(uq >> 16) & 255, (uq >> 8) & 255, uq & 255], -1).astype(np.uint8); sub = inv
+        else:
+            q = Image.fromarray(rgb.reshape(1, -1, 3)).quantize(n_op, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
+            cols = np.array(q.getpalette()[:3 * n_op], np.uint8).reshape(-1, 3); sub = np.asarray(q).reshape(-1)
+        base = len(pal); idx[op] = (sub + base).astype(np.uint8)
+        pal += [tuple(c) for c in cols.tolist()]; trns += [255] * len(cols)
+    im = Image.fromarray(idx, "P"); flat = [v for c in pal for v in c]; im.putpalette(flat + [0] * (768 - len(flat)))
+    im.save(path, optimize=True, transparency=bytes(trns))

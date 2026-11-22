@@ -24,6 +24,7 @@ def _cracks(H, W, glass, rng, n=2, color=(245, 252, 255)):
 def _dirt(col, a, strength=0.25, color=(120, 92, 64)):
     x0, x1, y0, y1 = _bbox(a); H = col.shape[0]
     yy = np.arange(H, dtype=np.float32)[:, None]; t = np.clip((yy - (y0 + (y1 - y0) * 0.55)) / max(1, (y1 - y0) * 0.45), 0, 1) * strength
+    t = np.where(t > 0.45 * strength, 0.7 * strength, 0.0).astype(np.float32)  # one hard grime band (cel), not a gradient
     col[..., :3] = col[..., :3] * (1 - t[..., None]) + np.array(color, np.float32) * t[..., None] * (col[..., :3] / 200.0)
 
 def damaged(col, mat, tint, emi, seed, level=1.0):
@@ -47,7 +48,7 @@ def damaged(col, mat, tint, emi, seed, level=1.0):
 
 def scorch(col, mat, tint, seed, amt):
     H, W = mat.shape; n = _noise(W, H, 9 * SS, seed + 5) * 0.7 + _noise(W, H, 3 * SS, seed + 6) * 0.3
-    s = np.clip((n - (0.7 - 0.3 * amt)) * 2.5, 0, 1) * (mat != 0)
+    s = (np.clip((n - (0.7 - 0.3 * amt)) * 2.5, 0, 1) > 0.5).astype(np.float32) * (mat != 0)  # hard-edged soot patches
     col[..., :3] = col[..., :3] * (1 - s[..., None] * 0.7) + SOOT * s[..., None] * 0.7
     tint *= (1 - s); return s
 
@@ -56,11 +57,11 @@ def rust(col, mat, tint, seed, amt, cell=4):
     metal = (mat == M_PAINT) | (mat == M_METAL) | (mat == M_TRIM) | (mat == M_LIGHTBODY)
     a = col[..., 3] > 0; ys = np.nonzero(a.any(1))[0]; y0, y1 = (ys.min(), ys.max()) if len(ys) else (0, H)
     grad = np.clip((np.arange(H, dtype=np.float32)[:, None] - y0) / max(1, y1 - y0), 0, 1)  # rust creeps up from the sills
-    s = np.clip((n + 0.35 * grad - (0.86 - 0.32 * amt)) * 3.0, 0, 1) * metal
+    s = (np.clip((n + 0.35 * grad - (0.86 - 0.32 * amt)) * 3.0, 0, 1) > 0.5).astype(np.float32) * metal  # hard-edged rust patches
     # streaks: drip down
     st = s.copy()
     for k in range(1, 6): st[k * SS // 2:, :] = np.maximum(st[k * SS // 2:, :], s[:-k * SS // 2, :] * (1 - k / 6))
-    st *= metal * 0.9; c2 = RUST * (1 - n[..., None] * 0.5) + RUST2 * n[..., None] * 0.5
+    st = (st > 0.4).astype(np.float32) * metal * 0.9; c2 = np.where((n > 0.55)[..., None], RUST2, RUST)  # two flat rust tones
     lum = col[..., :3].mean(-1, keepdims=True) / 200
     col[..., :3] = col[..., :3] * (1 - st[..., None] * 0.85) + c2 * lum * st[..., None] * 0.85
     tint *= (1 - st); return st
@@ -81,7 +82,7 @@ def rusty(col, mat, tint, emi, seed):
     tint *= 0.5  # faded paint (tint strength halves under the mask)
     rust(col, mat, tint, seed, 0.6, cell=3)
     g = mat == M_GLASS; n = _noise(W, H, 3 * SS, seed + 21)
-    col[..., :3][g] = col[..., :3][g] * (0.55 + 0.2 * n[g][:, None]) + np.array([60, 66, 40]) * 0.3
+    col[..., :3][g] = col[..., :3][g] * (0.55 + 0.2 * (n[g][:, None] > 0.5)) + np.array([60, 66, 40]) * 0.3
     c = _cracks(H, W, g, np.random.default_rng(seed), n=2); col[..., :3] = col[..., :3] * (1 - c[..., None] * 0.7) + 220 * c[..., None] * 0.7
     _dirt(col, a, 0.45, (110, 96, 60)); emi[:] = 0
     return col, tint, emi

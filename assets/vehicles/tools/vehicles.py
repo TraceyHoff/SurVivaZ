@@ -147,6 +147,9 @@ def van(kind, state):
         m.add(box(-L / 2, 0.58, -h, h, 0.45, zt, M_LIGHTBODY, WHITE, inset=0.02))
         for y in (-h - 0.004, h - 0.006): m.add(box(-L / 2 + 0.05, 0.53, y, y + 0.01, 0.95, 1.15, M_PAINT, P, bias=0.01))
         for i in range(5): m.add(box(-L / 2 - 0.012, -L / 2, -h + 0.08, h - 0.08, 0.6 + i * 0.25, 0.62 + i * 0.25, M_TRIM, hexc("#cfc8bd"), bias=0.005))
+        for y in (-h - 0.006, h - 0.004):  # side posts on the box body, one prim per side (sorts with its wall)
+            xs_ = [-L / 2 + i * (L / 2 + 0.58) / 6 for i in range(1, 6)]
+            m.add(Prim([pl for x in xs_ for pl in box(x - 0.012, x + 0.012, y, y + 0.01, 0.47, zt - 0.04, M_TRIM, hexc("#d8d0c4")).polys], bias=0.012))
         zr = 1.4; c1 = 1.05; front = L / 2 + 0.01; zl = 0.55; xb = -L / 2 - 0.01; zbk = zt - 0.08
         m.attach["cargo"] = (-0.45, 0, 0.5); m.attach["cargo_door"] = (-L / 2 - 0.2, 0, 0.3)
     else:  # minivan uses car body
@@ -169,7 +172,7 @@ def van(kind, state):
     m.foot = (L, W); return m
 
 def semi(state):
-    m = Model(); wrecked = state == "wrecked"; L, W, r = 2.7, 1.36, 0.32; h = W / 2
+    m = Model(); wrecked = state == "wrecked"; L, W, r = 2.7, 1.36, 0.265; h = W / 2  # r -> 0.51 m tyres at 3.9 m true scale
     if wrecked: m.xf = tilt(pitch=-0.06, roll=0.08, dz=-0.03)
     if state == "rusty": m.xf = tilt(roll=-0.02, dz=-0.07)
     m.add(box(-L / 2, L / 2 - 0.1, -0.42, 0.42, 0.26, 0.46, M_TRIM, DARK))
@@ -281,7 +284,7 @@ def trailer(kind, state):
     if state == "damaged": m.xf = tilt(roll=-0.03)
     spec = dict(flatbed=(3.2, 1.3, 0.2, (0.45, -0.45)), box=(3.4, 1.3, 0.22, (0.4, -0.05)), tanker=(3.4, 1.3, 0.22, (0.42, -0.02)),
                 log=(3.2, 1.3, 0.2, (0.45, -0.45)), utility=(1.25, 1.0, 0.18, (0.0,)), livestock=(3.2, 1.3, 0.2, (0.45, -0.45)),
-                semi_box=(5.2, 1.0, 0.16, ()), semi_flatbed=(5.2, 1.0, 0.16, ()))[kind]
+                semi_box=(5.2, 1.0, 0.24, ()), semi_flatbed=(5.2, 1.0, 0.24, ()))[kind]  # semi r 0.24 -> 0.5 m tyres, 1.4 m deck at true scale
     L, W, r, axl = spec; h = W / 2; semi_ = kind.startswith("semi_"); kind = kind[5:] if semi_ else kind
     xs = [-L / 2 + 0.55 + a for a in axl] if kind != "utility" else [-0.05]
     if kind in ("box", "tanker"): xs = [-L / 2 + 0.55, -L / 2 + 0.98]
@@ -298,6 +301,9 @@ def trailer(kind, state):
         m.add(box(-L / 2, L / 2, -h, h, zd - 0.02, zt, M_LIGHTBODY, WHITE, inset=0.02))
         for y in (-h - 0.005, h - 0.005): m.add(box(-L / 2 + 0.06, L / 2 - 0.06, y, y + 0.01, zd + 0.2, zt - 0.2, M_PAINT, P, bias=0.01))
         for i in range(2): m.add(box(-L / 2 - 0.012, -L / 2, -0.01 + (i - 0.5) * 0.02, 0.01 + (i - 0.5) * 0.02, zd + 0.05, zt - 0.05, M_METAL, CHROME, bias=0.004))
+        nr = 13 if semi_ else 6  # side posts: long flat walls read as a real dry-van / cargo box at true scale
+        for y in (-h - 0.008, h - 0.002):  # one prim per side, so the whole row depth-sorts with its wall (not per post)
+            m.add(Prim([pl for i in range(1, nr) for pl in box(-L / 2 + i * L / nr - 0.012, -L / 2 + i * L / nr + 0.012, y, y + 0.01, zd + 0.02, zt - 0.04, M_TRIM, hexc("#d8d0c4")).polys], bias=0.012))
         m.attach["cargo"] = (0, 0, zd); m.attach["cargo_door"] = (-L / 2 - 0.25, 0, 0.0)
     elif kind == "livestock":
         zt = 1.75 if state != "wrecked" else 1.55; DK = hexc("#4a3a40")
@@ -442,26 +448,31 @@ def model_extent(m):
     P_ = np.concatenate(pts); return P_.min(0), P_.max(0)
 
 def fit_factors(m, Lpx, Hpx, Wt):
-    """(sx, sy, sz) so the intact model's bumper-to-bumper length = Lpx (E view, U px/tile), roof = Hpx, body width = Wt tiles."""
+    """(sx, sy, sz) so the intact model's bumper-to-bumper length = Lpx (E view, U px/m), roof = Hpx (ZK px/m), body width = Wt m."""
     mn, mx = model_extent(m)
     sx = Lpx / U / max(1e-6, mx[0] - mn[0]); sz = Hpx / ZK / max(1e-6, mx[2]); sy = Wt / max(1e-6, m.foot[1])
     return sx, sy, sz
 
-def apply_fit(m, f, seat_px=None):
-    sx, sy, sz = f; S = np.array([sx, sy, sz]); kw = sz  # wheels stay round: radius follows the vertical scale
-    rk = math.sqrt(sx * sz)
+def apply_fit(m, f, seat_m=None):
+    """Scale an authored model to its real-world size. Wheels (car discs and bike rims) stay round ON SCREEN in the E/W view:
+    their radius follows the vertical scale and their x half-axis is multiplied by KR = ZK/U (30.29 vs 45.25 px per m)."""
+    sx, sy, sz = f; S = np.array([sx, sy, sz]); kw = sz
+    rk = math.sqrt(sx * sz); WR = np.array([kw * KR, sy, kw])
     for pr in m.prims:
         c = getattr(pr, "center", None)
         for v, *_ in pr.polys:
             if c is not None:
-                d = v - c; v[:] = c * S + d * np.array([kw, sy, kw])
+                d = v - c; v[:] = c * S + d * WR
             else: v *= S
-        pr.rods = [(a * S, b * S, rp * rk, mt, col) for a, b, rp, mt, col in pr.rods]
+        if c is not None and getattr(pr, "name", "") == "bike_wheel":
+            pr.rods = [(c * S + (a - c) * WR, c * S + (b - c) * WR, rp * rk, mt, col) for a, b, rp, mt, col in pr.rods]
+        else:
+            pr.rods = [(a * S, b * S, rp * rk, mt, col) for a, b, rp, mt, col in pr.rods]
         if c is not None: pr.center = c * S
     m.attach = {n: tuple(np.array(p) * S) for n, p in m.attach.items()}
-    if seat_px is not None:
+    if seat_m is not None:
         for n in SEAT_NAMES:
-            if n in m.attach: x, y, _ = m.attach[n]; m.attach[n] = (x, y, seat_px / ZK)
+            if n in m.attach: x, y, _ = m.attach[n]; m.attach[n] = (x, y, seat_m)
     m.lights = [(n, k, tuple(np.array(p) * S), nr) for n, k, p, nr in m.lights]
     m.foot = (m.foot[0] * sx, m.foot[1] * sy)
     if hasattr(m, "foot_c"): m.foot_c = (m.foot_c[0] * sx, m.foot_c[1] * sy)

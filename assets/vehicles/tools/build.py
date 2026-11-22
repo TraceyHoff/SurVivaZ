@@ -11,35 +11,52 @@ PAD = int(os.environ.get("VEH_PAD", "3"))  # >=2px transparent gutter per frame 
 MAXP = 2048
 # 1x page limit: 1008 = largest multiple of 16 <= 1020, so 4 pages share one 2048 array layer and @2x (2016) fits MAXP.
 PAGE1 = 1008
-# One atlas per vehicle at TRUE target size (docs/VEHICLES_RENDER.md): key, source model, L x H px (E view, 1x), body width
-# (tiles, vehicles.json footprint), seat z px, legacy keys still emitted as aliases. Atlas = veh_art_<key> (+ _1.. overflow).
+# One atlas per vehicle at TRUE real-world scale (2026-11 true-scale pass, docs/ART_KEYS_VEHICLES.md):
+#   length = vehicles.json footprint.length x 45.25 px (E view, 1 tile = 1 m), height = real roof height (m) x 30.29 px/m
+#   (player doll 53 px = 1.75 m), body width = footprint.width (m), seat = rider H-point height above ground (m).
+# key, source model, L px, roof height m, body width m, seat H-point m (None = no rider), legacy keys (aliases).
 VEH = [
-    ("bike_basic", "bike_basic", 81, 46, 0.6, 16, []), ("bike_road", "bike_road", 81, 46, 0.6, 16, []),
-    ("bike_mountain", "bike_mountain", 81, 47, 0.6, 17, []), ("bike_bmx", "bike_bmx", 81, 37, 0.6, 13, []),
-    ("bike_fat_tire", "bike_fat_tire", 81, 47, 0.6, 17, []), ("bike_cruiser", "bike_cruiser", 81, 46, 0.6, 16, []),
-    ("bike_tandem", "bike_tandem", 118, 46, 0.6, 16, []), ("bike_cargo", "bike_cargo", 109, 49, 0.8, 17, []),
-    ("bike_trike", "bike_trike", 86, 46, 1.0, 16, []),
-    ("car_compact", "car_hatchback", 163, 89, 1.6, 17, ["car_hatchback"]), ("car_sedan", "car_sedan", 208, 95, 1.8, 18, []),
-    ("car_muscle", "car_sports", 217, 89, 1.9, 17, ["car_sports"]), ("car_offroad", "car_suv", 199, 107, 1.9, 19, ["car_suv"]),
-    ("car_wagon", "car_wagon", 222, 96, 1.8, 19, []),
-    ("truck_pickup", "car_pickup", 244, 111, 2.0, 17, ["car_pickup"]), ("truck_flatbed", "car_flatbed", 294, 118, 2.2, 18, []),
-    ("truck_box", "truck_box", 317, 155, 2.3, 17, []),
-    ("van_cargo", "van_delivery", 235, 126, 2.0, 17, ["van_delivery"]), ("van_passenger", "van_minivan", 244, 122, 2.0, 16, ["van_minivan"]),
-    ("camper_van", "camper_van", 272, 137, 2.1, 15, []), ("camper_rv", "camper_motorhome", 407, 155, 2.5, 17, ["camper_motorhome"]),
-    ("semi_tractor", "truck_semi_cab", 294, 170, 2.5, 18, ["truck_semi_cab"]),
-    ("trailer_utility_small", "trailer_utility", 113, 56, 1.5, None, ["trailer_utility"]),
-    ("trailer_cargo_medium", "trailer_box", 181, 111, 2.0, None, ["trailer_box"]),
-    ("trailer_flatbed_large", "trailer_flatbed", 272, 67, 2.3, None, ["trailer_flatbed"]),
-    ("trailer_livestock", "trailer_livestock", 272, 130, 2.3, None, []), ("trailer_tanker", "trailer_tanker", 294, 141, 2.3, None, []),
-    ("trailer_camper", "camper_trailer", 294, 133, 2.3, None, ["camper_trailer"]), ("trailer_log", "trailer_log", 272, 100, 2.3, None, []),
-    ("semi_trailer_box", "trailer_semi_box", 588, 178, 2.5, None, []), ("semi_trailer_flatbed", "trailer_semi_flatbed", 588, 74, 2.5, None, []),
+    ("bike_basic", "bike_basic", 81, 1.10, 0.6, 0.95, []), ("bike_road", "bike_road", 81, 1.02, 0.6, 0.95, []),
+    ("bike_mountain", "bike_mountain", 81, 1.10, 0.6, 0.92, []), ("bike_bmx", "bike_bmx", 81, 0.92, 0.6, 0.76, []),
+    ("bike_fat_tire", "bike_fat_tire", 81, 1.12, 0.6, 0.95, []), ("bike_cruiser", "bike_cruiser", 81, 1.10, 0.6, 0.86, []),
+    ("bike_tandem", "bike_tandem", 118, 1.05, 0.6, 0.95, []), ("bike_cargo", "bike_cargo", 109, 1.10, 0.8, 0.95, []),
+    ("bike_trike", "bike_trike", 86, 1.05, 1.0, 0.82, []),
+    ("car_compact", "car_hatchback", 163, 1.48, 1.6, 0.55, ["car_hatchback"]), ("car_sedan", "car_sedan", 208, 1.45, 1.8, 0.55, []),
+    ("car_muscle", "car_sports", 217, 1.35, 1.9, 0.50, ["car_sports"]), ("car_offroad", "car_suv", 199, 1.78, 1.9, 0.75, ["car_suv"]),
+    ("car_wagon", "car_wagon", 222, 1.50, 1.8, 0.55, []),
+    ("truck_pickup", "car_pickup", 244, 1.85, 2.0, 0.85, ["car_pickup"]), ("truck_flatbed", "car_flatbed", 294, 2.10, 2.2, 0.95, []),
+    ("truck_box", "truck_box", 317, 3.20, 2.3, 1.20, []),
+    ("van_cargo", "van_delivery", 235, 2.00, 2.0, 0.85, ["van_delivery"]), ("van_passenger", "van_minivan", 244, 1.78, 2.0, 0.70, ["van_minivan"]),
+    ("camper_van", "camper_van", 272, 2.60, 2.1, 0.90, []), ("camper_rv", "camper_motorhome", 407, 3.40, 2.5, 1.05, ["camper_motorhome"]),
+    ("semi_tractor", "truck_semi_cab", 294, 3.90, 2.5, 1.55, ["truck_semi_cab"]),
+    ("trailer_utility_small", "trailer_utility", 113, 1.00, 1.5, None, ["trailer_utility"]),
+    ("trailer_cargo_medium", "trailer_box", 181, 2.30, 2.0, None, ["trailer_box"]),
+    ("trailer_flatbed_large", "trailer_flatbed", 272, 1.00, 2.3, None, ["trailer_flatbed"]),
+    ("trailer_livestock", "trailer_livestock", 272, 2.60, 2.3, None, []), ("trailer_tanker", "trailer_tanker", 294, 2.80, 2.3, None, []),
+    ("trailer_camper", "camper_trailer", 294, 2.90, 2.3, None, ["camper_trailer"]), ("trailer_log", "trailer_log", 272, 2.00, 2.3, None, []),
+    ("semi_trailer_box", "trailer_semi_box", 588, 4.05, 2.5, None, []), ("semi_trailer_flatbed", "trailer_semi_flatbed", 588, 1.55, 2.5, None, []),
 ]
 SRC = {k: (f, i) for f, l in FAMILIES.items() for i, (k, _) in enumerate(l)}
 VSPEC = {}
-for key, src, Lp, Hp, Wt, seat, legacy in VEH:
-    f, i = SRC[src]; m0 = FAMILIES[f][i][1]("intact"); fx = list(fit_factors(m0, Lp, Hp, Wt))
+for key, src, Lp, Hm, Wt, seat, legacy in VEH:
+    Hp = round(Hm * ZK); f, i = SRC[src]; m0 = FAMILIES[f][i][1]("intact"); fx = list(fit_factors(m0, Lp, Hp, Wt))
     if f == "bikes" and key != "bike_trike": fx[1] = 1.0  # bikes keep a slim body; footprint width is collision only
-    VSPEC[key] = dict(fam=f, idx=i, fit=tuple(fx), seat=seat, legacy=legacy, target=(Lp, Hp))
+    VSPEC[key] = dict(fam=f, idx=i, fit=tuple(fx), seat=seat, legacy=legacy, target=(Lp, Hp), real=(round(Lp / U, 2), Hm, Wt))
+
+def layout_pin(path):
+    """VEH_PIN=<manifest.vehicles.json>: keep the shipped state -> page grouping (main page states first, then each overflow
+    page's states), so every sprite key (incl. `<key>_st_<state>` state sprites, ids.lock) survives a re-render whose
+    frames got smaller. Overflow pages are ordered by their old atlas key (`_1`, `_2`... or split `_fh0`, `_fh1`...)."""
+    if not path or not os.path.exists(path): return {}
+    m = json.load(open(path)); S = {s["key"]: s for s in m["sprites"]}; pin = {}
+    for v in m["vehicles"]:
+        if "aliasOf" in v or "stateOf" in v: continue
+        groups = {}
+        for st, sk in v.get("stateSprites", {}).items(): groups.setdefault(S[sk]["atlas"], []).append(st)
+        main = [st for st in v["allStates"] if st in v["states"]]
+        pin[v["key"]] = [main] + [sorted(g, key=v["allStates"].index) for _, g in sorted(groups.items())]
+    return pin
+PIN = layout_pin(os.environ.get("VEH_PIN"))
 
 def model(key, st):
     v = VSPEC[key]; return apply_fit(FAMILIES[v["fam"]][v["idx"]][1](st), v["fit"], v["seat"])
@@ -64,12 +81,12 @@ def measure(args):
 def render_frame(args):
     key, st, d, fw, fh, piv, seed, hi = args; m = model(key, st); fam = VSPEC[key]["fam"]
     L = render(m.prims, d, m.xf, (fw, fh), piv)
-    eff = EFFECTS[st]; img, tint, emi = finish(L, shadow_poly(m, d, piv), eff, seed=seed, pivot=piv, grass=(st == "rusty" and fam != "bikes"))
+    eff = EFFECTS[st]; img, sh, tint, emi = finish(L, shadow_poly(m, d, piv), eff, seed=seed, pivot=piv, grass=(st == "rusty" and fam != "bikes"))
     if st == "rusty" and fam == "bikes": img = add_grass(img, shadow_poly(m, d, piv), seed)
-    i2 = np.asarray(downs(img, SS // 2)) if hi else None; i1 = downs(img, SS)
-    a1 = np.asarray(i1)[..., 3] > 8
-    t1 = np.asarray(downs(Image.fromarray((np.clip(tint, 0, 1) * 255).astype(np.uint8)), SS, Image.BOX)); t1 = np.where(a1, t1, 0).astype(np.uint8)
-    e1 = np.asarray(downs(Image.fromarray(np.clip(emi, 0, 255).astype(np.uint8)), SS, Image.BOX))
+    i2 = cel(img, sh, SS // 2, ring=2)[0] if hi else None; i1, body1 = cel(img, sh, SS, ring=1)
+    solid1 = np.asarray(downs(img, SS, Image.BOX))[..., 3] >= 128
+    t1 = np.asarray(downs(Image.fromarray((np.clip(tint, 0, 1) * 255).astype(np.uint8)), SS, Image.BOX)); t1 = np.where(solid1 & (t1 >= 128), np.uint8(255), np.uint8(0))
+    e1 = np.asarray(downs(Image.fromarray(np.clip(emi, 0, 255).astype(np.uint8)), SS, Image.BOX)); e1 = np.where(solid1[..., None], e1, 0).astype(np.uint8)
     att = {}
     for n, p in m.attach.items():
         x, y, dep = project_point(p, d, m.xf); att[n] = (round(x, 2), round(y, 2))
@@ -101,12 +118,16 @@ def main():
         lim = PAGE1 if fits(PAGE1) else MAXP // 2 if fits(MAXP // 2) else MAXP  # 1024 keeps @2x=2048 (split_facings.py adds <=1008 pages)
         cols = min(lim // fw, 8 * len(states)); rows_max = lim // fh
         spp = max(1, (cols * rows_max) // 8)  # whole states per page
-        chunks = [states[i:i + spp] for i in range(0, len(states), spp)]
+        chunks = PIN.get(key) or [states[i:i + spp] for i in range(0, len(states), spp)]
+        assert sorted(sum(chunks, [])) == sorted(states), (key, chunks)
         m0 = model(key, "intact"); state_atlas = {}; fattach = {}; anims_by = {}
         for ci, ch in enumerate(chunks):
             gkey = f"veh_art_{key}" + (f"_{ci}" if ci else ""); n = 8 * len(ch)
-            c_ = min((c for c in range(1, min(cols, n) + 1) if c * fw <= lim and math.ceil(n / c) * fh <= lim),
-                     key=lambda c: (max(c * fw, math.ceil(n / c) * fh), c * fw * math.ceil(n / c) * fh)); rows = math.ceil(n / c_)
+            for lim_ in (lim, MAXP // 2, MAXP, 2 * MAXP):  # a pinned chunk may need a bigger page; > PAGE1 pages are split by split_facings.py
+                ok = [c for c in range(1, n + 1) if c * fw <= lim_ and math.ceil(n / c) * fh <= lim_]
+                if ok: break
+            assert ok, (key, ci, ch, fw, fh, n)
+            c_ = min(ok, key=lambda c: (max(c * fw, math.ceil(n / c) * fh), c * fw * math.ceil(n / c) * fh)); rows = math.ceil(n / c_)
             W1, H1 = r16(c_ * fw), r16(rows * fh); hi = max(W1, H1) <= MAXP // 2
             fjobs = [(key, s, d, fw, fh, piv, hash((key, s)) % 1000 + d, True) for s in ch for d in range(8)]  # @2x always rendered (split_facings.py reuses it)
             results = pool.map(render_frame, fjobs)
@@ -121,8 +142,8 @@ def main():
                 if hi: P2[r * fh * 2:(r + 1) * fh * 2, c * fw * 2:(c + 1) * fw * 2] = i2
                 TM[r * fh:(r + 1) * fh, c * fw:(c + 1) * fw] = t1; EM[r * fh:(r + 1) * fh, c * fw:(c + 1) * fw] = e1
                 fr[k] = (key3, att, vis); allframes[(gkey, k)] = (key3, i1, i2, t1, e1)
-            Image.fromarray(P1).save(f"{OUT}/atlases/{gkey}.png", optimize=True)
-            if hi: Image.fromarray(P2).save(f"{OUT}/atlases/{gkey}@2x.png", optimize=True)
+            save_indexed(P1, f"{OUT}/atlases/{gkey}.png")
+            if hi: save_indexed(P2, f"{OUT}/atlases/{gkey}@2x.png")
             Image.fromarray(TM, "L").save(f"{OUT}/atlases/{gkey}.tintmask.png", optimize=True)
             has_em = EM.max() > 0
             if has_em: Image.fromarray(EM).save(f"{OUT}/atlases/{gkey}_emissive.png", optimize=True)
