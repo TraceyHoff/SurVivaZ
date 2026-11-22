@@ -47,7 +47,7 @@ Corner stubs are 0.22 tile (edge walls already run vertex to vertex); angled = p
 `wall_corner@tierN` / `roof_ridge@tierN` reuse the `wall_corner_outer` / `roof_gable` frames. Crack overlay sprite: `bld_crack`.
 
 ## Atlas
-One page per tier, `building_t1..t4`: 2016x1056, 84x96 cells, pivot (42,72) = anchor (0.5, 0.75), 1x only; ~8.1 MiB RGBA8 each (32.5 MiB all), KTX2 ETC1S twins ~2 MiB each (8.1 MiB all) via assets/tools/ktx2.py.
+One page per tier, `building_t1..t4`: 2016x2040, 84x120 cells, pivot (42,99) = anchor (0.5, 0.825), 1x only (ADR-504 80 px floor; was 2016x1056, 84x96, pivot (42,72)); ~8.1 MiB RGBA8 each (32.5 MiB all), KTX2 ETC1S twins ~2 MiB each (8.1 MiB all) via assets/tools/ktx2.py.
 
 ## Shaft Hatch (add-only art)
 `shaft_hatch` (twig, bare key) and `shaft_hatch@tier1..4`: dedicated ground trapdoors, not raised floor holes.
@@ -96,3 +96,8 @@ Covers every `door: true` piece: `door_wood`, `door_metal`, `hatch_wood`, `windo
 - Re-run only `packages/assets/pack/building/src/add_door_swing.py`; it is idempotent and append-only.
   - A full `build.py` / `decor.emit` / clan fragment run rewrites `decor_yard_t` and `clan_structures_large`. Re-run `add_door_swing.py` after one.
 - SFX: `door.open.swing`, `door.close.swing`, `door.open.gate`, `door.close.gate` (procedural `door_swing` recipe in `assets/audio/tools/sfx.py`).
+
+## ADR-504: 80 px floor (art/building-80px)
+- Walls / openings / corners / pillars re-built for the 80 px floor (`pack/building/src/scale80.py`, packer `add_building_80px.py`).
+- `bld_stairs_t1..t4` (piece `stairs@tier1..4`): dedicated flight per tier on the stream page `building_stairs` (84x120, pivot (42,99),
+  16 cols x 4 rows, tier N at frames (N-1)*16 .. +15, `[rot][damage]` unique4). Tier 0 keeps `stairs_twig` (main pack).

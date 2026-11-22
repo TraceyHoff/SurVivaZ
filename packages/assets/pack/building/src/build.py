@@ -2,6 +2,8 @@
 # rotation rows 1 (symmetric) / 2 (axis) / 4 (unique), shared crack overlay, smoke attach on chimneys.
 # One 1x page per tier (cells trimmed to 84x96, pivot (42,72) = main-pack (64,96)); 2x would exceed 2048 so 1x only,
 # like the main pack's buildings_* pages. Usage: cd src && python3 build.py .. <preview dir>
+# ADR-504: DO NOT re-run for the building_t* pages — they are 84x120 (pivot (42,99)) since the 80 px floor; the walls,
+# openings, corners, pillars and stairs come from add_building_80px.py (scale80.py), which this crop does not match.
 import json, os, sys, zlib, random
 from concurrent.futures import ProcessPoolExecutor
 from PIL import Image, ImageDraw

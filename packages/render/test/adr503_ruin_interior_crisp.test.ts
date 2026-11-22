@@ -42,9 +42,9 @@ const RUIN_DECOR = /^(decor_furn_|decor_deco_|decor_light_|hearth_)/;
 const decorPages = () => [...ALL.values()].filter((a) => a.residency === "stream" && RUIN_DECOR.test(a.key)).map((a) => page(a, 3));
 
 describe("ADR-503: ruin interiors stay crisp when the pools are out of budget", () => {
-  it("the real ruin pages: 4 building tiers (2016x1632, one per layer at 1x), rfx roofs, 19 rustic decor pages", () => {
+  it("the real ruin pages: 4 building tiers (2016x2040 since ADR-504 84x120 cells, one per layer at 1x), rfx roofs, 19 rustic decor pages", () => {
     const t = tierPages(); expect(t.map((p) => p.key).sort()).toEqual(["building_t1", "building_t2", "building_t3", "building_t4"]);
-    for (const p of t) expect([p.lazy.w1, p.lazy.h1]).toEqual([2016, 1632]);
+    for (const p of t) expect([p.lazy.w1, p.lazy.h1]).toEqual([2016, 2040]);
     expect(roofPages().length).toBeGreaterThanOrEqual(12);
     expect(decorPages().length).toBeGreaterThanOrEqual(19);
     for (const k of ["decor_furn_s", "decor_furn_w_1", "decor_furn_wt", "hearth_wt", "decor_deco_wt", "decor_light_t"]) expect(decorPages().some((p) => p.key === k), k).toBe(true);
