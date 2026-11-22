@@ -98,6 +98,18 @@ export function depthNudge(p: { x: number; y: number; z: number }, dk: number, i
   const k = iso.tileH / iso.zStep; const d = dk / (2 + k * zf); p.x += d; p.y += d; p.z += d * k;
 }
 
+/**
+ * ADR-518: depth key of a Footprint billboard's pixel `hb` screen px above its pivot, as the sprite vertex shader draws it
+ * (sprites.ts: every vertex + 0.6 (FOOTPRINT_LIFT); top vertex aA.z + 0.02 + top x zPerPx, bottom vertex + below /
+ * (tileH / 2), interpolated linearly down the quad, so a vehicle body is far nearer than its pivot plane). `top` /
+ * `below` = frame px above / below the pivot (outline included).
+ */
+export const FOOTPRINT_LIFT = 0.6;
+export function footprintKeyAt(pivotKey: number, hb: number, top: number, below: number, zPerPx: number, halfTileH: number): number {
+  const kt = pivotKey + 0.02 + top * zPerPx + FOOTPRINT_LIFT, kb = pivotKey + 0.02 + below / halfTileH + FOOTPRINT_LIFT;
+  const t = Math.min(1, Math.max(0, (top - hb) / Math.max(1e-6, top + below))); return kt + (kb - kt) * t;
+}
+
 /** Client-side pose smoothing between snapshots: exponential approach, angles along the shortest arc, snap on teleport. */
 export class PoseSmoother {
   x = 0; y = 0; z = 0; heading = 0; drift = 0; ready = false;

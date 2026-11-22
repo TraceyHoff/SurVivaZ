@@ -4,3 +4,5 @@ export * from "./atlas.js";
 export * from "./view.js";
 export * from "./scale.js";
 export * from "./artPack.js";
+export * from "./seats.js";
+export * from "./seats.data.js";

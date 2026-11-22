@@ -145,11 +145,12 @@ describe("camper interior", () => {
   });
 });
 
-describe("per-type scale (steering: vehicles read taller than players)", () => {
-  it("car roof 1.2-1.5x player, semi 2-2.5x, ordering bike < car < pickup < van/camper < semi", () => {
+describe("per-type scale (ADR-518: true real-world scale next to the 53 px / 1.75 m player)", () => {
+  it("sedan roof 1.45 m (0.83x player), semi 3.9 m (2.23x), ordering bike < car < pickup < van/camper < semi", () => {
     const h = (id: string) => targetHeightPx(def(id)) / PLAYER_HEIGHT_PX;
-    expect(h("car_sedan")).toBeGreaterThanOrEqual(1.2); expect(h("car_sedan")).toBeLessThanOrEqual(1.5);
-    expect(h("semi_tractor")).toBeGreaterThanOrEqual(2); expect(h("semi_tractor")).toBeLessThanOrEqual(2.5);
+    expect(PLAYER_HEIGHT_PX).toBe(53);
+    expect(h("car_sedan")).toBeCloseTo(1.45 / 1.75, 3); expect(targetHeightPx(def("car_sedan"))).toBeCloseTo(44, 0);
+    expect(h("semi_tractor")).toBeCloseTo(3.9 / 1.75, 3);
     expect(h("bike_basic")).toBeLessThan(h("car_sedan")); expect(h("car_sedan")).toBeLessThan(h("truck_pickup"));
     expect(h("truck_pickup")).toBeLessThan(h("van_cargo")); expect(h("van_cargo")).toBeLessThan(h("camper_rv")); expect(h("camper_rv")).toBeLessThan(h("semi_tractor"));
     for (const d of DEFS) expect(modelHeight(d)).toBeCloseTo(targetHeightPx(d) / 16, 3);

@@ -122,8 +122,8 @@ export type PoolClass = "wear" | "veh" | "bld" | "body" | "stream";
 /** Max mip levels of the compressed tail array: slot pitch is 16-aligned, so offsets stay 4x4-block aligned down to level 2. */
 const OWN_MAX_LEVELS = 3;
 /** Vehicle art pages kept resident at once (one page = one grouped Art sheet, ~1024^2 at 1x): desktop / low memory. */
-// 15 Art vehicle sheets exceed 1020px at 1x, so the vehicle pool slot is a whole 2048 layer (1 vehicle/layer, 6.7 MB ASTC);
-// once every 1x sheet fits 1020x1020 a layer holds 4 (6 slots: 13 MB instead of 40)
+// Every Art vehicle sheet fits 1020x1020 at 1x (ADR-518 true-scale pass: 88 pages, largest 936x1000 trimmed), so a 2048
+// layer holds 4 slots (8 slots on the A16 plan: 2 layers at 1x, ~4.8 MB a slot); pinned by adr518_vehicles_true_scale.test.ts
 const VEH_POOL_SLOTS_DESKTOP = 8, VEH_POOL_SLOTS_LOWMEM = 6;
 /** Building tier pages (building_t1..t4) resident at once: every tier on desktop; 2 on <=256 MB budgets (a base mixes ~2 tiers). */
 const BLD_POOL_SLOTS_DESKTOP = 4, BLD_POOL_SLOTS_LOWMEM = 4;

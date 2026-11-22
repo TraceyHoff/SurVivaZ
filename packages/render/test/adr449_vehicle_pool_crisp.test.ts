@@ -59,7 +59,8 @@ describe("ADR-449: vehicle pool stays crisp under memory pressure", () => {
   it("the real vehicle set is 46 sheets, most over one layer's quarter (perLayer 1 at 1x)", () => {
     const pages = vehPages();
     expect(pages.length).toBe(46); // ADR-503: vehicles.json grew to 46 defs after this test was written (it pinned 45 and turned main CI red)
-    expect(pages.filter((p) => p.lazy.w1 > 1020 || p.lazy.h1 > 1020).length).toBe(36);
+    // ADR-518: the placeholder sheets follow the true-scale heights (shorter bodies), so fewer exceed 1020 px (was 36)
+    expect(pages.filter((p) => p.lazy.w1 > 1020 || p.lazy.h1 > 1020).length).toBe(26);
     const a = am(256);
     expect(a.poolGeom(pages, 1).perLayer).toBe(1);
   });

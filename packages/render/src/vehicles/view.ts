@@ -14,16 +14,18 @@
  * Transform (no PrevTransform interpolation); gameplay sets the rider's AnimState to Sit (13, ADR-101).
  */
 import { Transform, type Entity, type World } from "@engine/core";
+import { VIEW_COS, VIEW_SIN } from "@engine/world";
 import { LightSource, Occluder, Shadow, Sprite, SpriteFlag } from "../components.js";
 import type { AssetRegistry } from "@engine/assets";
 import {
   PoseSmoother, RIDER_DK_CABIN, RIDER_DK_OPEN, dirAngle, hasInterior, headlightCone, insideFootprint, isPowered, quantizeDir8,
-  seatAnchors, segmentCount, segmentU, toWorld, trailerPose, depthNudge, type VehicleRenderDef,
+  seatAnchors, segmentCount, segmentU, toWorld, trailerPose, depthNudge, footprintKeyAt, type VehicleRenderDef,
 } from "./layout.js";
 import { modelHeight, modelZScale } from "./model.js";
 import type { InteriorRegion } from "./interiorPass.js";
 import { ART_INTERIOR, resolveVehicleArt, type VehicleArtBinding, type VehicleArtTable } from "./artPack.js";
-import { PLAYER_HEIGHT_Z } from "./scale.js";
+import { PLAYER_HEIGHT_Z, tallerThanPlayer } from "./scale.js";
+import { artSeat, windowBand } from "./seats.js";
 import { vehicleSpriteKey } from "./atlas.js";
 
 export interface VehicleSnapshot {
@@ -42,16 +44,30 @@ export interface VehicleViewOpts {
   /** localPlayerVehicle(world, eid) from gameplay (net id of the vehicle the local player drives, or null): cutaway it */ localVehicle?: number | null;
   /** rider keys are entities of this view world: suppress their ground Shadow while seated (default true; Art 64357f1) */ riderShadows?: boolean;
   /** drift yaw added to the drawn heading (fraction of Vehicle.drift) */ driftYaw?: number;
+  /** Camera view rotation in quarter turns (IsoConfig.view, ADR-253): depth keys and the camera ray are in view space. */
+  view?: number;
   /** World (tile) position on screen? Off-screen vehicles skip their streamed art page (no pageReady touch), so the
    *  LRU can evict it for visible ones; without this a full pool of off-screen pages starves e.g. car_compact. */
   inView?: (x: number, y: number) => boolean;
 }
 export interface VehicleSpatial { insert(e: Entity, x: number, y: number): void; remove(e: Entity): void }
-export interface RiderPlacement { rider: number; vehicle: number; seat: number; x: number; y: number; z: number; facing: number; cropped: boolean }
+export interface RiderPlacement { rider: number; vehicle: number; seat: number; x: number; y: number; z: number; facing: number; cropped: boolean;
+  /** ADR-518: rider rows to show, 1x px above the seat pivot (the doll's seat socket): pixels below `bottom` and above
+   *  `top` are clipped (top 0 = no top clip). Absent = draw the whole rider. */
+  clip?: { bottom: number; top: number } }
 export interface VehiclePose { x: number; y: number; z: number; heading: number; dir: number; interior: boolean }
 
 interface Rec { smooth: PoseSmoother; segs: Entity[]; segIds: number[]; intIds: number[]; lights: Entity[]; def: VehicleRenderDef; pose: VehiclePose; seen: number;
-  art: VehicleArtBinding | null; body: Entity | undefined; zk: number; /** facing whose art page this rec holds a refcount on */ artFacing?: number }
+  art: VehicleArtBinding | null; body: Entity | undefined; zk: number; /** facing whose art page this rec holds a refcount on */ artFacing?: number;
+  /** ADR-518: body frame extent around the pivot for facing f (rider depth) */ geom?: { f: number; top: number; below: number } }
+/** ADR-518: depth-key margin of an Art-seated rider over the vehicle body (+ = drawn after the sprite). */
+export const RIDER_DK_ART = 0.04;
+/** ADR-518: rider rows (1x px from the seat socket) that must beat the body: "over" seats down to the feet / up to the head. */
+export const RIDER_LEG_PX = 26, RIDER_HEAD_PX = 34;
+/** Sprite outline margin the vertex shader adds to every quad (px). */
+const OUTLINE_PX = 1;
+/** ADR-518: clip that hides a rider entirely (a seat with no window in the Art). */
+export const RIDER_CLIP_HIDDEN = { bottom: 1e4, top: 0 } as const;
 /** Streaming hooks (AtlasManager): Art vehicle sheets are retained per live vehicle and released when it leaves; facing-split
  *  art (dirFrames) streams one page per facing group, so the refcount follows the drawn `facing`. */
 export interface VehiclePages { retainSprite(id: number, facing?: number): void; releaseSprite(id: number, facing?: number): void; pageReady(id: number, prio?: number, facing?: number): boolean }
@@ -115,6 +131,9 @@ export class VehicleView {
         const sp = w.get(b, Sprite)!; const sc = r.art!.scale;
         if (sp.scale !== sc) w.set(b, Sprite, { ...sp, scale: sc });
         if (artOn) this.spatial?.insert(b, x, y); else this.spatial?.remove(b);
+        // ADR-518: true-scale bodies taller than the player (box truck, vans, campers, semi, tall trailers) fade like the
+        // tall placeholder segments do when they cover the local player (Footprint sprites only occlude via an Occluder)
+        if (tallerThanPlayer(s.def) && !w.has(b, Occluder)) w.add(b, Occluder, { fade: 0.45 });
       }
       for (let i = 0; i < n; i++) {
         const [sx, sy] = toWorld(x, y, hq, segmentU(s.def, i), 0); const e = r.segs[i]!;
@@ -137,10 +156,43 @@ export class VehicleView {
         const [lx, ly] = toWorld(x, y, h, c.u, 0); w.set(e, Transform, { x: lx, y: ly, z: 0, facing: 0 });
         w.set(e, LightSource, { r: 1, g: 0.93, b: 0.75, radius: c.radius, intensity: c.intensity * k, flicker: 0 });
       }
-      // riders
+      // riders. ADR-518: while the true-scale Art body is drawn, riders follow Art's seats (seats.vehicles.json): the
+      // seat H-point is placed on the body's own plane (depth key = the body pixel at that screen row) + a small margin so
+      // the rider draws just after the sprite; "window" seats clip to the beltline..roof band, seats Art has no window for
+      // are clipped away (hidden behind the body). Placeholder / interior cutaway: the vehicles.json anchors as before.
       const seats = seatAnchors(s.def, r.zk);
+      // view space (ADR-253 camera rotation): depth key = vu + vv + z zf, the camera ray is +(1, 1) in view space
+      const vq = (o.view ?? 0) & 3, vc = VIEW_COS[vq]!, vsn = VIEW_SIN[vq]!;
+      const vu = (a: number, b: number) => vc * a - vsn * b, vv = (a: number, b: number) => vsn * a + vc * b;
+      const bodyKey = vu(x, y) + vv(x, y) + z * this.zf;
+      const hv = hq + vq * (Math.PI / 2), cu = (Math.cos(hv) + Math.sin(hv)) / Math.SQRT2, cv = (Math.cos(hv) - Math.sin(hv)) / Math.SQRT2;
       for (let i = 0; i < occ.length; i++) {
-        const rid = occ[i]!; if (!rid) continue; const a = seats[i] ?? { u: 0, v: 0, z: 0, cabin: false };
+        const rid = occ[i]!; if (!rid) continue;
+        const as = artOn ? artSeat(s.def, i) : undefined;
+        if (as) {
+          const [px, py] = toWorld(x, y, hq, as.u, as.v); const p = { x: px, y: py, z: z + as.z };
+          const band = as.draw === "window" ? windowBand(s.def, i, cu, cv) : undefined;
+          const draw = as.draw === "window" && !band ? "hidden" : as.draw;
+          // screen height of the seat above the body pivot (z units): z - view-axis offset x (tileH / 2) / zStep
+          const dxy = vu(px, py) + vv(px, py) - (vu(x, y) + vv(x, y)); const hz = as.z - dxy * (this.iso.tileH / 2) / this.iso.zStep;
+          // the body is a Footprint billboard: its drawn depth is the vertex-interpolated key (footprintKeyAt), far nearer
+          // than its pivot plane. The rider (planar: key + rows x zPerPx) must beat it over every row it shows - both ends of
+          // its rows suffice (both keys are linear in the row). Hidden riders sit behind the body plane (and are clipped).
+          const zpp = this.zf / this.iso.zStep, hs = hz * this.iso.zStep; const g = this.bodyGeom(r, af + vq * (Math.PI / 2));
+          let need = bodyKey + hz * this.zf - (draw === "hidden" ? RIDER_DK_ART : 0);
+          if (g && draw !== "hidden") {
+            const lo = band ? band.bottom : -RIDER_LEG_PX, hi = band ? band.top : RIDER_HEAD_PX;
+            for (const d of [lo, hi]) need = Math.max(need, footprintKeyAt(bodyKey, hs + d, g.top, g.below, zpp, this.iso.tileH / 2) - 0.02 - d * zpp);
+            need += RIDER_DK_ART;
+          }
+          // move along the view axis (screen position unchanged): view-space (d, d, k d) = world R(-view) (d, d)
+          const key = vu(p.x, p.y) + vv(p.x, p.y) + p.z * this.zf, kk = this.iso.tileH / this.iso.zStep, dd = (need - key) / (2 + kk * this.zf);
+          p.x += (vc + vsn) * dd; p.y += (vc - vsn) * dd; p.z += dd * kk;
+          const clip = band ? { bottom: band.bottom, top: band.top } : draw === "hidden" ? { ...RIDER_CLIP_HIDDEN } : undefined;
+          out.push({ rider: rid, vehicle: s.key, seat: i, x: p.x, y: p.y, z: p.z, facing: hq, cropped: draw !== "over", ...(clip ? { clip } : {}) });
+          continue;
+        }
+        const a = seats[i] ?? { u: 0, v: 0, z: 0, cabin: false };
         const [px, py] = toWorld(x, y, hq, a.u, a.v); const p = { x: px, y: py, z: z + a.z };
         // depth relative to the seat's segment centre
         const si = Math.min(n - 1, Math.max(0, Math.floor((s.def.footprint.length / 2 - a.u) / (s.def.footprint.length / n))));
@@ -158,6 +210,12 @@ export class VehicleView {
     return out;
   }
 
+  /** Art body frame px above / below the pivot for the drawn facing (outline included), cached per facing. */
+  private bodyGeom(r: Rec, facing: number): { top: number; below: number } | undefined {
+    if (!r.art) return undefined; if (r.geom && r.geom.f === facing) return r.geom;
+    try { const s = this.registry.sprite(r.art.spriteId); const f = this.registry.dirFrame(r.art.spriteId, s.animList[0]!.name, facing, 0);
+      r.geom = { f: facing, top: f.anchorY + OUTLINE_PX, below: f.h - f.anchorY + OUTLINE_PX }; return r.geom; } catch { return undefined; }
+  }
   private sid(key: string): number { try { this.registry.byKey(key); return this.registry.id(key); } catch { return -1; } }
   private create(def: VehicleRenderDef): Rec {
     const w = this.world; const n = segmentCount(def); const segs: Entity[] = [], segIds: number[] = [], intIds: number[] = [];

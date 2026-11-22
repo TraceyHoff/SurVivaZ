@@ -315,10 +315,12 @@ export function blackFrameStep(st: BlackCheckState, r: { gl?: WebGL2RenderingCon
  * (motor or drawn) the rider sits in, in every view rotation. The sim snaps a rider to the vehicle centre; the
  * placement is the seat (the doll's `vehicle` seat socket lands on it, sprites.ts). PrevTransform matches so the
  * rider does not interpolate from the centre. Riders with no view entity yet are skipped. */
-export function applyVehicleRiderPlacements(net: World, view: World, map: Map<Entity, Entity>, placements: readonly RiderPlacement[]): void {
+export function applyVehicleRiderPlacements(net: World, view: World, map: Map<Entity, Entity>, placements: readonly RiderPlacement[], windows?: Map<number, { bottom: number; top: number }>): void {
+  windows?.clear(); // ADR-518: rider window clips (true-scale cab seats), rebuilt from this frame's placements
   for (const p of placements) {
     const ne = netIdEntity(net, p.rider); if (ne === undefined) continue;
     const ve = map.get(ne); if (ve === undefined || !view.has(ve, Transform)) continue;
+    if (windows && p.clip) windows.set(ve, p.clip);
     view.set(ve, Transform, { x: p.x, y: p.y, z: p.z, facing: p.facing });
     if (view.has(ve, PrevTransform)) view.set(ve, PrevTransform, { x: p.x, y: p.y, z: p.z, facing: p.facing });
   }
@@ -354,7 +356,7 @@ export class IsoView {
     const cat = noCosmetics ? undefined : registry.cosmetics;
     if (cat?.size) this.view.register(Appearance);
     renderer.bindGameplay({ animState: VAnim, buildPiece: VPiece, wetness: VWet, bodyTemp: VTemp, lit: VFuel, burning: VBurn, pieceState: (e) => this.pieceStates.get(e), pieceSwing: (e, now) => this.doors.swing(e, now), pieceRoofFx: (e) => (e === this.ghost?.entity ? this.roofPreview?.fx : this.roofs.binding(e)), pieceRoofPlane: (x, y, l) => this.roofs.planeOver(x, y, l), pieceSwingSprite: (e) => this.doors.swingSprite(e), pieceScale: (e) => this.pieceScales.get(e), pieceLit: (e) => this.pieceLit.get(e), pieceTints: (e) => this.pieceTintPairs.get(e), litPieces: () => this.litHearths,
-      carriedSprite: (e) => this.carriedOf.get(e), bedFit: (e) => this.bedOf.get(e)?.fit, riderClip: (e) => this.riderClipOf.get(e), // ADR-244 carry socket / bed fit
+      carriedSprite: (e) => this.carriedOf.get(e), bedFit: (e) => this.bedOf.get(e)?.fit, riderClip: (e) => this.riderClipOf.get(e), riderWindow: (e) => this.riderWinOf.get(e), // ADR-244 carry socket / bed fit
       hitFlash: (e) => this.hitPoseOf.get(e)?.flash ?? 0, hitTilt: (e) => this.hitPoseOf.get(e)?.tilt ?? 0,
       animRate: (e, st) => (st === 1 && this.characters.has(e) ? this.walkRate : undefined),
       animChain: (e, st, elapsed) => ((st === 3 || st >= 13) && this.characters.has(e) ? animChainFor(st, this.animCtx(e, elapsed)) : undefined), // ADR-241
@@ -1165,7 +1167,7 @@ export class IsoView {
   /** ADR-319 rider gait per rider view entity (anim chain ride_idle / ride_walk / ride_gallop). */
   private rideOf = new Map<number, 0 | 1 | 2>();
   /** ADR-322: rider ve -> swim clip (px above the seat pivot); mount -> {act, tick it began} (rider own clock). */
-  private riderClipOf = new Map<number, number>(); private mountAct = new Map<Entity, { act: MountAct; at: number }>();
+  private riderClipOf = new Map<number, number>(); /** ADR-518: vehicle rider view entity -> window clip */ private riderWinOf = new Map<number, { bottom: number; top: number }>(); private mountAct = new Map<Entity, { act: MountAct; at: number }>();
   /** ADR-319 / ADR-320 view-only layers of a mount: saddle overlay and (while ridden) the fore layer drawn over the rider. ADR-361: the harness overlay, one step below the saddle. */
   private mountLayers = new Map<Entity, { harness?: Entity; saddle?: Entity; fore?: Entity }>();
   /**
@@ -1264,7 +1266,7 @@ export class IsoView {
     const f = frac ?? 0.5, darkness = Math.max(0, Math.min(1, Math.cos(f * 2 * Math.PI) * 1.6 + 0.2));
     // ADR-360: the placements are the riders' seats — the sim snaps a rider to the vehicle centre, so without
     // this a driver renders in the middle of the wagon instead of on its bench. Same path for motor and drawn.
-    applyVehicleRiderPlacements(net, this.view, this.map, this.vehicleView.sync(list, dt, { darkness, lowEnd: this.renderer.capabilities.lowEnd, ...(player !== undefined ? { localVehicle: localPlayerVehicle(net, player) } : {}), riderShadows: false }));
+    applyVehicleRiderPlacements(net, this.view, this.map, this.vehicleView.sync(list, dt, { darkness, lowEnd: this.renderer.capabilities.lowEnd, ...(player !== undefined ? { localVehicle: localPlayerVehicle(net, player) } : {}), riderShadows: false, view: this.renderer.iso.view ?? 0 }), this.riderWinOf);
   }
   private classify(net: World, e: Entity, defs: ReturnType<typeof gameplayDefs> | undefined, own: boolean): Spec | undefined {
     const h = (entityIndex(e) * 2654435761) >>> 0;

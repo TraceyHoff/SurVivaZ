@@ -12172,3 +12172,30 @@ Payout (`building/collapse_refund.ts`), once per stability pass per player: aliv
 attachments only: the cascade would need a full stability recompute (it mutates `PieceStability`), which isn't cheap
 or side-effect free per hover.
 Test: `packages/gameplay/test/adr517_collapse_refund.test.ts`.
+
+## ADR-518: vehicles at true real-world scale; riders sit on Art's seats behind the glass (SurVivaZ)
+
+Art repainted every vehicle, trailer and bike at true scale (30.286 px per metre of height, 45.255 px/m of length,
+22.627 px/m of depth; the 53 px player doll = 1.75 m). The sprites now draw 1:1: `artScaleFor()` is 1,
+`PLAYER_HEIGHT_PX` is 53, and `ART_HEIGHT_PX` / `ART_LENGTH_PX` are retired. `VEHICLE_HEIGHT_X` is derived from Art's
+roof heights (h / 1.75). Defs without Art (wagons, boats) keep the legacy stylised table against the old 74 px player,
+so their seat maths (task361) is unchanged. `seatZScale` is metres → z units for true-scale defs.
+
+**Seats.** `scripts/gen-vehicle-seats.mjs` turns Art's `seats.vehicles.json` into `vehicles/seats.data.ts` (checked in;
+a test fails if it drifts). Riders sit on Art's seat (u, v, z) for the current facing. Gameplay seats beyond Art's
+(van 8 vs 4, pickup 3 vs 2, RV 6 vs 2) are hidden, not stacked.
+
+**Window clip, no ghost.** Cab riders draw in front of the body, and a per-sprite vertical clip (`riderWindow`, quad
+rows in the vertex shader) shows only the rows seen through the glass. The band is Art's belt..roof at the seat,
+lowered along the camera ray by the distance to the cabin wall (×22.627/30.286). Through a windscreen or rear window
+the glass is raked, so its top edge is 0.5 m nearer (`WINDSCREEN_RAKE_M`). A far-side seat whose band closes is hidden.
+Rider depth beats the body's Footprint depth (`footprintKeyAt` mirrors the shader, including its +0.6 lift) over the
+shown rows. Bikes and open seats draw the whole rider.
+
+**Hide / pools.** Bodies taller than the player get an Occluder (fade 0.45), as other tall props do. All 88 Art pages
+fit the 1020 px vehicle pool slot. The pool is unchanged (4 per layer, 8 slots, 2 layers at 256 MB) and is pinned by
+the test. Six atlas pages are gone.
+
+Cuts: the Canvas2D fallback ignores the window clip; trailer_log has art but no def, so no vehicles.json entry is
+added; the pickup bed and van rear rows have no Art seats.
+Test: `packages/render/test/adr518_vehicles_true_scale.test.ts`.

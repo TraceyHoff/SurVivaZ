@@ -141,6 +141,9 @@ export interface GameplayBindings {
   bedFit?: (entity: number) => { x: number; y: number } | undefined;
   /** ADR-322: rider on a swimming moose: water row as px above the doll's seat pivot (negative = below); clip pixels under it. */
   riderClip?: (entity: number) => number | undefined;
+  /** ADR-518: vehicle rider window (VehicleView RiderPlacement.clip): rows shown, 1x px above the doll's seat pivot; pixels
+   *  below `bottom` (door / beltline) and above `top` (roof underside; 0 = none) are clipped. */
+  riderWindow?: (entity: number) => { bottom: number; top: number } | undefined;
   /** Wetness {level u8 0..255} (art's 0-3 intensity maps onto 0..255). */
   wetness?: WetnessDefT;
   /** BodyTemp {cold, heat u8; shivering 0/1}: shivering gates the shiver, cold scales it and drives the frost rim, heat drives flush. */
@@ -257,7 +260,8 @@ void main() {
   vec2 sl = (flags & 1) != 0 ? vec2(-aC.w, -aC.z) : aC.zw;
   bool maskSway = (vFB.x & 4) != 0 && aG.x > 0.0; float m = maskSway ? aG.x + 1.0 : 0.0; // sway mask: per-pixel UV shift, quad grows by amp
   float x0 = max(-ow - m, aC.x + sl.x), x1 = min(dim.x + ow + m, aC.x + sl.y);
-  float x = mix(x0, x1, c.x), y = mix(-ow, aJ.x > 0.0 || aJ.y < 0.0 ? clamp(aC.y - aJ.x, -ow, dim.y + ow) : dim.y + ow, c.y); // swim: lower body clipped; ADR-322 aJ.y < 0: clip only (rider below the swim waterline), any sign
+  float yTop = (flags & 8) == 0 && aJ.w > 0.0 ? clamp(aC.y - aJ.w, -ow, dim.y + ow) : -ow; // ADR-518: rider window top clip (roof underside), px above the pivot
+  float x = mix(x0, x1, c.x), y = mix(yTop, aJ.x > 0.0 || aJ.y < 0.0 ? max(yTop, clamp(aC.y - aJ.x, -ow, dim.y + ow)) : dim.y + ow, c.y); // swim: lower body clipped; ADR-322 aJ.y < 0: clip only (rider below the swim waterline), any sign
   float flip = (flags & 1) != 0 ? -1.0 : 1.0;
   float px = (x - aC.x) * s * flip;
   float hp = (aC.y - y) * s;
@@ -1019,6 +1023,8 @@ export class SpriteBatch {
       if (st === CoreAnimState.Swim && res.anim !== "swim") { o0[36] = res.ay * SWIM_CLIP; o0[37] = SWIM_BOB_PX; }
       // ADR-322: a rider on a swimming moose: clip the doll below the water row (px above the seat pivot; clip only, no sink)
       if (bodyL && res.anim.startsWith("ride_")) { const rc = cx.bindings.riderClip?.(e); if (rc !== undefined) { o0[36] = rc; o0[37] = -1; } }
+      // ADR-518: a rider in a true-scale vehicle cab shows only through the window band (beltline .. roof underside)
+      if (bodyL) { const rw = cx.bindings.riderWindow?.(e); if (rw) { const sc = sp.data.scale[k]! || 1; o0[36] = rw.bottom / sc; o0[37] = -1; o0[39] = rw.top > 0 ? rw.top / sc : 0; } }
       if (bodyL) this.writeLayerTint(o0, bodyL);
       // paper-doll depth: the vertex shader clamps the height term per vertex (max(hp, 0)), so a quad reaching below the
       // pivot gets a flatter interpolated depth slope than one that doesn't. Body and wear quads have different extents

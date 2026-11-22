@@ -53,11 +53,9 @@ export function resolveVehicleArt(reg: AssetRegistry, def: VehicleRenderDef, met
   let key = def.id; let s, id: number;
   try { s = reg.byKey(key); id = reg.id(key); } catch { key = artKeyFor(def.id); try { s = reg.byKey(key); id = reg.id(key); } catch { return null; } }
   const a0 = s.animList[0]; if (!a0 || a0.directions !== 8) return null;
-  // per-type stylized height (scale.ts): roof = heightX * player; unknown art keys fall back to 0.8 * pivot height
-  // Art's sheets are drawn at true size (VEHICLES_RENDER.md): meta scaleMode wins; without a table, veh_art_* atlases
-  // are native too (else the legacy fit scale mixed sizes, e.g. car_sedan at 1.82x next to native-size neighbours)
-  const m = meta?.get(key); const native = m ? m.scaleMode === "native" : /^veh_art_/.test(s.atlas.key);
-  const scale = native ? 1 : artScaleFor(def, key, 0.8 * s.anchor.y * s.atlas.frameH);
+  // ADR-518: Art's sheets are authored at true real-world scale (30.29 px/m height, 45.25 px/m length; scale.ts), so
+  // they always draw 1:1 - no fit scale, no stretch or squash, whatever the meta says
+  void meta; const scale = artScaleFor(def, key);
   return { mode: "art", key, spriteId: id, facingOffset: ART_FACING_OFFSET, scale, atlas: s.atlas.key };
 }
 
