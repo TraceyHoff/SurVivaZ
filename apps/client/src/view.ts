@@ -76,7 +76,7 @@ const animMap = (a: number): number => (a >= 14 && a <= 24 ? a : a === 8 ? 8 : A
 import { LightTable, type LightSpec } from "./lights.js";
 import { Burning, Driver, weaponClassOf, Stance, StanceMode, netIdEntity, bedSpots, bedRot } from "@engine/gameplay";
 import { animChainFor, bedFit, type AnimChainCtx } from "@engine/render";
-import { floorToTerrainZ } from "@engine/world";
+import { floorToTerrainZ, worldToScreen } from "@engine/world";
 import { RaidFx, useRaidBurning, type RaidPiece } from "./raid-fx.js";
 import { MANIFEST_INDEX, withCharArtFragment, loadMergedManifestWith, type ManifestFragmentRef } from "./manifest-index.js";
 import { task34AtlasSources, TASK34_ATLAS_KEYS } from "./task34-art.js";
@@ -96,6 +96,8 @@ import { installFishingRodIcon, rodAtlasSources } from "./fishing-rod-art.js"; /
 import { FootprintStore, sampleFootprints, collectFootprintOverlays, footprintTuning, snowCoverOf } from "./footprints.js"; // ADR-455
 import { stumpKeys } from "./stumps.js";
 import { RoofTiler, rfxStandIn, roofWallMaterial } from "./roof-tiler.js";
+/** ADR-520: iso px past the screen edges that still count as on screen for vehicle page streaming (the largest sheets ~1000 px). */
+const VEH_VIEW_MARGIN = 600;
 /** `?cam=animal`: debug camera that follows the first ambient animal instead of the player. */
 const CAM_ANIMAL = typeof location !== "undefined" && new URLSearchParams(location.search).get("cam") === "animal";
 /** Max bytes for the sprite texture array (mips included) before customization layers are dropped. */
@@ -1248,6 +1250,12 @@ export class IsoView {
       return { ...(seat ? { seat: { x: seat.x * k, y: seat.y * k } } : {}), ...(water ? { water: { x: water.x * k, y: water.y * k } } : {}) };
     } catch { return undefined; }
   }
+  /** ADR-520: off-screen vehicles (VEH_VIEW_MARGIN iso px past the edges) don't touch their streamed page, so the
+   *  LRU hands the slots to the vehicles on screen (was: every vehicle in the loaded world requested its page each frame). */
+  private vehInView(): (x: number, y: number) => boolean {
+    const r = this.renderer.camera.visibleRect(VEH_VIEW_MARGIN); const iso = this.renderer.iso;
+    return (x, y) => { const p = worldToScreen(x, y, 0, iso); return p.sx >= r.x0 && p.sx <= r.x1 && p.sy >= r.y0 && p.sy <= r.y1; };
+  }
   private syncVehicles(net: World, player: Entity | undefined, ground: (x: number, y: number, z: number) => number, frac: number | undefined): void {
     if (!net.isRegistered(GVehicle)) return;
     const list = this.vehicleSnaps; list.length = 0;
@@ -1269,7 +1277,7 @@ export class IsoView {
     const f = frac ?? 0.5, darkness = Math.max(0, Math.min(1, Math.cos(f * 2 * Math.PI) * 1.6 + 0.2));
     // ADR-360: the placements are the riders' seats — the sim snaps a rider to the vehicle centre, so without
     // this a driver renders in the middle of the wagon instead of on its bench. Same path for motor and drawn.
-    applyVehicleRiderPlacements(net, this.view, this.map, this.vehicleView.sync(list, dt, { darkness, lowEnd: this.renderer.capabilities.lowEnd, ...(player !== undefined ? { localVehicle: localPlayerVehicle(net, player) } : {}), riderShadows: false, view: this.renderer.iso.view ?? 0 }), this.riderWinOf);
+    applyVehicleRiderPlacements(net, this.view, this.map, this.vehicleView.sync(list, dt, { darkness, lowEnd: this.renderer.capabilities.lowEnd, ...(player !== undefined ? { localVehicle: localPlayerVehicle(net, player) } : {}), riderShadows: false, view: this.renderer.iso.view ?? 0, inView: this.vehInView() }), this.riderWinOf);
   }
   private classify(net: World, e: Entity, defs: ReturnType<typeof gameplayDefs> | undefined, own: boolean): Spec | undefined {
     const h = (entityIndex(e) * 2654435761) >>> 0;

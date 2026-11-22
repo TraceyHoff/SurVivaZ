@@ -124,7 +124,17 @@ const OWN_MAX_LEVELS = 3;
 /** Vehicle art pages kept resident at once (one page = one grouped Art sheet, ~1024^2 at 1x): desktop / low memory. */
 // Every Art vehicle sheet fits 1020x1020 at 1x (ADR-518 true-scale pass: 88 pages, largest 936x1000 trimmed), so a 2048
 // layer holds 4 slots (8 slots on the A16 plan: 2 layers at 1x, ~4.8 MB a slot); pinned by adr518_vehicles_true_scale.test.ts
-const VEH_POOL_SLOTS_DESKTOP = 8, VEH_POOL_SLOTS_LOWMEM = 6;
+/** ADR-520: low-memory was 6; at 1024 layers (one big sheet a layer) 7+ cars on screen left some undrawn. The A16 plan (2048 layers, 4 a layer) already rounded 6 up to 8. */
+const VEH_POOL_SLOTS_DESKTOP = 8, VEH_POOL_SLOTS_LOWMEM = 8;
+/** ADR-520: vehicle sheets at most this big (1x px, both sides) stream through the small-vehicle pool (bikes). */
+export const VEH_SMALL_PX = 512;
+/** every small sheet gets a slot (7 today: 2 layers at 1024, 1 at 2048), so a crowd of bikes never pages */
+const VEH_SMALL_SLOTS = 8, VEH_SPLIT_MIN = 2;
+/** ADR-520: the vehicle pages of the small pool (none unless at least VEH_SPLIT_MIN small and big pages each). */
+export function vehSmallPages<T extends { lazy?: { w1: number; h1: number } }>(veh: readonly T[]): T[] {
+  const small = veh.filter((a) => a.lazy !== undefined && a.lazy.w1 <= VEH_SMALL_PX && a.lazy.h1 <= VEH_SMALL_PX);
+  return small.length >= VEH_SPLIT_MIN && veh.length - small.length >= VEH_SPLIT_MIN ? small : [];
+}
 /** Building tier pages (building_t1..t4) resident at once: every tier on desktop; 2 on <=256 MB budgets (a base mixes ~2 tiers). */
 const BLD_POOL_SLOTS_DESKTOP = 4, BLD_POOL_SLOTS_LOWMEM = 4;
 // ADR-400: rfx roof pages (2016 x <=408) get their own bld group so their slots are sized to them, not to a 1632-tall tier
@@ -916,7 +926,12 @@ export class AtlasManager {
     if (bldRoof.length) groups.push({ cls: "bld", lazy: bldRoof, minSlots: Math.min(bldRoof.length, lowMem ? ROOF_POOL_SLOTS_LOWMEM : ROOF_POOL_SLOTS_DESKTOP), cap: true });
     if (bldStairs.length) groups.push({ cls: "bld", lazy: bldStairs, minSlots: 1, cap: true });
     // vehicles: compressed tail
-    if (veh.length) groups.push({ cls: "veh", lazy: veh, minSlots: Math.min(veh.length, lowMem ? VEH_POOL_SLOTS_LOWMEM : VEH_POOL_SLOTS_DESKTOP), cap: true });
+    // ADR-520: small sheets (bikes, <= VEH_SMALL_PX) get their own pool: one 936x1000 slot size for every page made each
+    // bike take a whole car slot, so 7+ vehicles on screen at a 1024 layer (6 slots) left the last ones (often the bike)
+    // undrawn in WebGL2. Small slots tile 2x2+ per layer and never compete with car / truck pages.
+    const vehSmall = vehSmallPages(veh), vehBig = veh.filter((a) => !vehSmall.includes(a));
+    if (vehBig.length) groups.push({ cls: "veh", lazy: vehBig, minSlots: Math.min(vehBig.length, lowMem ? VEH_POOL_SLOTS_LOWMEM : VEH_POOL_SLOTS_DESKTOP), cap: true });
+    if (vehSmall.length) groups.push({ cls: "veh", lazy: vehSmall, minSlots: Math.min(vehSmall.length, VEH_SMALL_SLOTS), cap: true });
     // manifest stream sheets: visible art (kept at 1x, counted in keepVis like vehicles), a small LRU working set
     if (strm.length) {
       // ADR-251: stream sheets are mostly whole 2048 pages (one slot per layer at 1x): 24 slots asked ~640 MB, which the

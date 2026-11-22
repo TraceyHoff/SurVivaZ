@@ -12224,3 +12224,25 @@ Also fixed: the Canvas2D fallback threw "retainSprite is not a function" on ever
 does not stream pages); the client now passes `pages` only when the atlas has `retainSprite`.
 Tests: `packages/render/test/adr519_vehicle_paint.test.ts`, `packages/gameplay/test/adr519_vehicle_paint.test.ts`,
 `packages/persist/test/adr519_vehicle_paint_migration.test.ts`.
+
+## ADR-520: every vehicle draws in WebGL2: small-sheet vehicle pool, 8 low-memory slots, on-screen streaming (SurVivaZ)
+
+**Bug.** With 7+ vehicles on screen, the last ones did not draw in WebGL2 (often bike_road; in the ADR-519 lineup also
+van_cargo). Canvas2D showed them, because it draws straight from the loaded images. The streamed vehicle pool sized
+every slot for the biggest sheet (936x1000). At 1024 layers (low-memory budgets: 6 slots, one per layer), a 472x468
+bike took a whole car slot, and pages beyond the capacity stayed non-resident: no Art and no placeholder, so nothing was
+drawn. The client also never passed `inView`, so every vehicle in the loaded world requested its page each frame.
+
+**Fix.**
+- Sheets at most 512 px on both sides (`VEH_SMALL_PX`: 6 bikes plus a compact-car facing page) get their own pool (2x2
+  a layer at 1024, 4x4 at 2048). It has a slot for every small sheet, so a crowd of bikes never pages.
+- Low memory keeps 8 big slots (was 6). The A16 plan (2048 layers, 4 a layer) already rounded up to 8, so it is
+  unchanged there.
+- The client passes `inView` (camera visible rect plus 600 iso px), so off-screen vehicles stop touching their pages
+  and the LRU gives the slots to visible ones.
+
+Verified in WebGL2 (swiftshader, 160 MB budget): all 30 keys with a gameplay def are resident and drawn in batches of
+6 to 9 on screen (trailer_log has art but no def).
+Remaining limit: more than 8 big vehicles on screen at once at a 1024-layer budget still leaves the farthest-requested
+ones waiting for a slot.
+Test: `packages/render/test/adr520_vehicle_pool_split.test.ts`.
