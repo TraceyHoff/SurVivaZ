@@ -46,6 +46,7 @@ export * from "./building/integrity.js";
 export * from "./building/actions.js";
 export * from "./building/edit.js"; // ADR-317 / ADR-318
 export * from "./building/abandoned.js";
+export * from "./building/legacy_floors.js"; // ADR-514
 export * from "./building/stairs.js"; // ADR-372: stair ramps + level links
 export * from "./building/ghost.js";
 export * from "./building/shelter.js";

@@ -74,6 +74,9 @@ export interface WorldPersistenceOptions {
    * second call returns nothing further.
    */
   topUpNodes?: (world: World, chunk: Chunk, entities: readonly Entity[]) => NodePlacement[];
+  /** ADR-514: records saved at a tick below `beforeTick` predate the floor-height stamp; `fix` re-seats one loaded entity
+   *  (chunk entity or restored player) and returns whether it changed it. */
+  legacyZ?: { beforeTick: number; fix: (world: World, e: Entity) => boolean };
   player?: PlayerCodecOptions;
   /**
    * Component schema migrations applied to stored chunk rows (and, unless `player.migrations` is set, player records)
@@ -307,6 +310,9 @@ export class WorldPersistence {
         let skins = 0; for (const e of d.entities) if (migrateSkinTone(this.world, e)) skins++;
         if (skins) { this.stats.skinTonesMigrated += skins; this.skinDirty.add(d.chunk.key); // dirtied in track(), after membership has seen the loaded entities (else the chunk would save empty)
           this.opts.log?.(`persist: ${rec.key}: ${skins} legacy skin tone(s) remapped`); }
+        // ADR-514: z of entities saved before the floor stamp (pre-ADR-511 3-level floors) -> the current floor
+        const lz = this.opts.legacyZ; if (lz && rec.tick < lz.beforeTick) { let n = 0; for (const e of d.entities) if (lz.fix(this.world, e)) n++;
+          if (n) { this.skinDirty.add(d.chunk.key); this.opts.log?.(`persist: ${rec.key}: ${n} legacy floor height(s) re-seated`); } }
         this.savedVersion.set(d.chunk.key, d.chunk.version); this.stats.chunksLoadedFromStore++;
         this.loadSidecars(cx, cy, d.chunk.key, d.entities);
         const rg = this.opts.regenerateNodes;
@@ -505,6 +511,7 @@ export class WorldPersistence {
     const rec = this.store.readPlayer(token); if (!rec) return undefined;
     const r = decodePlayerInto(this.world, entity, rec.bytes, { ...(this.opts.migrations ? { migrations: this.opts.migrations } : {}), ...this.opts.player });
     if (migrateSkinTone(this.world, entity)) this.stats.skinTonesMigrated++; // ADR-245: before the clamp (it would keep a legacy index)
+    if (this.opts.legacyZ && rec.tick < this.opts.legacyZ.beforeTick && this.opts.legacyZ.fix(this.world, entity)) this.opts.log?.(`persist: player ${token.slice(0, 8)}…: legacy floor height re-seated`); // ADR-514
     const appearance = this.opts.appearance ? ensureAppearance(this.world, entity, this.opts.appearance.catalog) : undefined;
     return { ...r, name: rec.name, ...(appearance ? { appearance } : {}) };
   }

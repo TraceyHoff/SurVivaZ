@@ -72,7 +72,13 @@ export interface WorldMeta { seed: number; tick: number; schemaHash: number; cre
   /** World rules (ADR-121): roaming hordes on (1) / off (0), and their grace period in in-game days. Absent = gameplay defaults. */
   hordes?: number; hordeGraceDays?: number;
   /** World rules (Task 22): AI humans on (1) / off (0) in multiplayer. Absent = on. */
-  aiHumans?: number }
+  aiHumans?: number;
+  /** ADR-514: terrain levels per building floor the save's Transform.z values use (5 since ADR-511). Absent = written
+   *  before the stamp: records saved before ADR-511 store z in 3-level floors. */
+  floorLevels?: number;
+  /** ADR-514: records (chunks / players) saved at a tick below this one predate the floor stamp and get the legacy z fix
+   *  on load; 0 / absent with floorLevels set = none. */
+  floorStampTick?: number }
 
 /** Everything written in one transaction. Either all of it becomes durable or none of it does. */
 export interface SaveBatch {

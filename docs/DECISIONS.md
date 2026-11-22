@@ -12077,3 +12077,27 @@ needs Tracey's eyes. (b) Saves written before ADR-511 store Transform.z in 3-lev
 2nd floor or higher restores one floor lower (1st floor and ground are fine). A migration cannot tell pre-flip saves from
 saves made since the flip (no floor marker in the world meta), so it would mis-move players in newer saves; left as is.
 Evidence in `/workspace/share/bug_pass/`.
+
+## ADR-514: floor-height stamp in saves; pre-ADR-511 heights re-seat on load (SurVivaZ)
+
+**Bug (ADR-513 "found, not fixed" b).** ADR-511 moved a building floor from 3 to 5 terrain levels, but saves keep raw
+`Transform.z`. A player (or a death bag / AI human / animal in a chunk record) saved on the 2nd floor or higher came back
+at `round(z / 5)` — one floor lower or between floors — and the stand settle dropped them into the storey below.
+Building pieces save their floor index, not z, and were never affected.
+
+**Stamp.** The world meta now carries `floorLevels` (5) and `floorStampTick` (server `extraMeta`; SQLite `readMeta`
+reads both, plus the `aiHumans` key it was dropping). A save with no `floorLevels` predates the stamp: every record in it
+(tick <= the meta tick at that boot) may hold 3-level heights, so `floorStampTick = meta.tick + 1` and it is written with
+the stamp, so it holds on every later boot too. New worlds stamp 0 (nothing legacy).
+
+**Re-seat (`fixLegacyFloorZ`, `WorldPersistence` option `legacyZ`).** Saves hold no wall-clock time (records carry only
+the world tick), so the ADR-511 commit time can't be compared. For records with `tick < floorStampTick` (restored players
+and chunk entities), the z is matched to a stand height: `floor × levels + {0, 0.3125, 0.375, 0.75}`. A z that fits the
+5-level grid is kept. A z that only fits the 3-level grid, on floor 1..`maxLevel`, moves to the same floor index on the
+5-level grid (`z + floor × 2`). Mid-stairs and falling heights are left to the normal settle. When the chunk's structures
+are in the index, the move must land on a deck, and an ambiguous `15 + offset` moves only if just the old floor has one.
+The rule is idempotent: a re-seated chunk is dirtied and re-saved past the stamp tick.
+
+Tests: `packages/gameplay/test/adr514_legacy_floor_z.test.ts` (rule, idempotence, deck probe),
+`packages/persist/test/adr514_legacy_floor_chunks.test.ts` (chunk record round trip),
+`apps/server/test/adr514_legacy_floor_save.test.ts` (stamp written; stamped z kept; pre-stamp player re-seated 6.31 → 10.31).

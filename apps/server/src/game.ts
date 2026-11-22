@@ -2,7 +2,7 @@ import { dismountOnLeave, installMountCommands, installRopeCommands, MountEvent 
 import { MountEventEvt } from "./protocol.js";
 import { friendSpawn } from "./friend-spawn.js";
 import { giveSandboxKit, sandboxPetKit, sandboxPetCorner, sandboxSpawn } from "./sandbox.js";
-import { handLootTarget, Viewing, TerrainRes, terrainFromTileMap } from "@engine/gameplay";
+import { fixLegacyFloorZ, handLootTarget, Viewing, TerrainRes, terrainFromTileMap } from "@engine/gameplay";
 import { applyStanceInput, stanceBlocksActions, GameplayEdgeBits } from "@engine/gameplay"; // ADR-244
 import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSignCommands, installPetCommands, installReadyCommands, markReady, PlayerReady, PetEvent, setWorldRules, worldRules, type WorldRulesOpts, installAnimalSkillCommands, installWorkerCommands, installDyeCommands, WorkerEvent, installTerrainCommands, installRampCommands, installItemRepairCommands, recordChunkDiscoveries } from "@engine/gameplay";
 import { parseChunkKey } from "@engine/world";
@@ -177,6 +177,10 @@ export function createGameServer(o: GameServerOptions): GameServer {
   // (tests / custom maps) keep AI humans on those points.
   const worldAiSpawn = o.aiSpawn !== "starters"; // ADR-325 (fixtures may keep the ADR-106 starter placement)
   if (!o.spawnPoints?.length && worldAiSpawn) setAiSpawnPoints(world, () => computeAiSpawnPoints(generator, seed, spawnPoints(world), gameplayDefs(world).worldgen.unwalkableTiles));
+  // ADR-514: floor-height stamp. A save without it predates the stamp: every record it holds (tick <= meta.tick) may carry
+  // pre-ADR-511 3-level floor heights and is re-seated on load (fixLegacyFloorZ); records saved from now on are current.
+  const floorStampTick = !meta ? 0 : meta.floorLevels === undefined ? meta.tick + 1 : meta.floorLevels === defs.building.levelHeight ? (meta.floorStampTick ?? 0) : meta.tick + 1;
+  if (floorStampTick > 0 && meta?.floorLevels === undefined) log(`persist: save has no floor-height stamp; records saved before tick ${floorStampTick} get the ADR-514 floor re-seat`);
   const persist = o.store ? new WorldPersistence({
     world, store: o.store, generator, tickHz, log,
     ...(o.buildings ? { buildings: o.buildings } : {}),
@@ -187,8 +191,9 @@ export function createGameServer(o: GameServerOptions): GameServer {
     // ADR-429: stored chunks generated before the banded generator get the wild-crop / fruit-tree
     // kinds they are missing (one per kind, deterministic, idempotent — see wildCropTopUp.ts).
     topUpNodes: (w, chunk, ents) => computeWildCropTopUp(w, chunk, ents, generator.nodesInChunk(chunk.cx, chunk.cy)),
+    ...(floorStampTick > 0 ? { legacyZ: { beforeTick: floorStampTick, fix: fixLegacyFloorZ } } : {}),
     social: permissions,
-    extraMeta: () => { const r = worldRules(world); return { hordes: r.hordes ? 1 : 0, hordeGraceDays: r.hordeGraceDays, aiHumans: r.aiHumans ? 1 : 0 }; },
+    extraMeta: () => { const r = worldRules(world); return { hordes: r.hordes ? 1 : 0, hordeGraceDays: r.hordeGraceDays, aiHumans: r.aiHumans ? 1 : 0, floorLevels: defs.building.levelHeight, floorStampTick }; },
     ...(o.catalog ? { appearance: { catalog: o.catalog } } : {}),
   }) : undefined;
   let localPlayerIds = 1; // no store: ids only need to be unique for this run
