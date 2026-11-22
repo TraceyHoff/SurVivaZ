@@ -46,6 +46,25 @@ export const PAD_SHORTCUTS = ["X", "Y", "LB", "RB", "LT", "RT"] as const;
 export const PAD_GLYPH: Record<string, string> = { A: "Ⓐ", B: "Ⓑ", X: "Ⓧ", Y: "Ⓨ", LB: "LB", RB: "RB", LT: "LT", RT: "RT" };
 /** ADR-200: `html[data-pad-ui]` while the pad is the last-used device (shows hint footers); any pointer / key clears it. */
 let padUiHooked = false;
+/**
+ * ADR-513: D-pad wrap at a modal's edge. The control that shares the focused one's column (down / up) or row (left / right)
+ * and lies furthest the other way, or undefined when none does. The old DOM-order step jumped from a grid's last row into
+ * whatever panel came next in the markup (inventory: Down on Hotbar 8 went UP to the equipment's Main hand and looped).
+ */
+export function edgeWrap(rects: readonly { left: number; right: number; top: number; bottom: number }[], i: number, dir: "up" | "down" | "left" | "right"): number | undefined {
+  const c = rects[i]; if (!c) return undefined; const vert = dir === "up" || dir === "down";
+  let best: number | undefined, bestKey = Infinity;
+  rects.forEach((r, j) => {
+    if (j === i || r.right - r.left <= 0 || r.bottom - r.top <= 0) return;
+    const overlap = vert ? Math.min(c.right, r.right) - Math.max(c.left, r.left) : Math.min(c.bottom, r.bottom) - Math.max(c.top, r.top); if (overlap <= 1) return;
+    const key = dir === "down" ? r.top : dir === "up" ? -r.bottom : dir === "right" ? r.left : -r.right;
+    if (key < bestKey) { bestKey = key; best = j; }
+  });
+  if (best === undefined) return undefined; const b = rects[best]!;
+  // the far end must really be on the other side (a lone control in its column has nowhere to wrap to)
+  const other = dir === "down" ? b.top < c.top : dir === "up" ? b.bottom > c.bottom : dir === "right" ? b.left < c.left : b.right > c.right;
+  return other ? best : undefined;
+}
 export function setPadUi(on: boolean, doc: Document | undefined = typeof document !== "undefined" ? document : undefined): void {
   if (!doc) return; if (on) doc.documentElement.dataset["padUi"] = "1"; else delete doc.documentElement.dataset["padUi"];
   if (!padUiHooked) { padUiHooked = true; const off = (): void => setPadUi(false, doc); doc.addEventListener("pointerdown", off, true);
@@ -146,7 +165,10 @@ export class UINav {
     f.forEach((e, i) => { const r = rects[i]!; fm.add({ id: String(i), rect: { x: r.left, y: r.top, w: r.width, h: r.height } }); });
     fm.setFocus(String(f.indexOf(cur)));
     const next = fm.navigate(dir);
-    if (next === undefined || next === String(f.indexOf(cur))) return this.step(dir === "up" || dir === "left" ? -1 : 1); // edge: wrap in DOM order
+    if (next === undefined || next === String(f.indexOf(cur))) { // edge: wrap to the far end of the same column / row
+      const w = edgeWrap(rects, f.indexOf(cur), dir); if (w !== undefined) { const n = f[w]!; focusVisible(n); return n; }
+      return this.step(dir === "up" || dir === "left" ? -1 : 1); // nothing shares the column / row: DOM order
+    }
     const n = f[Number(next)]!; focusVisible(n); return n;
   }
   /** A / Enter / Space on the focused control. */

@@ -52,10 +52,18 @@ export class FocusManager {
     let best: FocusNode | undefined, bestScore = Infinity;
     for (const n of pool) {
       const p = center(n.rect); const dx = p.x - c.x, dy = p.y - c.y;
-      const primary = dir === "left" ? -dx : dir === "right" ? dx : dir === "up" ? -dy : dy; if (primary <= 0.5) continue;
+      const primary = dir === "left" ? -dx : dir === "right" ? dx : dir === "up" ? -dy : dy;
+      // ADR-513: it must lie at least a quarter of the smaller control further along (was 0.5 px: Down on the inventory's Feet
+      // slot picked Hotbar 8 on the same row, 1.5 px lower, so focus slid sideways and looped)
+      if (primary <= Math.max(0.5, (dir === "left" || dir === "right" ? Math.min(cur.rect.w, n.rect.w) : Math.min(cur.rect.h, n.rect.h)) / 4)) continue;
       // ADR-142: cross-axis gap between the rects (0 when they overlap), not centre distance; a wide button (Build "Place")
       // spanning both grid columns lost to a same-column button further down and was unreachable by D-pad.
-      const secondary = dir === "left" || dir === "right" ? gap(cur.rect.y, cur.rect.h, n.rect.y, n.rect.h, dy) : gap(cur.rect.x, cur.rect.w, n.rect.x, n.rect.w, dx); const score = primary + secondary * 2;
+      const horiz = dir === "left" || dir === "right";
+      const secondary = horiz ? gap(cur.rect.y, cur.rect.h, n.rect.y, n.rect.h, dy) : gap(cur.rect.x, cur.rect.w, n.rect.x, n.rect.w, dx);
+      // ADR-513: a candidate in another row / column (no cross-axis overlap) also pays the focused control's own size along the
+      // move axis, so the next cell in the same column wins over a near neighbour off to the side (inventory: up from the pack
+      // grid's right column jumped into the equipment panel; left from Head went down to Back instead of to the pack).
+      const score = primary + secondary * 2 + (secondary >= 1 ? (horiz ? cur.rect.w : cur.rect.h) : 0);
       if (score < bestScore) { bestScore = score; best = n; }
     }
     if (!best && cur.group && this.groups.get(cur.group)?.wrap) { // wrap to the far side within the group
