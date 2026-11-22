@@ -27,6 +27,7 @@ import { loadManifest, buildPieceVisual, quarterTurn, type AssetRegistry } from 
 import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard, setResizeSlicing, type VfxSpawn } from "@engine/render";
 import { countFraction } from "./load-progress.js";
 import { isWarmupCandidate, warmupPageBudget, type WarmupResult } from "@engine/render";
+import { GrazedTiles } from "@engine/render";
 import { VehicleView, type RiderPlacement, type VehicleSnapshot, type VehicleRenderDef } from "@engine/render";
 import { Vehicle as GVehicle, VehicleSeats, VehicleState, Hitch, vehicleDefOf, localPlayerVehicle } from "@engine/gameplay";
 import { netIdOf } from "@engine/net";
@@ -239,6 +240,18 @@ function readXform(w: World, e: Entity, def: typeof Transform | typeof PrevTrans
   if (!w.isAlive(e)) return undefined; const st = w.store(def); const i = entityIndex(e); if (!st.has(i)) return undefined; const k = st.slot(i), d = st.data as Record<"x" | "y" | "z" | "facing", Float32Array>;
   out.x = d.x[k]!; out.y = d.y[k]!; out.z = d.z[k]!; out.facing = d.facing[k]!; return out;
 }
+/** ADR-508: view Transform / PrevTransform write that skips the set() (init object + per-field walk + change mark) when
+ *  every stored f32 field already holds the value — static pieces, trees and idle bodies, i.e. most entities, most
+ *  frames. Missing component: falls through to set() (which throws, as before). Nothing reads the view world's
+ *  change marks (the renderer re-gathers every frame), so skipping an identical write changes no output. */
+export function writeXform(w: World, e: Entity, def: typeof Transform | typeof PrevTransform, x: number, y: number, z: number, facing: number): void {
+  const st = w.store(def); const i = entityIndex(e);
+  if (w.isAlive(e) && st.has(i)) {
+    const k = st.slot(i), d = st.data as Record<"x" | "y" | "z" | "facing", Float32Array>;
+    if (d.x[k] === Math.fround(x) && d.y[k] === Math.fround(y) && d.z[k] === Math.fround(z) && d.facing[k] === Math.fround(facing)) return;
+  }
+  if (def === Transform) w.set(e, Transform, { x, y, z, facing }); else w.set(e, PrevTransform, { x, y, z, facing });
+}
 export const CAM_Z_TAU = 0.15, CAM_Z_SNAP = 4;
 /** Camera x/y follow easing (s): the camera used to sit exactly on the interpolated player position, so every tick
  * jitter, collision slide and reconciliation remnant moved the whole screen. Easing x/y like z (tau 0.08 s, ~0.2-tile
@@ -371,16 +384,16 @@ export class IsoView {
   private movingVe = new Set<number>(); private driverVe = new Set<number>();
   /** ADR-244: sleeper ve -> bed lie kind + bedFits offset; carrier ve -> carried bag sprite; net bags hidden while carried. */
   private bedOf = new Map<number, { lie: "lie" | "under"; fit: { x: number; y: number } }>(); private carriedOf = new Map<number, number>(); private carriedNet = new Set<Entity>();
-  /** ADR-256: GrazedTile keys from the net world (tx,ty) + revision for renderer cache invalidation. */
-  private grazedKeys = new Set<string>(); private grazedRev = 0;
+  /** ADR-256: GrazedTile tiles from the net world. ADR-505: per-chunk revisions, so a graze rebuilds one terrain chunk
+   *  (WebGL2) / the gt blocks over it (Canvas2D) instead of every chunk; numeric keys, no per-frame Set/string churn. */
+  private readonly grazed = new GrazedTiles(); private grazedBound = false;
 
   /** ADR-256: mirror GrazedTile entities from the net world onto the renderer (view World has no GrazedTile). */
   private syncGrazed(net: World): void {
-    const next = new Set<string>();
-    if (net.isRegistered(GrazedTile)) for (const e of net.query([GrazedTile])) { const g = net.get(e, GrazedTile)!; next.add(`${g.tx},${g.ty}`); }
-    let same = next.size === this.grazedKeys.size; if (same) for (const k of next) if (!this.grazedKeys.has(k)) { same = false; break; }
-    if (!same) { this.grazedKeys = next; this.grazedRev++; }
-    this.renderer.setGrazed(this.grazedKeys.size ? (x, y) => this.grazedKeys.has(`${x},${y}`) : undefined, this.grazedRev);
+    const g = this.grazed; g.begin();
+    if (net.isRegistered(GrazedTile)) for (const e of net.query([GrazedTile])) { const t = net.get(e, GrazedTile)!; g.add(t.tx, t.ty); }
+    g.commit();
+    if (!this.grazedBound) { this.renderer.setGrazedTiles(g); this.grazedBound = true; }
   }
   private syncStance(net: World, e: Entity, ve: Entity): void {
     const s = net.isRegistered(Stance) ? net.get(e, Stance) : undefined;
@@ -797,11 +810,13 @@ export class IsoView {
     this.carriedNet.clear(); if (net.isRegistered(Stance)) for (const p of net.query([Stance])) { const id = net.getField(p, Stance, "carriedNetId"); const b = id ? netIdEntity(net, id) : undefined; if (b !== undefined) this.carriedNet.add(b); }
     for (const e of net.query([Transform])) {
       if (e === net.environment) continue;
-      const tf = net.get(e, Transform)!;
-      const grBase = net.has(e, GPiece) ? groundBoundaryPiece : net.has(e, GAnim) ? groundPiece : ground; // ADR-212: walkers on a deck keep their stand height over terrain steps
-      const pinToRim = hatchTiles.has(`${Math.floor(tf.x)},${Math.floor(tf.y)}`) && (net.has(e, GPiece) || !(net.isRegistered(InShaft) && net.getField(e, InShaft, "down")));
-      const gr = pinToRim ? (net.has(e, GPiece) || net.has(e, GAnim) ? rimPiece : shaftRimGroundZ.bind(null, tiles)) : grBase;
       const cur = readXform(net, e, Transform, this.sCur)!; let prev = readXform(net, e, PrevTransform, this.sPrev) ?? cur; // ADR-157: scratch, no per-entity allocation
+      // ADR-508: Transform read once into scratch (was an extra net.get copy per entity), and the hatch-tile string key is
+      // only built when a hatch exists (it was a template string per entity per frame).
+      const isPiece = net.has(e, GPiece), isAnim = !isPiece && net.has(e, GAnim);
+      const grBase = isPiece ? groundBoundaryPiece : isAnim ? groundPiece : ground; // ADR-212: walkers on a deck keep their stand height over terrain steps
+      const pinToRim = hatchTiles.size > 0 && hatchTiles.has(`${Math.floor(cur.x)},${Math.floor(cur.y)}`) && (isPiece || !(net.isRegistered(InShaft) && net.getField(e, InShaft, "down")));
+      const gr = pinToRim ? (isPiece || net.has(e, GAnim) ? rimPiece : shaftRimGroundZ.bind(null, tiles)) : grBase;
       if (this.corrections && net.predicted.has(e)) prev = this.corrSampler.apply(this.corrections, e, net.tick, cur, prev, this.sPrev);
       let ve = this.map.get(e);
       if (ve === undefined) {
@@ -830,8 +845,8 @@ export class IsoView {
       const travel = facingAfterTravel(cur.facing, dx, dy, this.lastFace.get(e));
       if (travel.last !== undefined) this.lastFace.set(e, travel.last);
       const facing = travel.facing;
-      v.set(ve, PrevTransform, { x: prev.x, y: prev.y, z: gr(prev.x, prev.y, prev.z), facing: v.getField(ve, Transform, "facing")! });
-      v.set(ve, Transform, { x: cur.x, y: cur.y, z: gr(cur.x, cur.y, cur.z), facing });
+      writeXform(v, ve, PrevTransform, prev.x, prev.y, gr(prev.x, prev.y, prev.z), v.getField(ve, Transform, "facing")!);
+      writeXform(v, ve, Transform, cur.x, cur.y, gr(cur.x, cur.y, cur.z), facing);
       if (v.has(ve, VAnim)) {
         const ga = net.getInto(e, GAnim, this.sAnim); const dead = net.has(e, Dead);
         let state = dead ? 5 : ga && ga.anim > 1 ? animMap(ga.anim) : moving ? (net.has(e, Zombie) ? 6 : 1) : 0;

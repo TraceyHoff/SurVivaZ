@@ -11856,3 +11856,50 @@ Ruled out on the way: no reduced-resolution cutaway / see-through target, no sca
 **Flip readiness (measured).** The sim already reads the floor from `tiers.json` (pieces persist by slot level and re-derive `Transform.z` with `slotTransform(lh)`, so saved bases need no migration). A scratch run with levelHeight / FLOOR_HEIGHT_LEVELS = 5 on this tree: 21 of 4,647 tests fail in 10 files — `adr372_stairs` (a test-local `LH = 3`), `adr142` / `adr412` / `adr432` / `adr433` ground-lift tests and `batch9` / `modular` (literal 3 / 48 and "one floor = one depth row", which becomes 5/3 rows and must be re-verified), `adr417` Canvas2D story cutaway. Those land with the art.
 
 **Honest cuts.** No visible change in this slice: buildings draw exactly as before (before/after composites identical) until Art's 80 px set lands. Numbers are measured headless (SwiftShader WebGL2); the user's eyes on the live build are the final check.
+
+## ADR-505: A grazed tile rebuilds only its own terrain chunk (SurVivaZ)
+
+**Owner ask.** "Can we do any upgrades to the rendering system to make rendering faster?" The Galaxy A16 has been laggy since `9ecf1388`.
+
+**Root cause (profiled).** Profile: headless Chrome with SwiftShader at 412×915, DPR 2.625, Android UA, CDP CPU throttle 4×, CPU profile plus heap sampling (`packages/render/scripts/perfMobile.mjs` plus scratch probes). `TileTerrain.build` took 76–167 ms of every second's ~106–220 ms of renderer CPU. Each change to the grazed-grass set (animals crop a tile about every 10 frames when a herd is near) bumped one **global** `grazedRev`. That rev is part of every chunk's stamp, so all ~8 visible textured-ground chunks rebuilt in one frame, plus up to 16 prewarm builds for the adjacent view quarters. Canvas2D re-baked every gt block the same way.
+
+**Fix.** New `packages/render/src/grazedTiles.ts`: `GrazedTiles` (`begin` / `add` / `commit`) diffs the new set against the previous one and bumps a **per-chunk** revision only for the chunks whose tiles changed. `TileTerrain.stamp` and the Canvas2D gt-block stamp fold in `chunkRev(cx, cy)`. The client's `syncGrazed` and the renderer's own binding feed one `GrazedTiles`. The legacy `setGrazed(fn, rev)` still works and still invalidates everything. Grazed tiles look exactly the same; only fewer chunks are re-meshed.
+
+**Measured.** Probe: one graze now rebuilds 1 chunk plus at most 2 prewarm chunks, down from about 8 + 16. Interleaved A/B, 30 s steady state, throttle 4× (box under heavy load from other jobs, so two rounds each):
+
+| | builds / 30 s | build ms / s | worst build | render CPU p50 / p95 | sync p50 / p95 |
+|---|---|---|---|---|---|
+| main `b085c49d` | 94 / 138 | 17.4 / 25.2 | 21.8 / 19.9 ms | 1.5–1.8 / 9.7–24.2 ms | 5.4–7.4 / 9.6–14.4 ms |
+| this change | 12 / 30 | 1.5 / 4.4 | 7.1 / 10.9 ms | 0.8–1.6 / 4.7–7.6 ms | 2.6–3.9 / 7.0–9.0 ms |
+
+(the sync column also includes ADR-508). `packages/render/test/adr505_grazed_chunks.test.ts` (3 tests).
+
+## ADR-506: Faster terrain-chunk builds (getChunk cache, height/tile rings, typed instance rows) (SurVivaZ)
+
+**Decision.** In `TileTerrain.build`:
+- Read heights from a padded `(CHUNK_SIZE+2)²` Float32 ring, and tile ids from a Uint16 ring padded to the shore-tint range (6 → pad 8), each filled once per chunk instead of through `map.getTile` / `hRaw` per corner.
+- Collect instance data in a growable `Float32Array` (`InstRows`) instead of `number[]` plus spread pushes.
+
+`TileMap.getChunk` keeps a one-entry cache that is invalidated by a generation counter on the chunk table (`ChunkTable extends Map`, `gen` bumps on set / delete / clear), so evicted or replaced chunks are never returned.
+
+**Measured.** The golden hash of the built instance buffers is identical before and after (`881692c1…`, 150 chunks over a mixed map, shore tint across chunk borders included). Unthrottled ms / chunk: p50 3.52 → **1.92**, mean 3.9 → **2.0** (−45%). The getChunk cache alone is about −19%. Tests: `packages/world/test/adr506_chunk_lookup_cache.test.ts` (cache vs set / delete / ChunkManager eviction) and `packages/render/test/adr506_507_terrain_tiles.test.ts` (shore tint across chunk borders matches `waterCornerTint`).
+
+## ADR-507: Textured ground drawn before the vertex-colour terrain mesh (SurVivaZ)
+
+**Decision.** When textured ground is on, `IsoRenderer` draws the gt tiles first (depth LEQUAL). It then draws the vertex-colour terrain mesh with `POLYGON_OFFSET(2, 8)` and depth LESS, so early-Z rejects the expensive lit / weather mesh fragments under tile art. Finally the wet / snow tile overlays are drawn (queued by `TileTerrain.deferOverlays`, replayed by `drawOverlays` with their own uniforms). Before, the mesh shaded the whole ground and the tiles were drawn over it. `IsoRenderer.tilesFirst = false` restores the old order (A/B knob).
+
+**Measured.** `readPixels` comparison of old vs new order: **0 differing pixels** in 3 trials each of a night-rain scene and a day-clear scene at quality high. SwiftShader cannot time GPU fill, so the saving is analytical, not measured: the mesh's fragment work under textured ground (most of the screen outdoors) is skipped on tile-based mobile GPUs such as the A16's Mali-G57. Test: deferred overlays replay with a mock GL (`adr506_507_terrain_tiles.test.ts`).
+
+## ADR-508: View skips unchanged Transform writes (SurVivaZ)
+
+**Decision.** In `apps/client/src/view.ts`, the per-entity interpolation loop writes `PrevTransform` / `Transform` through `writeXform`. That helper skips `set()` (and the component-change churn it causes) when the stored f32 fields already equal `Math.fround` of the new values. The loop also reads the current transform once instead of calling `net.get` again, and builds the hatch string key only when hatch tiles exist. Entities look the same because the stored values are identical. Measured as part of the sync drop in ADR-505's table. Test: `apps/client/test/adr508_view_xform.test.ts`.
+
+**Honest cuts (ADR-505..508).**
+- **Not done:** pool texture headroom so the bld / roof / stream pools reach 1.0x on the 256 MB budget (follow-up to ADR-503).
+  - At 1x the pools need about 9 layers (bld 4, roof 2, stream 3) against the 3 they get now, which is about +65 MB.
+  - Only the resident hot tier (7 RGBA8 layers at 0.5x, 186.7 MB) is big enough to free that. Lossless options don't free enough: the sway mask as R8 would save only about 1 MB per layer.
+  - Compressing that tier (ASTC, about −117 MB) needs the KTX2 twins that ADR-392 removed and a separate compressed array, because character art must stay lossless RGBA8 (ADR-220 / 251). That is a separate quality-checked slice.
+- **Untouched allocation hot spots:** net interpolation (about 3.5 MB/s) and the audio world snapshot (about 1.3 MB/s).
+- **Unverified on hardware:** all numbers are SwiftShader with phone emulation, not the Galaxy A16 itself.
+
+**Full gate (2026-11-21).** `pnpm check`: pinned TypeScript 5.9.3 typecheck clean; vitest 5,441 passed / 0 failed / 9 skipped across 804 files.

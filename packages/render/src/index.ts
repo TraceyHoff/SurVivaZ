@@ -6,6 +6,7 @@ export * from "./types.js";
 export * from "./components.js";
 export * from "./frame-select.js";
 export * from "./IsoRenderer.js";
+export * from "./grazedTiles.js";
 export { AsyncReadback } from "./gl/readback.js";
 export * from "./camera.js";
 export * from "./assets/atlasManager.js";

@@ -13,6 +13,7 @@
  * cached instance buffer per view quarter; vWorld is rotated back to world space for the surface noise / shimmer.
  * ADR-256: `grazedAt(tx,ty)` swaps grass bases for `gt_grass_grazed` (+ seasonal twin) when a GrazedTile is present.
  */
+import type { GrazedTiles } from "./grazedTiles.js";
 import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, viewRect, renderTileHeight, waterShoreTint, waterCornerTint, classifyGroundShape, groundSlopeArt, SHAPE_EDGE_TO_UV, type TileMap, type Chunk, type IsoConfig } from "@engine/world";
 import { SEASON_GROUND_GLSL } from "./season.js";
 import { terrainDropEdges, DROP_EDGE_GLSL } from "./dropEdges.js";
@@ -180,6 +181,18 @@ export function viewCellToTile(X: number, Y: number, q: number): { x: number; y:
  *  (x0.35, no seasonal floor); summer/fall art keeps weather snow + the seasonal floor (fall -> winter ramp). */
 export const gtSnow = (art: number, weatherSnow: number, seasonFloor: number): number => art === 3 ? weatherSnow * 0.35 : Math.max(weatherSnow, seasonFloor);
 
+/** ADR-506: growable typed instance rows (16 floats: x, y, z, first, count, fps, mask, 0, ax, ay, water, mode, d0..d3). */
+class InstRows {
+  a = new Float32Array(FLOATS * 1024); n = 0;
+  private grow(need: number): void { const b = new Float32Array(Math.max(need, this.a.length * 2)); b.set(this.a.subarray(0, this.n)); this.a = b; }
+  put(x: number, y: number, z: number, first: number, count: number, fps: number, mask: number, ax: number, ay: number, water: number, mode: number, d0: number, d1: number, d2: number, d3: number): void {
+    if (this.n + FLOATS > this.a.length) this.grow(this.n + FLOATS);
+    const a = this.a, o = this.n; a[o] = x; a[o + 1] = y; a[o + 2] = z; a[o + 3] = first; a[o + 4] = count; a[o + 5] = fps; a[o + 6] = mask; a[o + 7] = 0;
+    a[o + 8] = ax; a[o + 9] = ay; a[o + 10] = water; a[o + 11] = mode; a[o + 12] = d0; a[o + 13] = d1; a[o + 14] = d2; a[o + 15] = d3; this.n = o + FLOATS;
+  }
+  append(b: InstRows): void { if (this.n + b.n > this.a.length) this.grow(this.n + b.n); this.a.set(b.a.subarray(0, b.n), this.n); this.n += b.n; }
+}
+
 export class TileTerrain {
   private prog: Program;
   /** ADR-253: per view quarter (built lazily; the two adjacent views are prewarmed one chunk per frame). */
@@ -196,6 +209,8 @@ export class TileTerrain {
   grazedAt: ((tx: number, ty: number) => boolean) | undefined;
   /** ADR-256: bumped when the grazed set changes so chunk caches rebuild. */
   grazedRev = 0;
+  /** ADR-505: per-chunk grazed revisions (set with IsoRenderer.setGrazedTiles); undefined = legacy global grazedRev only. */
+  grazedTiles: GrazedTiles | undefined;
   private gart: GroundArt | null = null; private gartReg: unknown = null;
   private held: readonly number[] = []; private heldSeason = -1; private pend: readonly number[] = []; private pendSeason = -1;
   /** ADR-253: build the two adjacent view quarters' chunks in idle frames (one chunk per frame without other builds). */
@@ -213,7 +228,10 @@ export class TileTerrain {
   private stamp(map: TileMap, c: Chunk): number {
     let s = c.version;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const n = map.getChunk(c.cx + dx, c.cy + dy); s = (Math.imul(s, 31) + (n ? n.version + 1 : 0)) | 0; }
-    return (Math.imul(s, 31) + (this.grazedRev | 0)) | 0; // ADR-256: rebuild when GrazedTile set changes
+    // ADR-256: rebuild when the GrazedTile set changes. ADR-505: per chunk (grazedTiles.chunkRev) — a graze rebuilds the
+    // one chunk holding the tile, not every chunk; the global grazedRev stays for legacy setGrazed(at, rev) callers.
+    const gr = this.grazedTiles ? this.grazedTiles.chunkRev(c.cx, c.cy) : 0;
+    return (Math.imul((Math.imul(s, 31) + (this.grazedRev | 0)) | 0, 31) + gr) | 0;
   }
 
   /** ADR-246: the gt_ set for this atlas's registry (null = not shipped). */
@@ -237,6 +255,8 @@ export class TileTerrain {
     return 0;
   }
 
+  /** ADR-506: reused per-build height ring (see build). */
+  private hGrid: Float32Array | undefined; private tGrid: Uint16Array | undefined; private instD: InstRows | undefined; private instO: InstRows | undefined;
   private build(map: TileMap, c: Chunk, atlas: AtlasManager, old: TileChunk | undefined, art: number, q = 0): TileChunk {
     this.builds++;
     const gl = this.gl; const reg = atlas.registry!;
@@ -251,11 +271,23 @@ export class TileTerrain {
     // ADR-253: everything below sees the view-space grid of quarter q (X, Y); wx / wy map a view cell to its world tile.
     const wx = (X: number, Y: number): number => (q === 0 ? X : q === 1 ? Y : q === 2 ? -X - 1 : -Y - 1);
     const wy = (X: number, Y: number): number => (q === 0 ? Y : q === 1 ? -X - 1 : q === 2 ? -Y - 1 : X);
-    const tileAt = (X: number, Y: number): number => map.getTile(wx(X, Y), wy(X, Y));
-    const hAt = (X: number, Y: number): number => { const x = wx(X, Y), y = wy(X, Y); const ch = map.getChunk(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE)); if (!ch) return -99; const i = (((y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE) * CHUNK_SIZE + (((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE); return ch.tiles[i] === 0 ? -99 : renderTileHeight(ch.tiles[i]!, ch.height[i]!) - (isWaterTile(ch.tiles[i]!) ? 0.25 : 0); };
+    // ADR-506: tile ids of the chunk + an 8-tile ring (shore tint scans up to SHORE_TINT_RANGE, blob/edge/drop reads 1),
+    // read once per build instead of a chunk lookup per call; reads outside the ring fall back to map.getTile.
+    const TP = 8, TW = CHUNK_SIZE + 2 * TP, tx0 = c.cx * CHUNK_SIZE - TP, ty0 = c.cy * CHUNK_SIZE - TP;
+    const tg = this.tGrid ??= new Uint16Array(TW * TW);
+    for (let j = 0; j < TW; j++) for (let i = 0; i < TW; i++) tg[j * TW + i] = map.getTile(tx0 + i, ty0 + j);
+    const tileAt = (X: number, Y: number): number => { const x = wx(X, Y) - tx0, y = wy(X, Y) - ty0; return x >= 0 && y >= 0 && x < TW && y < TW ? tg[y * TW + x]! : map.getTile(x + tx0, y + ty0); };
+    const hRaw = (x: number, y: number): number => { const ch = map.getChunk(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE)); if (!ch) return -99; const i = (((y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE) * CHUNK_SIZE + (((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE); return ch.tiles[i] === 0 ? -99 : renderTileHeight(ch.tiles[i]!, ch.height[i]!) - (isWaterTile(ch.tiles[i]!) ? 0.25 : 0); };
+    // ADR-506: every tile reads 8 neighbour heights; precompute the chunk + 1-tile ring once (world space, (S+2)^2)
+    // instead of a chunk lookup + height decode per read. Same values as hRaw; reads outside the ring fall back to it.
+    const HP = CHUNK_SIZE + 2, hx0 = c.cx * CHUNK_SIZE - 1, hy0 = c.cy * CHUNK_SIZE - 1;
+    const hg = this.hGrid ??= new Float32Array(HP * HP);
+    for (let j = 0; j < HP; j++) for (let i = 0; i < HP; i++) hg[j * HP + i] = hRaw(hx0 + i, hy0 + j);
+    const hAt = (X: number, Y: number): number => { const x = wx(X, Y) - hx0, y = wy(X, Y) - hy0; return x >= 0 && y >= 0 && x < HP && y < HP ? hg[y * HP + x]! : hRaw(x + hx0, y + hy0); };
     const tm = new Map<number, number>(); const tintAt = (x: number, y: number): number => { const k = x * 65536 + y; let v = tm.get(k); if (v === undefined) tm.set(k, (v = waterShoreTint(tileAt, x, y))); return v; };
     const cT = (x: number, y: number): number => waterCornerTint(tileAt, x, y, tintAt);
-    const data: number[] = []; const overlays: number[] = []; let minZ = 1e9, maxZ = -1e9;
+    // ADR-506: instance rows go straight into reused typed scratch buffers (was number[] + spread pushes + a copy).
+    const data = (this.instD ??= new InstRows()), overlays = (this.instO ??= new InstRows()); data.n = 0; overlays.n = 0; let minZ = 1e9, maxZ = -1e9;
     const ox = c.cx * CHUNK_SIZE, oy = c.cy * CHUNK_SIZE;
     const wfArt = !!(art && g && waterfallArtResident((k) => g.id(k) >= 0));
     const dirX = VIEW_PLUS_X[q]!, dirY = VIEW_PLUS_Y[q]!;
@@ -296,7 +328,11 @@ export class TileTerrain {
           }
           const e = EI(g.id(key)); if (!e) continue; const wl = l.kind === GroundLayerKind.Water;
           const mode = l.kind === GroundLayerKind.Ice || l.kind === GroundLayerKind.Leaves ? 2 : 1;
-          data.push(x + 0.5, y + 0.5, z, e.first, e.count, e.fps, mask, 0, e.ax, e.ay, wl ? 1 : l.kind === GroundLayerKind.Ice ? -1 : 0, mode, ...(wl ? [cT(x, y), cT(x + 1, y), cT(x + 1, y + 1), cT(x, y + 1)] : l.kind === GroundLayerKind.Ice ? [0, 0, 0, 0] : drops)); n++;
+          const ice = l.kind === GroundLayerKind.Ice;
+          if (wl) data.put(x + 0.5, y + 0.5, z, e.first, e.count, e.fps, mask, e.ax, e.ay, 1, mode, cT(x, y), cT(x + 1, y), cT(x + 1, y + 1), cT(x, y + 1));
+          else if (ice) data.put(x + 0.5, y + 0.5, z, e.first, e.count, e.fps, mask, e.ax, e.ay, -1, mode, 0, 0, 0, 0);
+          else data.put(x + 0.5, y + 0.5, z, e.first, e.count, e.fps, mask, e.ax, e.ay, 0, mode, drops[0]!, drops[1]!, drops[2]!, drops[3]!);
+          n++;
         }
         // ADR-251: gt_side faces where a +x / +y neighbour is lower, one per level of drop (left half +y, right half +x;
         // the shader's skirt rule keeps the half whose mask bit is set). Drawn over the polygon-offset mesh cliff, which
@@ -304,7 +340,7 @@ export class TileTerrain {
         // ADR-409: a slope side draws no side face — the tilted top already meets the low neighbour.
         if (n && mat && mat !== "water" && mask) for (const sl of groundSideLevels(z, slopeU ? z : pu, slopeV ? z : pv, SL)) {
           const e = EI(g.id(groundSideKey(mat, art - 1, sl.level))); if (!e) break;
-          data.push(x + 0.5, y + 0.5, z - sl.level, e.first, e.count, e.fps, sl.mask, 0, e.ax, e.ay, 0, 1, 0, 0, 0, 0); n++;
+          data.put(x + 0.5, y + 0.5, z - sl.level, e.first, e.count, e.fps, sl.mask, e.ax, e.ay, 0, 1, 0, 0, 0, 0); n++;
           minZ = Math.min(minZ, z - sl.level);
         }
         // ADR-389: waterfall art when the sprite is in the pack. The destination's gt_water instance is
@@ -313,8 +349,8 @@ export class TileTerrain {
         if (water) {
           for (const inst of planWaterfallArt(map, tx, ty, (k) => g.id(k) >= 0, q)) {
             const ev = EI(g.id(inst.key)); if (!ev) continue;
-            const row = [x + 0.5, y + 0.5, inst.z, ev.first, ev.count, ev.fps, inst.mask, 0, ev.ax, ev.ay, 0, inst.mode, 0, 0, 0, 0];
-            if (inst.mode === WATERFALL_OVERLAY_MODE) overlays.push(...row); else { data.push(...row); n++; }
+            const ov = inst.mode === WATERFALL_OVERLAY_MODE;
+            (ov ? overlays : data).put(x + 0.5, y + 0.5, inst.z, ev.first, ev.count, ev.fps, inst.mask, ev.ax, ev.ay, 0, inst.mode, 0, 0, 0, 0); if (!ov) n++;
             minZ = Math.min(minZ, inst.z);
           }
         }
@@ -329,16 +365,16 @@ export class TileTerrain {
       let e = key ? E(key) : null;
       if (!e) e = E(variants[hsh % variants.length]!) ?? E(variants[0]!);
       if (!e) continue;
-      data.push(x + 0.5, y + 0.5, z, e.first, e.count, e.fps, mask, 0, e.ax, e.ay, water ? 1 : 0, 0, ...(water ? [cT(x, y), cT(x + 1, y), cT(x + 1, y + 1), cT(x, y + 1)] : drops));
+      if (water) data.put(x + 0.5, y + 0.5, z, e.first, e.count, e.fps, mask, e.ax, e.ay, 1, 0, cT(x, y), cT(x + 1, y), cT(x + 1, y + 1), cT(x, y + 1));
+      else data.put(x + 0.5, y + 0.5, z, e.first, e.count, e.fps, mask, e.ax, e.ay, 0, 0, drops[0]!, drops[1]!, drops[2]!, drops[3]!);
       minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
     }
-    const opaque = data.length / FLOATS;
-    if (overlays.length) data.push(...overlays);
+    const opaque = data.n / FLOATS; const overlayCount = overlays.n / FLOATS;
+    if (overlays.n) data.append(overlays);
     const vao = old?.vao ?? gl.createVertexArray()!; const vbo = old?.vbo ?? gl.createBuffer()!;
     const stride = FLOATS * 4;
-    gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, vbo); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+    gl.bindVertexArray(vao); gl.bindBuffer(gl.ARRAY_BUFFER, vbo); gl.bufferData(gl.ARRAY_BUFFER, data.a.slice(0, data.n), gl.STATIC_DRAW);
     for (let a = 0; a < 4; a++) { gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 4, gl.FLOAT, false, stride, a * 16); gl.vertexAttribDivisor(a, 1); }
-    const overlayCount = overlays.length / FLOATS;
     let overlayVao = old?.overlayVao;
     if (overlayCount) {
       overlayVao = overlayVao ?? gl.createVertexArray()!;
@@ -362,6 +398,27 @@ export class TileTerrain {
     }
   }
 
+  /** ADR-507: queue the blended waterfall impact overlays instead of drawing them inline; IsoRenderer draws the opaque
+   *  tiles first, then the vertex-colour mesh (its covered fragments now fail the early depth test instead of being
+   *  shaded and overdrawn), then drawOverlays() — blended after every opaque ground layer, as before. */
+  deferOverlays = false;
+  private overlayQueue: (TileChunk | number)[] = []; private overlayArt = 0;
+  /** ADR-507: the queued overlay draws (same program, textures, per-chunk surface uniforms and blend as inline). */
+  drawOverlays(atlas: AtlasManager, stats: FrameStats): void {
+    const Q = this.overlayQueue; if (!Q.length || !atlas.tex || !atlas.frameTex) { Q.length = 0; return; }
+    const gl = this.gl; const { u } = this.prog;
+    gl.useProgram(this.prog.prog);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, atlas.tex);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, atlas.frameTex);
+    gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    for (let i = 0; i < Q.length; i += 3) {
+      const t = Q[i] as TileChunk, wet = Q[i + 1] as number, snow = Q[i + 2] as number;
+      gl.uniform1f(u.uWet ?? null, wet); gl.uniform1f(u.uSnow ?? null, snow); gl.uniform1f(u.uArtSnow ?? null, gtSnow(this.overlayArt, snow, this.season[2]));
+      gl.bindVertexArray(t.overlayVao!); gl.drawArraysInstanced(gl.TRIANGLES, 0, TERRAIN_TILE_VERTEX_COUNT, t.overlayCount!); stats.drawCalls++;
+    }
+    gl.disable(gl.BLEND); gl.bindVertexArray(null); Q.length = 0;
+  }
+
   draw(map: TileMap, atlas: AtlasManager, view: Float32Array, depth: Float32Array, rect: Rect, time: number, stats: FrameStats,
     surface: SurfaceState, perChunk: SurfaceProvider | undefined, sstyle: { puddles: number; wetDarken: number; skyRefl: readonly number[] }, activeKeys?: ReadonlySet<string>): void {
     if (!atlas.tex || !atlas.frameTex) return;
@@ -375,6 +432,7 @@ export class TileTerrain {
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D_ARRAY, atlas.tex); gl.uniform1i(u.uAtlas ?? null, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, atlas.frameTex); gl.uniform1i(u.uFrames ?? null, 1);
     const art = this.groundMode(atlas); this.artMode = art; this.builds = 0;
+    this.overlayQueue.length = 0; this.overlayArt = art;
     const q = (this.iso.view ?? 0) & 3; const cur = this.views[q]!; gl.uniform2f(u.uRot ?? null, VIEW_COS[q]!, VIEW_SIN[q]!);
     let warm: Chunk | undefined; // ADR-253: one adjacent-view chunk prewarmed per frame (rotation then swaps without a build hitch)
     for (const c of map.loadedChunks()) {
@@ -394,9 +452,13 @@ export class TileTerrain {
       if (t.overlayCount && t.overlayVao) {
         // Impact overlays (pool / lip) only: one extra instanced draw on chunks that have a fall, blended
         // over the dest/source water that was already drawn. Blend stays off for every other ground tile.
-        gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        gl.bindVertexArray(t.overlayVao); gl.drawArraysInstanced(gl.TRIANGLES, 0, TERRAIN_TILE_VERTEX_COUNT, t.overlayCount); stats.drawCalls++;
-        gl.disable(gl.BLEND);
+        // ADR-507: with deferOverlays the draw is queued for drawOverlays(), after the vertex-colour mesh.
+        if (this.deferOverlays) this.overlayQueue.push(t, sf.wet, sf.snow);
+        else {
+          gl.enable(gl.BLEND); gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          gl.bindVertexArray(t.overlayVao); gl.drawArraysInstanced(gl.TRIANGLES, 0, TERRAIN_TILE_VERTEX_COUNT, t.overlayCount); stats.drawCalls++;
+          gl.disable(gl.BLEND);
+        }
       }
     }
     if (warm && this.builds === 0) for (const k of [(q + 1) & 3, (q + 3) & 3]) {

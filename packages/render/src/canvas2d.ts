@@ -15,6 +15,7 @@ import { reportRenderError } from "./report.js";
  * loadLook, resize, render, tilemap, setFocusEntity, diagReport) so IsoView can drive either one.
  */
 import { Transform, PrevTransform, entityIndex, getAppearance, type World, type Entity } from "@engine/core";
+import { GrazedTiles } from "./grazedTiles.js";
 import { fireAnimTime, hearthParticles, pieceFireFrame, isFireAnim, type HearthParticle } from "./fire-anim.js";
 import { previewLayers2D, tintPixels, type PreviewLayer2D } from "./character/preview2d.js";
 import { worldToScreen, toView, fromView, viewRect, DEFAULT_ISO, CHUNK_SIZE, floorToTerrainZ, terrainZToFloor, renderTileHeight, isWaterId, waterShoreTint, type TileMap, type Chunk } from "@engine/world";
@@ -119,14 +120,15 @@ export class Canvas2DRenderer {
   }
   bindGameplay(b: GameplayBindings): void { this.bindings = b; }
   /** ADR-256: grazed grass lookup (world tile coords) + revision so gt blocks rebuild. */
-  setGrazed(at: ((tx: number, ty: number) => boolean) | undefined, rev = 0): void { this.grazedAt = at; this.grazedRev = rev | 0; }
+  setGrazed(at: ((tx: number, ty: number) => boolean) | undefined, rev = 0): void { this.grazedAt = at; this.grazedRev = rev | 0; this.grazedTiles = undefined; }
+  /** ADR-505: grazed tiles with per-chunk revisions — a graze re-bakes only the gt blocks over that chunk. */
+  setGrazedTiles(g: GrazedTiles): void { this.grazedAt = g.at; this.grazedRev = 0; this.grazedTiles = g; }
   private syncGrazedBinding(world: World): void {
     const def = this.bindings.grazedTile; if (!def || !world.isRegistered(def)) return;
-    const next = new Set<string>(); for (const e of world.query([def])) { const g = world.get(e, def)!; next.add(`${g.tx},${g.ty}`); }
-    let same = next.size === this.grazedKeys.size; if (same) for (const k of next) if (!this.grazedKeys.has(k)) { same = false; break; }
-    if (!same) { this.grazedKeys = next; this.grazedBindRev++; this.setGrazed((x, y) => this.grazedKeys.has(`${x},${y}`), this.grazedBindRev); }
+    const gt = this.grazedBind; gt.begin(); for (const e of world.query([def])) { const g = world.get(e, def)!; gt.add(g.tx, g.ty); }
+    if (gt.commit()) this.setGrazedTiles(gt);
   }
-  private grazedKeys = new Set<string>(); private grazedBindRev = 0;
+  private grazedBind = new GrazedTiles();
   setFocusEntity(e: number): void { this.focus = e; }
   /** ADR-417: indoor cutaway state (parity with IsoRenderer.indoor / SpriteBatch.cutawayActive): the last frame had a roof/upper-floor cutaway around the focus entity. */
   cutawayActive = false;
@@ -370,6 +372,7 @@ export class Canvas2DRenderer {
   /** false = flat legacy diamonds (tests / diag). */ groundArtEnabled = true;
   /** ADR-256: world-tile grazed lookup; undefined = ungrazed. */ grazedAt: ((tx: number, ty: number) => boolean) | undefined;
   /** ADR-256: bumped when the grazed set changes so gt blocks rebuild. */ grazedRev = 0;
+  /** ADR-505: per-chunk grazed revisions folded into each gt block's stamp (undefined = legacy global grazedRev). */ grazedTiles: GrazedTiles | undefined;
   /** gt blocks drawn / built this frame (diag). */ groundStats = { blocks: 0, built: 0, cached: 0 };
   private groundArtOf(reg: AssetRegistry): GroundArt | null {
     if (this.gArtReg !== reg) { this.gArtReg = reg; const g = new GroundArt(reg); this.gArt = g.available ? g : null; this.gBlocks.clear(); this.waterfallArtOn = undefined; }
@@ -382,7 +385,7 @@ export class Canvas2DRenderer {
     const B = GT_BLOCK, x0 = bx * B, y0 = by * B; let st = `${season}:g${this.grazedRev | 0}`; // ADR-256
     const ca = fromView(x0 - 1, y0 - 1, q), cb = fromView(x0 + B, y0 + B, q); // world tile bounds of the block (+1 ring)
     const wx0 = Math.min(ca.x, cb.x), wx1 = Math.max(ca.x, cb.x), wy0 = Math.min(ca.y, cb.y), wy1 = Math.max(ca.y, cb.y);
-    for (let cy = Math.floor(wy0 / CHUNK_SIZE); cy <= Math.floor(wy1 / CHUNK_SIZE); cy++) for (let cx = Math.floor(wx0 / CHUNK_SIZE); cx <= Math.floor(wx1 / CHUNK_SIZE); cx++) { const n = tm.getChunk(cx, cy); st += n ? `,${n.version}` : ",x"; }
+    for (let cy = Math.floor(wy0 / CHUNK_SIZE); cy <= Math.floor(wy1 / CHUNK_SIZE); cy++) for (let cx = Math.floor(wx0 / CHUNK_SIZE); cx <= Math.floor(wx1 / CHUNK_SIZE); cx++) { const n = tm.getChunk(cx, cy); st += n ? `,${n.version}` : ",x"; if (this.grazedTiles) st += `g${this.grazedTiles.chunkRev(cx, cy)}`; }
     const k = `${q}:${bx},${by}`; const hit = this.gBlocks.get(k); if (hit && hit.stamp === st) { hit.used = this.gFrame; return { cv: hit.cv, topPad: hit.topPad }; }
     if (!build || typeof document === "undefined") return hit ? { cv: hit.cv, topPad: hit.topPad } : null; // stale block until rebuilt (no flash)
     const at = q === 0 ? (a: number, b: number): number => tm.getTile(a, b) : (a: number, b: number): number => { const w = fromView(a, b, q); return tm.getTile(w.x, w.y); };

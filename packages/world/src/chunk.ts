@@ -49,8 +49,19 @@ export const chunkKeyOf = (x: number, y: number): ChunkKey => chunkKey(Math.floo
 /** Plain chunk container (no streaming). ChunkManager builds on it. */
 export interface TileChangeSet { key: ChunkKey; chunk: Chunk; version: number; /** flat (index, old, new) triples in edit order */ changes: number[];
   /** ADR-263: heights changed too (no delta encoding: replicate the whole chunk). */ heights?: boolean }
+/** ADR-506: the chunk table; every structural change (set / delete / clear) bumps `gen`, so TileMap.getChunk can keep a
+ *  one-entry (cx, cy) -> chunk cache that is exact even when a subclass (ChunkManager) edits the map directly. */
+export class ChunkTable extends Map<ChunkKey, Chunk> {
+  gen = 0;
+  override set(k: ChunkKey, v: Chunk): this { this.gen++; return super.set(k, v); }
+  override delete(k: ChunkKey): boolean { this.gen++; return super.delete(k); }
+  override clear(): void { this.gen++; super.clear(); }
+}
 export class TileMap {
-  protected chunks = new Map<ChunkKey, Chunk>();
+  protected chunks = new ChunkTable();
+  /** ADR-506: last getChunk hit (getChunk builds a string key per call; terrain builds, groundZ and the sim call it
+   *  per tile / per entity, almost always for the chunk they asked for last). Validated by ChunkTable.gen. */
+  private lcx = NaN; private lcy = NaN; private lgen = -1; private lc: Chunk | undefined;
   protected changed = new Set<Chunk>();
   protected adopt(c: Chunk): void { c.changeSink = this.changed; if (c.tileChanges.length) this.changed.add(c); }
   /** Drain per-chunk tile edits recorded since the last drain (call once per tick, e.g. in net's network phase). */
@@ -63,7 +74,11 @@ export class TileMap {
     }
     this.changed.clear(); return out.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
   }
-  getChunk(cx: number, cy: number): Chunk | undefined { return this.chunks.get(chunkKey(cx, cy)); }
+  getChunk(cx: number, cy: number): Chunk | undefined {
+    const t = this.chunks;
+    if (cx === this.lcx && cy === this.lcy && t.gen === this.lgen) return this.lc;
+    const c = t.get(chunkKey(cx, cy)); this.lcx = cx; this.lcy = cy; this.lgen = t.gen; this.lc = c; return c;
+  }
   getChunkByKey(k: ChunkKey): Chunk | undefined { return this.chunks.get(k); }
   ensureChunk(cx: number, cy: number): Chunk {
     const k = chunkKey(cx, cy); let c = this.chunks.get(k);

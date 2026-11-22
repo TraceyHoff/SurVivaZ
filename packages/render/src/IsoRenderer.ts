@@ -22,6 +22,7 @@ import { IsoCamera, type Rect } from "./camera.js";
 import { BloomPass } from "./bloom.js";
 import { lightningStrikeAnim } from "./frame-select.js";
 import { TileTerrain } from "./terrainTiles.js";
+import { GrazedTiles } from "./grazedTiles.js";
 import { tileHeight } from "./tilemap.js";
 import { parseGradingKeyframes, sampleKeyframes, lutSizeFromImage, type GradingKeyframe } from "./grading.js";
 import { DEFAULT_EMITTER_KINDS, type EmitterVisual } from "./lighting.js";
@@ -185,6 +186,9 @@ export class IsoRenderer implements Renderer {
   private tiles: TileTerrain;
   /** Use the textured tile atlas for terrain when the registry has tile sprites (else vertex colours only). */
   texturedTerrain = true;
+  /** ADR-507: draw the opaque tile art before the vertex-colour under-mesh (same image, the mesh's hidden fragments
+   *  fail early-Z). false = the pre-ADR-507 mesh-first order (A/B and pixel-identity checks only). */
+  tilesFirst = true;
   private flash = 0; private nextBolt = 3; private cloudOff = [0, 0];
   /** Fires when lightning strikes (screen-space x/y of a random visible point, world tile coords). */
   onLightning: ((x: number, y: number) => void) | null = null;
@@ -375,14 +379,15 @@ export class IsoRenderer implements Renderer {
   /** Gameplay components the renderer reads (BuildPiece, AnimState). */
   bindGameplay(b: GameplayBindings): void { this.bindings = { ...this.bindings, ...b }; }
   /** ADR-256: grazed grass lookup (world tile coords) + revision so TileTerrain chunk caches rebuild. */
-  setGrazed(at: ((tx: number, ty: number) => boolean) | undefined, rev = 0): void { this.tiles.grazedAt = at; this.tiles.grazedRev = rev | 0; }
+  setGrazed(at: ((tx: number, ty: number) => boolean) | undefined, rev = 0): void { this.tiles.grazedAt = at; this.tiles.grazedRev = rev | 0; this.tiles.grazedTiles = undefined; }
+  /** ADR-505: grazed tiles with per-chunk revisions — a graze rebuilds only the chunk that holds the tile. */
+  setGrazedTiles(g: GrazedTiles): void { this.tiles.grazedAt = g.at; this.tiles.grazedRev = 0; this.tiles.grazedTiles = g; }
   private syncGrazedBinding(world: World): void {
     const def = this.bindings.grazedTile; if (!def || !world.isRegistered(def)) return;
-    const next = new Set<string>(); for (const e of world.query([def])) { const g = world.get(e, def)!; next.add(`${g.tx},${g.ty}`); }
-    let same = next.size === this.grazedKeys.size; if (same) for (const k of next) if (!this.grazedKeys.has(k)) { same = false; break; }
-    if (!same) { this.grazedKeys = next; this.grazedRev++; this.setGrazed((x, y) => this.grazedKeys.has(`${x},${y}`), this.grazedRev); }
+    const gt = this.grazedTiles; gt.begin(); for (const e of world.query([def])) { const g = world.get(e, def)!; gt.add(g.tx, g.ty); }
+    if (gt.commit()) this.setGrazedTiles(gt);
   }
-  private grazedKeys = new Set<string>(); private grazedRev = 0;
+  private grazedTiles = new GrazedTiles();
   /** BuildingGrid used for cutaway detection (multi-level). */
   setBuildingGrid(g: BuildingGrid | undefined): void { this.grid = g; }
   /** Use a ChunkedSpatialIndex for sprite culling (iterate only visible, active chunks). */
@@ -627,12 +632,25 @@ export class IsoRenderer implements Renderer {
       // push it back with a polygon offset so the tile art (gt_ land, water, ice) always wins the LEQUAL test instead of
       // z-fighting it (hid gt water/land on some depth buffers; the fall-grass mosaic / seam lines).
       const textured = this.texturedTerrain && TileTerrain.available(this.atlas);
-      if (textured) { gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(2, 8); }
       const reg = this.atlas.registry;
       this.terrain.waterfallArt = !!reg && waterfallArtResident((k) => reg.ids.sprites.tryId(k) !== undefined);
+      // ADR-507: opaque tile art FIRST, then the offset-back vertex-colour mesh, then the blended impact overlays.
+      // Every pixel still resolves to the nearest surface with the tile art winning ties (tiles LEQUAL among
+      // themselves, mesh pushed back by the polygon offset and tested LESS), so the image is unchanged — but the
+      // mesh's (noise / season / puddle) fragments under the tile art now fail the early depth test instead of
+      // being shaded and then overdrawn: one full-screen ground pass less fill on phones.
+      const first = textured && this.tilesFirst;
+      if (textured && !first) { gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(2, 8); this.tiles.deferOverlays = false; } // pre-ADR-507 order (A/B knob)
+      if (first) {
+        gl.depthFunc(gl.LEQUAL); this.tiles.deferOverlays = true;
+        this.tiles.draw(this.tilemap, this.atlas, this.viewU, this.depthU, rect, this.time, stats, this.terrain.surface, this.terrain.perChunk, this.terrain.surfaceStyle, this.activeKeys);
+        gl.depthFunc(gl.LESS);
+        gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(2, 8);
+      }
       this.terrain.draw(this.viewU, this.depthU, rect, this.time, stats, this.activeKeys);
       if (textured) gl.disable(gl.POLYGON_OFFSET_FILL);
-      if (textured) {
+      if (first) { gl.depthFunc(gl.LEQUAL); this.tiles.drawOverlays(this.atlas, stats); gl.depthFunc(gl.LESS); }
+      else if (textured) {
         gl.depthFunc(gl.LEQUAL);
         this.tiles.draw(this.tilemap, this.atlas, this.viewU, this.depthU, rect, this.time, stats, this.terrain.surface, this.terrain.perChunk, this.terrain.surfaceStyle, this.activeKeys);
         gl.depthFunc(gl.LESS);
