@@ -15,7 +15,7 @@
  */
 import { Transform, type Entity, type World } from "@engine/core";
 import { VIEW_COS, VIEW_SIN } from "@engine/world";
-import { LightSource, Occluder, Shadow, Sprite, SpriteFlag } from "../components.js";
+import { LightSource, Occluder, Shadow, Sprite, SpriteFlag, TintNeutral } from "../components.js";
 import type { AssetRegistry } from "@engine/assets";
 import {
   PoseSmoother, RIDER_DK_CABIN, RIDER_DK_OPEN, dirAngle, hasInterior, headlightCone, insideFootprint, isPowered, quantizeDir8,
@@ -27,6 +27,7 @@ import { ART_INTERIOR, resolveVehicleArt, type VehicleArtBinding, type VehicleAr
 import { PLAYER_HEIGHT_Z, tallerThanPlayer } from "./scale.js";
 import { artSeat, windowBand } from "./seats.js";
 import { vehicleSpriteKey } from "./atlas.js";
+import { vehiclePaint } from "./paint.js";
 
 export interface VehicleSnapshot {
   /** stable id (net id) */ key: number; def: VehicleRenderDef;
@@ -35,6 +36,7 @@ export interface VehicleSnapshot {
   /** Hitch.parentNetId: the tow this trailer hangs on (0 = none) */ parent?: number;
   /** engine on (driver present / ignition); default: occupied seat 0 or |speed| >= 0.25 */ on?: boolean;
   /** core VehicleState byte (ADR-101): bit 0 engineOn, bit 1 headlights. When present it gates the headlight cone. */ state?: number;
+  /** ADR-519: gameplay Vehicle.paint pick (1..240; 0 / absent = Art's default colour) */ paint?: number;
 }
 export interface VehicleViewOpts {
   /** 0 (day) .. 1 (night); headlights scale with it and are off below ~0.15 */ darkness: number;
@@ -129,7 +131,10 @@ export class VehicleView {
       if (r.body !== undefined) {
         const b = r.body; w.set(b, Transform, { x, y, z, facing: hq + r.art!.facingOffset });
         const sp = w.get(b, Sprite)!; const sc = r.art!.scale;
-        if (sp.scale !== sc) w.set(b, Sprite, { ...sp, scale: sc });
+        // ADR-519: Art's paint through the tintmask (Sprite.tint + TintNeutral); was always tint 0 = unpainted grey-beige
+        const pt = vehiclePaint(r.art!.key, s.paint); const tint = pt?.tint ?? 0;
+        if (sp.scale !== sc || sp.tint !== tint) w.set(b, Sprite, { ...sp, scale: sc, tint });
+        if (pt && w.isRegistered(TintNeutral) && !w.has(b, TintNeutral)) w.add(b, TintNeutral, { neutral: pt.neutral, strength: pt.strength });
         if (artOn) this.spatial?.insert(b, x, y); else this.spatial?.remove(b);
         // ADR-518: true-scale bodies taller than the player (box truck, vans, campers, semi, tall trailers) fade like the
         // tall placeholder segments do when they cover the local player (Footprint sprites only occlude via an Occluder)

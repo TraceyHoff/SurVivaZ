@@ -1257,11 +1257,14 @@ export class IsoView {
       const seats = net.has(e, VehicleSeats) ? Array.from((net.get(e, VehicleSeats) as unknown as { occupant: ArrayLike<number> }).occupant) : undefined;
       const parent = net.has(e, Hitch) ? net.getField(e, Hitch, "parentNetId") ?? 0 : 0;
       const state = net.has(e, VehicleState) ? net.getField(e, VehicleState, "flags") ?? 0 : undefined;
-      list.push({ key, def: d as unknown as VehicleRenderDef, x: t.x, y: t.y, z: ground(t.x, t.y, t.z), heading: vh.heading, drift: vh.drift, speed: vh.speed,
+      list.push({ key, def: d as unknown as VehicleRenderDef, x: t.x, y: t.y, z: ground(t.x, t.y, t.z), heading: vh.heading, drift: vh.drift, speed: vh.speed, paint: (vh as { paint?: number }).paint ?? 0,
         ...(seats ? { occupants: seats } : {}), ...(parent ? { parent } : {}), ...(state !== undefined ? { state } : {}) });
     }
     if (!list.length && !this.vehicleView) return;
-    this.vehicleView ??= new VehicleView(this.view, this.registry, { art: true, pages: this.renderer.atlas as never });
+    // ADR-519: only the WebGL2 AtlasManager streams vehicle pages; the Canvas2D fallback's atlas has no retainSprite (every
+    // frame with a vehicle threw "retainSprite is not a function" there) and draws Art straight from the loaded images
+    const pages = this.renderer.atlas as unknown as { retainSprite?: unknown } | undefined;
+    this.vehicleView ??= new VehicleView(this.view, this.registry, { art: true, ...(typeof pages?.retainSprite === "function" ? { pages: pages as never } : {}) });
     const now = performance.now(), dt = this.vehAt ? Math.min(0.25, (now - this.vehAt) / 1000) : 0; this.vehAt = now;
     const f = frac ?? 0.5, darkness = Math.max(0, Math.min(1, Math.cos(f * 2 * Math.PI) * 1.6 + 0.2));
     // ADR-360: the placements are the riders' seats — the sim snaps a rider to the vehicle centre, so without

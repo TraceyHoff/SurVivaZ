@@ -68,6 +68,15 @@ export const SpriteAlpha = defineComponent("SpriteAlpha", {
   alpha: "f32",
 });
 
-export const RENDER_COMPONENTS = [Sprite, LightSource, Shadow, Occluder, TintSecondary, InteriorPart, SpriteAlpha] as const;
+/**
+ * ADR-519: Art's paint contract for Sprite.tint through the atlas tintmask R only: out = base * mix(1, tint / neutral,
+ * strength * mask.r) (vehicles: neutral 0.78, so a neutral-grey body pixel becomes exactly the paint colour). Without a
+ * resident mask the sprite draws unpainted (never a whole-frame tint over glass and tyres).
+ */
+export const TintNeutral = defineComponent("TintNeutral", {
+  neutral: "f32", strength: "f32",
+});
+
+export const RENDER_COMPONENTS = [Sprite, LightSource, Shadow, Occluder, TintSecondary, InteriorPart, SpriteAlpha, TintNeutral] as const;
 
 export { SpriteFlag, TileId } from "./ids.js";

@@ -6,3 +6,5 @@ export * from "./scale.js";
 export * from "./artPack.js";
 export * from "./seats.js";
 export * from "./seats.data.js";
+export * from "./paint.js";
+export * from "./paint.data.js";

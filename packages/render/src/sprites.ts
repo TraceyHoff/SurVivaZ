@@ -16,7 +16,7 @@ import { SEASON_SPRITE_GLSL, SEASON_FOLIAGE, SEASON_SNOWCAP, SEASON_GROUND, SEAS
 import { AnimState as CoreAnimState, entityIndex, lerpAngle, PrevTransform, Transform, type ComponentDef, type World } from "@engine/core";
 import { CHUNK_SIZE, VIEW_COS, VIEW_SIN, fromView, viewRect, chunkKey, floorToTerrainZ, terrainZToFloor, type BuildingGrid, type ChunkedSpatialIndex, type IsoConfig } from "@engine/world";
 import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/util.js";
-import { Sprite, Shadow, Occluder, SpriteFlag, LightSource, TintSecondary, SpriteAlpha } from "./components.js";
+import { Sprite, Shadow, Occluder, SpriteFlag, LightSource, TintSecondary, SpriteAlpha, TintNeutral } from "./components.js";
 import { newResolved, STREAM_MARGIN_PX, STREAM_MARGIN_ANIMAL_PX, STREAM_KEEP_FACTOR, type AtlasManager, type ResolvedFrame, type HandAnchor } from "./assets/atlasManager.js";
 import { offHandAnchor, offHandBehind } from "./character/offhand.js";
 import { CARRY_SOCKET, SEAT_SOCKET } from "./character/animChain.js";
@@ -286,6 +286,8 @@ void main() {
   gl_Position = vec4(isoToClip(iso), keyToNdc(key), 1.0);
 }`;
 
+/** ADR-519: aI.y (vLT.y) code of the TintNeutral paint contract: multiply through tintmask R only (layer modes are 1..4). */
+export const PAINT_MASK_ONLY = 9;
 const FS = /* glsl */ `#version 300 es
 precision highp float; precision highp int;
 in vec4 vFx; in vec3 vUvRaw; flat in int vLayer; in float vAlpha; flat in int vFlags; flat in vec4 vRect; in vec3 vTint; flat in vec3 vMisc; in vec2 vLocal; in vec2 vScr; flat in float vOcc; flat in ivec2 vFB; flat in vec4 vTint2; flat in float vSwayPx; flat in vec4 vLT; in vec2 vDeck; flat in ivec2 vDeckM; flat in float vSeed; in vec2 vRoofClip; flat in vec3 vRoofLine;
@@ -404,7 +406,9 @@ void main() {
   if ((vFlags & ${RFX_EDGE}) != 0) { if (t.a < 0.5) discard; t.rgb = min(t.rgb / t.a, vec3(1.0)); t.a = 1.0; }
   vec3 col; float a = t.a;
   if (vLT.y > 0.5) { // character layer: tintmask R <- primary (vTint), G <- secondary (vTint2); no mask = whole frame primary
-    vec4 tm = (vFB.x & 8) != 0 ? texture(uTintM, sideUv(su, uWinT)) : vec4(1.0, 0.0, 0.0, 1.0); int mode = int(vLT.y - 0.5);
+    // ADR-519: vLT.y >= ${PAINT_MASK_ONLY} = paint contract (TintNeutral): mask only, no mask resident = unpainted
+    bool paintOnly = vLT.y > ${PAINT_MASK_ONLY - 0.5};
+    vec4 tm = (vFB.x & 8) != 0 ? texture(uTintM, sideUv(su, uWinT)) : paintOnly ? vec4(0.0) : vec4(1.0, 0.0, 0.0, 1.0); int mode = int(vLT.y - 0.5) & 7;
     col = layerTint(t.rgb, vTint, mode, vLT.z * tm.r, vLT.w);
     if (dot(vTint2.rgb, vec3(1.0)) > 0.0) col = layerTint(col, vTint2.rgb, mode, vLT.z * tm.g, vLT.w);
   } else if ((vFB.x & 8) != 0) { // two-tone tint mask: R = primary (Sprite.tint), G = secondary (aH rgb)
@@ -466,6 +470,12 @@ void main() {
 }`;
 
 /** Secondary tint (RGBA8 packed) into instance floats 28..30 (0 = reuse primary). */
+/** ADR-519: Sprite.tint as Art's paint (out = base * mix(1, tint / neutral, strength * mask.r)) via the layer-tint path. */
+export function writePaint(o: Float32Array, tint: number, neutral: number, strength: number): void {
+  if (tint === 0 || !(strength > 0)) return; const d = 1 / (neutral > 0 ? neutral : 1);
+  o[12] = ((tint >>> 24) & 255) / 255 * d; o[13] = ((tint >>> 16) & 255) / 255 * d; o[14] = ((tint >>> 8) & 255) / 255 * d;
+  o[28] = o[29] = o[30] = 0; o[33] = PAINT_MASK_ONLY; o[34] = strength; o[35] = 1;
+}
 export function writeTint2(o: Float32Array, t: number): void { if (t === 0) { o[28] = o[29] = o[30] = 0; return; } o[28] = ((t >>> 24) & 255) / 255 || 1e-3; o[29] = ((t >>> 16) & 255) / 255; o[30] = ((t >>> 8) & 255) / 255; }
 
 interface StaticChunk { vao: WebGLVertexArrayObject; vbo: WebGLBuffer; count: number; checksum: number; cx: number; cy: number; maxZ: number; seen: number; born: number }
@@ -795,6 +805,7 @@ export class SpriteBatch {
     const litSt = cx.bindings.lit && world.isRegistered(cx.bindings.lit) ? world.store(cx.bindings.lit) : null; const litData = litSt?.data as Record<string, ArrayLike<number>> | undefined;
     const oh = cx.bindings.offHand ? world.store(cx.bindings.offHand) : null; const offOf = cx.bindings.offHandSprite ?? heldOf;
     const t2s = world.isRegistered(TintSecondary) ? world.store(TintSecondary) : null;
+    const tns = world.isRegistered(TintNeutral) ? world.store(TintNeutral) : null; // ADR-519 paint contract
     const sa = world.isRegistered(SpriteAlpha) ? world.store(SpriteAlpha) : null; // ADR-238 despawn fade
     const apB = cx.bindings.appearance; const ap0 = apB && world.isRegistered(apB.def) ? world.store(apB.def) : null; const ap = ap0 && (ap0.data as Record<string, unknown>).version ? ap0 : null;
     atlas.beginFrame();
@@ -1015,6 +1026,7 @@ export class SpriteBatch {
         if (o0[22] || o0[21] > COLD_BREATH) cx.statusFx?.("cold", x, y, z, Math.max(o0[21], o0[22] * 0.5)); else if (bt.data.heat[s2]! > 150) cx.statusFx?.("heat", x, y, z, bt.data.heat[s2]! / 255); } }
       if (exh) { const s2 = exh.slot(i); if (s2 >= 0) o0[31] = exh.data.level[s2]! / 255; }
       if (t2s) { const s2 = t2s.slot(i); if (s2 >= 0) writeTint2(o0, t2s.data.tint[s2]! >>> 0); }
+      if (tns) { const s2 = tns.slot(i); if (s2 >= 0) writePaint(o0, sp.data.tint[k]! >>> 0, tns.data.neutral[s2]!, tns.data.strength[s2]!); }
       const sw = atlas.swayOf(sid);
       if (sw) { o0[24] = sw[0]!; o0[25] = sw[1]!; o0[26] = sw[2]!; }
       o0[27] = occT;

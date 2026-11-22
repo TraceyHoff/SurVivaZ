@@ -23,7 +23,7 @@ import { AnimState, Container, CONTAINER_MAX_SLOTS, Dead, Driver, Health, Hitch,
 import { applyRidingMotion, DrawnDriveRes, DrawnDrivenRes, movementBlocked, waterDepth } from "./systems/movement.js";
 import { riverCurrentAt } from "./river_current.js"; // ADR-490: forced rivers push paddle/motor boats downstream
 import { isHarnessed, MOUNT_TUNING, mountSpecies } from "./mount_defs.js";
-import { gameplayDefs, isAuthority } from "./config.js";
+import { GameplayConfig, gameplayDefs, isAuthority } from "./config.js";
 import { spendStamina } from "./systems/vitals.js";
 import { netIdEntity } from "./vehicle_net.js";
 import { hasKeyFor, keyIssueSystem } from "./vehicle_keys.js";
@@ -185,11 +185,18 @@ export const VEHICLE_PASSENGER_TUNING: VehiclePassengerTuning = loadVehiclePasse
 
 // ---- spawn / lookup -------------------------------------------------------------------------------
 /** Spawns a vehicle (server). NetId is assigned by net; standalone tests add it themselves. */
+/** ADR-519: paint picks stored on Vehicle.paint (1..240). 240 is a multiple of Art's tint-set sizes (12 car, 10 bike), so
+ *  (paint - 1) % size is uniform over each set. */
+export const VEHICLE_PAINT_PICKS = 240;
+/** Deterministic paint pick for a vehicle placed at (x, y) now (world seed + tick + tile): varied, same on every peer. */
+export function paintPick(world: World, x: number, y: number): number {
+  return 1 + world.rngFor(`vehicle_paint:${Math.floor(x * 4)},${Math.floor(y * 4)}`).int(0, VEHICLE_PAINT_PICKS);
+}
 export function spawnVehicle(world: World, def: number | string, x: number, y: number, heading = 0): Entity {
   const defId = typeof def === "string" ? vehicleDefId(def) : def; const d = vehicleDef(defId); if (!d) throw new Error(`unknown vehicle ${def}`);
   const e = world.create(); const cap = storageCapacity(d);
   world.add(e, Transform, { x, y, facing: heading })
-    .add(e, Vehicle, { defId, heading, fuel: d.fuel?.capacity ?? 0, health: d.health })
+    .add(e, Vehicle, { defId, heading, fuel: d.fuel?.capacity ?? 0, health: d.health, paint: paintPick(world, x, y) })
     .add(e, Container, { slotCount: cap.slots, maxWeight: cap.maxWeight });
   if (d.seats > 0) world.add(e, VehicleSeats);
   if (d.hitches.length) world.add(e, Hitch);
@@ -496,6 +503,9 @@ function stepTrailer(world: World, tr: Entity, d: VehicleDef, tow: Entity, dt: n
 /** gameplay.vehicles: drive powered vehicles, then trailers in chain order, then seat riders. Deterministic on every peer. */
 export function vehicleSystem(world: World, dt: number): void {
   if (world.tick % 20 === 0 && world.isRegistered(VehicleLock)) keyIssueSystem(world); // ADR-109 legacy migration + owed keys
+  if (world.tick % 20 === 0 && world.getResource(GameplayConfig)?.role !== "client") for (const v of world.query([Vehicle, Transform])) { // ADR-519: saves from before Vehicle.paint load as 0
+    if (world.getField(v, Vehicle, "paint") === 0) { const t = world.get(v, Transform)!; world.setField(v, Vehicle, "paint", paintPick(world, t.x, t.y)); }
+  }
   const inputs = world.getResource(DriveInputs); const riders = new Map<number, Entity>();
   for (const r of world.query([Driver, NetId])) riders.set(world.getField(r, NetId, "id")!, r);
   const vs = [...world.query([Vehicle, Transform])];

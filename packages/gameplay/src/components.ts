@@ -307,6 +307,8 @@ export const VEHICLE_MAX_SEATS = 8;
  * (arcade slide); steer = current steering angle. Storage lives in Container on the same entity. */
 export const Vehicle = defineComponent("Vehicle", {
   defId: "u16", speed: "f32", heading: "f32", fuel: "f32", health: "f32", drift: "f32", steer: "f32",
+  /** ADR-519: paint pick 1..VEHICLE_PAINT_PICKS (render: tint-set colour (paint - 1) % set size); 0 = unpainted (legacy save, assigned on the next vehicle tick). */
+  paint: "u8",
 }, { networked: true, persistent: true });
 /** Seat occupancy on the vehicle: rider NetIds (0 = empty), seat 0 = driver. Not persisted (riders are ejected on load). */
 export const VehicleSeats = defineComponent("VehicleSeats", { occupant: { type: "u32", length: VEHICLE_MAX_SEATS } }, { networked: true });

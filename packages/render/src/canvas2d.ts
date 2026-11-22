@@ -23,7 +23,7 @@ import { C2D_GT_Z_CLAMP, c2dClampHeight, c2dCliffShade, c2dGroundGeometry, c2dGt
 import { allWaterfallArtKeys, planWaterfallArt, WATERFALL_ANIM } from "./waterfallTiles.js";
 import type { AssetRegistry } from "@engine/assets";
 import { IsoCamera } from "./camera.js";
-import { Sprite, LightSource, Occluder, SpriteAlpha } from "./components.js";
+import { Sprite, LightSource, Occluder, SpriteAlpha, TintNeutral } from "./components.js";
 import { frameAnim } from "./frame-select.js";
 import { Canvas2DLightmap, lightRadiusPx, type C2DLight } from "./canvasLight.js";
 import { DEFAULT_STYLE } from "./style.js";
@@ -279,15 +279,16 @@ export class Canvas2DRenderer {
   private tinted = new Map<string, CanvasImageSource>();
   private tintedPieces = new Map<string, HTMLCanvasElement>();
   /** ADR-230: a build-piece frame tinted through its atlas tintmask (cached per frame rect + tint pair); null = draw untinted (no mask / no DOM / mask loading). */
-  private tintedPiece(img: CanvasImageSource, f: { atlas: { key: string }; x: number; y: number; w: number; h: number }, primary: number, secondary: number): HTMLCanvasElement | null {
+  private tintedPiece(img: CanvasImageSource, f: { atlas: { key: string }; x: number; y: number; w: number; h: number }, primary: number, secondary: number, paint?: { neutral: number; strength: number }): HTMLCanvasElement | null {
     if (typeof document === "undefined") return null;
-    const key = `${f.atlas.key}|${f.x},${f.y},${f.w},${f.h}|${primary}|${secondary}`; const c0 = this.tintedPieces.get(key); if (c0) return c0;
+    const key = `${f.atlas.key}|${f.x},${f.y},${f.w},${f.h}|${primary}|${secondary}${paint ? `|p${paint.neutral},${paint.strength}` : ""}`; const c0 = this.tintedPieces.get(key); if (c0) return c0;
     const m = this.sources.get(f.atlas.key)?.masks?.tintmask; const url = Array.isArray(m) ? m[0] : m; if (!url) return null;
     const mi = this.urlImage(url); if (!mi) return null;
     const c = document.createElement("canvas"); c.width = f.w; c.height = f.h; const g = c.getContext("2d", { willReadFrequently: true }); if (!g) return null;
     g.drawImage(img, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h);
     try { const d = g.getImageData(0, 0, f.w, f.h); const mc = document.createElement("canvas"); mc.width = f.w; mc.height = f.h; const mg = mc.getContext("2d", { willReadFrequently: true })!;
-      mg.drawImage(mi, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h); tintPiecePixels(d.data, mg.getImageData(0, 0, f.w, f.h).data, primary, secondary); g.putImageData(d, 0, 0); } catch { return null; }
+      mg.drawImage(mi, f.x, f.y, f.w, f.h, 0, 0, f.w, f.h); const md = mg.getImageData(0, 0, f.w, f.h).data;
+      if (paint) tintPaintPixels(d.data, md, primary, paint.neutral, paint.strength); else tintPiecePixels(d.data, md, primary, secondary); g.putImageData(d, 0, 0); } catch { return null; }
     if (this.tintedPieces.size > 512) this.tintedPieces.clear(); this.tintedPieces.set(key, c); return c;
   }
   /** A paper-doll layer's frame, tinted through its tintmask (cached); the raw sheet when untinted or no DOM canvas. */
@@ -734,6 +735,8 @@ export class Canvas2DRenderer {
       if ((vq & 1) && !spriteIsDirectional(reg!, spk.sid)) f = { ...f, flipX: !f.flipX }; // ADR-253 fallback: mirror single-facing art
       const sFl = flatS ? (spk.sid === sp.spriteId && this.sv.fall + this.sv.winter > 0.002 ? SEASON_GROUND : 0) : spk.flags; // ADR-246: seasonal roads
       if (sFl) { const sc = this.seasonFrame(img, f, sFl, entityIndex(it.e)); if (sc) { img = sc; f = { ...f, x: 0, y: 0 }; } }
+      if (sp.tint && world.isRegistered(TintNeutral) && world.has(it.e, TintNeutral)) { // ADR-519: vehicle paint through the tintmask, as WebGL2
+        const tn = world.get(it.e, TintNeutral)!; const ti = this.tintedPiece(img, f, sp.tint >>> 0, 0, tn); if (ti) { img = ti; f = { ...f, x: 0, y: 0 }; } }
       const dw = f.w * k, dh = f.h * k;
       const sAl = world.isRegistered(SpriteAlpha) ? world.getField(it.e, SpriteAlpha, "alpha") : undefined; // ADR-238 despawn fade
       if (sAl !== undefined && sAl <= 0.01) continue;
@@ -778,6 +781,17 @@ export function tintPiecePixels(px: Uint8ClampedArray, mask: Uint8ClampedArray, 
   for (let i = 0; i < px.length; i += 4) {
     if (px[i + 3] === 0) continue; const mr = mask[i]! / 255, mg = mask[i + 1]! / 255; if (mr === 0 && mg === 0) continue;
     for (let c = 0; c < 3; c++) px[i + c] = px[i + c]! * (1 + (p[c]! - 1) * mr) * (1 + (q[c]! - 1) * mg);
+  }
+}
+/**
+ * ADR-519: Art's paint contract on the CPU (WebGL2: writePaint): rgb *= mix(1, tint / neutral, strength * mask.r).
+ * Only the mask's R channel paints (vehicle masks are greyscale, so G must not tint a second time).
+ */
+export function tintPaintPixels(px: Uint8ClampedArray, mask: Uint8ClampedArray, tint: number, neutral: number, strength: number): void {
+  const n = neutral > 0 ? neutral : 1; const p = [(tint >>> 24) & 255, (tint >>> 16) & 255, (tint >>> 8) & 255].map((v) => v / 255 / n) as [number, number, number];
+  for (let i = 0; i < px.length; i += 4) {
+    if (px[i + 3] === 0) continue; const m = (mask[i]! / 255) * strength; if (m <= 0) continue;
+    for (let c = 0; c < 3; c++) px[i + c] = px[i + c]! * (1 + (p[c]! - 1) * m);
   }
 }
 interface C2DPiece { e: Entity; sx: number; sy: number; depth: number; ord: number; img: CanvasImageSource; f: { x: number; y: number; w: number; h: number; anchorX: number; anchorY: number; flipX?: boolean }; clip: [number, number][] | undefined; seams?: { poly: [number, number][]; dx: number; dy: number }[] | undefined; ghost: boolean; hearth?: boolean; scale: number; /** ADR-417: cutaway / occlusion alpha (1 = opaque, 0.10 = cut away). */ alpha: number }

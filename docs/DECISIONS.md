@@ -12199,3 +12199,28 @@ the test. Six atlas pages are gone.
 Cuts: the Canvas2D fallback ignores the window clip; trailer_log has art but no def, so no vehicles.json entry is
 added; the pickup bed and van rear rows have no Art seats.
 Test: `packages/render/test/adr518_vehicles_true_scale.test.ts`.
+
+## ADR-519: vehicles show Art's paint; per-vehicle paint picks (SurVivaZ)
+
+**Bug.** Vehicles in-game drew untinted grey-beige, unlike Art's preview. Art's sheets are neutral grey (0.78) wherever
+paint goes (tintmask R = 1) and the manifest carries the paint contract per vehicle (`vehicles[].tint`: tint set,
+default index, neutral 0.78; `tintSets` vehicle_paint 12 colours, bike_paint 10). VehicleView always created the body
+with `Sprite.tint: 0`, and nothing read the contract. The masks themselves were loaded fine (ADR-510/512 side windows
+are correct). The existing two-tone mask path could not have applied the contract anyway: it has no neutral (paint
+would come out 22% dark), and it tints again through mask G (vehicle masks are greyscale).
+
+**Fix.** `scripts/gen-vehicle-paint.mjs` folds the contract into `vehicles/paint.data.ts` (a test fails on drift);
+`vehiclePaint(artKey, pick)` gives the colour. VehicleView sets the body's `Sprite.tint` plus a new render component
+`TintNeutral {neutral, strength}`. WebGL2: `writePaint` pre-divides the colour by neutral and selects the layer-tint
+path with code `PAINT_MASK_ONLY` (multiply through mask R only; no resident mask = unpainted, never a whole-frame
+tint). Canvas2D: `tintPaintPixels`, same formula, cached per frame and colour like build pieces.
+
+**Gameplay.** `Vehicle.paint` (u8, networked, persistent): a pick 1..240, chosen at spawn from `world.rngFor` (seed,
+tick, position), so it is varied and the same on every peer. The colour is `set[(pick - 1) % set.length]` (240 is a
+multiple of 12 and 10, so it is uniform). Saves from before load through `VEHICLE_PAINT_MIGRATION` with 0, and
+vehicleSystem (authority, every 20 ticks) assigns a pick. A pick of 0 on a client draws Art's default colour.
+
+Also fixed: the Canvas2D fallback threw "retainSprite is not a function" on every frame with a vehicle (its atlas
+does not stream pages); the client now passes `pages` only when the atlas has `retainSprite`.
+Tests: `packages/render/test/adr519_vehicle_paint.test.ts`, `packages/gameplay/test/adr519_vehicle_paint.test.ts`,
+`packages/persist/test/adr519_vehicle_paint_migration.test.ts`.
