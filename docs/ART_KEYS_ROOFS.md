@@ -23,8 +23,8 @@ Flat, Eaves, Gable, HipGable, picked per site by `roofWeights(kind)`. ADR-373 me
 roofs", but no barn roof exists; they use the Barn weights.
 
 **Art** (`packages/assets/pack/building/manifest.building.json`, generator `assets/tools/buildings2.py roof_piece`):
-- `bld_roof_{flat,slope,gable,hip,corner,chimney,ridge}_t1..t4` on `building_t1..t4` (84×96 grid cells, pivot (42,72),
-  anchor (0.5,0.75), `residency: stream`, 1x only). Bare `bld_roof_gable` / `bld_roof_chimney` sit on the t1 page.
+- `bld_roof_{flat,slope,gable,hip,corner,chimney,ridge}_t1..t4` on `building_t1..t4` (84×120 grid cells since ADR-504, pivot (42,99),
+  anchor (0.5,0.825), `residency: stream`, 1x only). Bare `bld_roof_gable` / `bld_roof_chimney` sit on the t1 page.
   `bld_roof_ridge_tN` reuses the gable frames.
 - 88 roof cells per tier page (16 per piece: 4 rotations × **4 baked damage stages**), 352 total, about 23% of each
   page. That is about 1.7 MB PNG + 0.45 MB KTX2 across t1..t4 in the repo (pre-oxipng).

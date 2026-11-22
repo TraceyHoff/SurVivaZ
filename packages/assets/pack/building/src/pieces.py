@@ -1,8 +1,11 @@
 """Base-building piece set, tiers 1 wood / 2 stone / 3 metal / 4 reinforced. Reuses the main pack's iso box/roof
 toolkit (assets/tools/buildings*.py) so materials, outlines, damage and the grid match the existing pieces exactly:
-1 cell = 1 tile (64x32), pivot = cell centre on the ground, walls on the cell centre line, 1 floor = 48 px."""
+1 cell = 1 tile (64x32), pivot = cell centre on the ground, walls on the cell centre line, 1 floor = 80 px (ADR-504;
+scale80.py sets the toolkit's WALL_H / openings / stairs before anything is built; it was 48 px)."""
 import os, sys, numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../../../assets/tools'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import scale80  # noqa: F401  (ADR-504 80 px floor; must run before `from buildings2 import WALL_H`)
 import buildings2 as b2
 from buildings import B, render_boxes, planksH, planksV, flat
 from toon import SS, noise
@@ -33,32 +36,38 @@ def _plinth(M, bx, x0=-L, x1=L, thick=T):
     return 0
 
 def wall_arched(tier):
-    M = TIERS[tier]; W = _W(M); bx = []; pw = M["post_w"]; inner = L - pw; hw = 0.3; spring = 26
+    """round-headed walk-through arch: crown ~63 px above the pivot (ADR-504), voussoirs + keystone in the trim."""
+    M = TIERS[tier]; W = _W(M); bx = []; pw = M["post_w"]; inner = L - pw; hw = 0.3; rise = 14; spring = 72 - rise
     if M["base"]:
         brp, btx = M["base"]
         for a, b in ((-L, -hw), (hw, L)): bx.append(B(a, b, -T - 0.03, T + 0.03, 0, 7, brp, top=tx(btx), left=tx(btx), right=tx(btx)))
     z0 = 7 if M["base"] else 0
     bx += [W(-inner, -hw, z0, WALL_H - 5), W(hw, inner, z0, WALL_H - 5)]
-    n = 7   # arch: stepped voussoirs (half-circle approximated with boxes)
+    n = 16   # arch: thin voussoir strips (half-circle; no ink between strips, so the curve reads smooth)
+    wrp, wtx = M["wall"]
     for k in range(n):
-        x0 = -hw + hw * (1 - np.cos(np.pi / 2 * k / n)) * 0; a = hw * np.cos(np.pi / 2 * (k + 1) / n); zb = spring + hw * 36 * np.sin(np.pi / 2 * (k + 1) / n) * 0.75
-        za = spring + hw * 36 * np.sin(np.pi / 2 * k / n) * 0.75
-        bx += [W(-hw, -a, za, WALL_H - 5), W(a, hw, za, WALL_H - 5)]
-    bx.append(W(-0.04, 0.04, spring + hw * 27, WALL_H - 5))
-    fr = M["trim"]; bx.append(B(-0.06, 0.06, -T - 0.04, T + 0.04, spring + hw * 27 - 2, spring + hw * 27 + 4, fr))   # keystone
+        a = hw * np.cos(np.pi / 2 * (k + 1) / n); za = spring + rise * np.sin(np.pi / 2 * k / n)
+        for x0, x1 in ((-hw, -a), (a, hw)): bx.append(B(x0, x1, -T, T, za, WALL_H - 5, wrp, left=tx(wtx), right=tx(wtx), top=flat(), edge=False))
+    crown = spring + rise
+    bx.append(W(-0.04, 0.04, crown, WALL_H - 5))
+    fr = M["trim"]; bx.append(B(-0.06, 0.06, -T - 0.04, T + 0.04, crown - 2, crown + 5, fr))   # keystone
     bx.append(B(-hw, hw, -T, T, 0, 1.5, M["base"][0] if M["base"] else "dirt", top=flat()))
     _frame(M, bx, WALL_H); return bx, []
 
+MERLON = 5   # crenels above the 80 px face; the merlon tops stay inside the 99 px frame headroom
 def wall_fortified(tier):
     M = TIERS[tier]; t2 = T * 1.5; W = _W(M, t2); bx = []
     z0 = _plinth(M, bx, thick=t2 + 0.02)
     bx.append(W(-L + M["post_w"], L - M["post_w"], z0, WALL_H - 5))
     _frame(M, bx, WALL_H, t2)
     frp, ftx = M["frame"]
-    for x in (-0.25, 0.25):   # buttresses on the outer (+y) face
+    for x in (-0.25, 0.25):   # buttresses on the outer (+y) face, stepped once at mid height
         bx.append(B(x - 0.07, x + 0.07, t2, t2 + 0.14, 0, 30, frp, left=tx(ftx), right=tx(ftx), top=flat()))
+        bx.append(B(x - 0.06, x + 0.06, t2, t2 + 0.08, 30, 52, frp, left=tx(ftx), right=tx(ftx), top=flat()))
+    for x in (-0.25, 0.25):   # arrow slits above the buttresses (dark recess on the outer face)
+        bx.append(B(x - 0.015, x + 0.015, t2, t2 + 0.005, 58, 70, "ink", faces="l", edge=False))
     for x in (-0.38, 0.0, 0.38):   # merlons
-        bx.append(B(x - 0.09, x + 0.09, -t2 - 0.05, t2 + 0.05, WALL_H, WALL_H + 7, frp, top=flat(), left=tx(ftx), right=tx(ftx)))
+        bx.append(B(x - 0.09, x + 0.09, -t2 - 0.05, t2 + 0.05, WALL_H, WALL_H + MERLON, frp, top=flat(), left=tx(ftx), right=tx(ftx)))
     return bx, []
 
 R3 = 1 / np.sqrt(3)   # circumradius of a unit equilateral triangle

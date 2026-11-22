@@ -49,3 +49,38 @@ clan_hall_door, watchtower.
   push: `tiers.json` levelHeight 3→5, `FLOOR_HEIGHT_LEVELS` 3→5, `roofRfx.json` levelPx 48→80, `building_scale.json`
   floorLevels 5 with `pendingArt` emptied, re-measured `building_scale.measured.json`, roof seats re-checked
   (ADR-404/405), stairs ramp and the level-height tests. `adr504_building_scale.test.ts` checks every number above.
+
+## Art delivered (Art & Assets, branch `art/building-80px`)
+Re-built at the 80 px floor by the targeted packer `packages/assets/pack/building/src/add_building_80px.py` (metric + builders in
+`src/scale80.py`, imported by `pieces.py`); never build.py / build_all. New geometry from the procedural materials at the same
+texel density (new log / plank / stone / panel courses), cel-snapped (flat fills, one hard shade, hard highlight, binary alpha;
+the soft contact shadow kept). Measured with `tools/measure-building-scale.py` (px above the pivot, 1x):
+
+| piece | delivered | target |
+|---|---|---|
+| wall (t0–t4) | 87–89 | 80–90 |
+| wall_doorway clear opening | 60 (sill 7–8, footing) | 58–64 |
+| door_wood / door_metal leaf | 65 / 65 | 60–66 |
+| wall_window opening | sill 28–29, head 59–60 | sill 24–30, head 58–62 |
+| window_glass / _shutters / _bars | 63 / 63 / 62 | 56–64 |
+| wall_arched crown | 58–65 (round head, keystone) | 60–64 |
+| wall_corner_inner / _outer / _angled | 87–88 / 87–88 / 88 | 80–88 |
+| pillar | 91 | 80–92 |
+| wall_fortified | 95–96 (5 px crenels, stepped buttresses, arrow slits) | 84–96 |
+| stairs (t0 `stairs_twig`, t1–t4 `bld_stairs_t<N>`) | 94–97 (10 treads, top tread z 78 at the back edge) | 94–100 |
+
+- **Frame (deviation, needed):** `building_t1..t4`, `building_tw`, `building_fx` and the new `building_stairs` use **84×120, pivot (42,99),
+  anchor (0.5, 0.825)** instead of 84×128 / 0.8125. The tier pages have 17 rows of 24 and every shipped frame index is pinned
+  (shaft hatch / foundation / floor-hatch tests); 17 × 128 = 2176 px would overflow the 2048 texture-array layer, 17 × 120 = 2040
+  fits. The pivot is the same world point; headroom is 99 px (tallest art: angled corner rot 3 = 99, fortified = 96), and 21 px
+  stay below the pivot (the shipped art reaches +21; only an alpha ≤ 2 shadow row of the untouched cells is cropped).
+- **Untouched pieces** on those pages (foundations, floors, wall_low, roofs, chimney, shaft hatch) are the shipped pixels moved down
+  27 px into the taller cell — not repainted.
+- **Stairs:** dedicated flights per tier on the stream page `building_stairs` (no room on the tier pages): t1 open-riser planks on dark
+  stringers + newel, t2 solid stone with flagstone treads and cobble cheeks, t3 diamond-plate treads on teal stringers, t4 riveted
+  plates on a slate mass with armoured cheeks; t0 `stairs_twig` (reed treads on log stringers) re-built in place.
+- **Openings:** door leaves (knob at 30, the wood door's port at 48, metal door three straps), 6-pane glass, 5-bar grille, Z-braced
+  shutters, and their swing1..4 frames (`door_swing_openings`); `bld_crack` spreads over the 88 px face.
+- **Engine flip (EA):** `building_scale.json` (`floorLevels` 5, `floorPx` 80, `pendingArt` emptied), `tiers.json` levelHeight,
+  `FLOOR_HEIGHT_LEVELS`, `roofRfx.json` levelPx — until then the ADR-504 "pending pinned" / "floor flips with the art" checks fail
+  on this branch by design (the art is measured at 80 px while the contract still says 48).

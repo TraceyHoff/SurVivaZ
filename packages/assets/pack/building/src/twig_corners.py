@@ -2,6 +2,7 @@
 # tier-1 wood frames (placeholder). Renders the corners with the main pack's "twig" material (thatch/wattle, bark
 # frame) on a small always-resident page `building_tw` (not /^building_t\d+$/, so never streamed) and repoints the
 # bare-key sprites at it. Same cell crop/pivot/rotation rows as build.py. Usage: cd src && python3 twig_corners.py ..
+# ADR-504: superseded for the 80 px floor by add_building_80px.py (84x120 cells, pivot (42,99)); do not re-run.
 import json, sys
 from PIL import Image
 import pieces as PC

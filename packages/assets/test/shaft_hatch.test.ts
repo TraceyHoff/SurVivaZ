@@ -16,7 +16,7 @@ describe("dedicated Shaft Hatch art", () => {
       expect({ ...s.building, states: undefined }).toEqual({ states: undefined, piece: `shaft_hatch@tier${t}`, footprint: { w: 1, h: 1 }, layer: 0,
         frames: [[352, 353, 354, 355], [356, 357, 358, 359], [360, 361, 362, 363], [364, 365, 366, 367]], crackOverlay: "bld_crack" });
       expect(s.atlas).toBe(`building_t${t}`);
-      expect(s.anchor).toEqual({ x: 0.5, y: 0.75 });
+      expect(s.anchor).toEqual({ x: 0.5, y: 0.825 }); // ADR-504: 84x120 tier cells, pivot (42,99)
       expect(s.rotationArt).toBe("unique4");
       expect(s.animations.idle.frames).toEqual([352]);
       expect(lock.sprites[s.key]).toBeTypeOf("number");
