@@ -20,7 +20,7 @@ import { BuildPiece, PieceBuilder, PieceLink, PieceOwner, PieceStability, Tribe,
 import { gameplayDefs, isAuthority } from "../config.js";
 import type { ItemCount, PieceDef } from "../defs.js";
 import { BuildFail, emit, PieceMoved } from "../events.js";
-import { maxHpOf } from "./integrity.js";
+import { attachedPieces, maxHpOf } from "./integrity.js";
 import { attachmentsOf } from "./links.js";
 import { candidateStability, hasPrivilege, pieceCost, snapPlacement, tribeOf, validatePlacement, zonesAt, zoneOwnedBy, type PlaceRequest, type Snapped } from "./place.js";
 import { reseatSmallOn, smallPiecesOn } from "./surface.js";
@@ -87,6 +87,13 @@ export function demolishRefund(world: World, actor: Entity, piece: Entity): { it
   return { items: cost.map((c) => ({ item: c.item, count: Math.max(1, Math.floor(c.count * k)) })), full };
 }
 
+/** ADR-516: the refund for demolishing `piece` plus everything that comes down with it (attachedPieces: its door /
+ *  window / hatch / wall inserts), each by the own (100%) / other (50%) rule. Merged per item; `full` = the host's rule. */
+export function demolishRefundAll(world: World, actor: Entity, piece: Entity): { items: ItemCount[]; full: boolean } {
+  const host = demolishRefund(world, actor, piece); const sum = new Map<number, number>();
+  for (const x of [host, ...attachedPieces(world, piece).map((a) => demolishRefund(world, actor, a))]) for (const c of x.items) sum.set(c.item, (sum.get(c.item) ?? 0) + c.count);
+  return { items: [...sum].map(([item, count]) => ({ item, count })), full: host.full };
+}
 /** ADR-318: pieces that never move — they carry their own land / world state (stalls, planter soil, terrain ladders, shaft hatches). */
 export const movableDef = (def: PieceDef): boolean => !def.stall && !def.features.planter && !def.features.terrainLadder && !def.features.shaftHatch;
 /**

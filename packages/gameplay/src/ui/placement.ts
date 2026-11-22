@@ -16,7 +16,7 @@ import { isFineRot, isLCorner, rotParts, rotatedSize, structures, FINE_ROT, type
 import { maxHpOf } from "../building/integrity.js";
 import { BuildPiece, Dead, EdgeSide, PieceSlot, PrivilegeZone } from "../components.js";
 import { DemolishCmd, MoveCmd, ReclaimCmd, RepairCmd, UpgradeCmd } from "../input.js";
-import { demolishPermission, demolishRefund, moveBlocker, validateLiftedMove } from "../building/edit.js";
+import { demolishPermission, demolishRefundAll, moveBlocker, validateLiftedMove } from "../building/edit.js";
 import type { ItemCount } from "../defs.js";
 import { siteOf, siteUnclaimed } from "../building/abandoned.js";
 import { countItem } from "../inventory.js";
@@ -384,7 +384,7 @@ export function pieceTargetAt(world: World, player: Entity, at: { x: number; y: 
     canReclaim: (() => { const site = siteOf(world, best); return !!site && siteUnclaimed(world, site) && onClaim; })(), pickup: def.pickup,
     onClaim, repairUnlocked,
     canAfford: { repair: has(pieceCost(d, def, bp.tier, mul * missing)), upgrade: next !== undefined && has(pieceCost(d, def, next)) },
-    demolishReason: demolishPermission(world, player, best), ...(() => { const r = demolishRefund(world, player, best); return { refund: r.items, refundFull: r.full }; })(),
+    demolishReason: demolishPermission(world, player, best), ...(() => { const r = demolishRefundAll(world, player, best); return { refund: r.items, refundFull: r.full }; })(),
     moveReason: moveBlocker(world, player, best), rot: bp.rot, variant: bp.variant, paint: bp.paint };
 }
 export const repairIntent = (target: Entity): MenuIntent => ({ cmd: RepairCmd, args: { target }, entities: ["target"] });

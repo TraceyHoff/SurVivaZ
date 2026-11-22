@@ -9,6 +9,7 @@
  *  - gameplay.explosives (after combat): fuse -> radial damage (falloff), structures via damagePiece (raid attribution),
  *    own-tribe structures x pvp.explosives.ownTribeStructureMul, RaidRule hook, ignite; Exploded (reliable).
  */
+import { refundOrDrop } from "../overflow.js";
 import { LootSource, tagLootSource } from "../loot_labels.js";
 import { lootBagInit } from "../loot_despawn.js";
 import { defineResource, entityIndex, PlayerId, Transform, type Entity, type World } from "@engine/core";
@@ -16,7 +17,7 @@ import { BuildPiece, Container, DamageCause, ContainerViewers, Dead, Equipment, 
 import { gameplayDefs, isAuthority } from "../config.js";
 import { BODY_WEAR_SLOTS, ItemCategory, secondsToTicks, WearSlot, WEAR_SLOTS, type ItemDef } from "../defs.js";
 import { emit, ev } from "../events.js";
-import { addItem, countItem, moveSlotTuples, removeItem, slotItem, takeFromSlot } from "../inventory.js";
+import { countItem, moveSlotTuples, removeItem, slotItem, takeFromSlot } from "../inventory.js";
 import { applyDamage } from "./combat.js";
 import { Anim, AnimState } from "../components.js";
 import { indexEntity } from "../spawn.js";
@@ -110,7 +111,7 @@ export function weaponsSystem(world: World, dt: number): void {
     const ws = world.get(e, WeaponState)!; const h = heldDef(world, e); const s = it.slot(entityIndex(e));
     const want = h.def?.ranged ? h.slot + 1 : 0;
     if (ws.slot !== want) { // switched weapon: return rounds to inventory
-      if (auth && ws.loaded > 0 && ws.ammoItem) addItem(world, e, ws.ammoItem, ws.loaded);
+      if (auth && ws.loaded > 0 && ws.ammoItem) refundOrDrop(world, e, [{ item: ws.ammoItem, count: ws.loaded }]); // ADR-516: a full pack drops them in a bag
       world.set(e, WeaponState, { slot: want, loaded: 0, ammoItem: 0, reloadUntilTick: 0, chargeStartTick: 0 }); continue;
     }
     const r = h.def?.ranged; if (!r) continue;

@@ -12134,3 +12134,17 @@ only by `placePiece` / `movePiece`. Pieces indexed on load or replication never 
 0, and pieces under a removed flag stayed booked to it. `zonePieceCount` now derives the count from the index (pieces
 inside the claim's disk; claims never overlap). It is cached per index edit through a new `StructureIndex.edits` counter,
 which `lifted()` does not rewind. The tally maps are gone. Test: `packages/gameplay/test/adr515_zone_full.test.ts`.
+
+## ADR-516: attachments refund with their host; overflow drops instead of vanishing (SurVivaZ)
+
+**Attachment refunds.** Demolishing a host piece also destroys its hosted opening (door, window, hatch) and, on an edge
+piece, the wall inserts mounted on it (`destroyPiece`), but only the host was refunded. `attachedPieces` (integrity.ts)
+walks the same set, and `demolishRefundAll` (edit.ts) sums each piece's ADR-317 refund: 100% for your own build, 50%
+(min 1) for anyone else's, judged per piece. The Demolish intent pays it, and the build HUD preview shows the same total.
+Overflow drops in a bag (ADR-515).
+
+**Overflow.** `refundOrDrop` moved to `overflow.ts` and now also covers rounds unloaded by a weapon swap (`weaponsSystem`)
+and a picked-up sign (`removeSign`); both lost what did not fit. I audited every `addItem` call that ignores its
+return. Gathering and fishing overflow is new loot, already reported by `InventoryOverflow`, so it is left as is.
+Station produce simply isn't made when the station is full. Loot / dung / dead-mount bags are sized for their contents.
+Test: `packages/gameplay/test/adr516_attached_refunds.test.ts`.

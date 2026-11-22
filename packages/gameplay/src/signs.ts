@@ -3,11 +3,12 @@
  * sanitized (printable ASCII, collapsed spaces), length-limited per kind (<= SIGN_TEXT_MAX) and profanity-masked
  * on the server. Owner or owner's clan may edit / remove it. Networked so every client renders a world label.
  */
+import { refundOrDrop } from "./overflow.js";
 import { defineCommand, entityIndex, Membership, PlayerId, Transform, type CommandDef, type CommandHandlers, type Entity, type World } from "@engine/core";
 import { emit, XpActivity } from "./events.js";
 import raw from "../data/roads.json";
 import { Sign, SIGN_TEXT_MAX } from "./components.js";
-import { countItem, removeItem, addItem } from "./inventory.js";
+import { countItem, removeItem } from "./inventory.js";
 import { hasPrivilege } from "./building/place.js";
 import { indexEntity } from "./spawn.js";
 import { itemIdSafe } from "./roads.js";
@@ -90,7 +91,7 @@ export function removeSign(world: World, e: Entity, sign: Entity): SignFail {
   if (!world.isAlive(sign) || !world.has(sign, Sign)) return SignFail.NotFound;
   if (!canEditSign(world, e, sign)) return SignFail.NotOwner;
   const d = signDef(world.getField(sign, Sign, "kind") ?? 0); const item = d ? itemIdSafe(world, d.item) : undefined;
-  if (item !== undefined) addItem(world, e, item, 1);
+  if (item !== undefined) refundOrDrop(world, e, [{ item, count: 1 }]); // ADR-516: a full pack drops it in a bag
   world.destroy(sign); return SignFail.None;
 }
 

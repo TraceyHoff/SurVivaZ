@@ -111,6 +111,15 @@ export function spillStorage(world: World, att: Entity): Entity | undefined {
   moveSlotTuples(world, att, bag, moves); indexEntity(world, bag); return bag;
 }
 
+/** ADR-516: the pieces destroyPiece takes down with `e` (its hosted opening — door, window, hatch — and, on an edge
+ *  piece, the wall inserts mounted on it), recursively; `e` itself excluded. Same walk as destroyPiece below. */
+export function attachedPieces(world: World, e: Entity, out: Entity[] = []): Entity[] {
+  const idx = structures(world); if (!idx.info.has(e)) return out;
+  const op = idx.opening(e); if (op && !out.includes(op)) { out.push(op); attachedPieces(world, op, out); }
+  const d = idx.def(e); const s = idx.info.get(e)?.slot;
+  if (d && s && d.placement === Placement.Edge && !d.features.mount) for (const m of idx.mountsOn(s.tx, s.ty, s.z, s.side)) if (!out.includes(m)) { out.push(m); attachedPieces(world, m, out); }
+  return out;
+}
 /** Destroy a piece (server): removes attachments and the hosted opening, records neighbors for recompute. */
 export function destroyPiece(world: World, e: Entity, cause: DestroyCause): void {
   const idx = structures(world); if (!idx.info.has(e)) return;
