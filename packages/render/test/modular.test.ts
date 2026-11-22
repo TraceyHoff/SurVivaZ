@@ -74,9 +74,12 @@ describe("damage crack overlay", () => {
   });
 });
 
-describe("stacked floors depth (levelHeight 3 = FLOOR_HEIGHT_LEVELS)", () => {
+describe("stacked floors depth (levelHeight 5 = FLOOR_HEIGHT_LEVELS, ADR-511)", () => {
   const zf = isoZDepthFactor(DEFAULT_ISO); const Z = (lv: number) => lv * FLOOR_HEIGHT_LEVELS;
-  it("one floor = exactly one tile row of depth", () => { expect(Z(1) * zf).toBeCloseTo(1, 6); });
+  // the shader's upright key adds height px x uZPerPx (= zf / zStep); a floor's level term is the same metric, so the
+  // 80 px floor adds 80 / 48 rows (the 48 px floor added exactly 1)
+  const zPerPx = zf / DEFAULT_ISO.zStep, WALL_TOP_PX = 88;
+  it("one floor = floor px x uZPerPx of depth (80 px = 5/3 rows)", () => { expect(Z(1) * zf).toBeCloseTo(80 * zPerPx, 6); expect(Z(1) * zf).toBeCloseTo(5 / 3, 6); });
   it("orders upper levels above lower ones on the same tile and keeps ground pieces in front where they are", () => {
     const deck = (x: number, y: number, lv: number) => pieceDepthKey(x, y, 1, 1, Z(lv), zf, 0);
     const wall = (x: number, y: number, lv: number) => pieceDepthKey(x, y, 1, 1, Z(lv), zf, 0.01);
@@ -85,7 +88,9 @@ describe("stacked floors depth (levelHeight 3 = FLOOR_HEIGHT_LEVELS)", () => {
     expect(deck(5, 5, 2)).toBeGreaterThan(wall(5, 5, 1));
     expect(roof(5, 5, 2)).toBeGreaterThan(wall(5, 5, 1));
     expect(wall(6, 6, 0)).toBeGreaterThan(deck(5, 5, 1)); // ground wall two rows in front draws after the deck behind/above
-    expect(wall(5, 6, 0)).toBeGreaterThan(deck(5, 5, 1)); // front wall top meets the upper deck edge: wall wins
+    // front wall top meets the upper deck edge: the wall's top pixels (pivot key + top px x uZPerPx) win; with the 80 px floor
+    // its pivot key alone no longer does, so the per-pixel height term is what orders it (as in the shader)
+    expect(wall(5, 6, 0) + 0.02 + (WALL_TOP_PX - 8) * zPerPx).toBeGreaterThan(deck(5, 5, 1));
     expect(deck(6, 6, 1)).toBeGreaterThan(wall(5, 5, 1));
   });
 });

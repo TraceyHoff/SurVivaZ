@@ -10,7 +10,7 @@
  * the entity's level and a landing exists one level up (the stairwell tile itself, or the adjacent tile past
  * the top edge, e.g. an outside balcony), the stand height is `level * levelHeight + frac * levelHeight`,
  * where frac is the entity's progress across the tile toward the top edge. Walking up the tile raises z at
- * the existing stepRate (6 z/s); walking back down lowers it; `settleStandZ` eases both ways, so stopping
+ * the existing stepRate (6 z/s; ADR-511 stepCatchUp keeps it on the 5-level ramp); walking back down lowers it; `settleStandZ` eases both ways, so stopping
  * mid-flight, turning back, or stepping off sideways settles onto the nearest level instead of sticking.
  * The same rule in reverse (stairs piece one level below + a landing at this level) is the way down: an
  * entity at level 1 standing on the stairwell tile descends as it walks back across it. Because the ramp

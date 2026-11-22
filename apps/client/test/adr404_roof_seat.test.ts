@@ -29,8 +29,10 @@ function pixels(key: string, r: number): [number, number][] {
 }
 const P = (wx: number, wy: number): [number, number] => [(wx - wy) * 32, (wx + wy) * 16];
 const top = (key: string, r: number): number => Math.min(...pixels(key, r).map((p) => p[1]));
-/** plain straight-wall art of every tier (main pack twig/wood/stone/metal + the building pack t1..t4) */
-const PLAIN_WALLS = ["wall_twig", "wall", "wall_stone", "wall_metal", "bld_wall_t1", "bld_wall_t2", "bld_wall_t3", "bld_wall_t4"].filter((k) => spr.has(k));
+/** plain straight-wall art of every tier as the game draws it: twig (main pack, the bare `wall` piece) + the building pack
+ *  t1..t4. ADR-511: the main pack's old `wall` / `wall_stone` / `wall_metal` sprites (48 px floor art) are no longer drawn by
+ *  any piece (wall@tierN resolves to bld_wall_tN, bare `wall` to wall_twig), so they are not held to the 80 px floor. */
+const PLAIN_WALLS = ["wall_twig", "bld_wall_t1", "bld_wall_t2", "bld_wall_t3", "bld_wall_t4"].filter((k) => spr.has(k));
 /** row of a wall sprite whose face runs along world x (the N/S edges) */
 const rowAlongX = (k: string): number => { const p = pixels(k, 0); let c = 0; for (const [x, y] of p) c += x * (y + 25); return c > 0 ? 0 : 1; };
 
@@ -83,11 +85,15 @@ describe("ADR-404 roof seat", () => {
   });
   it("seats lie between the floor and the wall-top height of the plain wall art", () => {
     const tops = PLAIN_WALLS.flatMap((k) => [0, 1].map((r) => -top(k, r) - RFX.levelPx));
-    expect(PLAIN_WALLS.length).toBeGreaterThanOrEqual(6);
+    expect(PLAIN_WALLS.length).toBe(5); expect(RFX.levelPx).toBe(80); // ADR-511: 80 px floor
     for (const [f] of FORMS) { const s = RFX.forms[f].seatPx ?? 0; expect(s, f).toBeGreaterThan(0); expect(s, f).toBeLessThanOrEqual(Math.max(...tops)); }
   });
   it("rfx parts out-rank the walls they rest on in the WebGL2 depth key (front wall top + vertex post)", () => {
-    expect(RFX_SEAT_BIAS).toBeGreaterThan(0.45 + 61 / 48 + 0.53 - 1 - 0.05 - 13 / 48);
+    // front edge wall top key = edge + 0.45 + top px / 48 (uZPerPx), a vertex post +0.53 more; the roof part's key gains one
+    // floor (levelPx / 48 rows) + its seat. ADR-511: 92 px tops on the 80 px floor (was 61 on 48) keep the same ~12 px margin
+    const hi = Math.max(...PLAIN_WALLS.flatMap((k) => [0, 1].map((r) => -top(k, r)))), seat = Math.min(...FORMS.map(([f]) => RFX.forms[f].seatPx ?? 0));
+    expect(hi).toBeGreaterThan(RFX.levelPx); expect(hi - RFX.levelPx).toBeLessThanOrEqual(16);
+    expect(RFX_SEAT_BIAS).toBeGreaterThan(0.45 + hi / 48 + 0.53 - RFX.levelPx / 48 - 0.05 - seat / 48);
   });
   // ADR-509: Art's eave pass (c203cbec) + data seats / clip modes: every facing meets the roof on the wall's edge span,
   // and the near/far facings also with the posts past the tile corners (+-23 px; the 8 px corner flare covers most)

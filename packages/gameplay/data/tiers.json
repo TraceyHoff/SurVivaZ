@@ -10,7 +10,7 @@
   "building": {
     "buildReach": 4,
     "playerMaxSpeed": 5,
-    "levelHeight": 3,
+    "levelHeight": 5,
     "maxLevel": 7,
     "minStability": 5,
     "groundStability": 100,

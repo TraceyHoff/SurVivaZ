@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CHUNK_SIZE, floorToTerrainZ, type TileMap } from "@engine/world";
+import { CHUNK_SIZE, FLOOR_HEIGHT_LEVELS as L, floorToTerrainZ, type TileMap } from "@engine/world";
 import { groundZ, pieceBoundaryGroundZ, pieceGroundZ } from "../src/view.js";
 
 /**
@@ -48,10 +48,10 @@ describe("ADR-412 ruin corners and walls sit on their own ground tile", () => {
   });
 
   it("upper-story boundary pieces keep their story on top of the structure's ground", () => {
-    expect(pieceBoundaryGroundZ(tiles, 6.5, 9, 3, 3)).toBe(2);
-    expect(floorToTerrainZ(1, pieceBoundaryGroundZ(tiles, 6.5, 9, 3, 3))).toBe(5);
-    expect(pieceBoundaryGroundZ(tiles, 9, 9, 6, 3)).toBe(2);
-    expect(floorToTerrainZ(2, pieceBoundaryGroundZ(tiles, 9, 9, 6, 3))).toBe(8);
+    expect(pieceBoundaryGroundZ(tiles, 6.5, 9, L, L)).toBe(2);
+    expect(floorToTerrainZ(1, pieceBoundaryGroundZ(tiles, 6.5, 9, L, L))).toBe(L + 2);
+    expect(pieceBoundaryGroundZ(tiles, 9, 9, 2 * L, L)).toBe(2);
+    expect(floorToTerrainZ(2, pieceBoundaryGroundZ(tiles, 9, 9, 2 * L, L))).toBe(2 * L + 2);
   });
 
   it("off-boundary anchors are identical to pieceGroundZ (foundations, furniture, interior pieces)", () => {
@@ -60,7 +60,7 @@ describe("ADR-412 ruin corners and walls sit on their own ground tile", () => {
     }
     expect(pieceBoundaryGroundZ(tiles, 6.5, 6.5, 0, 3)).toBe(2);
     expect(pieceBoundaryGroundZ(undefined, 6.5, 9, 0, 3)).toBe(0);
-    expect(pieceBoundaryGroundZ(undefined, 6.5, 9, 3.3125, 3)).toBeCloseTo(0.3125);
+    expect(pieceBoundaryGroundZ(undefined, 6.5, 9, L + 0.3125, L)).toBeCloseTo(0.3125);
   });
 
   it("a boundary anchor straddling a chunk edge reads both chunks (lowest wins)", () => {

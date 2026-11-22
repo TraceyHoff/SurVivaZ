@@ -6,10 +6,10 @@ export interface IsoConfig { tileW: number; tileH: number; zStep: number;
   view?: number }
 export const DEFAULT_ISO: IsoConfig = { tileW: 64, tileH: 32, zStep: 16 };
 /**
- * Height convention: 1 terrain level = zStep (16 px); 1 building floor = FLOOR_HEIGHT_LEVELS terrain levels (walls are
- * 48 px tall). Transform.z is in terrain levels; BuildingGrid z is a floor index. Roofs of floor f sit at terrain level (f+1)*3.
+ * Height convention: 1 terrain level = zStep (16 px); 1 building floor = FLOOR_HEIGHT_LEVELS terrain levels (ADR-511: walls are
+ * 80 px tall, was 3 levels / 48 px). Transform.z is in terrain levels; BuildingGrid z is a floor index. Roofs of floor f sit at terrain level (f+1)*5.
  */
-export const FLOOR_HEIGHT_LEVELS = 3;
+export const FLOOR_HEIGHT_LEVELS = 5;
 /** Terrain-level z of the bottom of building floor `floor` above a base terrain height. */
 export const floorToTerrainZ = (floor: number, baseZ = 0): number => baseZ + floor * FLOOR_HEIGHT_LEVELS;
 /** Building floor index containing terrain-level z (relative to base terrain height). */

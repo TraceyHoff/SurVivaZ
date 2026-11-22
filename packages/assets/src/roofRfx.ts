@@ -103,15 +103,21 @@ export function rfxShapeOf(lower: number): { shape: RfxShape; row: number } {
 export function rfxVariant(x: number, y: number, level: number, cfg: RfxConfig = RFX): 0 | 1 | 2 { const k = rfxHashU32(cfg.seed, x, y, level) & 3; return k === 3 ? 2 : k === 2 ? 1 : 0; }
 
 /** Pick every tile of one level. Tiles of keys outside `groups` are ignored. */
+/** ADR-511: group value of a piece that joins whichever region it touches (a chimney stands IN a roof: it never splits one). */
+export const RFX_ANY_GROUP = "*";
 export function rfxPickLevel(tiles: readonly RfxTile[], level: number, cfg: RfxConfig = RFX): Map<string, RfxPick> {
   const at = new Map<string, RfxTile>(); for (const t of tiles) if (cfg.groups[t.key] !== undefined) at.set(rfxCell(t.x, t.y), t);
   const out = new Map<string, RfxPick>(); const seen = new Set<string>(); let regionId = 0;
-  for (const start of at.values()) {
+  const any = (t: RfxTile): boolean => cfg.groups[t.key] === RFX_ANY_GROUP;
+  // regions grow from real roof tiles first, so an any-group tile (chimney) joins the region around it; one touching no
+  // roof tile is its own legacy region (a lone chimney -> hip, as before)
+  const starts = [...at.values()].sort((a, b) => +any(a) - +any(b));
+  for (const start of starts) {
     const sk = rfxCell(start.x, start.y); if (seen.has(sk)) continue;
-    const group = cfg.groups[start.key]!; const region: RfxTile[] = []; const q = [start]; seen.add(sk);
-    while (q.length) { // 8-connected, same group
+    const group = any(start) ? "legacy" : cfg.groups[start.key]!; const region: RfxTile[] = []; const q = [start]; seen.add(sk);
+    while (q.length) { // 8-connected, same group (any-group tiles join; they do not carry the fill on past themselves into another group)
       const t = q.pop()!; region.push(t);
-      for (const [dx, dy] of NB) { const k = rfxCell(t.x + dx, t.y + dy); const n = at.get(k); if (n && !seen.has(k) && cfg.groups[n.key] === group) { seen.add(k); q.push(n); } }
+      for (const [dx, dy] of NB) { const k = rfxCell(t.x + dx, t.y + dy); const n = at.get(k); if (n && !seen.has(k) && (cfg.groups[n.key] === group || any(n))) { seen.add(k); q.push(n); } }
     }
     pickRegion(region, group, level, regionId++, cfg, out);
   }

@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { World, Transform, PrevTransform, defineComponent } from "@engine/core";
+import { FLOOR_HEIGHT_LEVELS } from "@engine/world";
 import { loadManifest, mergeManifests, type ManifestJson } from "@engine/assets";
 import { Canvas2DRenderer } from "../src/canvas2d.js";
 import { DEFAULT_STYLE } from "../src/style.js";
@@ -216,7 +217,7 @@ describe("ADR-417 Canvas2D hideOtherStory (render)", () => {
       w.add(e, Sprite, { spriteId: TREE, frameId: 0, flags: 0, scale: 1, tint: 0 });
       return e;
     };
-    addTree(1.5, 1.5, 3); // same tile as the player, one floor up: hidden when the player is indoors below
+    addTree(1.5, 1.5, FLOOR_HEIGHT_LEVELS); // same tile as the player, one floor up (ADR-511: 5 levels): hidden when the player is indoors below
     addTree(20.5, 20.5, 0); // outside the room: drawn
     const log: { alpha: number; tx: number; ty: number; dw: number; dh: number }[] = [];
     const canvas = { width: 320, height: 240, getContext: () => ({}) } as unknown as HTMLCanvasElement;

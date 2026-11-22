@@ -84,3 +84,5 @@ the soft contact shadow kept). Measured with `tools/measure-building-scale.py` (
 - **Engine flip (EA):** `building_scale.json` (`floorLevels` 5, `floorPx` 80, `pendingArt` emptied), `tiers.json` levelHeight,
   `FLOOR_HEIGHT_LEVELS`, `roofRfx.json` levelPx — until then the ADR-504 "pending pinned" / "floor flips with the art" checks fail
   on this branch by design (the art is measured at 80 px while the contract still says 48).
+
+**Status (ADR-511):** delivered by Art (3bab4025) and landed with the floor flip to 5 levels / 80 px; `pendingArt` is empty.

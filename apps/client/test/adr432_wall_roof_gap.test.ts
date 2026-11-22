@@ -16,9 +16,9 @@ import { deckTileKey, groundZ, pieceBoundaryGroundZ, pieceGroundZ } from "../src
  * sinking IS the gap, because the roof does not sink with it. The placement ghost uses the same
  * lift (view.ts:543-546), so it shows the gap faithfully.
  *
- * Constants: levelHeight = 3 (tiers.json); 1 terrain level = 16 px; 1 floor = 3 levels = 48 px;
- * walls are 48 px tall, so a wall top is its base + FLOOR_HEIGHT_LEVELS. Roof / floor sim z = 3
- * (level 1). Every assertion below is the wall-top/roof pair, not just a grounding value.
+ * Constants: levelHeight = 5 (tiers.json; 3 before ADR-511); 1 terrain level = 16 px; 1 floor = 5 levels = 80 px;
+ * walls are one floor tall, so a wall top is its base + FLOOR_HEIGHT_LEVELS. Roof / floor sim z = FLOOR_HEIGHT_LEVELS
+ * (level 1); the pinned values below are written as ground + n x FLOOR_HEIGHT_LEVELS. Every assertion below is the wall-top/roof pair, not just a grounding value.
  *
  * Scenario (one chunk, same harness as the ADR-412 test): a flat 5x5 footprint at origin (4,4),
  * ground level 3, with the south row (y=9) and east column (x=9) dropped to level 2.
@@ -79,7 +79,7 @@ describe("ADR-432 wall top meets the roof on a flat footprint next to a one-leve
   it("control: north wall, whose outside neighbour is level with the footprint, has no gap", () => {
     expect(pieceBoundaryGroundZ(tiles, 6.5, 4, 0, 3, decks)).toBe(3);
     expect(wallTopZ(tiles, 6.5, 4, decks)).toBe(roofDrawZ(tiles, 6.5, 4.5));
-    expect(wallTopZ(tiles, 6.5, 4, decks)).toBe(6);
+    expect(wallTopZ(tiles, 6.5, 4, decks)).toBe(3 + FLOOR_HEIGHT_LEVELS);
   });
 
   it("the SE corner vertex (9,9) touches 4 tiles, min 2 — its wall top meets the roof too", () => {
@@ -128,11 +128,11 @@ describe("ADR-432 straddle variant: a footprint split across the step (pins curr
     // four corners, where a single diagonal tile is decked, and mid-edge vertices have no piece —
     // this pin is arithmetic for the rule, not a rendered case. The bare (no-deck) read is
     // unchanged: min 2, top 5, meeting the west roof instead.
-    expect(wallTopZ(tiles, 5, 7, decks)).toBe(6);
-    expect(roofDrawZ(tiles, 4.5, 6.5)).toBe(5);
-    expect(roofDrawZ(tiles, 5.5, 6.5)).toBe(6);
-    expect(wallTopZ(tiles, 5, 4, decks)).toBe(6); // same on the north step-line vertex
-    expect(wallTopZ(tiles, 5, 7)).toBe(5);
+    expect(wallTopZ(tiles, 5, 7, decks)).toBe(3 + FLOOR_HEIGHT_LEVELS);
+    expect(roofDrawZ(tiles, 4.5, 6.5)).toBe(2 + FLOOR_HEIGHT_LEVELS);
+    expect(roofDrawZ(tiles, 5.5, 6.5)).toBe(3 + FLOOR_HEIGHT_LEVELS);
+    expect(wallTopZ(tiles, 5, 4, decks)).toBe(3 + FLOOR_HEIGHT_LEVELS); // same on the north step-line vertex
+    expect(wallTopZ(tiles, 5, 7)).toBe(2 + FLOOR_HEIGHT_LEVELS);
   });
 });
 
@@ -176,7 +176,7 @@ describe("ADR-432 must not trade the defect for ADR-412's: raised neighbours sti
     // separates the two properties: min is the no-deck fallback, not the roofed rule.
     expect(pieceBoundaryGroundZ(sunk, 6.5, 4, 0, 3, decks)).toBe(2);
     expect(wallTopZ(sunk, 6.5, 4, decks)).toBe(roofDrawZ(sunk, 6.5, 4.5));
-    expect(wallTopZ(sunk, 6.5, 4, decks)).toBe(5);
+    expect(wallTopZ(sunk, 6.5, 4, decks)).toBe(2 + FLOOR_HEIGHT_LEVELS);
   });
 
   it("and in the raised-neighbour geometry the wall top already meets the roof — the fix must keep it so", () => {

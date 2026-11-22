@@ -1,4 +1,4 @@
-import { rfxCell, rfxClipsAt, rfxPickLevel, rfxSeat, rfxSpriteKeys, RFX, type RfxConfig, type RfxPick, type RfxTile } from "@engine/assets";
+import { RFX_ANY_GROUP, rfxCell, rfxClipsAt, rfxPickLevel, rfxSeat, rfxSpriteKeys, RFX, type RfxConfig, type RfxPick, type RfxTile } from "@engine/assets";
 import type { RoofFxBinding } from "@engine/render";
 import { BuildPiece, StructureIndex, StructureIndexRes, gameplayDefs } from "@engine/gameplay";
 import type { World } from "@engine/core";
@@ -167,7 +167,7 @@ export function roofWallMaterial(net: World, x: number, y: number, wallLevel: nu
  * `building.piece` (`<base>@<variant>`) or undefined. undefined when the key has a legacy sprite or is not an rfx-only form.
  */
 export function rfxStandIn(key: string, rot: number, tier: number, art: (spriteKey: string) => string | undefined, cfg: RfxConfig = RFX): { pieceKey: string; variant: string; row: number } | undefined {
-  const g = cfg.groups[key]; if (g === undefined || g === "legacy") return undefined;
+  const g = cfg.groups[key]; if (g === undefined || g === "legacy" || g === RFX_ANY_GROUP) return undefined; // the chimney (ADR-511 any-group) keeps its legacy art
   const p = rfxPickLevel([{ x: 0, y: 0, key, rot: rot & 3, tier }], 0, cfg).get(rfxCell(0, 0)); if (!p) return undefined;
   for (let t = tier; t <= 4; t++) for (const k of rfxSpriteKeys(p.stem, t, undefined, cfg)) { // below the form's lowest tier: its nearest tier's art
     const piece = art(k); const at = piece?.indexOf("@") ?? -1;

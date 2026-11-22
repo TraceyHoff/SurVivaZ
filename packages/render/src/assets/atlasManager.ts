@@ -129,9 +129,11 @@ const BLD_POOL_SLOTS_DESKTOP = 4, BLD_POOL_SLOTS_LOWMEM = 4;
 // page, and never take a tier page's slot: a cabin's tier is two pages (a + b); 4 holds two tiers on a phone
 const ROOF_POOL_SLOTS_DESKTOP = 6, ROOF_POOL_SLOTS_LOWMEM = 4; // ADR-211: one slot per tier page (0.7 MB each at 0.5x): 2 slots thrashed a mixed-tier base onto the legacy fallback art
 /** Building tier sheets streamed per tier present nearby (BuildingTierStreamer): `building_t<N>` atlases from files. */
-/** ADR-211 building tier pages, and (ADR-400) Art's continuous-roof pages rfx_t<N>_<a|b> and skins rfx_<skin>_t<N> (rfx_shk_t0/t1), which stream and evict with buildings. */
+/** ADR-211 building tier pages, the ADR-511 stairs page, and (ADR-400) Art's continuous-roof pages rfx_t<N>_<a|b> and skins rfx_<skin>_t<N> (rfx_shk_t0/t1), which stream and evict with buildings. */
 export function isStreamedBuildingAtlas(key: string, url: string): boolean { return BLD_STREAM_RE.test(key) && !/^(blob|data):/.test(url); }
-const BLD_STREAM_RE = /^(?:building_t\d+|rfx_(?:[a-z]+_)?t\d+(?:_[a-z])?)$/, ROOF_PAGE_RE = /^rfx_/;
+const BLD_STREAM_RE = /^(?:building_t\d+|building_stairs|rfx_(?:[a-z]+_)?t\d+(?:_[a-z])?)$/, ROOF_PAGE_RE = /^rfx_/;
+/** ADR-511: Art's per-tier stairs page (bld_stairs_t1..t4) streams with the buildings in a one-slot group of its own size, so it never takes a tier page's slot. */
+const STAIRS_PAGE_RE = /^building_stairs$/;
 /** ADR-244 (b): v2 per-group sheets (`<core>__combat|ranged|pose|sleep`) stream in the stream pool; only the core sheet
  *  stays resident in the body / wear pools. */
 export const isV2StreamSheet = (key: string): boolean => /^v2s?_.*__(combat|ranged|pose|sleep)$/.test(key);
@@ -877,9 +879,10 @@ export class AtlasManager {
       } else groups.push({ cls: "wear", lazy: wear, minSlots: min, cap: false });
     }
     // building tiers: first pool of the compressed tail (ETC1S own array) with vehicles and stream sheets
-    const bldTier = bld.filter((a) => !ROOF_PAGE_RE.test(a.key)), bldRoof = bld.filter((a) => ROOF_PAGE_RE.test(a.key));
+    const bldTier = bld.filter((a) => !ROOF_PAGE_RE.test(a.key) && !STAIRS_PAGE_RE.test(a.key)), bldRoof = bld.filter((a) => ROOF_PAGE_RE.test(a.key)), bldStairs = bld.filter((a) => STAIRS_PAGE_RE.test(a.key));
     if (bldTier.length) groups.push({ cls: "bld", lazy: bldTier, minSlots: Math.min(bldTier.length, lowMem ? BLD_POOL_SLOTS_LOWMEM : BLD_POOL_SLOTS_DESKTOP), cap: true });
     if (bldRoof.length) groups.push({ cls: "bld", lazy: bldRoof, minSlots: Math.min(bldRoof.length, lowMem ? ROOF_POOL_SLOTS_LOWMEM : ROOF_POOL_SLOTS_DESKTOP), cap: true });
+    if (bldStairs.length) groups.push({ cls: "bld", lazy: bldStairs, minSlots: 1, cap: true });
     // vehicles: compressed tail
     if (veh.length) groups.push({ cls: "veh", lazy: veh, minSlots: Math.min(veh.length, lowMem ? VEH_POOL_SLOTS_LOWMEM : VEH_POOL_SLOTS_DESKTOP), cap: true });
     // manifest stream sheets: visible art (kept at 1x, counted in keepVis like vehicles), a small LRU working set

@@ -13,6 +13,7 @@
  * ground door's neighbour. Ruin 0 never drops stairs (ADR-372 roll is ruin-scaled).
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
 import { installPermissions, PlayerId, Transform, type Entity, type World } from "@engine/core";
 import * as G from "../src/index.js";
 import { planClaimRuin } from "../src/ai/claim_build.js";
@@ -20,7 +21,10 @@ import { makeWorld, plantClaim, spawnLearned, steps } from "./helpers.js";
 import { room, setDoor, world215 } from "./nav215_fixture.js";
 
 const DT = 1 / 20;
-const LH = 3; // building.levelHeight
+/** building.levelHeight (tiers.json; 5 since ADR-511's 80 px floor) */
+const LH = (JSON.parse(readFileSync(new URL("../data/tiers.json", import.meta.url), "utf8")) as { building: { levelHeight: number } }).building.levelHeight;
+/** foundation deck top (12 px) and the upper floor's stand height (one floor + its 5 px deck) in terrain levels */
+const DECK0 = 0.75, UPPER = LH + 0.3125;
 const OX = 8, OY = 8;
 
 /** World (screen) direction -> analog stick axes (the inverse of movement.moveVector). */
@@ -83,16 +87,16 @@ describe("ADR-372 stair ramp", () => {
   it("standHeightAt ramps 0 -> levelHeight across the stair tile, and back down at level 1", () => {
     const w = makeWorld();
     stampCottage(w);
-    // Interior stair tile (9, 11): south edge is the bottom (z ~ 0), north edge the top (z ~ 3).
-    expect(G.standHeightAt(w, 9.5, 11.9, 0)).toBeCloseTo(0.3, 1);
-    expect(G.standHeightAt(w, 9.5, 11.5, 0)).toBeCloseTo(1.5, 1);
-    expect(G.standHeightAt(w, 9.5, 11.1, 0)).toBeCloseTo(2.7, 1);
+    // Interior stair tile (9, 11): south edge is the bottom (z ~ 0), north edge the top (z ~ LH).
+    expect(G.standHeightAt(w, 9.5, 11.9, 0)).toBeCloseTo(0.1 * LH, 1);
+    expect(G.standHeightAt(w, 9.5, 11.5, 0)).toBeCloseTo(0.5 * LH, 1);
+    expect(G.standHeightAt(w, 9.5, 11.1, 0)).toBeCloseTo(0.9 * LH, 1);
     // Same tile from level 1 (the stairwell hole): walking back south descends the same ramp.
-    expect(G.standHeightAt(w, 9.5, 11.1, 1)).toBeCloseTo(2.7, 1);
-    expect(G.standHeightAt(w, 9.5, 11.9, 1)).toBeCloseTo(0.3, 1);
-    // Off the stair tile the old heights are untouched (foundation deck 0.75, upper floor 3.3125).
-    expect(G.standHeightAt(w, 10.5, 11.5, 0)).toBeCloseTo(0.75, 2);
-    expect(G.standHeightAt(w, 10.5, 10.5, 1)).toBeCloseTo(3.3125, 2);
+    expect(G.standHeightAt(w, 9.5, 11.1, 1)).toBeCloseTo(0.9 * LH, 1);
+    expect(G.standHeightAt(w, 9.5, 11.9, 1)).toBeCloseTo(0.1 * LH, 1);
+    // Off the stair tile the old heights are untouched (foundation deck 0.75, upper floor LH + 0.3125).
+    expect(G.standHeightAt(w, 10.5, 11.5, 0)).toBeCloseTo(DECK0, 2);
+    expect(G.standHeightAt(w, 10.5, 10.5, 1)).toBeCloseTo(UPPER, 2);
   });
 
   it("a stair tile does not block movement at either level", () => {
@@ -109,19 +113,19 @@ describe("ADR-372 stair ramp", () => {
     stampCottage(w);
     const p = spawnLearned(w, { x: 8.5, y: 12.5, maxWeight: 10_000 });
     settle(w, p);
-    expect(zOf(w, p)).toBeCloseTo(0.75, 1);
+    expect(zOf(w, p)).toBeCloseTo(DECK0, 1);
     expect(walkTo(w, p, 8.5, 10.5)).toBe(true);
     expect(walkTo(w, p, 9.5, 10.5)).toBe(true);
     expect(walkTo(w, p, 9.5, 11.5)).toBe(true); // onto the stair tile
     expect(walkTo(w, p, 9.5, 10.5)).toBe(true); // north across it: the climb
     settle(w, p);
     expect(levelOf(w, p)).toBe(1);
-    expect(zOf(w, p)).toBeCloseTo(3.3125, 1);
+    expect(zOf(w, p)).toBeCloseTo(UPPER, 1);
     // Back down the same flight.
     expect(walkTo(w, p, 9.5, 12.5)).toBe(true);
     settle(w, p);
     expect(levelOf(w, p)).toBe(0);
-    expect(zOf(w, p)).toBeCloseTo(0.75, 1);
+    expect(zOf(w, p)).toBeCloseTo(DECK0, 1);
   });
 
   it("standing still on the stair tile settles mid-ramp, never a full climb", () => {
@@ -129,11 +133,11 @@ describe("ADR-372 stair ramp", () => {
     stampCottage(w);
     const p = spawnLearned(w, { x: 9.5, y: 11.5, maxWeight: 10_000 });
     settle(w, p, 40);
-    expect(zOf(w, p)).toBeCloseTo(1.5, 1);
-    expect(levelOf(w, p)).toBe(1); // round(1.5 / 3) = 1: mid-ramp reads as level 1, but z stays put
+    expect(zOf(w, p)).toBeCloseTo(0.5 * LH, 1);
+    expect(levelOf(w, p)).toBe(1); // round(0.5) = 1: mid-ramp reads as level 1, but z stays put
     const p2 = spawnLearned(w, { x: 10.5, y: 11.5, maxWeight: 10_000 });
     settle(w, p2, 40);
-    expect(zOf(w, p2)).toBeCloseTo(0.75, 1);
+    expect(zOf(w, p2)).toBeCloseTo(DECK0, 1);
   });
 
   it("outside stairs carry a player up to the balcony", () => {
@@ -148,7 +152,7 @@ describe("ADR-372 stair ramp", () => {
     expect(walkTo(w, p, 9.5, 13.5)).toBe(true);
     settle(w, p);
     expect(levelOf(w, p)).toBe(1);
-    expect(zOf(w, p)).toBeCloseTo(3.3125, 1);
+    expect(zOf(w, p)).toBeCloseTo(UPPER, 1);
     const t = w.get(p, Transform)!;
     expect(Math.floor(t.x)).toBe(9);
     expect(Math.floor(t.y)).toBe(13);
@@ -225,7 +229,7 @@ describe("ADR-372 blocked / rebuilt stairs", () => {
     // The interior flight tile (local 1, 3) has a stairwell above it but no stairs below it.
     const sx = ox + 1, sy = oy + 3;
     expect(G.stairPieceAt(G.structures(w), sx, sy, 0)).toBe(0);
-    expect(G.standHeightAt(w, sx + 0.5, sy + 0.5, 0)).toBeCloseTo(0.75, 2);
+    expect(G.standHeightAt(w, sx + 0.5, sy + 0.5, 0)).toBeCloseTo(DECK0, 2);
     const p = spawnLearned(w, { x: ox + 0.5, y: oy + 4.5, maxWeight: 10_000 });
     stock(w, p);
     plantClaim(w, p, ox + 2, oy + 2);
@@ -234,7 +238,7 @@ describe("ADR-372 blocked / rebuilt stairs", () => {
     expect(walkTo(w, p, sx + 0.5, sy - 0.5)).toBe(true);
     settle(w, p);
     expect(levelOf(w, p)).toBe(0);
-    expect(zOf(w, p)).toBeCloseTo(0.75, 1);
+    expect(zOf(w, p)).toBeCloseTo(DECK0, 1);
     // Build the stairs back through the existing build system, then climb.
     const defs = G.gameplayDefs(w);
     const sn = G.snapPlacement(w, { piece: defs.pieceId("stairs"), x: sx + 0.5, y: sy + 0.5, level: 0, rot: 0, tier: 1, variant: 0 });
@@ -245,7 +249,7 @@ describe("ADR-372 blocked / rebuilt stairs", () => {
     expect(walkTo(w, p, sx + 0.5, sy - 0.5)).toBe(true);
     settle(w, p);
     expect(levelOf(w, p)).toBe(1);
-    expect(zOf(w, p)).toBeCloseTo(3.3125, 1);
+    expect(zOf(w, p)).toBeCloseTo(UPPER, 1);
   });
 
   it("a player can build stairs and an upper floor through the existing build system", () => {
@@ -266,7 +270,7 @@ describe("ADR-372 blocked / rebuilt stairs", () => {
     expect(walkTo(w, p, 21.5, 20.5)).toBe(true); // north across it, onto the L1 floor
     settle(w, p);
     expect(levelOf(w, p)).toBe(1);
-    expect(zOf(w, p)).toBeCloseTo(3.3125, 1);
+    expect(zOf(w, p)).toBeCloseTo(UPPER, 1);
   });
 });
 
@@ -332,7 +336,7 @@ describe("ADR-372 AI pathfinding across levels", () => {
       if (!wp) break; // no route: closest reachable tile walked, then undefined
       walkTick(w, e, wp.x, wp.y);
     }
-    expect(maxZ).toBeLessThan(1.5);
+    expect(maxZ).toBeLessThan(0.5 * LH);
     expect(levelOf(w, e)).toBe(0);
   });
 

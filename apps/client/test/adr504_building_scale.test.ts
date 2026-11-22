@@ -92,11 +92,12 @@ describe("ADR-504: pieces agree with each other and with the floor", () => {
   });
 });
 
-describe("ADR-504: scale against the player (ratchet until Art's 80 px set lands)", () => {
-  it("the measured gap is the one the contract documents: walls ~= player, doorways ~0.6x player", () => {
-    expect(maxTop("wall") / C.playerPx).toBeLessThan(1.1);
-    const door = Math.max(...Object.values(M.pieces.wall_doorway!.tiers).map((m) => m.openTopPx!));
-    if (C.pendingArt.wall_doorway !== undefined) expect(door / C.playerPx).toBeLessThan(0.7);
+describe("ADR-504 / ADR-511: scale against the player (80 px set landed)", () => {
+  it("ADR-511: walls are ~1.5-1.7x the player and every doorway opens a bit taller than the player (was 1.05x / 0.59x)", () => {
+    for (const v of tops("wall")) { expect(v / C.playerPx).toBeGreaterThan(1.5); expect(v / C.playerPx).toBeLessThan(1.75); }
+    for (const m of Object.values(M.pieces.wall_doorway!.tiers)) { expect(m.openTopPx! / C.playerPx).toBeGreaterThan(1.05); expect(m.openTopPx! / C.playerPx).toBeLessThan(1.25); }
+    for (const k of ["door_wood", "door_metal"]) expect(maxTop(k) / C.playerPx).toBeGreaterThan(1.1);
+    expect(Object.keys(C.pendingArt)).toEqual([]);
   });
   it("pending pieces are pinned to their measured height; every other scaled piece meets its target", () => {
     for (const [k, key] of Object.entries(TARGET_OF)) {

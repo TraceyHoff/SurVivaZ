@@ -13,8 +13,8 @@ describe("piece state", () => {
   });
 });
 describe("height convention", () => {
-  it("1 floor = 3 terrain levels = 48 px", () => {
-    expect(FLOOR_HEIGHT_LEVELS).toBe(3); expect(floorToTerrainZ(2, 1)).toBe(7); expect(terrainZToFloor(7, 1)).toBe(2); expect(terrainZToFloor(2.99)).toBe(0); expect(terrainZToFloor(3)).toBe(1);
-    expect(worldToScreen(0, 0, 0).sy - worldToScreen(0, 0, floorToTerrainZ(1)).sy).toBe(48); expect(DEFAULT_ISO.zStep * FLOOR_HEIGHT_LEVELS).toBe(48);
+  it("1 floor = 5 terrain levels = 80 px (ADR-511; 3 levels / 48 px before Art's 80 px set)", () => {
+    expect(FLOOR_HEIGHT_LEVELS).toBe(5); expect(floorToTerrainZ(2, 1)).toBe(11); expect(terrainZToFloor(11, 1)).toBe(2); expect(terrainZToFloor(4.99)).toBe(0); expect(terrainZToFloor(5)).toBe(1);
+    expect(worldToScreen(0, 0, 0).sy - worldToScreen(0, 0, floorToTerrainZ(1)).sy).toBe(80); expect(DEFAULT_ISO.zStep * FLOOR_HEIGHT_LEVELS).toBe(80);
   });
 });

@@ -35,7 +35,7 @@ function atlases(): Map<string, Src> {
 const page = (a: Src, pool: number) => ({ key: a.key, source: {}, count: 1, lazy: { w1: a.columns * a.frameW, h1: a.rows * a.frameH, state: 0, pool } });
 const ALL = atlases();
 /** The building-tier pages the bld pool streams (walls / floors / foundations / wall openings of every tier). */
-const tierPages = () => [...ALL.values()].filter((a) => isStreamedBuildingAtlas(a.key, "x.png") && !/^rfx_/.test(a.key)).map((a) => page(a, 1));
+const tierPages = () => [...ALL.values()].filter((a) => isStreamedBuildingAtlas(a.key, "x.png") && !/^rfx_/.test(a.key) && a.key !== "building_stairs").map((a) => page(a, 1));
 const roofPages = () => [...ALL.values()].filter((a) => isStreamedBuildingAtlas(a.key, "x.png") && /^rfx_/.test(a.key)).map((a) => page(a, 2));
 /** The rustic furniture / hearth / lamp / decor pages a ruin interior draws (stream residency). */
 const RUIN_DECOR = /^(decor_furn_|decor_deco_|decor_light_|hearth_)/;
@@ -49,6 +49,12 @@ describe("ADR-503: ruin interiors stay crisp when the pools are out of budget", 
     expect(decorPages().length).toBeGreaterThanOrEqual(19);
     for (const k of ["decor_furn_s", "decor_furn_w_1", "decor_furn_wt", "hearth_wt", "decor_deco_wt", "decor_light_t"]) expect(decorPages().some((p) => p.key === k), k).toBe(true);
     const a = am(256); expect(a.poolGeom(t, 1).perLayer).toBe(1); expect(a.poolGeom(t, 0.5).perLayer).toBe(4);
+  });
+  it("ADR-511: Art's per-tier stairs page streams with the buildings in its own one-page group, at 1x even when starved", () => {
+    expect(isStreamedBuildingAtlas("building_stairs", "x.png")).toBe(true); expect(isStreamedBuildingAtlas("building_stairs", "blob:x")).toBe(false);
+    const st = ALL.get("building_stairs")!; expect(st.residency).toBe("stream"); expect([st.columns * st.frameW, st.rows * st.frameH]).toEqual([1344, 480]);
+    const a = am(256); a.planPool([page(st, 1)], 1, [], "bld", true);
+    expect(a.pools[0].k).toBe(1); expect(a.pools[0].layers).toBe(1); expect(a.pools[0].lru.capacity).toBeGreaterThanOrEqual(1);
   });
   it("starved building-tier pool: every tier page at 0.5x in its one layer (was 0.25x: walls / floors / foundations)", () => {
     const a = am(256); a.planPool(tierPages(), 4, [], "bld", true);

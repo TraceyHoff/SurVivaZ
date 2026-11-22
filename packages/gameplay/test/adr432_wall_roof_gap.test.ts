@@ -67,13 +67,13 @@ describe("ADR-432 the wall/roof gap is buildable by players", () => {
     // …while the roof over cell (6,8) sits on its own tile, 3: floorToTerrainZ(1, 3) = 6.
     const roofZ = floorToTerrainZ(1, terrain.heightAt(6, 8));
     expect(wallBase).toBe(2);
-    expect(wallTop).toBe(5);
-    expect(roofZ).toBe(6);
+    expect(wallTop).toBe(2 + FLOOR_HEIGHT_LEVELS);
+    expect(roofZ).toBe(3 + FLOOR_HEIGHT_LEVELS);
     expect(roofZ - wallTop).toBe(1); // 1 level = 16 px of see-through gap
     // Same on the east wall anchor (9, 6.5): min(3, 2) = 2 against the roof's 6.
     const eastBase = Math.min(terrain.heightAt(8, 6), terrain.heightAt(9, 6));
-    expect(floorToTerrainZ(0, eastBase) + FLOOR_HEIGHT_LEVELS).toBe(5);
-    expect(floorToTerrainZ(1, terrain.heightAt(8, 6))).toBe(6);
+    expect(floorToTerrainZ(0, eastBase) + FLOOR_HEIGHT_LEVELS).toBe(2 + FLOOR_HEIGHT_LEVELS);
+    expect(floorToTerrainZ(1, terrain.heightAt(8, 6))).toBe(3 + FLOOR_HEIGHT_LEVELS);
     // Control: the north wall's outside neighbour is level with the footprint, so no gap.
     const northBase = Math.min(terrain.heightAt(6, 3), terrain.heightAt(6, 4));
     expect(floorToTerrainZ(0, northBase) + FLOOR_HEIGHT_LEVELS).toBe(floorToTerrainZ(1, terrain.heightAt(6, 4)));

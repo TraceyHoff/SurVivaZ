@@ -501,9 +501,11 @@ export const PIECE_PARTS_MAX = 48; // ADR-400: a 12-deep shed corner carries 3 x
 /** ADR-397: depth bias per roof overlay step, so each overlay wins the equal-depth test against its own tile (drawn after it). */
 export const ROOF_OVERLAY_BIAS = 0.002;
 /** ADR-404: extra depth for every rfx roof part, so the roof seated on the wall tops always wins over the caps and posts of the
- *  walls it rests on (front edge wall top key = edge +0.45 + ~61 px x uZPerPx; a vertex post +0.53 more) instead of the eave
- *  pixels (below the tile pivot, no height term) losing to them. Canvas2D gets the same result from its level-major painter order. */
-export const RFX_SEAT_BIAS = 1.1;
+ *  walls it rests on (front edge wall top key = edge +0.45 + ~92 px x uZPerPx on the ADR-511 80 px floor; a vertex post +0.53 more) instead of the eave
+ *  pixels (below the tile pivot, no height term) losing to them. Canvas2D gets the same result from its level-major painter order.
+ *  ADR-511: 1.1 -> 1.5: an edge wall's high end (its end post, 16 px higher on screen than the pivot) and log L-corner posts out-ranked
+ *  the overhanging eave by up to ~0.3 rows and drew over it (barn post tips / corners above the gambrel eave). */
+export const RFX_SEAT_BIAS = 1.5;
 /**
  * ADR-404: the line on an upright piece's art (px above its pivot, as a function of screen px from the pivot) where the
  * seated roof plane above it cuts it. An edge wall's art lies along its edge, so the line follows the edge's screen slope

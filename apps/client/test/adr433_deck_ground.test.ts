@@ -55,8 +55,8 @@ describe("ADR-433 the deck above the wall wins (upper beats own)", () => {
     const d = decks([6, 8, 1], [6, 8, 2], [6, 9, 1]);
     expect(pieceBoundaryGroundZ(tiles, 6.5, 9, 3, 3, d)).toBe(3);
     // And the top meets the level-2 roof over the inside tile: base 3 + story 3 + wall 3 = 9.
-    expect(floorToTerrainZ(1, pieceBoundaryGroundZ(tiles, 6.5, 9, 3, 3, d)) + FLOOR_HEIGHT_LEVELS).toBe(9);
-    expect(floorToTerrainZ(2, 3)).toBe(9);
+    expect(floorToTerrainZ(1, pieceBoundaryGroundZ(tiles, 6.5, 9, 3, 3, d)) + FLOOR_HEIGHT_LEVELS).toBe(3 + 2 * FLOOR_HEIGHT_LEVELS);
+    expect(floorToTerrainZ(2, 3)).toBe(3 + 2 * FLOOR_HEIGHT_LEVELS);
   });
 
   it("a deck at level+1 on the outside tile wins too — that is a party wall, and the trade is documented", () => {
@@ -75,7 +75,7 @@ describe("ADR-433 no deck above yet: the deck the wall stands on wins", () => {
     const tiles = flat(3, { "6,9": 2 });
     const d = decks([6, 8, 0]);
     expect(pieceBoundaryGroundZ(tiles, 6.5, 9, 0, 3, d)).toBe(3);
-    expect(pieceBoundaryGroundZ(tiles, 6.5, 9, 0, 3, d) + FLOOR_HEIGHT_LEVELS).toBe(6);
+    expect(pieceBoundaryGroundZ(tiles, 6.5, 9, 0, 3, d) + FLOOR_HEIGHT_LEVELS).toBe(3 + FLOOR_HEIGHT_LEVELS);
   });
 
   it("an upper-story wall stands on its floor and meets the roof above it", () => {
@@ -84,8 +84,8 @@ describe("ADR-433 no deck above yet: the deck the wall stands on wins", () => {
     const tiles = flat(2, { "6,9": 5 });
     const d = decks([6, 8, 1], [6, 8, 2]);
     expect(pieceBoundaryGroundZ(tiles, 6.5, 9, 3, 3, d)).toBe(2);
-    expect(floorToTerrainZ(1, pieceBoundaryGroundZ(tiles, 6.5, 9, 3, 3, d)) + FLOOR_HEIGHT_LEVELS).toBe(8);
-    expect(floorToTerrainZ(2, 2)).toBe(8);
+    expect(floorToTerrainZ(1, pieceBoundaryGroundZ(tiles, 6.5, 9, 3, 3, d)) + FLOOR_HEIGHT_LEVELS).toBe(2 + 2 * FLOOR_HEIGHT_LEVELS);
+    expect(floorToTerrainZ(2, 2)).toBe(2 + 2 * FLOOR_HEIGHT_LEVELS);
   });
 });
 

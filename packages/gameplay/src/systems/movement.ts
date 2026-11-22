@@ -199,12 +199,15 @@ export function standHeightAt(world: World, x: number, y: number, level: number)
   if (sd && sd.family === "foundation") return base + mv.deckStandHeight * 0.5;
   return base;
 }
-/** ADR-212: ease Transform.z toward the stand height (smooth step-up / step-down, stepRate z units per second). */
+/** ADR-212: ease Transform.z toward the stand height (smooth step-up / step-down, stepRate z units per second).
+ *  ADR-511: or stepCatchUp x the remaining gap per second when that is faster: a deck step (0.75) eases exactly as before
+ *  (0.75 x 8 x dt = stepRate x dt), but a walker crossing a stair tile (now a 5-level / 80 px ramp in ~0.35 s) keeps up
+ *  with it and clears the half-floor mark before stepping onto the landing. */
 export function settleStandZ(world: World, e: Entity, dt: number): void {
   const t = world.get(e, Transform); if (!t) return;
   const lh = gameplayDefs(world).building.levelHeight; const level = Math.max(0, Math.round(t.z / lh));
   const target = standHeightAt(world, t.x, t.y, level); const z = t.z ?? 0; if (Math.abs(target - z) < 1e-4) return;
-  const step = gameplayDefs(world).movement.stepRate * dt;
+  const mv = gameplayDefs(world).movement; const step = Math.max(mv.stepRate, Math.abs(target - z) * mv.stepCatchUp) * dt;
   world.set(e, Transform, { z: Math.abs(target - z) <= step ? target : z + Math.sign(target - z) * step });
 }
 

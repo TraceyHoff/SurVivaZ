@@ -1,7 +1,7 @@
 {
-  "$doc": "ADR-397: continuous-roof selection (Art & Assets docs/ART_KEYS_ROOFS.md \u00a74). rise = px per band at 1x (1 level = 48 px); kmax = band clamp. seatPx (ADR-404) = px every part of the form is raised so it rests on the wall tops; clip (ADR-509) = which uprights under the form are cut at its plane: all | ends (end walls only) | posts (vertex posts only) | none; anything but all needs seatPx at the wall top (adr404_roof_seat test). groups: piece key -> membership group (pieces of different groups never merge). materials: ADR-397 skin hook (rules matched against the building's wall material; empty until Art ships a skin).",
+  "$doc": "ADR-397: continuous-roof selection (Art & Assets docs/ART_KEYS_ROOFS.md \u00a74). rise = px per band at 1x (1 level = 80 px since ADR-511; 48 before); kmax = band clamp. seatPx (ADR-404) = px every part of the form is raised so it rests on the wall tops; clip (ADR-509) = which uprights under the form are cut at its plane: all | ends (end walls only) | posts (vertex posts only) | none; anything but all needs seatPx at the wall top (adr404_roof_seat test). groups: piece key -> membership group (pieces of different groups never merge; \"*\" = joins the region it touches, ADR-511: the chimney never splits a cottage / gambrel / shed roof). materials: ADR-397 skin hook (rules matched against the building's wall material; empty until Art ships a skin).",
   "seed": 1391461270,
-  "levelPx": 48,
+  "levelPx": 80,
   "forms": {
     "hip": {
       "rise": [
@@ -66,7 +66,7 @@
     "roof_corner": "legacy",
     "roof_hip": "legacy",
     "roof_gable": "legacy",
-    "roof_chimney": "legacy",
+    "roof_chimney": "*",
     "roof_cottage": "cot",
     "roof_gambrel": "gam",
     "roof_shed": "shd"

@@ -1,30 +1,62 @@
 {
-  "$comment": "ADR-504 building scale contract: how tall base building pieces draw against the player and the level grid (1x px, above the piece pivot = its ground point). Measured numbers live in building_scale.measured.json (tools/measure-building-scale.py). `floorLevels` MUST equal tiers.json building.levelHeight and @engine/world FLOOR_HEIGHT_LEVELS, and roofRfx.json levelPx MUST equal floorPx: one metric drives walls, decks, stairs and roof seats. `target` is the realistic set Art is asked for (docs/art-requests/ADR504_BUILDING_SCALE.md): 5 terrain levels (80 px) per floor, door openings a bit taller than the player. `pendingArt` lists pieces whose shipped art is still on the old 48 px floor (their measured heights are pinned so a re-paint is noticed); when Art's 80 px set lands, floorLevels / levelHeight / FLOOR_HEIGHT_LEVELS / levelPx flip to the target together and the list empties.",
+  "$comment": "ADR-504 building scale contract: how tall base building pieces draw against the player and the level grid (1x px, above the piece pivot = its ground point). Measured numbers live in building_scale.measured.json (tools/measure-building-scale.py). `floorLevels` MUST equal tiers.json building.levelHeight and @engine/world FLOOR_HEIGHT_LEVELS, and roofRfx.json levelPx MUST equal floorPx: one metric drives walls, decks, stairs and roof seats. `target` is the realistic set Art is asked for (docs/art-requests/ADR504_BUILDING_SCALE.md): 5 terrain levels (80 px) per floor, door openings a bit taller than the player. `pendingArt` lists pieces whose shipped art is not yet on the target floor (measured height pinned). ADR-511: Art's 80 px set (3bab4025) landed and the floor flipped to 5 levels / 80 px together with it; the list is empty and every scaled piece is held to its target.",
   "playerPx": 53,
   "playerM": 1.75,
   "zStepPx": 16,
-  "floorLevels": 3,
-  "floorPx": 48,
+  "floorLevels": 5,
+  "floorPx": 80,
   "wallCapMaxPx": 10,
   "tierTolerancePx": 3,
   "familyTolerancePx": 3,
-  "wallFamily": ["wall", "wall_window", "wall_doorway", "wall_arched", "wall_corner_inner", "wall_corner_outer", "wall_corner_angled", "pillar"],
+  "wallFamily": [
+    "wall",
+    "wall_window",
+    "wall_doorway",
+    "wall_arched",
+    "wall_corner_inner",
+    "wall_corner_outer",
+    "wall_corner_angled",
+    "pillar"
+  ],
   "target": {
     "floorLevels": 5,
     "floorPx": 80,
-    "wallTopPx": [80, 90],
-    "doorOpenTopPx": [58, 64],
-    "doorLeafTopPx": [60, 66],
-    "windowSillPx": [22, 32],
-    "windowOpenTopPx": [56, 64],
-    "wallLowTopPx": [28, 36],
-    "fortifiedTopPx": [84, 96],
-    "pillarTopPx": [80, 92],
-    "stairsTopPx": [94, 100]
+    "wallTopPx": [
+      80,
+      90
+    ],
+    "doorOpenTopPx": [
+      58,
+      64
+    ],
+    "doorLeafTopPx": [
+      60,
+      66
+    ],
+    "windowSillPx": [
+      22,
+      32
+    ],
+    "windowOpenTopPx": [
+      56,
+      64
+    ],
+    "wallLowTopPx": [
+      28,
+      36
+    ],
+    "fortifiedTopPx": [
+      84,
+      96
+    ],
+    "pillarTopPx": [
+      80,
+      92
+    ],
+    "stairsTopPx": [
+      94,
+      100
+    ]
   },
-  "pendingArt": {
-    "wall": 56, "wall_window": 56, "wall_doorway": 56, "wall_arched": 57, "wall_fortified": 65,
-    "wall_corner_inner": 56, "wall_corner_outer": 56, "wall_corner_angled": 56, "pillar": 59, "stairs": 64,
-    "door_wood": 41, "door_metal": 41, "window_shutters": 35, "window_glass": 38, "window_bars": 40
-  }
+  "pendingArt": {}
 }

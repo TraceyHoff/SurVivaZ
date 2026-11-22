@@ -114,7 +114,7 @@ describe("modular building set (ADR-104)", () => {
     const c1 = h(c); damagePiece(w, c, 50); steps(w, 1); expect(c1 - h(c)).toBe(50);
     const rule = w.getResource(RaidRuleRes)!.fn!; expect(rule(p, a)).toBe(true);
   });
-  it("gameplay levelHeight matches @engine/world FLOOR_HEIGHT_LEVELS (Art: 1 floor = 48 px)", () => {
+  it("gameplay levelHeight matches @engine/world FLOOR_HEIGHT_LEVELS (Art: 1 floor = 80 px since ADR-511)", () => {
     expect(d.building.levelHeight).toBe(FLOOR_HEIGHT_LEVELS);
   });
   it("every modular key Art shipped matches assets/building/KEYS.md names", () => {
