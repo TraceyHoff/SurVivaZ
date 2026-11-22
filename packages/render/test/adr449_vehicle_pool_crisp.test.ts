@@ -71,8 +71,10 @@ describe("ADR-449: vehicle pool stays crisp under memory pressure", () => {
     a.planPool(pages, 6, list, "veh", true);
     const pool = a.pools[0];
     expect(pool.k).toBe(1);
-    expect(pool.layers).toBe(5);
-    expect(pool.lru.capacity).toBe(5);
+    // ADR-510: planPool now charges what upload() allocates (side arrays hold only their carriers' layers), so the
+    // same 256 MB room fits all 6 slots at 1x (it was 5: the old model charged every side array on every layer)
+    expect(pool.layers).toBe(6);
+    expect(pool.lru.capacity).toBe(6);
   });
 
   it("with room the veh pool still plans all 6 slots at 1x (no behaviour change when it fits)", async () => {

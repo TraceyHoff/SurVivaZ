@@ -297,6 +297,9 @@ layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oEmissive;
 float inRect(vec2 uv) { return step(vRect.x, uv.x) * step(uv.x, vRect.z) * step(vRect.y, uv.y) * step(uv.y, vRect.w); }
 uniform int uPoolFirst;
+// ADR-510: side arrays (emissive / sheen / sway / tint mask) store only their layer windows: (split, off0, off1)
+uniform ivec3 uWinE, uWinS, uWinW, uWinT;
+vec3 sideUv(vec3 uv, ivec3 w) { int l = int(uv.z + 0.5); return vec3(uv.xy, float(l < w.x ? l - w.y : l - w.z)); }
 vec4 atlasAt(vec3 uv) { int l = int(uv.z + 0.5); return l >= uPoolFirst ? texture(uPoolTex, vec3(uv.xy, float(l - uPoolFirst))) : texture(uAtlas, uv); }
 // face/eyes layers: negative LOD bias so 1-3 px pupils/lashes are not averaged away in the minified mips
 vec4 atlasAtBias(vec3 uv, float b) { int l = int(uv.z + 0.5); return l >= uPoolFirst ? texture(uPoolTex, vec3(uv.xy, float(l - uPoolFirst)), b) : texture(uAtlas, uv, b); }
@@ -366,7 +369,7 @@ void main() {
   }
   vec3 uv = vUv;
   if ((vFB.x & 4) != 0 && vSwayPx != 0.0) { // sway mask (R = weight): sample the source shifted against the wind
-    float w = texture(uSwayM, vUv).r; uv.x -= vSwayPx * w; // vSwayPx is in uv units
+    float w = texture(uSwayM, sideUv(vUv, uWinW)).r; uv.x -= vSwayPx * w; // vSwayPx is in uv units
   }
   if (vDeckM.x != 0) { // ADR-210 connected top: the border band toward a CLOSED side samples the interior instead
     float ia = float(vDeckM.y & 15) * 0.5 - ${DECK_SEAM_BAND}, ib = float((vDeckM.y >> 4) & 15) * 0.5 - ${DECK_SEAM_BAND};
@@ -397,11 +400,11 @@ void main() {
   if ((vFlags & ${RFX_EDGE}) != 0) { if (t.a < 0.5) discard; t.rgb = min(t.rgb / t.a, vec3(1.0)); t.a = 1.0; }
   vec3 col; float a = t.a;
   if (vLT.y > 0.5) { // character layer: tintmask R <- primary (vTint), G <- secondary (vTint2); no mask = whole frame primary
-    vec4 tm = (vFB.x & 8) != 0 ? texture(uTintM, su) : vec4(1.0, 0.0, 0.0, 1.0); int mode = int(vLT.y - 0.5);
+    vec4 tm = (vFB.x & 8) != 0 ? texture(uTintM, sideUv(su, uWinT)) : vec4(1.0, 0.0, 0.0, 1.0); int mode = int(vLT.y - 0.5);
     col = layerTint(t.rgb, vTint, mode, vLT.z * tm.r, vLT.w);
     if (dot(vTint2.rgb, vec3(1.0)) > 0.0) col = layerTint(col, vTint2.rgb, mode, vLT.z * tm.g, vLT.w);
   } else if ((vFB.x & 8) != 0) { // two-tone tint mask: R = primary (Sprite.tint), G = secondary (aH rgb)
-    vec4 tm = texture(uTintM, su); vec3 t2 = dot(vTint2.rgb, vec3(1.0)) > 0.0 ? vTint2.rgb : vTint;
+    vec4 tm = texture(uTintM, sideUv(su, uWinT)); vec3 t2 = dot(vTint2.rgb, vec3(1.0)) > 0.0 ? vTint2.rgb : vTint;
     col = t.rgb * mix(vec3(1.0), vTint, tm.r) * mix(vec3(1.0), t2, tm.g);
   } else col = t.rgb * vTint;
   if (a < 0.5 && uOutline > 0.0 && (vFlags & 16) == 0) {
@@ -424,7 +427,7 @@ void main() {
   }
   // survival FX: wetness (darken + sheen + drips), frost rim (cold), flush (heat)
   if (vFx.x > 0.003) {
-    vec4 sm = (vFB.x & 2) != 0 ? texture(uSheenM, su) : vec4(-1.0); // sheen mask: R sheen, G darken, B drip
+    vec4 sm = (vFB.x & 2) != 0 ? texture(uSheenM, sideUv(su, uWinS)) : vec4(-1.0); // sheen mask: R sheen, G darken, B drip
     col *= mix(1.0, uWetDarken, vFx.x * (sm.g >= 0.0 ? sm.g : 1.0));
     float sheen = sm.r >= 0.0 ? sm.r : pow(max(0.0, 1.0 - length((vLocal - vec2(-0.35, -0.45)) * vec2(1.2, 0.9))), 3.0);
     vec2 px = vUv.xy / uTexel;
@@ -449,7 +452,7 @@ void main() {
   }
   if ((vFlags & 512) != 0) col = clamp((col - 0.5) * uFaceContrast + 0.5, 0.0, 1.0); // face/eyes: small contrast lift (after tint + status)
   float e = (vFlags & 2) != 0 ? 1.0 : 0.0;
-  if (vMisc.z > 0.5) { vec4 em = texture(uEmis, vUv); e = max(e, max(em.r, max(em.g, em.b)) * em.a * ((vFlags & 64) != 0 ? uNightGate : 1.0)); } // 64: night-only emissive
+  if (vMisc.z > 0.5) { vec4 em = texture(uEmis, sideUv(vUv, uWinE)); e = max(e, max(em.r, max(em.g, em.b)) * em.a * ((vFlags & 64) != 0 ? uNightGate : 1.0)); } // 64: night-only emissive
   oColor = vec4(col, alpha);
   // r: darkness bypass (emissive); g: bloom source (emissive pixels + light-source sprites)
   // ghosts (build preview) bypass the lightmap (r) so they stay readable at night, but never feed bloom (g)
@@ -1542,6 +1545,9 @@ export class SpriteBatch {
     gl.activeTexture(gl.TEXTURE5); gl.bindTexture(gl.TEXTURE_2D_ARRAY, atlas.tintMaskTex); gl.uniform1i(u.uTintM!, 5);
     gl.activeTexture(gl.TEXTURE6); gl.bindTexture(gl.TEXTURE_2D, atlas.tintTex); gl.uniform1i(u.uTints!, 6);
     gl.activeTexture(gl.TEXTURE7); gl.bindTexture(gl.TEXTURE_2D_ARRAY, atlas.poolTex); if (u.uPoolTex) gl.uniform1i(u.uPoolTex, 7); if (u.uPoolFirst) gl.uniform1i(u.uPoolFirst, atlas.poolFirst);
+    const sw = atlas.sideWindows; // ADR-510
+    if (u.uWinE) gl.uniform3i(u.uWinE, sw.emis.split, sw.emis.off0, sw.emis.off1); if (u.uWinS) gl.uniform3i(u.uWinS, sw.sheen.split, sw.sheen.off0, sw.sheen.off1);
+    if (u.uWinW) gl.uniform3i(u.uWinW, sw.sway.split, sw.sway.off0, sw.sway.off1); if (u.uWinT) gl.uniform3i(u.uWinT, sw.tint.split, sw.tint.off0, sw.tint.off1);
     gl.activeTexture(gl.TEXTURE0);
   }
 

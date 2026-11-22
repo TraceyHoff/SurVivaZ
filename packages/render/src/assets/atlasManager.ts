@@ -239,6 +239,28 @@ export function sourcesFromManifest(registry: AssetRegistry, manifestUrl: string
   return out;
 }
 
+/**
+ * ADR-510: which layers of the shared layer index a side array (emissive, sheen, sway, tint mask) stores. The arrays used
+ * to hold one side layer per colour layer (resident) or per layer (tint mask / pool emissive) although only the layers of
+ * atlases / pools with that mask are ever sampled (the frame flag bit gates every lookup). A window keeps at most two runs
+ * of the layer index: side layer = l < split ? l - off0 : l - off1. `count` side layers are allocated (0: 1x1 dummy).
+ * The two runs are split at the largest gap of the needed set; smaller gaps are stored (never sampled).
+ */
+export interface SideWindow { split: number; off0: number; off1: number; count: number }
+export const NO_SIDE_WINDOW: SideWindow = Object.freeze({ split: 0, off0: 0, off1: 0, count: 0 });
+export function sideWindow(layers: Iterable<number>): SideWindow {
+  const s = [...new Set(layers)].filter((l) => l >= 0).sort((a, b) => a - b);
+  if (!s.length) return NO_SIDE_WINDOW;
+  let gi = -1, gap = 1; for (let i = 1; i < s.length; i++) { const g = s[i]! - s[i - 1]!; if (g > gap) { gap = g; gi = i; } }
+  const a0 = s[0]!, last = s[s.length - 1]!;
+  if (gi < 0) return { split: last + 1, off0: a0, off1: a0, count: last - a0 + 1 };
+  const a1 = s[gi - 1]! + 1, b0 = s[gi]!, n0 = a1 - a0;
+  return { split: a1, off0: a0, off1: b0 - n0, count: n0 + last - b0 + 1 };
+}
+/** Side layer of shared layer `l` (sprites.ts `sideUv` is the same mapping). */
+export const sideIndex = (w: SideWindow, l: number): number => (l < w.split ? l - w.off0 : l - w.off1);
+export type SideArray = "emis" | "sheen" | "sway" | "tint";
+
 /** 1x1 transparent array (stands in for unused emissive / mask arrays). */
 function dummyArray(gl: WebGL2RenderingContext): WebGLTexture {
   const t = gl.createTexture()!; gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
@@ -479,6 +501,15 @@ export class AtlasManager {
     }
   }
   emisTex: WebGLTexture | null = null;
+  /** ADR-510: layer windows of the side arrays (sprites.ts binds them as uWinE / uWinS / uWinW / uWinT). */
+  sideWindows: Record<SideArray, SideWindow> = { emis: NO_SIDE_WINDOW, sheen: NO_SIDE_WINDOW, sway: NO_SIDE_WINDOW, tint: NO_SIDE_WINDOW };
+  /** Side-array windows for the packed resident `list` and the planned pools (see sideWindow). */
+  private planSideWindows(list: readonly AtlasRT[]): Record<SideArray, SideWindow> {
+    const need: Record<SideArray, number[]> = { emis: [], sheen: [], sway: [], tint: [] };
+    for (const a of list) { if (a.emis) need.emis.push(a.layer); if (a.masks.sheen) need.sheen.push(a.layer); if (a.masks.sway) need.sway.push(a.layer); if (a.masks.tintmask) need.tint.push(a.layer); }
+    for (const p of this.pools) for (let l = p.first; l < p.first + p.layers; l++) { if (p.emis) need.emis.push(l); if (p.tint) need.tint.push(l); }
+    return { emis: sideWindow(need.emis), sheen: sideWindow(need.sheen), sway: sideWindow(need.sway), tint: sideWindow(need.tint) };
+  }
   /** sheen (R sheen, G darken, B drip spawn), sway weight (R) and tint mask arrays, same layout as `tex`. */
   sheenTex: WebGLTexture | null = null; swayTex: WebGLTexture | null = null; tintMaskTex: WebGLTexture | null = null;
   /** Status tint table (see header). */
@@ -1009,17 +1040,23 @@ export class AtlasManager {
     if (!lazy.length) return;
     const tint = lazy.some((a) => a.source.masks?.tintmask), emis = cls !== "wear" && lazy.some((a) => a.source.emissiveUrl);
     const anyTint = tint || this.pools.some((p) => p.tint), anyEmis = emis || this.pools.some((p) => p.emis);
-    const per = this.layerBytes(resident, anyTint, anyEmis); const budget = this.textureBudgetMB * 1048576;
-    // resident layers at RGBA8 cost, pool layers (earlier pools and this one) at their compressed cost
-    const pper = this.poolLayerBytes(resident, anyTint, anyEmis); const poolL = this.pools.reduce((t, p) => t + p.layers, 0);
+    const budget = this.textureBudgetMB * 1048576; const poolL = this.pools.reduce((t, p) => t + p.layers, 0);
     const resL = this.layers - poolL; // ADR-251: the real packed layer count (pack() ran just before; the shelf estimate planLayers left ~2 layers idle on Xbox)
-    // ADR-251: lossless character pools live in the main RGBA8 array (ADR-220), so a layer costs `per`, not the compressed
-    // tail cost (charging pper let wear coverAll take ~27 layers = 1.1 GB on a 1 GB budget); `holdBytes` is the 1x
-    // working set of the visible pools planned after this one (bld / veh / stream), which wear must leave free
+    // ADR-510: charge what upload() allocates. Resident layers: RGBA8 colour + the side layers their windows hold (side
+    // arrays only store the layers that carry them). Pool layers: colour (compressed own array at the levels planOwn
+    // allocates, or RGBA8) + only the side arrays the pool carries (tint mask / emissive). The old model charged every
+    // side array for every layer (pool layers ~11 MB each where ~5-7 MB was allocated), which starved the visible pools.
+    // ADR-251: lossless character pools live in the main RGBA8 array (ADR-220), so their colour is RGBA8, not the
+    // compressed tail (charging the tail cost let wear coverAll take ~27 layers = 1.1 GB on a 1 GB budget); `holdBytes`
+    // is the 1x working set of the visible pools planned after this one (bld / veh / stream), which wear must leave free
+    const S = this.layerSize, side1 = rgbaBytes(Math.max(1, S >> this.sideShift), Math.max(1, S >> this.sideShift), true), rgba = rgbaBytes(S, S, true);
+    const resSide = (["emis", "sheen", "sway", "tintmask"] as const).reduce((t, m) => t + sideWindow(resident.filter((a) => (m === "emis" ? a.emis : a.masks[m])).map((a) => a.layer)).count, 0);
     const lossless = losslessCharPools(this.textureBudgetMB);
-    const costOf = (p: { cls: PoolClass }) => (lossless && CHAR_POOL_CLS.has(p.cls) ? per : pper);
-    const lcost = costOf({ cls }); const used = this.pools.reduce((t, p) => t + p.layers * costOf(p), 0);
-    let freeLayers = Math.max(0, Math.min(this.maxLayers - this.layers, Math.floor((budget - per * resL - used - holdBytes) / lcost)));
+    let oc = 0; { const lv = this.ownLevelsFor([...this.pools, { cls, k: 1 } as Pool]); for (let l = 0, w = S; l < lv; l++, w = Math.max(1, w >> 1)) oc += blockBytes(w, w); }
+    const colour = this.ktx2Target ? oc : rgba;
+    const costOf = (p: { cls: PoolClass; tint: boolean; emis: boolean }) => (lossless && CHAR_POOL_CLS.has(p.cls) ? rgba : colour) + side1 * ((p.tint ? 1 : 0) + (p.emis ? 1 : 0));
+    const lcost = costOf({ cls, tint, emis }); const used = this.pools.reduce((t, p) => t + p.layers * costOf(p), 0);
+    let freeLayers = Math.max(0, Math.min(this.maxLayers - this.layers, Math.floor((budget - resL * rgba - resSide * side1 - used - holdBytes) / lcost)));
     if (cls === "wear") {
       const wearUsed = this.pools.reduce((t, p) => t + (p.cls === "wear" ? p.layers * costOf(p) : 0), 0);
       freeLayers = Math.max(0, Math.min(freeLayers, Math.floor((budget * WEAR_BUDGET_SHARE * (share + (wearUsed > 0 ? 1 - share : 0)) - wearUsed) / lcost)));
@@ -1214,14 +1251,10 @@ export class AtlasManager {
   /** ADR-251: season whose gt_<season>_p* pages are pinned at 1x (TileTerrain sets the drawn one; the others may halve). */
   groundPinSeason: "summer" | "fall" | "winter" | "spring" = "summer";
   private groundPinOk(key: string): boolean { const m = /^gt_(summer|fall|winter|spring)_/.exec(key); return !m || m[1] === this.groundPinSeason; }
-  /**
-   * Pack whole atlas images into array layers: MaxRects (best short side fit) across layers, largest first, rects
-   * padded by a 2px gutter and rounded to 4px so side arrays (>> sideShift <= 2) stay texel-exact. Only placement
-   * changed (layer/px/py); side arrays keep one layer per colour layer (no sparse side map).
-   */
-  private pack(list: AtlasRT[]): void {
-    const S = this.layerSize, GAP = 2; const al = (v: number) => (v + 3) & ~3;
-    const order = [...list].sort((a, b) => Math.max(b.img!.width, b.img!.height) - Math.max(a.img!.width, a.img!.height) || b.img!.width * b.img!.height - a.img!.width * a.img!.height || a.id - b.id);
+  /** MaxRects placement of `order` (in that order) across layers: best short side fit, rects padded by a 2px gutter and
+   *  rounded to 4px. Pure: returns the placement, pack() applies it. */
+  private maxRects(order: AtlasRT[]): { at: Map<AtlasRT, { layer: number; x: number; y: number }>; layers: number } {
+    const S = this.layerSize, GAP = 2; const al = (v: number) => (v + 3) & ~3; const at = new Map<AtlasRT, { layer: number; x: number; y: number }>();
     type R = { x: number; y: number; w: number; h: number };
     const free: R[][] = [];
     const place = (fr: R[], w: number, h: number): R | null => { let best: R | null = null, bs = Infinity, bl = Infinity;
@@ -1244,9 +1277,28 @@ export class AtlasManager {
       for (; l < free.length; l++) if ((r = place(free[l]!, pw, ph))) break;
       if (!r) { free.push([{ x: 0, y: 0, w: S, h: S }]); l = free.length - 1; r = place(free[l]!, pw, ph)!; }
       free[l] = split(free[l]!, r);
-      a.layer = l; a.px = r.x; a.py = r.y;
+      at.set(a, { layer: l, x: r.x, y: r.y });
     }
-    this.layers = Math.max(1, free.length); this.packedLayers = this.layers;
+    return { at, layers: free.length };
+  }
+  /**
+   * Pack whole atlas images into array layers: MaxRects (best short side fit) across layers, largest first, rects
+   * padded by a 2px gutter and rounded to 4px so side arrays (>> sideShift <= 2) stay texel-exact. Side-array users
+   * are packed first (ADR-510: the side arrays then hold only those layers, see sideWindow).
+   */
+  private pack(list: AtlasRT[]): void {
+    const bySize = (a: AtlasRT, b: AtlasRT) => Math.max(b.img!.width, b.img!.height) - Math.max(a.img!.width, a.img!.height) || b.img!.width * b.img!.height - a.img!.width * a.img!.height || a.id - b.id;
+    let best = this.maxRects([...list].sort(bySize));
+    // ADR-510: atlases that sample a side array (emissive / sheen / sway / tint mask) are placed first, so those arrays
+    // only store the few leading layers they live in (sideWindow) instead of one side layer per colour layer. Kept only
+    // when it packs into no more layers than the plain largest-first order.
+    const side = (a: AtlasRT) => !!(a.emis || a.masks.sheen || a.masks.sway || a.masks.tintmask);
+    if (list.some(side) && list.some((a) => !side(a))) {
+      const two = this.maxRects([...list.filter(side).sort(bySize), ...list.filter((a) => !side(a)).sort(bySize)]);
+      if (two.layers <= best.layers) best = two;
+    }
+    for (const [a, r] of best.at) { a.layer = r.layer; a.px = r.x; a.py = r.y; }
+    this.layers = Math.max(1, best.layers); this.packedLayers = this.layers;
     this.planLayers = Math.max(this.layers, list.length ? this.shelfLayers(list) : 1);
     let base = 0; for (const a of list) { a.base = base; base += a.count; }
     this.totalFrames = base;
@@ -1328,23 +1380,24 @@ export class AtlasManager {
     this.tintRowMap = tintRows;
     const gl = this.gl;
     // side arrays (emissive/masks) at half size: images were halved in halveSide(); offsets shift with them
-    const sub = (im: ImageLike, a: AtlasRT) => { const x = a.px >> this.sideShift, y = a.py >> this.sideShift, H = this.layerSize >> this.sideShift;
+    const sub = (im: ImageLike, a: AtlasRT, win: SideWindow) => { const x = a.px >> this.sideShift, y = a.py >> this.sideShift, H = this.layerSize >> this.sideShift;
       const w = Math.min(im.width, H - x), h = Math.min(im.height, H - y); if (w <= 0 || h <= 0) return;
       if (w !== im.width || h !== im.height) { this.uploadErrors.push(`side image ${a.key} ${im.width}x${im.height} clipped`); return; }
-      gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, x, y, a.layer, w, h, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource); };
+      gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, x, y, sideIndex(win, a.layer), w, h, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource); };
     this.streamPets = all.some((a) => !!a.lazy && PET_SHEET_RE.test(a.key)); this.planOwn();
     const owned = this.pools.filter((p) => p.own); const own = owned[0];
     const ownLayers = owned.reduce((t, p) => t + p.layers, 0);
     const colourLayers = Math.max(1, this.layers - ownLayers);
-    // streamed pool layers (the tail) never carry sheen/sway masks (and emissive only for vehicle pools): those side
-    // arrays stop at the first pool layer (their flag bits are never set for pool pages, so they are never sampled there)
-    const firstPool = this.pools.length ? Math.min(...this.pools.map((p) => p.first)) : this.layers;
-    const residentLayers = Math.max(1, firstPool);
+    // ADR-510: each side array stores only the layers whose atlases / pools carry it (sheen / sway: resident atlases with
+    // the mask; emissive: resident emissive atlases + emissive pools; tint mask: tinted atlases + tinted pools). Every
+    // lookup is gated by the frame's flag bit, so the layers left out were never sampled.
+    const sw = this.sideWindows = this.planSideWindows(list);
+    let alloc = 0;
     const mk = (side = false, nLayers?: number): WebGLTexture => {
       const t = gl.createTexture()!; gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
       const S = side ? Math.max(1, this.layerSize >> this.sideShift) : this.layerSize;
-      const levels = Math.floor(Math.log2(S)) + 1;
-      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, levels, gl.RGBA8, S, S, nLayers ?? (side ? this.layers : colourLayers)); if (!side) this.texLevels = levels;
+      const levels = Math.floor(Math.log2(S)) + 1; const n = nLayers ?? (side ? this.layers : colourLayers);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, levels, gl.RGBA8, S, S, n); if (!side) this.texLevels = levels; alloc += n * rgbaBytes(S, S, true);
       const err = gl.getError(); if (err !== gl.NO_ERROR) { this.uploadErrors.push(`texStorage3D ${S}x${S}x${this.layers} levels ${levels}: 0x${err.toString(16)}`); if (err === gl.OUT_OF_MEMORY) this.oomFlag = true; }
       setLevelRange(gl, gl.TEXTURE_2D_ARRAY, levels, this.magNearest);
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -1359,7 +1412,7 @@ export class AtlasManager {
     this.tex = mk();
     if (own) {
       const o = own.own!; const t = gl.createTexture()!; gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
-      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, o.levels, o.fmt ?? gl.RGBA8, this.layerSize, this.layerSize, ownLayers);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, o.levels, o.fmt ?? gl.RGBA8, this.layerSize, this.layerSize, ownLayers); alloc += ownLayers * this.ownLayerBytes(o);
       const err = gl.getError(); if (err !== gl.NO_ERROR) { this.uploadErrors.push(`pool texStorage3D ${o.fmt ?? "RGBA8"} x${ownLayers}: 0x${err.toString(16)}`); if (err === gl.OUT_OF_MEMORY) this.oomFlag = true; }
       setLevelRange(gl, gl.TEXTURE_2D_ARRAY, o.levels, this.magNearest);
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -1369,29 +1422,32 @@ export class AtlasManager {
     for (const a of list) gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, a.px, a.py, a.layer, a.img!.width, a.img!.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, a.img as TexImageSource);
     gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
     this.hasEmissive = list.some((a) => a.emis) || this.pools.some((p) => p.emis);
-    this.emisTex = this.hasEmissive ? mk(true, this.pools.some((p) => p.emis) ? this.layers : residentLayers) : dummyArray(gl); // emissive is gated by a frame flag: no full array when unused
-    const sideSave = this.sideSaving(list);
-    this.gpuBytes = this.estimate(list) - this.ownSaving() - sideSave;
-    const poolBytes = this.pools.reduce((t, p) => t + p.layers * this.layerBytes(list), 0) - this.ownSaving() - sideSave;
-    this.vram.budgetBytes = this.textureBudgetMB * 1048576; this.vram.setResident(this.gpuBytes - poolBytes, poolBytes);
-    this.vram.pageSlots = this.pools.reduce((t, p) => t + p.lru.capacity, 0); this.vram.pending = 0;
-    for (const a of list) if (a.emis) sub(a.emis, a);
-    if (this.hasEmissive) gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
-    // mask arrays: full layout only when some atlas has that mask, else a 1x1 dummy (never sampled: flag bit unset)
+    this.emisTex = this.hasEmissive && sw.emis.count ? mk(true, sw.emis.count) : dummyArray(gl); // emissive is gated by a frame flag: no array when unused
+    for (const a of list) if (a.emis) sub(a.emis, a, sw.emis);
+    if (this.hasEmissive && sw.emis.count) gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+    // mask arrays: the window's layers only when some atlas / pool has that mask, else a 1x1 dummy (never sampled: flag bit unset)
     const maskArray = (m: MaskName): WebGLTexture => {
-      if (!list.some((a) => a.masks[m]) && !(m === "tintmask" && this.pools.some((p) => p.tint))) {
+      const win = sw[m === "tintmask" ? "tint" : m];
+      if (!win.count) {
         const t = gl.createTexture()!; gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
         gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, 1, 1, 1);
         gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, 0, 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
         setLevelRange(gl, gl.TEXTURE_2D_ARRAY, 1);
         return t;
       }
-      const t = mk(true, m === "tintmask" ? this.layers : residentLayers);
-      for (const a of list) { const im = a.masks[m]; if (im) sub(im, a); }
+      const t = mk(true, win.count);
+      for (const a of list) { const im = a.masks[m]; if (im) sub(im, a, win); }
       gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
       return t;
     };
     this.sheenTex = maskArray("sheen"); this.swayTex = maskArray("sway"); this.tintMaskTex = maskArray("tintmask");
+    // ADR-510: VRAM accounting from what was allocated (it used to charge every side array for every layer and subtract
+    // estimates); the pool share is each pool's colour layers plus its side layers
+    const side1 = rgbaBytes(Math.max(1, this.layerSize >> this.sideShift), Math.max(1, this.layerSize >> this.sideShift), true);
+    const poolBytes = this.pools.reduce((t, p) => t + p.layers * ((p.own ? this.ownLayerBytes(p.own) : rgbaBytes(this.layerSize, this.layerSize, true)) + side1 * ((p.tint ? 1 : 0) + (p.emis ? 1 : 0))), 0);
+    this.gpuBytes = alloc;
+    this.vram.budgetBytes = this.textureBudgetMB * 1048576; this.vram.setResident(this.gpuBytes - poolBytes, poolBytes);
+    this.vram.pageSlots = this.pools.reduce((t, p) => t + p.lru.capacity, 0); this.vram.pending = 0;
     // frame table
     const n = Math.max(1, this.totalFrames); const rows = Math.ceil(n / TABLE_W);
     const data = new Float32Array(TABLE_W * 2 * rows * 4); this.table = data; this.tableDirty0 = this.tableDirty1 = -1; this.tableRowDirty = new Uint8Array(rows);
@@ -1699,9 +1755,9 @@ export class AtlasManager {
       levels.slice(0, cap).forEach((im, l) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> l, py >> l, layer, im.width, im.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource));
     };
     put(this.tex, cc, maxL);
-    if (tc && this.tintMaskTex) { gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tintMaskTex); tc.slice(this.sideShift, this.sideShift + Math.max(1, maxL - this.sideShift)).forEach((im, l) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> (l + this.sideShift), py >> (l + this.sideShift), layer, im.width, im.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource)); }
+    if (tc && this.tintMaskTex) { gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tintMaskTex); tc.slice(this.sideShift, this.sideShift + Math.max(1, maxL - this.sideShift)).forEach((im, l) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> (l + this.sideShift), py >> (l + this.sideShift), sideIndex(this.sideWindows.tint, layer), im.width, im.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource)); }
     // emissive (vehicle lights): cold tier, stored like the tint mask at side resolution (layerSize >> this.sideShift)
-    if (ec && this.emisTex) { gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.emisTex); ec.slice(this.sideShift, this.sideShift + Math.max(1, maxL - this.sideShift)).forEach((im, l) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> (l + this.sideShift), py >> (l + this.sideShift), layer, im.width, im.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource)); }
+    if (ec && this.emisTex) { gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.emisTex); ec.slice(this.sideShift, this.sideShift + Math.max(1, maxL - this.sideShift)).forEach((im, l) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> (l + this.sideShift), py >> (l + this.sideShift), sideIndex(this.sideWindows.emis, layer), im.width, im.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource)); }
     for (const im of [...cc, ...(tc ?? []), ...(ec ?? [])]) if (im !== img && im !== tint && im !== emi && typeof (im as ImageBitmap).close === "function") (im as ImageBitmap).close();
     for (const im of [img, tint, emi]) if (im && typeof (im as ImageBitmap).close === "function") (im as ImageBitmap).close();
     if (this.droppedByLoss(a, p)) { if (this.syncChecks) gl.getError(); return; }
@@ -1786,8 +1842,8 @@ export class AtlasManager {
         gl.compressedTexSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> l, py >> l, layer - this.poolFirst, w4, h4, 1, o.fmt!, data);
       }
     } else col.levels.forEach((im, l) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> l, py >> l, layer - this.poolFirst, im.width, im.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource));
-    if (tc && this.tintMaskTex) { gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tintMaskTex); tc.forEach((im, l) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> (l + this.sideShift), py >> (l + this.sideShift), layer, im.width, im.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource)); }
-    if (ec && this.emisTex) { gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.emisTex); ec.forEach((im, l) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> (l + this.sideShift), py >> (l + this.sideShift), layer, im.width, im.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource)); }
+    if (tc && this.tintMaskTex) { gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tintMaskTex); tc.forEach((im, l) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> (l + this.sideShift), py >> (l + this.sideShift), sideIndex(this.sideWindows.tint, layer), im.width, im.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource)); }
+    if (ec && this.emisTex) { gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.emisTex); ec.forEach((im, l) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, l, px >> (l + this.sideShift), py >> (l + this.sideShift), sideIndex(this.sideWindows.emis, layer), im.width, im.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, im as TexImageSource)); }
     for (const im of [...col.levels, ...(tc ?? []), ...(ec ?? [])]) if (typeof (im as ImageBitmap).close === "function") (im as ImageBitmap).close();
     if (this.droppedByLoss(a, p)) { if (this.syncChecks) gl.getError(); return; }
     const err = this.syncChecks ? gl.getError() : gl.NO_ERROR;

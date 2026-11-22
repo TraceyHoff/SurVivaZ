@@ -11932,3 +11932,65 @@ Ruled out on the way: no reduced-resolution cutaway / see-through target, no sca
 - ADR-504 floor flip (48 → 80 px): `levelPx` follows the floor metric (adr504 test pins `roofRfx.json` levelPx = floorPx) and seats are measured above `levelPx` against the wall top (cap), so the flip changes `levelPx` and re-measures the seats with this test — no code change.
 
 **Validation.** Every form on every plain wall tier meets the roof on ≥ 90% of each facing's edge columns (all four facings, end sides included) and ≥ 85% on N/W/S with the corner posts (±23 px). Visual check: WebGL2 + Canvas2D renders of a shake cabin, hip10, barn, shed, cottage and flat in `/workspace/share/roofs_eaves/`.
+
+## ADR-510: Side arrays store only their layers; pools plan at 1.0x on the 256 MB phone budget (SurVivaZ)
+
+**Context.** Follow-up to ADR-503 / ADR-505..508's honest cut. On the Galaxy A16 profile (256 MB texture budget, WebGL2, ASTC), the building-tier, roof, vehicle and stream (furniture / decor) pools planned at 0.5x, so ruin interiors and base pieces drew soft. The plan on record was to compress the resident hot tier: bring back the KTX2 twins that ADR-392 removed and keep a separate lossless store for character art (ADR-220 / 251).
+
+**Compression evaluated and rejected (quality gate: no visible loss).**
+- Encoded the resident non-character atlases (half scale, as resident on the phone) with toktx UASTC q4 and astcenc ASTC 4x4 `-exhaustive`, then decoded and compared with the source:
+  - UASTC PSNR / SSIM: furniture 32.2 dB, decor 34.5, buildings 34.5, openings 35.4, defenses 29.2, held items 27–30, vehicle garage items 35.7–37.3; SSIM 0.95–0.998; max channel error 44–132.
+  - ASTC 4x4 exhaustive: furniture 34.1 dB, buildings 37.1, decor 31.7.
+- At 2–3x zoom the errors show on pixel-art edges and on the outlines and text-like detail, which is the art the gate excludes. No atlas passed, so none is compressed. The KTX2 twins stay deleted (dist size would have been only +1.6 MB for 39 UASTC files).
+
+**Decision: free the room losslessly.**
+- The side arrays (emissive, sheen, sway, tint mask) used to allocate one side layer for every layer of the shared index, even though only atlases / pools carrying that mask ever sample it (the frame flag bit gates each lookup). Each array now stores a **layer window**: at most two runs of the index, split at the largest gap. Side layer = `l < split ? l - off0 : l - off1` (`sideWindow` / `sideIndex` in `atlasManager.ts`).
+  - `sprites.ts` binds the windows as `uWinE / uWinS / uWinW / uWinT` and maps every side lookup through `sideUv`, which applies the same mapping.
+  - Pool page-ins write tint / emissive at `sideIndex`.
+- `pack()` also tries placing side-mask atlases first. It keeps that order only when it needs no more layers than largest-first, so the resident windows become short prefixes.
+- VRAM accounting now comes from the actual `texStorage3D` sizes (`gpuBytes`; `vram.setResident(gpu - pool, pool)`).
+- `planPool` charges what `upload()` allocates:
+  - resident layers: RGBA8 colour plus their window side layers;
+  - pool layers: colour (compressed own array at `ownLevelsFor` levels, or RGBA8 for the lossless character pools) plus only the tint / emissive side layers that pool carries.
+  - The old model charged all four side arrays on every layer, about 11 MB per pool layer where about 5–7 MB was really allocated.
+- `fitBudget` is unchanged, so resident scales are unchanged (hot 0.5x, cold 0.25x), and character art is untouched.
+
+**Measured (A16 emulation: 915×412 at DPR 2.625, Mali-G57 / Android UA, deviceMemory 4, SwiftShader WebGL2, budget 256 MB).**
+
+| pool | before (d510fb9a) | after |
+|---|---|---|
+| bld tiers | 0.5x, 1 layer, 4/4 | **1.0x**, 4 layers, 4/4 |
+| roof | 0.5x, 1 layer, 2/8 | **1.0x**, 2 layers, 2/4 |
+| veh | 1.0x, 1 layer, 0/4 | 1.0x, 2 layers, 0/8 |
+| stream (furniture / decor) | 0.5x, 1 layer, 7/16 | **1.0x**, 3 layers, 7/12 |
+| big stream, body, wear | 1.0x | 1.0x (unchanged) |
+
+- Allocation went from about 250 MB to 240.0 MB of the 256 MB budget. Before, about 250 MB was really allocated against 240 MB reported, because the side arrays spanned all 15 layers.
+- Side windows after: emissive 9, sheen 3, sway 2, tint 9 layers, out of 22.
+
+**Scene gate.** Deterministic shots: the clock is pinned after boot and `Math.random` is seeded. A base-vs-base re-run is pixel-identical for the ruin and character scenes. Side-by-side images and |diff|×4 are in `/workspace/share/tex_headroom/`.
+
+| scene | PSNR | SSIM | base-vs-base noise |
+|---|---|---|---|
+| day | 30.94 dB | 0.944 | 21.8 dB (actors move between runs) |
+| night + rain | 24.01 dB | 0.420 | 24.6 dB (rain particles) |
+| ruin interior | 28.71 dB | 0.876 | identical |
+| character close-up | 26.01 dB | 0.876 | identical |
+
+- Every changed pixel is on pool art (walls, floors, roofs, furniture, road) that now draws at 1x instead of 0.5x. Character, grass and terrain pixels are unchanged, as the diff images show.
+- The zoomed crops (`ruin_zoom_*`, `char_zoom_*`) show sharper brick, stone and planks. Window glow (emissive) and tints are present.
+- The PSNR drop measures that sharpening, not a loss.
+
+**Size.** Dist is unchanged: +0 MB, 735.0 MB of the 800 MB guard. No assets were added.
+
+**Not done.**
+- Net interpolation churn (about 3.5 MB/s) and the audio world-snapshot churn (about 1.3 MB/s) are untouched. They are not texture work, and they need their own allocation profiling slice.
+- Numbers come from SwiftShader with phone emulation, not the A16 itself.
+
+**Tests (`pnpm check` 2026-11-21: TypeScript 5.9.3 clean; vitest 5,450 passed / 0 failed / 9 skipped, 805 files).**
+- `packages/render/test/adr510_side_windows.test.ts`:
+  - window / index mapping: injective and in range over 200 random sets;
+  - the shader mapping exists;
+  - side-first packing on the real resident set;
+  - the 256 MB vehicle pool plans 6 slots at 1x within budget.
+- `adr449` pin updated from 5 to 6 slots: the same room now fits all of them.
