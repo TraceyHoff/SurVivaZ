@@ -1,0 +1,3123 @@
+{
+ "$comment": "Writes <pack>/seats.vehicles.json: per vehicle key (aliases listed), every rider seat with its model position (metres,\nvehicle-local: x forward, y right, z up) and, per facing (E, SE, S, SW, W, NW, N, NE = the sheet's dir order), the seat\nH-point as 1x px offsets from the sprite pivot (@2x: double them) plus the draw-order rule:\n  draw \"over\"   - open seat (bikes): draw the seated rider after (in front of) the vehicle sprite.\n  draw \"window\" - cabin seat: draw the rider after the vehicle sprite but only the screen rows clipTop..clipBottom (roof\n                  underside .. beltline at that seat, 1x px from the pivot); below the beltline the door hides the legs,\n                  above clipTop the roof covers the head. Fallback without clipping: draw it before the sprite (occluded).\nAlso measures every key's E view from the shipped pages (opaque top above the pivot, opaque length) for the docs table.",
+ "scale": {
+  "pxPerMetreLength": 45.255,
+  "pxPerMetreHeight": 30.286,
+  "pxPerMetreDepth": 22.627,
+  "playerPx": 53,
+  "playerM": 1.75
+ },
+ "dirs": [
+  "E",
+  "SE",
+  "S",
+  "SW",
+  "W",
+  "NW",
+  "N",
+  "NE"
+ ],
+ "vehicles": {
+  "bike_basic": {
+   "aliases": [],
+   "realSize": {
+    "length": 1.79,
+    "width": 0.6,
+    "height": 1.1
+   },
+   "seats": [
+    {
+     "name": "seat",
+     "u": -0.254,
+     "v": 0.0,
+     "z": 0.95,
+     "zPx": 28.8,
+     "draw": "over",
+     "facings": {
+      "E": {
+       "x": -11.5,
+       "y": -28.8
+      },
+      "SE": {
+       "x": -8.1,
+       "y": -32.8
+      },
+      "S": {
+       "x": -0.0,
+       "y": -34.5
+      },
+      "SW": {
+       "x": 8.1,
+       "y": -32.8
+      },
+      "W": {
+       "x": 11.5,
+       "y": -28.8
+      },
+      "NW": {
+       "x": 8.1,
+       "y": -24.7
+      },
+      "N": {
+       "x": 0.0,
+       "y": -23.0
+      },
+      "NE": {
+       "x": -8.1,
+       "y": -24.7
+      }
+     }
+    }
+   ]
+  },
+  "bike_road": {
+   "aliases": [],
+   "realSize": {
+    "length": 1.79,
+    "width": 0.6,
+    "height": 1.02
+   },
+   "seats": [
+    {
+     "name": "seat",
+     "u": -0.254,
+     "v": 0.0,
+     "z": 0.95,
+     "zPx": 28.8,
+     "draw": "over",
+     "facings": {
+      "E": {
+       "x": -11.5,
+       "y": -28.8
+      },
+      "SE": {
+       "x": -8.1,
+       "y": -32.8
+      },
+      "S": {
+       "x": -0.0,
+       "y": -34.5
+      },
+      "SW": {
+       "x": 8.1,
+       "y": -32.8
+      },
+      "W": {
+       "x": 11.5,
+       "y": -28.8
+      },
+      "NW": {
+       "x": 8.1,
+       "y": -24.7
+      },
+      "N": {
+       "x": 0.0,
+       "y": -23.0
+      },
+      "NE": {
+       "x": -8.1,
+       "y": -24.7
+      }
+     }
+    }
+   ]
+  },
+  "bike_mountain": {
+   "aliases": [],
+   "realSize": {
+    "length": 1.79,
+    "width": 0.6,
+    "height": 1.1
+   },
+   "seats": [
+    {
+     "name": "seat",
+     "u": -0.246,
+     "v": 0.0,
+     "z": 0.92,
+     "zPx": 27.9,
+     "draw": "over",
+     "facings": {
+      "E": {
+       "x": -11.1,
+       "y": -27.9
+      },
+      "SE": {
+       "x": -7.9,
+       "y": -31.8
+      },
+      "S": {
+       "x": -0.0,
+       "y": -33.4
+      },
+      "SW": {
+       "x": 7.9,
+       "y": -31.8
+      },
+      "W": {
+       "x": 11.1,
+       "y": -27.9
+      },
+      "NW": {
+       "x": 7.9,
+       "y": -23.9
+      },
+      "N": {
+       "x": 0.0,
+       "y": -22.3
+      },
+      "NE": {
+       "x": -7.9,
+       "y": -23.9
+      }
+     }
+    }
+   ]
+  },
+  "bike_bmx": {
+   "aliases": [],
+   "realSize": {
+    "length": 1.79,
+    "width": 0.6,
+    "height": 0.92
+   },
+   "seats": [
+    {
+     "name": "seat",
+     "u": -0.245,
+     "v": 0.0,
+     "z": 0.76,
+     "zPx": 23.0,
+     "draw": "over",
+     "facings": {
+      "E": {
+       "x": -11.1,
+       "y": -23.0
+      },
+      "SE": {
+       "x": -7.9,
+       "y": -26.9
+      },
+      "S": {
+       "x": -0.0,
+       "y": -28.6
+      },
+      "SW": {
+       "x": 7.9,
+       "y": -26.9
+      },
+      "W": {
+       "x": 11.1,
+       "y": -23.0
+      },
+      "NW": {
+       "x": 7.9,
+       "y": -19.1
+      },
+      "N": {
+       "x": 0.0,
+       "y": -17.5
+      },
+      "NE": {
+       "x": -7.9,
+       "y": -19.1
+      }
+     }
+    }
+   ]
+  },
+  "bike_fat_tire": {
+   "aliases": [],
+   "realSize": {
+    "length": 1.79,
+    "width": 0.6,
+    "height": 1.12
+   },
+   "seats": [
+    {
+     "name": "seat",
+     "u": -0.256,
+     "v": 0.0,
+     "z": 0.95,
+     "zPx": 28.8,
+     "draw": "over",
+     "facings": {
+      "E": {
+       "x": -11.6,
+       "y": -28.8
+      },
+      "SE": {
+       "x": -8.2,
+       "y": -32.9
+      },
+      "S": {
+       "x": -0.0,
+       "y": -34.6
+      },
+      "SW": {
+       "x": 8.2,
+       "y": -32.9
+      },
+      "W": {
+       "x": 11.6,
+       "y": -28.8
+      },
+      "NW": {
+       "x": 8.2,
+       "y": -24.7
+      },
+      "N": {
+       "x": 0.0,
+       "y": -23.0
+      },
+      "NE": {
+       "x": -8.2,
+       "y": -24.7
+      }
+     }
+    }
+   ]
+  },
+  "bike_cruiser": {
+   "aliases": [],
+   "realSize": {
+    "length": 1.79,
+    "width": 0.6,
+    "height": 1.1
+   },
+   "seats": [
+    {
+     "name": "seat",
+     "u": -0.291,
+     "v": 0.0,
+     "z": 0.86,
+     "zPx": 26.0,
+     "draw": "over",
+     "facings": {
+      "E": {
+       "x": -13.2,
+       "y": -26.0
+      },
+      "SE": {
+       "x": -9.3,
+       "y": -30.7
+      },
+      "S": {
+       "x": -0.0,
+       "y": -32.6
+      },
+      "SW": {
+       "x": 9.3,
+       "y": -30.7
+      },
+      "W": {
+       "x": 13.2,
+       "y": -26.0
+      },
+      "NW": {
+       "x": 9.3,
+       "y": -21.4
+      },
+      "N": {
+       "x": 0.0,
+       "y": -19.5
+      },
+      "NE": {
+       "x": -9.3,
+       "y": -21.4
+      }
+     }
+    }
+   ]
+  },
+  "bike_tandem": {
+   "aliases": [],
+   "realSize": {
+    "length": 2.61,
+    "width": 0.6,
+    "height": 1.05
+   },
+   "seats": [
+    {
+     "name": "seat",
+     "u": 0.028,
+     "v": 0.0,
+     "z": 0.95,
+     "zPx": 28.8,
+     "draw": "over",
+     "facings": {
+      "E": {
+       "x": 1.3,
+       "y": -28.8
+      },
+      "SE": {
+       "x": 0.9,
+       "y": -28.3
+      },
+      "S": {
+       "x": 0.0,
+       "y": -28.1
+      },
+      "SW": {
+       "x": -0.9,
+       "y": -28.3
+      },
+      "W": {
+       "x": -1.3,
+       "y": -28.8
+      },
+      "NW": {
+       "x": -0.9,
+       "y": -29.2
+      },
+      "N": {
+       "x": -0.0,
+       "y": -29.4
+      },
+      "NE": {
+       "x": 0.9,
+       "y": -29.2
+      }
+     }
+    },
+    {
+     "name": "seat_rear",
+     "u": -0.66,
+     "v": 0.0,
+     "z": 0.95,
+     "zPx": 28.8,
+     "draw": "over",
+     "facings": {
+      "E": {
+       "x": -29.9,
+       "y": -28.8
+      },
+      "SE": {
+       "x": -21.1,
+       "y": -39.3
+      },
+      "S": {
+       "x": -0.0,
+       "y": -43.7
+      },
+      "SW": {
+       "x": 21.1,
+       "y": -39.3
+      },
+      "W": {
+       "x": 29.9,
+       "y": -28.8
+      },
+      "NW": {
+       "x": 21.1,
+       "y": -18.2
+      },
+      "N": {
+       "x": 0.0,
+       "y": -13.8
+      },
+      "NE": {
+       "x": -21.1,
+       "y": -18.2
+      }
+     }
+    }
+   ]
+  },
+  "bike_cargo": {
+   "aliases": [],
+   "realSize": {
+    "length": 2.41,
+    "width": 0.8,
+    "height": 1.1
+   },
+   "seats": [
+    {
+     "name": "seat",
+     "u": -0.63,
+     "v": 0.0,
+     "z": 0.95,
+     "zPx": 28.8,
+     "draw": "over",
+     "facings": {
+      "E": {
+       "x": -28.5,
+       "y": -28.8
+      },
+      "SE": {
+       "x": -20.2,
+       "y": -38.8
+      },
+      "S": {
+       "x": -0.0,
+       "y": -43.0
+      },
+      "SW": {
+       "x": 20.2,
+       "y": -38.8
+      },
+      "W": {
+       "x": 28.5,
+       "y": -28.8
+      },
+      "NW": {
+       "x": 20.2,
+       "y": -18.7
+      },
+      "N": {
+       "x": 0.0,
+       "y": -14.5
+      },
+      "NE": {
+       "x": -20.2,
+       "y": -18.7
+      }
+     }
+    }
+   ]
+  },
+  "bike_trike": {
+   "aliases": [],
+   "realSize": {
+    "length": 1.9,
+    "width": 1.0,
+    "height": 1.05
+   },
+   "seats": [
+    {
+     "name": "seat",
+     "u": -0.317,
+     "v": 0.0,
+     "z": 0.82,
+     "zPx": 24.8,
+     "draw": "over",
+     "facings": {
+      "E": {
+       "x": -14.3,
+       "y": -24.8
+      },
+      "SE": {
+       "x": -10.1,
+       "y": -29.9
+      },
+      "S": {
+       "x": -0.0,
+       "y": -32.0
+      },
+      "SW": {
+       "x": 10.1,
+       "y": -29.9
+      },
+      "W": {
+       "x": 14.3,
+       "y": -24.8
+      },
+      "NW": {
+       "x": 10.1,
+       "y": -19.8
+      },
+      "N": {
+       "x": 0.0,
+       "y": -17.7
+      },
+      "NE": {
+       "x": -10.1,
+       "y": -19.8
+      }
+     }
+    }
+   ]
+  },
+  "car_compact": {
+   "aliases": [
+    "car_hatchback"
+   ],
+   "realSize": {
+    "length": 3.6,
+    "width": 1.6,
+    "height": 1.48
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": -0.179,
+     "v": -0.326,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.8,
+      "roofZ": 1.4
+     },
+     "facings": {
+      "E": {
+       "x": -8.1,
+       "y": -24.0,
+       "clipTop": -49.8,
+       "clipBottom": -31.6
+      },
+      "SE": {
+       "x": 4.7,
+       "y": -24.7,
+       "clipTop": -50.5,
+       "clipBottom": -32.3
+      },
+      "S": {
+       "x": 14.7,
+       "y": -20.7,
+       "clipTop": -46.5,
+       "clipBottom": -28.3
+      },
+      "SW": {
+       "x": 16.2,
+       "y": -14.3,
+       "clipTop": -40.1,
+       "clipBottom": -21.9
+      },
+      "W": {
+       "x": 8.1,
+       "y": -9.3,
+       "clipTop": -35.0,
+       "clipBottom": -16.9
+      },
+      "NW": {
+       "x": -4.7,
+       "y": -8.6,
+       "clipTop": -34.3,
+       "clipBottom": -16.1
+      },
+      "N": {
+       "x": -14.7,
+       "y": -12.6,
+       "clipTop": -38.3,
+       "clipBottom": -20.2
+      },
+      "NE": {
+       "x": -16.2,
+       "y": -19.0,
+       "clipTop": -44.7,
+       "clipBottom": -26.6
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": -0.179,
+     "v": 0.326,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.8,
+      "roofZ": 1.4
+     },
+     "facings": {
+      "E": {
+       "x": -8.1,
+       "y": -9.3,
+       "clipTop": -35.0,
+       "clipBottom": -16.9
+      },
+      "SE": {
+       "x": -16.2,
+       "y": -14.3,
+       "clipTop": -40.1,
+       "clipBottom": -21.9
+      },
+      "S": {
+       "x": -14.7,
+       "y": -20.7,
+       "clipTop": -46.5,
+       "clipBottom": -28.3
+      },
+      "SW": {
+       "x": -4.7,
+       "y": -24.7,
+       "clipTop": -50.5,
+       "clipBottom": -32.3
+      },
+      "W": {
+       "x": 8.1,
+       "y": -24.0,
+       "clipTop": -49.8,
+       "clipBottom": -31.6
+      },
+      "NW": {
+       "x": 16.2,
+       "y": -19.0,
+       "clipTop": -44.7,
+       "clipBottom": -26.6
+      },
+      "N": {
+       "x": 14.7,
+       "y": -12.6,
+       "clipTop": -38.3,
+       "clipBottom": -20.2
+      },
+      "NE": {
+       "x": 4.7,
+       "y": -8.6,
+       "clipTop": -34.3,
+       "clipBottom": -16.1
+      }
+     }
+    },
+    {
+     "name": "seat_rear_l",
+     "u": -1.075,
+     "v": -0.326,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.8,
+      "roofZ": 1.4
+     },
+     "facings": {
+      "E": {
+       "x": -48.7,
+       "y": -24.0,
+       "clipTop": -49.8,
+       "clipBottom": -31.6
+      },
+      "SE": {
+       "x": -24.0,
+       "y": -39.1,
+       "clipTop": -64.8,
+       "clipBottom": -46.6
+      },
+      "S": {
+       "x": 14.7,
+       "y": -41.0,
+       "clipTop": -66.7,
+       "clipBottom": -48.6
+      },
+      "SW": {
+       "x": 44.8,
+       "y": -28.6,
+       "clipTop": -54.4,
+       "clipBottom": -36.2
+      },
+      "W": {
+       "x": 48.7,
+       "y": -9.3,
+       "clipTop": -35.0,
+       "clipBottom": -16.9
+      },
+      "NW": {
+       "x": 24.0,
+       "y": 5.8,
+       "clipTop": -20.0,
+       "clipBottom": -1.8
+      },
+      "N": {
+       "x": -14.7,
+       "y": 7.7,
+       "clipTop": -18.1,
+       "clipBottom": 0.1
+      },
+      "NE": {
+       "x": -44.8,
+       "y": -4.7,
+       "clipTop": -30.4,
+       "clipBottom": -12.2
+      }
+     }
+    },
+    {
+     "name": "seat_rear_r",
+     "u": -1.075,
+     "v": 0.326,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.8,
+      "roofZ": 1.4
+     },
+     "facings": {
+      "E": {
+       "x": -48.7,
+       "y": -9.3,
+       "clipTop": -35.0,
+       "clipBottom": -16.9
+      },
+      "SE": {
+       "x": -44.8,
+       "y": -28.6,
+       "clipTop": -54.4,
+       "clipBottom": -36.2
+      },
+      "S": {
+       "x": -14.7,
+       "y": -41.0,
+       "clipTop": -66.7,
+       "clipBottom": -48.6
+      },
+      "SW": {
+       "x": 24.0,
+       "y": -39.1,
+       "clipTop": -64.8,
+       "clipBottom": -46.6
+      },
+      "W": {
+       "x": 48.7,
+       "y": -24.0,
+       "clipTop": -49.8,
+       "clipBottom": -31.6
+      },
+      "NW": {
+       "x": 44.8,
+       "y": -4.7,
+       "clipTop": -30.4,
+       "clipBottom": -12.2
+      },
+      "N": {
+       "x": 14.7,
+       "y": 7.7,
+       "clipTop": -18.1,
+       "clipBottom": 0.1
+      },
+      "NE": {
+       "x": -24.0,
+       "y": 5.8,
+       "clipTop": -20.0,
+       "clipBottom": -1.8
+      }
+     }
+    }
+   ]
+  },
+  "car_sedan": {
+   "aliases": [],
+   "realSize": {
+    "length": 4.6,
+    "width": 1.8,
+    "height": 1.45
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 0.0,
+     "v": -0.36,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.814,
+      "roofZ": 1.366
+     },
+     "facings": {
+      "E": {
+       "x": 0.0,
+       "y": -24.8,
+       "clipTop": -49.5,
+       "clipBottom": -32.8
+      },
+      "SE": {
+       "x": 11.5,
+       "y": -22.4,
+       "clipTop": -47.1,
+       "clipBottom": -30.4
+      },
+      "S": {
+       "x": 16.3,
+       "y": -16.7,
+       "clipTop": -41.4,
+       "clipBottom": -24.7
+      },
+      "SW": {
+       "x": 11.5,
+       "y": -10.9,
+       "clipTop": -35.6,
+       "clipBottom": -18.9
+      },
+      "W": {
+       "x": 0.0,
+       "y": -8.5,
+       "clipTop": -33.2,
+       "clipBottom": -16.5
+      },
+      "NW": {
+       "x": -11.5,
+       "y": -10.9,
+       "clipTop": -35.6,
+       "clipBottom": -18.9
+      },
+      "N": {
+       "x": -16.3,
+       "y": -16.7,
+       "clipTop": -41.4,
+       "clipBottom": -24.7
+      },
+      "NE": {
+       "x": -11.5,
+       "y": -22.4,
+       "clipTop": -47.1,
+       "clipBottom": -30.4
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 0.0,
+     "v": 0.36,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.814,
+      "roofZ": 1.366
+     },
+     "facings": {
+      "E": {
+       "x": 0.0,
+       "y": -8.5,
+       "clipTop": -33.2,
+       "clipBottom": -16.5
+      },
+      "SE": {
+       "x": -11.5,
+       "y": -10.9,
+       "clipTop": -35.6,
+       "clipBottom": -18.9
+      },
+      "S": {
+       "x": -16.3,
+       "y": -16.7,
+       "clipTop": -41.4,
+       "clipBottom": -24.7
+      },
+      "SW": {
+       "x": -11.5,
+       "y": -22.4,
+       "clipTop": -47.1,
+       "clipBottom": -30.4
+      },
+      "W": {
+       "x": -0.0,
+       "y": -24.8,
+       "clipTop": -49.5,
+       "clipBottom": -32.8
+      },
+      "NW": {
+       "x": 11.5,
+       "y": -22.4,
+       "clipTop": -47.1,
+       "clipBottom": -30.4
+      },
+      "N": {
+       "x": 16.3,
+       "y": -16.7,
+       "clipTop": -41.4,
+       "clipBottom": -24.7
+      },
+      "NE": {
+       "x": 11.5,
+       "y": -10.9,
+       "clipTop": -35.6,
+       "clipBottom": -18.9
+      }
+     }
+    },
+    {
+     "name": "seat_rear_l",
+     "u": -0.995,
+     "v": -0.36,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.814,
+      "roofZ": 1.366
+     },
+     "facings": {
+      "E": {
+       "x": -45.0,
+       "y": -24.8,
+       "clipTop": -49.5,
+       "clipBottom": -32.8
+      },
+      "SE": {
+       "x": -20.3,
+       "y": -38.3,
+       "clipTop": -63.0,
+       "clipBottom": -46.3
+      },
+      "S": {
+       "x": 16.3,
+       "y": -39.2,
+       "clipTop": -63.9,
+       "clipBottom": -47.2
+      },
+      "SW": {
+       "x": 43.4,
+       "y": -26.8,
+       "clipTop": -51.5,
+       "clipBottom": -34.8
+      },
+      "W": {
+       "x": 45.0,
+       "y": -8.5,
+       "clipTop": -33.2,
+       "clipBottom": -16.5
+      },
+      "NW": {
+       "x": 20.3,
+       "y": 5.0,
+       "clipTop": -19.7,
+       "clipBottom": -3.0
+      },
+      "N": {
+       "x": -16.3,
+       "y": 5.9,
+       "clipTop": -18.9,
+       "clipBottom": -2.1
+      },
+      "NE": {
+       "x": -43.4,
+       "y": -6.5,
+       "clipTop": -31.2,
+       "clipBottom": -14.5
+      }
+     }
+    },
+    {
+     "name": "seat_rear_r",
+     "u": -0.995,
+     "v": 0.36,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.814,
+      "roofZ": 1.366
+     },
+     "facings": {
+      "E": {
+       "x": -45.0,
+       "y": -8.5,
+       "clipTop": -33.2,
+       "clipBottom": -16.5
+      },
+      "SE": {
+       "x": -43.4,
+       "y": -26.8,
+       "clipTop": -51.5,
+       "clipBottom": -34.8
+      },
+      "S": {
+       "x": -16.3,
+       "y": -39.2,
+       "clipTop": -63.9,
+       "clipBottom": -47.2
+      },
+      "SW": {
+       "x": 20.3,
+       "y": -38.3,
+       "clipTop": -63.0,
+       "clipBottom": -46.3
+      },
+      "W": {
+       "x": 45.0,
+       "y": -24.8,
+       "clipTop": -49.5,
+       "clipBottom": -32.8
+      },
+      "NW": {
+       "x": 43.4,
+       "y": -6.5,
+       "clipTop": -31.2,
+       "clipBottom": -14.5
+      },
+      "N": {
+       "x": 16.3,
+       "y": 5.9,
+       "clipTop": -18.9,
+       "clipBottom": -2.1
+      },
+      "NE": {
+       "x": -20.3,
+       "y": 5.0,
+       "clipTop": -19.7,
+       "clipBottom": -3.0
+      }
+     }
+    }
+   ]
+  },
+  "car_muscle": {
+   "aliases": [
+    "car_sports"
+   ],
+   "realSize": {
+    "length": 4.8,
+    "width": 1.9,
+    "height": 1.35
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": -0.199,
+     "v": -0.36,
+     "z": 0.5,
+     "zPx": 15.1,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.778,
+      "roofZ": 1.252
+     },
+     "facings": {
+      "E": {
+       "x": -9.0,
+       "y": -23.3,
+       "clipTop": -46.1,
+       "clipBottom": -31.7
+      },
+      "SE": {
+       "x": 5.2,
+       "y": -24.1,
+       "clipTop": -46.9,
+       "clipBottom": -32.5
+      },
+      "S": {
+       "x": 16.3,
+       "y": -19.6,
+       "clipTop": -42.4,
+       "clipBottom": -28.1
+      },
+      "SW": {
+       "x": 17.9,
+       "y": -12.6,
+       "clipTop": -35.3,
+       "clipBottom": -21.0
+      },
+      "W": {
+       "x": 9.0,
+       "y": -7.0,
+       "clipTop": -29.8,
+       "clipBottom": -15.4
+      },
+      "NW": {
+       "x": -5.2,
+       "y": -6.2,
+       "clipTop": -29.0,
+       "clipBottom": -14.6
+      },
+      "N": {
+       "x": -16.3,
+       "y": -10.6,
+       "clipTop": -33.4,
+       "clipBottom": -19.1
+      },
+      "NE": {
+       "x": -17.9,
+       "y": -17.7,
+       "clipTop": -40.5,
+       "clipBottom": -26.1
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": -0.199,
+     "v": 0.36,
+     "z": 0.5,
+     "zPx": 15.1,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.778,
+      "roofZ": 1.252
+     },
+     "facings": {
+      "E": {
+       "x": -9.0,
+       "y": -7.0,
+       "clipTop": -29.8,
+       "clipBottom": -15.4
+      },
+      "SE": {
+       "x": -17.9,
+       "y": -12.6,
+       "clipTop": -35.3,
+       "clipBottom": -21.0
+      },
+      "S": {
+       "x": -16.3,
+       "y": -19.6,
+       "clipTop": -42.4,
+       "clipBottom": -28.1
+      },
+      "SW": {
+       "x": -5.2,
+       "y": -24.1,
+       "clipTop": -46.9,
+       "clipBottom": -32.5
+      },
+      "W": {
+       "x": 9.0,
+       "y": -23.3,
+       "clipTop": -46.1,
+       "clipBottom": -31.7
+      },
+      "NW": {
+       "x": 17.9,
+       "y": -17.7,
+       "clipTop": -40.5,
+       "clipBottom": -26.1
+      },
+      "N": {
+       "x": 16.3,
+       "y": -10.6,
+       "clipTop": -33.4,
+       "clipBottom": -19.1
+      },
+      "NE": {
+       "x": 5.2,
+       "y": -6.2,
+       "clipTop": -29.0,
+       "clipBottom": -14.6
+      }
+     }
+    }
+   ]
+  },
+  "car_offroad": {
+   "aliases": [
+    "car_suv"
+   ],
+   "realSize": {
+    "length": 4.4,
+    "width": 1.9,
+    "height": 1.78
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 0.14,
+     "v": -0.348,
+     "z": 0.75,
+     "zPx": 22.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.937,
+      "roofZ": 1.64
+     },
+     "facings": {
+      "E": {
+       "x": 6.3,
+       "y": -30.6,
+       "clipTop": -57.6,
+       "clipBottom": -36.3
+      },
+      "SE": {
+       "x": 15.6,
+       "y": -26.0,
+       "clipTop": -53.0,
+       "clipBottom": -31.7
+      },
+      "S": {
+       "x": 15.8,
+       "y": -19.5,
+       "clipTop": -46.5,
+       "clipBottom": -25.2
+      },
+      "SW": {
+       "x": 6.7,
+       "y": -14.9,
+       "clipTop": -41.9,
+       "clipBottom": -20.6
+      },
+      "W": {
+       "x": -6.3,
+       "y": -14.8,
+       "clipTop": -41.8,
+       "clipBottom": -20.5
+      },
+      "NW": {
+       "x": -15.6,
+       "y": -19.4,
+       "clipTop": -46.3,
+       "clipBottom": -25.0
+      },
+      "N": {
+       "x": -15.8,
+       "y": -25.9,
+       "clipTop": -52.8,
+       "clipBottom": -31.5
+      },
+      "NE": {
+       "x": -6.7,
+       "y": -30.5,
+       "clipTop": -57.5,
+       "clipBottom": -36.2
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 0.14,
+     "v": 0.348,
+     "z": 0.75,
+     "zPx": 22.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.937,
+      "roofZ": 1.64
+     },
+     "facings": {
+      "E": {
+       "x": 6.3,
+       "y": -14.8,
+       "clipTop": -41.8,
+       "clipBottom": -20.5
+      },
+      "SE": {
+       "x": -6.7,
+       "y": -14.9,
+       "clipTop": -41.9,
+       "clipBottom": -20.6
+      },
+      "S": {
+       "x": -15.8,
+       "y": -19.5,
+       "clipTop": -46.5,
+       "clipBottom": -25.2
+      },
+      "SW": {
+       "x": -15.6,
+       "y": -26.0,
+       "clipTop": -53.0,
+       "clipBottom": -31.7
+      },
+      "W": {
+       "x": -6.3,
+       "y": -30.6,
+       "clipTop": -57.6,
+       "clipBottom": -36.3
+      },
+      "NW": {
+       "x": 6.7,
+       "y": -30.5,
+       "clipTop": -57.5,
+       "clipBottom": -36.2
+      },
+      "N": {
+       "x": 15.8,
+       "y": -25.9,
+       "clipTop": -52.8,
+       "clipBottom": -31.5
+      },
+      "NE": {
+       "x": 15.6,
+       "y": -19.4,
+       "clipTop": -46.3,
+       "clipBottom": -25.0
+      }
+     }
+    },
+    {
+     "name": "seat_rear_l",
+     "u": -0.736,
+     "v": -0.348,
+     "z": 0.75,
+     "zPx": 22.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.937,
+      "roofZ": 1.64
+     },
+     "facings": {
+      "E": {
+       "x": -33.3,
+       "y": -30.6,
+       "clipTop": -57.6,
+       "clipBottom": -36.3
+      },
+      "SE": {
+       "x": -12.4,
+       "y": -40.1,
+       "clipTop": -67.0,
+       "clipBottom": -45.7
+      },
+      "S": {
+       "x": 15.8,
+       "y": -39.4,
+       "clipTop": -66.3,
+       "clipBottom": -45.0
+      },
+      "SW": {
+       "x": 34.7,
+       "y": -28.9,
+       "clipTop": -55.9,
+       "clipBottom": -34.6
+      },
+      "W": {
+       "x": 33.3,
+       "y": -14.8,
+       "clipTop": -41.8,
+       "clipBottom": -20.5
+      },
+      "NW": {
+       "x": 12.4,
+       "y": -5.4,
+       "clipTop": -32.3,
+       "clipBottom": -11.0
+      },
+      "N": {
+       "x": -15.8,
+       "y": -6.1,
+       "clipTop": -33.0,
+       "clipBottom": -11.7
+      },
+      "NE": {
+       "x": -34.7,
+       "y": -16.5,
+       "clipTop": -43.5,
+       "clipBottom": -22.2
+      }
+     }
+    },
+    {
+     "name": "seat_rear_r",
+     "u": -0.736,
+     "v": 0.348,
+     "z": 0.75,
+     "zPx": 22.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.937,
+      "roofZ": 1.64
+     },
+     "facings": {
+      "E": {
+       "x": -33.3,
+       "y": -14.8,
+       "clipTop": -41.8,
+       "clipBottom": -20.5
+      },
+      "SE": {
+       "x": -34.7,
+       "y": -28.9,
+       "clipTop": -55.9,
+       "clipBottom": -34.6
+      },
+      "S": {
+       "x": -15.8,
+       "y": -39.4,
+       "clipTop": -66.3,
+       "clipBottom": -45.0
+      },
+      "SW": {
+       "x": 12.4,
+       "y": -40.1,
+       "clipTop": -67.0,
+       "clipBottom": -45.7
+      },
+      "W": {
+       "x": 33.3,
+       "y": -30.6,
+       "clipTop": -57.6,
+       "clipBottom": -36.3
+      },
+      "NW": {
+       "x": 34.7,
+       "y": -16.5,
+       "clipTop": -43.5,
+       "clipBottom": -22.2
+      },
+      "N": {
+       "x": 15.8,
+       "y": -6.1,
+       "clipTop": -33.0,
+       "clipBottom": -11.7
+      },
+      "NE": {
+       "x": -12.4,
+       "y": -5.4,
+       "clipTop": -32.3,
+       "clipBottom": -11.0
+      }
+     }
+    }
+   ]
+  },
+  "car_wagon": {
+   "aliases": [],
+   "realSize": {
+    "length": 4.91,
+    "width": 1.8,
+    "height": 1.5
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 0.039,
+     "v": -0.36,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.778,
+      "roofZ": 1.333
+     },
+     "facings": {
+      "E": {
+       "x": 1.8,
+       "y": -24.8,
+       "clipTop": -48.5,
+       "clipBottom": -31.7
+      },
+      "SE": {
+       "x": 12.8,
+       "y": -21.8,
+       "clipTop": -45.5,
+       "clipBottom": -28.7
+      },
+      "S": {
+       "x": 16.3,
+       "y": -15.8,
+       "clipTop": -39.5,
+       "clipBottom": -22.7
+      },
+      "SW": {
+       "x": 10.3,
+       "y": -10.3,
+       "clipTop": -34.0,
+       "clipBottom": -17.2
+      },
+      "W": {
+       "x": -1.8,
+       "y": -8.5,
+       "clipTop": -32.2,
+       "clipBottom": -15.4
+      },
+      "NW": {
+       "x": -12.8,
+       "y": -11.5,
+       "clipTop": -35.2,
+       "clipBottom": -18.4
+      },
+      "N": {
+       "x": -16.3,
+       "y": -17.5,
+       "clipTop": -41.3,
+       "clipBottom": -24.4
+      },
+      "NE": {
+       "x": -10.3,
+       "y": -23.0,
+       "clipTop": -46.8,
+       "clipBottom": -29.9
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 0.039,
+     "v": 0.36,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.778,
+      "roofZ": 1.333
+     },
+     "facings": {
+      "E": {
+       "x": 1.8,
+       "y": -8.5,
+       "clipTop": -32.2,
+       "clipBottom": -15.4
+      },
+      "SE": {
+       "x": -10.3,
+       "y": -10.3,
+       "clipTop": -34.0,
+       "clipBottom": -17.2
+      },
+      "S": {
+       "x": -16.3,
+       "y": -15.8,
+       "clipTop": -39.5,
+       "clipBottom": -22.7
+      },
+      "SW": {
+       "x": -12.8,
+       "y": -21.8,
+       "clipTop": -45.5,
+       "clipBottom": -28.7
+      },
+      "W": {
+       "x": -1.8,
+       "y": -24.8,
+       "clipTop": -48.5,
+       "clipBottom": -31.7
+      },
+      "NW": {
+       "x": 10.3,
+       "y": -23.0,
+       "clipTop": -46.8,
+       "clipBottom": -29.9
+      },
+      "N": {
+       "x": 16.3,
+       "y": -17.5,
+       "clipTop": -41.3,
+       "clipBottom": -24.4
+      },
+      "NE": {
+       "x": 12.8,
+       "y": -11.5,
+       "clipTop": -35.2,
+       "clipBottom": -18.4
+      }
+     }
+    },
+    {
+     "name": "seat_rear_l",
+     "u": -0.938,
+     "v": -0.36,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.778,
+      "roofZ": 1.333
+     },
+     "facings": {
+      "E": {
+       "x": -42.5,
+       "y": -24.8,
+       "clipTop": -48.5,
+       "clipBottom": -31.7
+      },
+      "SE": {
+       "x": -18.5,
+       "y": -37.4,
+       "clipTop": -61.1,
+       "clipBottom": -44.3
+      },
+      "S": {
+       "x": 16.3,
+       "y": -37.9,
+       "clipTop": -61.6,
+       "clipBottom": -44.8
+      },
+      "SW": {
+       "x": 41.5,
+       "y": -25.9,
+       "clipTop": -49.6,
+       "clipBottom": -32.8
+      },
+      "W": {
+       "x": 42.5,
+       "y": -8.5,
+       "clipTop": -32.2,
+       "clipBottom": -15.4
+      },
+      "NW": {
+       "x": 18.5,
+       "y": 4.1,
+       "clipTop": -19.6,
+       "clipBottom": -2.8
+      },
+      "N": {
+       "x": -16.3,
+       "y": 4.6,
+       "clipTop": -19.1,
+       "clipBottom": -2.3
+      },
+      "NE": {
+       "x": -41.5,
+       "y": -7.4,
+       "clipTop": -31.1,
+       "clipBottom": -14.3
+      }
+     }
+    },
+    {
+     "name": "seat_rear_r",
+     "u": -0.938,
+     "v": 0.36,
+     "z": 0.55,
+     "zPx": 16.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.778,
+      "roofZ": 1.333
+     },
+     "facings": {
+      "E": {
+       "x": -42.5,
+       "y": -8.5,
+       "clipTop": -32.2,
+       "clipBottom": -15.4
+      },
+      "SE": {
+       "x": -41.5,
+       "y": -25.9,
+       "clipTop": -49.6,
+       "clipBottom": -32.8
+      },
+      "S": {
+       "x": -16.3,
+       "y": -37.9,
+       "clipTop": -61.6,
+       "clipBottom": -44.8
+      },
+      "SW": {
+       "x": 18.5,
+       "y": -37.4,
+       "clipTop": -61.1,
+       "clipBottom": -44.3
+      },
+      "W": {
+       "x": 42.5,
+       "y": -24.8,
+       "clipTop": -48.5,
+       "clipBottom": -31.7
+      },
+      "NW": {
+       "x": 41.5,
+       "y": -7.4,
+       "clipTop": -31.1,
+       "clipBottom": -14.3
+      },
+      "N": {
+       "x": 16.3,
+       "y": 4.6,
+       "clipTop": -19.1,
+       "clipBottom": -2.3
+      },
+      "NE": {
+       "x": -18.5,
+       "y": 4.1,
+       "clipTop": -19.6,
+       "clipBottom": -2.8
+      }
+     }
+    }
+   ]
+  },
+  "truck_pickup": {
+   "aliases": [
+    "car_pickup"
+   ],
+   "realSize": {
+    "length": 5.39,
+    "width": 2.0,
+    "height": 1.85
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 0.744,
+     "v": -0.379,
+     "z": 0.85,
+     "zPx": 25.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.066,
+      "roofZ": 1.755
+     },
+     "facings": {
+      "E": {
+       "x": 33.7,
+       "y": -34.3,
+       "clipTop": -61.7,
+       "clipBottom": -40.9
+      },
+      "SE": {
+       "x": 35.9,
+       "y": -19.9,
+       "clipTop": -47.3,
+       "clipBottom": -26.5
+      },
+      "S": {
+       "x": 17.2,
+       "y": -8.9,
+       "clipTop": -36.3,
+       "clipBottom": -15.5
+      },
+      "SW": {
+       "x": -11.7,
+       "y": -7.8,
+       "clipTop": -35.2,
+       "clipBottom": -14.3
+      },
+      "W": {
+       "x": -33.7,
+       "y": -17.2,
+       "clipTop": -44.6,
+       "clipBottom": -23.7
+      },
+      "NW": {
+       "x": -35.9,
+       "y": -31.6,
+       "clipTop": -59.0,
+       "clipBottom": -38.1
+      },
+      "N": {
+       "x": -17.2,
+       "y": -42.6,
+       "clipTop": -70.0,
+       "clipBottom": -49.1
+      },
+      "NE": {
+       "x": 11.7,
+       "y": -43.7,
+       "clipTop": -71.1,
+       "clipBottom": -50.3
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 0.744,
+     "v": 0.379,
+     "z": 0.85,
+     "zPx": 25.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.066,
+      "roofZ": 1.755
+     },
+     "facings": {
+      "E": {
+       "x": 33.7,
+       "y": -17.2,
+       "clipTop": -44.6,
+       "clipBottom": -23.7
+      },
+      "SE": {
+       "x": 11.7,
+       "y": -7.8,
+       "clipTop": -35.2,
+       "clipBottom": -14.3
+      },
+      "S": {
+       "x": -17.2,
+       "y": -8.9,
+       "clipTop": -36.3,
+       "clipBottom": -15.5
+      },
+      "SW": {
+       "x": -35.9,
+       "y": -19.9,
+       "clipTop": -47.3,
+       "clipBottom": -26.5
+      },
+      "W": {
+       "x": -33.7,
+       "y": -34.3,
+       "clipTop": -61.7,
+       "clipBottom": -40.9
+      },
+      "NW": {
+       "x": -11.7,
+       "y": -43.7,
+       "clipTop": -71.1,
+       "clipBottom": -50.3
+      },
+      "N": {
+       "x": 17.2,
+       "y": -42.6,
+       "clipTop": -70.0,
+       "clipBottom": -49.1
+      },
+      "NE": {
+       "x": 35.9,
+       "y": -31.6,
+       "clipTop": -59.0,
+       "clipBottom": -38.1
+      }
+     }
+    }
+   ]
+  },
+  "truck_flatbed": {
+   "aliases": [],
+   "realSize": {
+    "length": 6.5,
+    "width": 2.2,
+    "height": 2.1
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 1.25,
+     "v": -0.41,
+     "z": 0.95,
+     "zPx": 28.8,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.193,
+      "roofZ": 2.011
+     },
+     "facings": {
+      "E": {
+       "x": 56.6,
+       "y": -38.1,
+       "clipTop": -70.2,
+       "clipBottom": -45.4
+      },
+      "SE": {
+       "x": 53.1,
+       "y": -15.3,
+       "clipTop": -47.5,
+       "clipBottom": -22.7
+      },
+      "S": {
+       "x": 18.6,
+       "y": -0.5,
+       "clipTop": -32.6,
+       "clipBottom": -7.8
+      },
+      "SW": {
+       "x": -26.9,
+       "y": -2.2,
+       "clipTop": -34.3,
+       "clipBottom": -9.6
+      },
+      "W": {
+       "x": -56.6,
+       "y": -19.5,
+       "clipTop": -51.6,
+       "clipBottom": -26.8
+      },
+      "NW": {
+       "x": -53.1,
+       "y": -42.2,
+       "clipTop": -74.3,
+       "clipBottom": -49.6
+      },
+      "N": {
+       "x": -18.6,
+       "y": -57.1,
+       "clipTop": -89.2,
+       "clipBottom": -64.4
+      },
+      "NE": {
+       "x": 26.9,
+       "y": -55.3,
+       "clipTop": -87.5,
+       "clipBottom": -62.7
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 1.25,
+     "v": 0.41,
+     "z": 0.95,
+     "zPx": 28.8,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.193,
+      "roofZ": 2.011
+     },
+     "facings": {
+      "E": {
+       "x": 56.6,
+       "y": -19.5,
+       "clipTop": -51.6,
+       "clipBottom": -26.8
+      },
+      "SE": {
+       "x": 26.9,
+       "y": -2.2,
+       "clipTop": -34.3,
+       "clipBottom": -9.6
+      },
+      "S": {
+       "x": -18.6,
+       "y": -0.5,
+       "clipTop": -32.6,
+       "clipBottom": -7.8
+      },
+      "SW": {
+       "x": -53.1,
+       "y": -15.3,
+       "clipTop": -47.5,
+       "clipBottom": -22.7
+      },
+      "W": {
+       "x": -56.6,
+       "y": -38.1,
+       "clipTop": -70.2,
+       "clipBottom": -45.4
+      },
+      "NW": {
+       "x": -26.9,
+       "y": -55.3,
+       "clipTop": -87.5,
+       "clipBottom": -62.7
+      },
+      "N": {
+       "x": 18.6,
+       "y": -57.1,
+       "clipTop": -89.2,
+       "clipBottom": -64.4
+      },
+      "NE": {
+       "x": 53.1,
+       "y": -42.2,
+       "clipTop": -74.3,
+       "clipBottom": -49.6
+      }
+     }
+    }
+   ]
+  },
+  "truck_box": {
+   "aliases": [],
+   "realSize": {
+    "length": 7.0,
+    "width": 2.3,
+    "height": 3.2
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 1.74,
+     "v": -0.425,
+     "z": 1.2,
+     "zPx": 36.3,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.45,
+      "roofZ": 2.293
+     },
+     "facings": {
+      "E": {
+       "x": 78.8,
+       "y": -46.0,
+       "clipTop": -79.1,
+       "clipBottom": -53.5
+      },
+      "SE": {
+       "x": 69.3,
+       "y": -15.3,
+       "clipTop": -48.4,
+       "clipBottom": -22.9
+      },
+      "S": {
+       "x": 19.2,
+       "y": 3.0,
+       "clipTop": -30.1,
+       "clipBottom": -4.5
+      },
+      "SW": {
+       "x": -42.1,
+       "y": -1.7,
+       "clipTop": -34.8,
+       "clipBottom": -9.3
+      },
+      "W": {
+       "x": -78.8,
+       "y": -26.7,
+       "clipTop": -59.8,
+       "clipBottom": -34.3
+      },
+      "NW": {
+       "x": -69.3,
+       "y": -57.4,
+       "clipTop": -90.5,
+       "clipBottom": -65.0
+      },
+      "N": {
+       "x": -19.2,
+       "y": -75.7,
+       "clipTop": -108.8,
+       "clipBottom": -83.3
+      },
+      "NE": {
+       "x": 42.1,
+       "y": -71.0,
+       "clipTop": -104.1,
+       "clipBottom": -78.6
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 1.74,
+     "v": 0.425,
+     "z": 1.2,
+     "zPx": 36.3,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.45,
+      "roofZ": 2.293
+     },
+     "facings": {
+      "E": {
+       "x": 78.8,
+       "y": -26.7,
+       "clipTop": -59.8,
+       "clipBottom": -34.3
+      },
+      "SE": {
+       "x": 42.1,
+       "y": -1.7,
+       "clipTop": -34.8,
+       "clipBottom": -9.3
+      },
+      "S": {
+       "x": -19.2,
+       "y": 3.0,
+       "clipTop": -30.1,
+       "clipBottom": -4.5
+      },
+      "SW": {
+       "x": -69.3,
+       "y": -15.3,
+       "clipTop": -48.4,
+       "clipBottom": -22.9
+      },
+      "W": {
+       "x": -78.8,
+       "y": -46.0,
+       "clipTop": -79.1,
+       "clipBottom": -53.5
+      },
+      "NW": {
+       "x": -42.1,
+       "y": -71.0,
+       "clipTop": -104.1,
+       "clipBottom": -78.6
+      },
+      "N": {
+       "x": 19.2,
+       "y": -75.7,
+       "clipTop": -108.8,
+       "clipBottom": -83.3
+      },
+      "NE": {
+       "x": 69.3,
+       "y": -57.4,
+       "clipTop": -90.5,
+       "clipBottom": -65.0
+      }
+     }
+    }
+   ]
+  },
+  "van_cargo": {
+   "aliases": [
+    "van_delivery"
+   ],
+   "realSize": {
+    "length": 5.19,
+    "width": 2.0,
+    "height": 2.0
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 0.515,
+     "v": -0.4,
+     "z": 0.85,
+     "zPx": 25.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.0,
+      "roofZ": 1.945
+     },
+     "facings": {
+      "E": {
+       "x": 23.3,
+       "y": -34.8,
+       "clipTop": -68.0,
+       "clipBottom": -39.3
+      },
+      "SE": {
+       "x": 29.3,
+       "y": -23.9,
+       "clipTop": -57.1,
+       "clipBottom": -28.4
+      },
+      "S": {
+       "x": 18.1,
+       "y": -14.1,
+       "clipTop": -47.2,
+       "clipBottom": -18.6
+      },
+      "SW": {
+       "x": -3.7,
+       "y": -11.1,
+       "clipTop": -44.3,
+       "clipBottom": -15.6
+      },
+      "W": {
+       "x": -23.3,
+       "y": -16.7,
+       "clipTop": -49.9,
+       "clipBottom": -21.2
+      },
+      "NW": {
+       "x": -29.3,
+       "y": -27.6,
+       "clipTop": -60.8,
+       "clipBottom": -32.1
+      },
+      "N": {
+       "x": -18.1,
+       "y": -37.4,
+       "clipTop": -70.6,
+       "clipBottom": -41.9
+      },
+      "NE": {
+       "x": 3.7,
+       "y": -40.4,
+       "clipTop": -73.6,
+       "clipBottom": -44.9
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 0.515,
+     "v": 0.4,
+     "z": 0.85,
+     "zPx": 25.7,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.0,
+      "roofZ": 1.945
+     },
+     "facings": {
+      "E": {
+       "x": 23.3,
+       "y": -16.7,
+       "clipTop": -49.9,
+       "clipBottom": -21.2
+      },
+      "SE": {
+       "x": 3.7,
+       "y": -11.1,
+       "clipTop": -44.3,
+       "clipBottom": -15.6
+      },
+      "S": {
+       "x": -18.1,
+       "y": -14.1,
+       "clipTop": -47.2,
+       "clipBottom": -18.6
+      },
+      "SW": {
+       "x": -29.3,
+       "y": -23.9,
+       "clipTop": -57.1,
+       "clipBottom": -28.4
+      },
+      "W": {
+       "x": -23.3,
+       "y": -34.8,
+       "clipTop": -68.0,
+       "clipBottom": -39.3
+      },
+      "NW": {
+       "x": -3.7,
+       "y": -40.4,
+       "clipTop": -73.6,
+       "clipBottom": -44.9
+      },
+      "N": {
+       "x": 18.1,
+       "y": -37.4,
+       "clipTop": -70.6,
+       "clipBottom": -41.9
+      },
+      "NE": {
+       "x": 29.3,
+       "y": -27.6,
+       "clipTop": -60.8,
+       "clipBottom": -32.1
+      }
+     }
+    }
+   ]
+  },
+  "van_passenger": {
+   "aliases": [
+    "van_minivan"
+   ],
+   "realSize": {
+    "length": 5.39,
+    "width": 2.0,
+    "height": 1.78
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 0.62,
+     "v": -0.367,
+     "z": 0.7,
+     "zPx": 21.2,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.813,
+      "roofZ": 1.704
+     },
+     "facings": {
+      "E": {
+       "x": 28.0,
+       "y": -29.5,
+       "clipTop": -59.9,
+       "clipBottom": -32.9
+      },
+      "SE": {
+       "x": 31.6,
+       "y": -17.2,
+       "clipTop": -47.6,
+       "clipBottom": -20.6
+      },
+      "S": {
+       "x": 16.6,
+       "y": -7.2,
+       "clipTop": -37.6,
+       "clipBottom": -10.6
+      },
+      "SW": {
+       "x": -8.1,
+       "y": -5.4,
+       "clipTop": -35.8,
+       "clipBottom": -8.8
+      },
+      "W": {
+       "x": -28.0,
+       "y": -12.9,
+       "clipTop": -43.3,
+       "clipBottom": -16.3
+      },
+      "NW": {
+       "x": -31.6,
+       "y": -25.2,
+       "clipTop": -55.7,
+       "clipBottom": -28.7
+      },
+      "N": {
+       "x": -16.6,
+       "y": -35.2,
+       "clipTop": -65.6,
+       "clipBottom": -38.6
+      },
+      "NE": {
+       "x": 8.1,
+       "y": -37.0,
+       "clipTop": -67.4,
+       "clipBottom": -40.4
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 0.62,
+     "v": 0.367,
+     "z": 0.7,
+     "zPx": 21.2,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.813,
+      "roofZ": 1.704
+     },
+     "facings": {
+      "E": {
+       "x": 28.0,
+       "y": -12.9,
+       "clipTop": -43.3,
+       "clipBottom": -16.3
+      },
+      "SE": {
+       "x": 8.1,
+       "y": -5.4,
+       "clipTop": -35.8,
+       "clipBottom": -8.8
+      },
+      "S": {
+       "x": -16.6,
+       "y": -7.2,
+       "clipTop": -37.6,
+       "clipBottom": -10.6
+      },
+      "SW": {
+       "x": -31.6,
+       "y": -17.2,
+       "clipTop": -47.6,
+       "clipBottom": -20.6
+      },
+      "W": {
+       "x": -28.0,
+       "y": -29.5,
+       "clipTop": -59.9,
+       "clipBottom": -32.9
+      },
+      "NW": {
+       "x": -8.1,
+       "y": -37.0,
+       "clipTop": -67.4,
+       "clipBottom": -40.4
+      },
+      "N": {
+       "x": 16.6,
+       "y": -35.2,
+       "clipTop": -65.6,
+       "clipBottom": -38.6
+      },
+      "NE": {
+       "x": 31.6,
+       "y": -25.2,
+       "clipTop": -55.7,
+       "clipBottom": -28.7
+      }
+     }
+    },
+    {
+     "name": "seat_rear_l",
+     "u": -0.413,
+     "v": -0.367,
+     "z": 0.7,
+     "zPx": 21.2,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.813,
+      "roofZ": 1.704
+     },
+     "facings": {
+      "E": {
+       "x": -18.7,
+       "y": -29.5,
+       "clipTop": -59.9,
+       "clipBottom": -32.9
+      },
+      "SE": {
+       "x": -1.5,
+       "y": -33.7,
+       "clipTop": -64.1,
+       "clipBottom": -37.1
+      },
+      "S": {
+       "x": 16.6,
+       "y": -30.5,
+       "clipTop": -61.0,
+       "clipBottom": -34.0
+      },
+      "SW": {
+       "x": 25.0,
+       "y": -21.9,
+       "clipTop": -52.4,
+       "clipBottom": -25.4
+      },
+      "W": {
+       "x": 18.7,
+       "y": -12.9,
+       "clipTop": -43.3,
+       "clipBottom": -16.3
+      },
+      "NW": {
+       "x": 1.5,
+       "y": -8.7,
+       "clipTop": -39.1,
+       "clipBottom": -12.1
+      },
+      "N": {
+       "x": -16.6,
+       "y": -11.9,
+       "clipTop": -42.3,
+       "clipBottom": -15.3
+      },
+      "NE": {
+       "x": -25.0,
+       "y": -20.5,
+       "clipTop": -50.9,
+       "clipBottom": -23.9
+      }
+     }
+    },
+    {
+     "name": "seat_rear_r",
+     "u": -0.413,
+     "v": 0.367,
+     "z": 0.7,
+     "zPx": 21.2,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.813,
+      "roofZ": 1.704
+     },
+     "facings": {
+      "E": {
+       "x": -18.7,
+       "y": -12.9,
+       "clipTop": -43.3,
+       "clipBottom": -16.3
+      },
+      "SE": {
+       "x": -25.0,
+       "y": -21.9,
+       "clipTop": -52.4,
+       "clipBottom": -25.4
+      },
+      "S": {
+       "x": -16.6,
+       "y": -30.5,
+       "clipTop": -61.0,
+       "clipBottom": -34.0
+      },
+      "SW": {
+       "x": 1.5,
+       "y": -33.7,
+       "clipTop": -64.1,
+       "clipBottom": -37.1
+      },
+      "W": {
+       "x": 18.7,
+       "y": -29.5,
+       "clipTop": -59.9,
+       "clipBottom": -32.9
+      },
+      "NW": {
+       "x": 25.0,
+       "y": -20.5,
+       "clipTop": -50.9,
+       "clipBottom": -23.9
+      },
+      "N": {
+       "x": 16.6,
+       "y": -11.9,
+       "clipTop": -42.3,
+       "clipBottom": -15.3
+      },
+      "NE": {
+       "x": -1.5,
+       "y": -8.7,
+       "clipTop": -39.1,
+       "clipBottom": -12.1
+      }
+     }
+    }
+   ]
+  },
+  "camper_van": {
+   "aliases": [],
+   "realSize": {
+    "length": 6.01,
+    "width": 2.1,
+    "height": 2.6
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 1.379,
+     "v": -0.423,
+     "z": 0.9,
+     "zPx": 27.3,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.118,
+      "roofZ": 1.863
+     },
+     "facings": {
+      "E": {
+       "x": 62.4,
+       "y": -36.8,
+       "clipTop": -66.0,
+       "clipBottom": -43.4
+      },
+      "SE": {
+       "x": 57.7,
+       "y": -12.0,
+       "clipTop": -41.1,
+       "clipBottom": -18.6
+      },
+      "S": {
+       "x": 19.2,
+       "y": 3.9,
+       "clipTop": -25.2,
+       "clipBottom": -2.7
+      },
+      "SW": {
+       "x": -30.6,
+       "y": 1.6,
+       "clipTop": -27.6,
+       "clipBottom": -5.0
+      },
+      "W": {
+       "x": -62.4,
+       "y": -17.7,
+       "clipTop": -46.8,
+       "clipBottom": -24.3
+      },
+      "NW": {
+       "x": -57.7,
+       "y": -42.5,
+       "clipTop": -71.7,
+       "clipBottom": -49.2
+      },
+      "N": {
+       "x": -19.2,
+       "y": -58.5,
+       "clipTop": -87.6,
+       "clipBottom": -65.1
+      },
+      "NE": {
+       "x": 30.6,
+       "y": -56.1,
+       "clipTop": -85.3,
+       "clipBottom": -62.7
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 1.379,
+     "v": 0.423,
+     "z": 0.9,
+     "zPx": 27.3,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.118,
+      "roofZ": 1.863
+     },
+     "facings": {
+      "E": {
+       "x": 62.4,
+       "y": -17.7,
+       "clipTop": -46.8,
+       "clipBottom": -24.3
+      },
+      "SE": {
+       "x": 30.6,
+       "y": 1.6,
+       "clipTop": -27.6,
+       "clipBottom": -5.0
+      },
+      "S": {
+       "x": -19.2,
+       "y": 3.9,
+       "clipTop": -25.2,
+       "clipBottom": -2.7
+      },
+      "SW": {
+       "x": -57.7,
+       "y": -12.0,
+       "clipTop": -41.1,
+       "clipBottom": -18.6
+      },
+      "W": {
+       "x": -62.4,
+       "y": -36.8,
+       "clipTop": -66.0,
+       "clipBottom": -43.4
+      },
+      "NW": {
+       "x": -30.6,
+       "y": -56.1,
+       "clipTop": -85.3,
+       "clipBottom": -62.7
+      },
+      "N": {
+       "x": 19.2,
+       "y": -58.5,
+       "clipTop": -87.6,
+       "clipBottom": -65.1
+      },
+      "NE": {
+       "x": 57.7,
+       "y": -42.5,
+       "clipTop": -71.7,
+       "clipBottom": -49.2
+      }
+     }
+    },
+    {
+     "name": "seat_rear_l",
+     "u": 0.144,
+     "v": -0.423,
+     "z": 0.9,
+     "zPx": 27.3,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.577,
+      "roofZ": 1.978
+     },
+     "facings": {
+      "E": {
+       "x": 6.5,
+       "y": -36.8,
+       "clipTop": -69.5,
+       "clipBottom": -57.3
+      },
+      "SE": {
+       "x": 18.2,
+       "y": -31.7,
+       "clipTop": -64.4,
+       "clipBottom": -52.2
+      },
+      "S": {
+       "x": 19.2,
+       "y": -24.0,
+       "clipTop": -56.6,
+       "clipBottom": -44.5
+      },
+      "SW": {
+       "x": 8.9,
+       "y": -18.2,
+       "clipTop": -50.8,
+       "clipBottom": -38.7
+      },
+      "W": {
+       "x": -6.5,
+       "y": -17.7,
+       "clipTop": -50.3,
+       "clipBottom": -38.2
+      },
+      "NW": {
+       "x": -18.2,
+       "y": -22.8,
+       "clipTop": -55.4,
+       "clipBottom": -43.3
+      },
+      "N": {
+       "x": -19.2,
+       "y": -30.5,
+       "clipTop": -63.2,
+       "clipBottom": -51.0
+      },
+      "NE": {
+       "x": -8.9,
+       "y": -36.3,
+       "clipTop": -69.0,
+       "clipBottom": -56.8
+      }
+     }
+    },
+    {
+     "name": "seat_rear_r",
+     "u": 0.144,
+     "v": 0.423,
+     "z": 0.9,
+     "zPx": 27.3,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.577,
+      "roofZ": 1.978
+     },
+     "facings": {
+      "E": {
+       "x": 6.5,
+       "y": -17.7,
+       "clipTop": -50.3,
+       "clipBottom": -38.2
+      },
+      "SE": {
+       "x": -8.9,
+       "y": -18.2,
+       "clipTop": -50.8,
+       "clipBottom": -38.7
+      },
+      "S": {
+       "x": -19.2,
+       "y": -24.0,
+       "clipTop": -56.6,
+       "clipBottom": -44.5
+      },
+      "SW": {
+       "x": -18.2,
+       "y": -31.7,
+       "clipTop": -64.4,
+       "clipBottom": -52.2
+      },
+      "W": {
+       "x": -6.5,
+       "y": -36.8,
+       "clipTop": -69.5,
+       "clipBottom": -57.3
+      },
+      "NW": {
+       "x": 8.9,
+       "y": -36.3,
+       "clipTop": -69.0,
+       "clipBottom": -56.8
+      },
+      "N": {
+       "x": 19.2,
+       "y": -30.5,
+       "clipTop": -63.2,
+       "clipBottom": -51.0
+      },
+      "NE": {
+       "x": 18.2,
+       "y": -22.8,
+       "clipTop": -55.4,
+       "clipBottom": -43.3
+      }
+     }
+    }
+   ]
+  },
+  "camper_rv": {
+   "aliases": [
+    "camper_motorhome"
+   ],
+   "realSize": {
+    "length": 8.99,
+    "width": 2.5,
+    "height": 3.4
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 2.427,
+     "v": -0.46,
+     "z": 1.05,
+     "zPx": 31.8,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.291,
+      "roofZ": 2.047
+     },
+     "facings": {
+      "E": {
+       "x": 109.8,
+       "y": -42.2,
+       "clipTop": -72.4,
+       "clipBottom": -49.5
+      },
+      "SE": {
+       "x": 92.4,
+       "y": -0.3,
+       "clipTop": -30.5,
+       "clipBottom": -7.6
+      },
+      "S": {
+       "x": 20.8,
+       "y": 23.1,
+       "clipTop": -7.1,
+       "clipBottom": 15.8
+      },
+      "SW": {
+       "x": -63.0,
+       "y": 14.4,
+       "clipTop": -15.8,
+       "clipBottom": 7.1
+      },
+      "W": {
+       "x": -109.8,
+       "y": -21.4,
+       "clipTop": -51.6,
+       "clipBottom": -28.7
+      },
+      "NW": {
+       "x": -92.4,
+       "y": -63.3,
+       "clipTop": -93.5,
+       "clipBottom": -70.6
+      },
+      "N": {
+       "x": -20.8,
+       "y": -86.7,
+       "clipTop": -116.9,
+       "clipBottom": -94.0
+      },
+      "NE": {
+       "x": 63.0,
+       "y": -78.0,
+       "clipTop": -108.2,
+       "clipBottom": -85.3
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 2.427,
+     "v": 0.46,
+     "z": 1.05,
+     "zPx": 31.8,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.291,
+      "roofZ": 2.047
+     },
+     "facings": {
+      "E": {
+       "x": 109.8,
+       "y": -21.4,
+       "clipTop": -51.6,
+       "clipBottom": -28.7
+      },
+      "SE": {
+       "x": 63.0,
+       "y": 14.4,
+       "clipTop": -15.8,
+       "clipBottom": 7.1
+      },
+      "S": {
+       "x": -20.8,
+       "y": 23.1,
+       "clipTop": -7.1,
+       "clipBottom": 15.8
+      },
+      "SW": {
+       "x": -92.4,
+       "y": -0.3,
+       "clipTop": -30.5,
+       "clipBottom": -7.6
+      },
+      "W": {
+       "x": -109.8,
+       "y": -42.2,
+       "clipTop": -72.4,
+       "clipBottom": -49.5
+      },
+      "NW": {
+       "x": -63.0,
+       "y": -78.0,
+       "clipTop": -108.2,
+       "clipBottom": -85.3
+      },
+      "N": {
+       "x": 20.8,
+       "y": -86.7,
+       "clipTop": -116.9,
+       "clipBottom": -94.0
+      },
+      "NE": {
+       "x": 92.4,
+       "y": -63.3,
+       "clipTop": -93.5,
+       "clipBottom": -70.6
+      }
+     }
+    }
+   ]
+  },
+  "semi_tractor": {
+   "aliases": [
+    "truck_semi_cab"
+   ],
+   "realSize": {
+    "length": 6.5,
+    "width": 2.5,
+    "height": 3.9
+   },
+   "seats": [
+    {
+     "name": "driver",
+     "u": 1.04,
+     "v": -0.46,
+     "z": 1.55,
+     "zPx": 46.9,
+     "draw": "window",
+     "window": {
+      "beltZ": 2.026,
+      "roofZ": 3.039
+     },
+     "facings": {
+      "E": {
+       "x": 47.1,
+       "y": -57.3,
+       "clipTop": -102.4,
+       "clipBottom": -71.8
+      },
+      "SE": {
+       "x": 48.0,
+       "y": -37.7,
+       "clipTop": -82.8,
+       "clipBottom": -52.1
+      },
+      "S": {
+       "x": 20.8,
+       "y": -23.4,
+       "clipTop": -68.5,
+       "clipBottom": -37.8
+      },
+      "SW": {
+       "x": -18.6,
+       "y": -22.9,
+       "clipTop": -68.0,
+       "clipBottom": -37.4
+      },
+      "W": {
+       "x": -47.1,
+       "y": -36.5,
+       "clipTop": -81.6,
+       "clipBottom": -51.0
+      },
+      "NW": {
+       "x": -48.0,
+       "y": -56.2,
+       "clipTop": -101.3,
+       "clipBottom": -70.6
+      },
+      "N": {
+       "x": -20.8,
+       "y": -70.5,
+       "clipTop": -115.6,
+       "clipBottom": -84.9
+      },
+      "NE": {
+       "x": 18.6,
+       "y": -70.9,
+       "clipTop": -116.0,
+       "clipBottom": -85.4
+      }
+     }
+    },
+    {
+     "name": "seat_passenger",
+     "u": 1.04,
+     "v": 0.46,
+     "z": 1.55,
+     "zPx": 46.9,
+     "draw": "window",
+     "window": {
+      "beltZ": 2.026,
+      "roofZ": 3.039
+     },
+     "facings": {
+      "E": {
+       "x": 47.1,
+       "y": -36.5,
+       "clipTop": -81.6,
+       "clipBottom": -51.0
+      },
+      "SE": {
+       "x": 18.6,
+       "y": -22.9,
+       "clipTop": -68.0,
+       "clipBottom": -37.4
+      },
+      "S": {
+       "x": -20.8,
+       "y": -23.4,
+       "clipTop": -68.5,
+       "clipBottom": -37.8
+      },
+      "SW": {
+       "x": -48.0,
+       "y": -37.7,
+       "clipTop": -82.8,
+       "clipBottom": -52.1
+      },
+      "W": {
+       "x": -47.1,
+       "y": -57.3,
+       "clipTop": -102.4,
+       "clipBottom": -71.8
+      },
+      "NW": {
+       "x": -18.6,
+       "y": -70.9,
+       "clipTop": -116.0,
+       "clipBottom": -85.4
+      },
+      "N": {
+       "x": 20.8,
+       "y": -70.5,
+       "clipTop": -115.6,
+       "clipBottom": -84.9
+      },
+      "NE": {
+       "x": 48.0,
+       "y": -56.2,
+       "clipTop": -101.3,
+       "clipBottom": -70.6
+      }
+     }
+    }
+   ]
+  },
+  "trailer_utility_small": {
+   "aliases": [
+    "trailer_utility"
+   ],
+   "realSize": {
+    "length": 2.5,
+    "width": 1.5,
+    "height": 1.0
+   },
+   "seats": []
+  },
+  "trailer_cargo_medium": {
+   "aliases": [
+    "trailer_box"
+   ],
+   "realSize": {
+    "length": 4.0,
+    "width": 2.0,
+    "height": 2.3
+   },
+   "seats": []
+  },
+  "trailer_flatbed_large": {
+   "aliases": [
+    "trailer_flatbed"
+   ],
+   "realSize": {
+    "length": 6.01,
+    "width": 2.3,
+    "height": 1.0
+   },
+   "seats": []
+  },
+  "trailer_livestock": {
+   "aliases": [],
+   "realSize": {
+    "length": 6.01,
+    "width": 2.3,
+    "height": 2.6
+   },
+   "seats": []
+  },
+  "trailer_tanker": {
+   "aliases": [],
+   "realSize": {
+    "length": 6.5,
+    "width": 2.3,
+    "height": 2.8
+   },
+   "seats": []
+  },
+  "trailer_camper": {
+   "aliases": [
+    "camper_trailer"
+   ],
+   "realSize": {
+    "length": 6.5,
+    "width": 2.3,
+    "height": 2.9
+   },
+   "seats": []
+  },
+  "trailer_log": {
+   "aliases": [],
+   "realSize": {
+    "length": 6.01,
+    "width": 2.3,
+    "height": 2.0
+   },
+   "seats": []
+  },
+  "semi_trailer_box": {
+   "aliases": [],
+   "realSize": {
+    "length": 12.99,
+    "width": 2.5,
+    "height": 4.05
+   },
+   "seats": []
+  },
+  "semi_trailer_flatbed": {
+   "aliases": [],
+   "realSize": {
+    "length": 12.99,
+    "width": 2.5,
+    "height": 1.55
+   },
+   "seats": []
+  }
+ }
+}

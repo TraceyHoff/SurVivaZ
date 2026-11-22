@@ -16,6 +16,7 @@ skips their atlas-range checks when every animation has dirFrames.
 import sys, json, math, pickle, numpy as np
 from PIL import Image
 from build import PAGE1, r16, STATES, VSPEC
+from vrender import save_indexed
 
 OUT = sys.argv[1]
 GROUPS = [("h", (0, 4)), ("v", (2, 6)), ("d", (1, 3, 5, 7))]  # Art order E,SE,S,SW,W,NW,N,NE
@@ -55,7 +56,7 @@ def main():
                     EM[r * ch:(r + 1) * ch, c * cw:(c + 1) * cw] = e1[y0:y1, x0:x1]
                     P2[r * ch * 2:(r + 1) * ch * 2, c * cw * 2:(c + 1) * cw * 2] = i2[y0 * 2:y1 * 2, x0 * 2:x1 * 2]
                     lookup[sd] = {"atlas": key, "frame": k, "anchor": {"x": round((piv[0] - x0) / cw, 5), "y": round((piv[1] - y0) / ch, 5)}}
-                Image.fromarray(P1).save(f"{OUT}/atlases/{key}.png", optimize=True); Image.fromarray(P2).save(f"{OUT}/atlases/{key}@2x.png", optimize=True)
+                save_indexed(P1, f"{OUT}/atlases/{key}.png"); save_indexed(P2, f"{OUT}/atlases/{key}@2x.png")
                 Image.fromarray(TM, "L").save(f"{OUT}/atlases/{key}.tintmask.png", optimize=True)
                 masks = {"tintmask": f"atlases/{key}.tintmask.png"}
                 if EM.max() > 0: Image.fromarray(EM).save(f"{OUT}/atlases/{key}_emissive.png", optimize=True); masks["emissive"] = f"atlases/{key}_emissive.png"
