@@ -38,8 +38,8 @@ describe("Task 17: zombie art crisp", () => {
     expect(COLD_ATLAS_RE.test("zombies_brute")).toBe(false);
   });
   it("fitBudget idle demotion skips an undrawn zombie atlas and demotes a generic atlas instead", async () => {
-    const a = am(21); // 1x total 23.3 MB; demoting decor to cold (0.5) leaves 20.3 MB
-    const tiles = rt("tiles", 2048), zombies = rt("zombies", 912), decor = rt("decor", 1024);
+    const a = am(21); // 1x total 23.3 MB; demoting props (generic art; ADR-512 pins decor) to cold (0.5) leaves 20.3 MB
+    const tiles = rt("tiles", 2048), zombies = rt("zombies", 912), decor = rt("props", 1024);
     const list = [tiles, zombies, decor];
     (a as any).recentlyUsed = new Set(["tiles"]); // tiles drawn; zombies present but not drawn this frame
     await a.fitBudget(list, 0, 0);

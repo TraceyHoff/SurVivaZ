@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AtlasManager, NO_SIDE_WINDOW, sideIndex, sideWindow } from "../src/assets/atlasManager.js";
+import { RETIRED_BUILD_RE, AtlasManager, NO_SIDE_WINDOW, sideIndex, sideWindow } from "../src/assets/atlasManager.js";
 import { vehicleManifestEntries, type VehicleRenderDef } from "../src/index.js";
 
 /**
@@ -16,15 +16,21 @@ function am(budget: number): any {
   a.atlases = []; a.coldDownscale = 1; a.downscale = 1; a.sideShift = 2;
   return a;
 }
+/** ADR-512: fitBudget runs with the pools' reserve (rebuild() passes it); 85 MB is the A16 256 MB plan's keep / 1x floor. */
+const KEEP = 85 * 1048576;
+const TRIMMED_H: Record<string, number> = { buildings_twig: 568, openings: 464, furniture: 732, decor: 492, defenses: 168, defenses_glow: 180, cz_mirror: 272, vitems_garage: 536, vitems_garage_t2: 536, vitems_garage_t3: 536,
+  building_tw: 560, pets_trough: 40, decor_apiary: 204, decor_ore_store: 196, decor_log_store: 128, decor_stick_store: 168, decor_crop_store: 124, decor_stone_store: 196, decor_dock: 160, decor_shipyard: 216 };
 function residentList(): any[] {
   const atl = new Map<string, any>();
   for (const p of ["../../assets/pack/manifest.json", "../../assets/pack/nature/manifest.nature.json", "../../../assets/manifest.json"]) {
     const m = JSON.parse(readFileSync(new URL(p, import.meta.url), "utf8"));
     for (const a of m.atlases) if (!atl.has(a.key)) atl.set(a.key, a);
   }
-  const resident = [...atl.values()].filter((a) => a.residency !== "stream" || /^nature_(crops|sprouts|saplings)$/.test(a.key));
+  // ADR-512: the retired wave-2 building sheets are not loaded, and the base sheets upload trim-repacked (heights measured
+  // by trimGridAtlas on the shipped sheets, same width)
+  const resident = [...atl.values()].filter((a) => (a.residency !== "stream" || /^nature_(crops|sprouts|saplings)$/.test(a.key)) && !RETIRED_BUILD_RE.test(a.key));
   return resident.map((a, i) => ({
-    key: a.key, id: i, img: { width: a.columns * a.frameW, height: a.rows * a.frameH }, emis: a.masks?.emissive ? {} : null,
+    key: a.key, id: i, img: { width: a.columns * a.frameW, height: TRIMMED_H[a.key] ?? a.rows * a.frameH }, emis: a.masks?.emissive ? {} : null,
     masks: { ...(a.masks?.sway ? { sway: {} } : {}), ...(a.masks?.sheen ? { sheen: {} } : {}), ...(a.masks?.tintmask ? { tintmask: {} } : {}) },
     scale: 1, cold: false, count: a.columns * a.rows,
   }));
@@ -73,19 +79,20 @@ describe("ADR-510 sideWindow / sideIndex", () => {
 describe("ADR-510 packing and budget on the real resident set", () => {
   it("atlases with side masks pack first, so every side window is a short prefix of the layer index", async () => {
     const list = residentList(); const a = am(256);
-    await a.fitBudget(list, 0, 0); a.pack(list);
+    await a.fitBudget(list, KEEP, KEEP, KEEP); a.pack(list);
     for (const pick of [(x: any) => x.masks.sway, (x: any) => x.masks.sheen, (x: any) => x.emis]) {
       const ls = list.filter(pick).map((x) => x.layer as number);
       expect(ls.length).toBeGreaterThan(0);
       const w = sideWindow(ls);
       expect(w.count).toBeLessThan(a.layers);
-      expect(Math.min(...ls)).toBe(0);
+      // ADR-512: the side-first order is only kept when it packs into no more layers; on the trimmed base set the plain
+      // largest-first order can be a layer tighter, so the window need not start at layer 0 (fitBudget charges it as allocated)
     }
   });
 
   it("256 MB: the vehicle pool plans all 6 slots at 1x and the charged bytes stay within the budget", async () => {
     const list = residentList(); const a = am(256);
-    await a.fitBudget(list, 0, 0);
+    await a.fitBudget(list, KEEP, KEEP, KEEP);
     a.pools = [];
     a.planPool(vehPages(), 6, list, "veh", true);
     const pool = a.pools[0];

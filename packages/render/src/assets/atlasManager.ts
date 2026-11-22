@@ -33,6 +33,7 @@ import { AssetRegistry, type Animation, type Atlas, type DirFrameRect, type Fram
 import { STATUS_TINTS, TINT_MODE_INDEX, type StatusTint, type StatusTintName } from "../style.js";
 import type { AssetManager } from "@engine/core";
 import type { RectTable } from "./texturePacker.js";
+import { trimGridAtlas, type TrimFrame } from "./trimAtlas.js";
 import { PageLRU, PRIO_NEAR, VramAccountant, rgbaBytes, type VramStats } from "../gl/vram.js";
 import { blockBytes, GL_FORMAT, ktx2Target, loadKtx2, loadKtx2Rgba, type Ktx2Target } from "./ktx2.js";
 import { assetFetch, isLazyDollPageKey, withAssetSlot } from "./asset-fetch.js";
@@ -102,6 +103,7 @@ export interface AtlasRT { key: string; id: number; source: AtlasSource; img: Im
   masks: Partial<Record<MaskName, ImageLike>>; maskUrls: Partial<Record<MaskName, string>>; base: number; count: number; fw: number; fh: number; cols: number; layer: number; px: number; py: number;
   /** streamed wearable page: not loaded at rebuild (see header); w1/h1 = 1x page size */ lazy?: { w1: number; h1: number; state: 0 | 1 | 2; pool: number; prio?: number };
   /** budget tier: cold art is downscaled before hot art (see fitBudget) */ cold?: boolean;
+  /** ADR-512: trim-repacked grid atlas: per frame, its rect in the packed page and its offset inside the grid cell (1x px) */ trim?: TrimFrame[];
   /** explicit dirFrames rects (deduped), frame-table entries n0.. after the grid/TexturePacker frames */ extra?: { n0: number; rects: DirFrameRect[]; byKey: Map<string, number>; /** ADR-190: same index by rect object (no string key per lookup) */ byRect: Map<DirFrameRect, number> } }
 /** One streaming pool (wearables, vehicles): own slot geometry, layers and LRU; all pools share the VRAM accountant. */
 /** ADR-220: pool classes holding paper-doll character art: always RGBA8 from the PNG, never ETC1S. */
@@ -329,6 +331,23 @@ export const CORE_PIN_RE = /^(resources(_tall|_huge)?|nature_(trees|crops|sprout
  *  sleeper read as a blurred quarter-size smear) and the gt ground pages (ADR-246 wanted them 1x; fitBudget halved them).
  *  Base building pieces join them: a halved buildings atlas is the blurry-wall complaint, and walls are what the
  *  camera sits on just as much as the ground under them. */
+/**
+ * ADR-512: resident base-building grid sheets (doors / windows / hatches, beds / chests / stations, decor, twig-tier pieces
+ * and corners, defenses, resource stores, apiary / dock / shipyard): trim-repacked losslessly (trimAtlas.ts) and pinned at 1x
+ * with the core set (fitBudget pin tier 4) so base pieces draw from full-resolution texels on the 256 MB phone budget.
+ */
+export const BASE_PIN_RE = /^(openings|furniture|decor|buildings_twig|building_tw|defenses|defenses_glow|decor_(apiary|dock|shipyard|(crop|log|ore|stick|stone)_store)|cz_mirror|pets_trough|vitems_garage(_t\d)?)$/;
+/** ADR-512: grid sheets trim-repacked on load: the base set + resident vehicle art (boats / wagons / bikes: ~45% empty cell
+ *  padding). Lossless (same texels, same anchors); the vehicle share is what lets tier 4 pack in the ADR-510 layer count. */
+export const TRIM_ATLAS_RE = new RegExp(`${BASE_PIN_RE.source}|^veh_art_\\w+$`);
+/** ADR-512: the cold scale pin tier 4 (base pieces at 1x) may cost, never below: the ADR-510 256 MB plan ran cold at 0.25. */
+export const BASE_PIN_COLD_FLOOR = 0.25;
+/**
+ * ADR-512: the Cozy-Wild wave 2 wood / stone / metal sheets, superseded by Art's streamed tier pages (building_t1..t4,
+ * ADR-211 / ADR-511). With tier streaming on, no piece resolves to them; they only served as the streaming fallback,
+ * which drew 48 px-floor art inside an 80 px-floor base. They are not loaded (like legacy dirFrame pages: pool -1).
+ */
+export const RETIRED_BUILD_RE = /^buildings(_stone|_metal)?$/;
 export const VISIBLE_PIN_RE = /^(gt_|furniture(_|$)|buildings?(_|$)|openings(_|$)|defenses(_|$))/;
 export const FIDELITY_ATLAS_RE = /^(animals|pets|nature_critters|characters|zombies|v2s?)(_|$)/;
 /** ADR-149: hi-res painted pet sheets (streamed, drawn well below their stored size: need the mip tail). */
@@ -553,6 +572,8 @@ export class AtlasManager {
   streamVehicles = true;
   /** Stream building_t1..t4 per tier present nearby (refcounted by IsoRenderer's BuildingTierStreamer). */
   streamBuildingTiers = true;
+  /** ADR-512: trim-repack the TRIM_ATLAS_RE grid sheets on load (lossless; false = upload the sheets as shipped). */
+  trimAtlases = true;
   /** Page manifest `residency: "stream"` atlases through the stream pool (false = load them resident like before). */
   streamSheets = true;
   /** Bumped on every rebuild (pools / sprite tables replaced): refcount holders re-retain. */
@@ -593,7 +614,7 @@ export class AtlasManager {
   /** Side-array (emissive / masks) shift for this build: SIDE_SHIFT, or SIDE_SHIFT_LOWMEM on <=256 MB budgets. */
   sideShift: number = SIDE_SHIFT;
   /** How fitBudget met the budget (diag): pool reserve actually kept, hot atlases demoted to cold. */
-  fitInfo: { reserveMB: number; reserveWantedMB: number; demoted: number; /** ADR-237: sheets kept x1 while the hot tier is halved */ pinned?: string[] } = { reserveMB: 0, reserveWantedMB: 0, demoted: 0 };
+  fitInfo: { reserveMB: number; reserveWantedMB: number; demoted: number; /** ADR-237: sheets kept x1 while the hot tier is halved */ pinned?: string[]; /** ADR-512: keep / pool 1x floor (MB) */ keepMB?: number; floorMB?: number } = { reserveMB: 0, reserveWantedMB: 0, demoted: 0 };
   /** ADR-380: ms per phase of the last rebuild (diag: the ?diag=1 boot sub-phases). Undefined until a rebuild
    *  completes; IsoView.create reads it right after the initial setRegistry. */
   rebuildTimings: { fetchDecode: number; fitBudget: number; halveSide: number; layout: number; upload: number; tables: number; bodies: number; restore: number } | undefined = undefined;
@@ -824,19 +845,21 @@ export class AtlasManager {
       return [null, undefined];
     };
     const list: AtlasRT[] = []; const lazyList: AtlasRT[] = [];
-    const { lazyKeys, legacy, vehKeys, bldKeys, streamKeys, bodyKeys, bodyPages } = atlasPoolSets(registry, sources, { streamWearables: this.streamWearables, streamVehicles: this.streamVehicles,
+    const { lazyKeys, legacy, retired, vehKeys, bldKeys, streamKeys, bodyKeys, bodyPages } = atlasPoolSets(registry, sources, { streamWearables: this.streamWearables, streamVehicles: this.streamVehicles,
       streamBuildingTiers: this.streamBuildingTiers, streamSheets: this.streamSheets, residentCreatures: this.residentCreatures, ktx2: !!this.ktx2Target });
     this.placeholderCache.clear();
     this.bodyPageKeys = bodyPages;
+    // ADR-512: explicit dirFrames rects are in the sheet's own px, so those sheets are never trim-repacked
+    const dirRectAtlases = new Set<string>(); for (const sp of registry.allSprites()) for (const an of sp.animList) for (const d of an.dirFrames ?? []) if (d.rect) dirRectAtlases.add(d.atlas.key);
     const ldT0 = now();
     await Promise.all([...registry.atlases.values()].map(async (a) => {
       const src = sources.get(a.key); if (!src) throw new Error(`no image source for atlas "${a.key}"`);
-      if (lazyKeys.has(a.key) || vehKeys.has(a.key) || legacy.has(a.key) || bldKeys.has(a.key) || bodyKeys.has(a.key) || streamKeys.has(a.key)) {
+      if (lazyKeys.has(a.key) || vehKeys.has(a.key) || legacy.has(a.key) || retired.has(a.key) || bldKeys.has(a.key) || bodyKeys.has(a.key) || streamKeys.has(a.key)) {
         let w1 = a.columns * a.frameW, h1 = a.rows * a.frameH;
         if (src.rects?.length) { w1 = 0; h1 = 0; for (const r of src.rects) { w1 = Math.max(w1, r.x + r.w); h1 = Math.max(h1, r.y + r.h); } }
         // legacy full-size pages of facing-split sprites: never drawn (resolve uses dirFrames), so no pool slot and no
         // part in slot sizing (pool -1: pageReady refuses, nothing requests them)
-        const pool = legacy.has(a.key) ? -1 : vehKeys.has(a.key) ? 1 : bldKeys.has(a.key) ? 2 : bodyKeys.has(a.key) ? 3 : streamKeys.has(a.key) ? 4 : 0;
+        const pool = legacy.has(a.key) || retired.has(a.key) ? -1 : vehKeys.has(a.key) ? 1 : bldKeys.has(a.key) ? 2 : bodyKeys.has(a.key) ? 3 : streamKeys.has(a.key) ? 4 : 0;
         lazyList.push({ key: a.key, id: a.id, source: src, img: null, emis: null, scale: 1, masks: {}, maskUrls: {}, base: 0, count: src.rects ? src.rects.length : a.columns * a.rows, fw: a.frameW, fh: a.frameH, cols: a.columns, layer: -1, px: 0, py: 0, lazy: { w1, h1, state: 0, pool } });
         return;
       }
@@ -849,7 +872,13 @@ export class AtlasManager {
       // masks (and the 1x emissive page) are resized to the chosen page so they line up under the same UVs
       if (emis) emis = await fitToPage(emis, img.width, img.height);
       for (const m of Object.keys(masks) as MaskName[]) { const f = await fitToPage(masks[m]!, img.width, img.height); if (f) masks[m] = f; else { delete masks[m]; delete maskUrls[m]; } }
-      list.push({ key: a.key, id: a.id, source: src, img, emis, scale, masks, maskUrls, base: 0, count: src.rects ? src.rects.length : a.columns * a.rows, fw: a.frameW, fh: a.frameH, cols: a.columns, layer: 0, px: 0, py: 0 });
+      // ADR-512: base building / vehicle grid sheets are trim-repacked losslessly (same texels, ~40% of the page), see trimAtlas.ts
+      let trim: TrimFrame[] | undefined;
+      if (this.trimAtlases && TRIM_ATLAS_RE.test(a.key) && !src.rects && scale === 1 && !masks.sheen && !masks.sway && !dirRectAtlases.has(a.key)) {
+        const t = trimGridAtlas(img, emis, masks as Record<string, ImageLike>, a.columns, a.rows, a.frameW, a.frameH);
+        if (t) { img = t.img; emis = t.emis; for (const m of Object.keys(masks) as MaskName[]) masks[m] = t.masks[m]!; trim = t.plan.frames; }
+      }
+      list.push({ key: a.key, id: a.id, source: src, img, emis, scale, masks, maskUrls, base: 0, count: src.rects ? src.rects.length : a.columns * a.rows, fw: a.frameW, fh: a.frameH, cols: a.columns, layer: 0, px: 0, py: 0, ...(trim ? { trim } : {}) });
     }));
     ph.fetchDecode += now() - ldT0;
     const layT0 = now();
@@ -921,7 +950,7 @@ export class AtlasManager {
     const bldHold = groups.reduce((t, g, i) => t + (g.cls === "veh" ? visHold[i]! : g.cls === "stream" ? this.poolReserveBytes(g.lazy, Math.min(g.minSlots, STREAM_FLOOR_SLOTS), list, 1) : 0), 0);
     ph.layout += now() - layT0; // sort + rect tables + pool-group planning, before the rescale steps
     this.registryForTier = registry;
-    const fbT0 = now(); await this.fitBudget(list, reserve, keep); ph.fitBudget += now() - fbT0;
+        const fbT0 = now(); await this.fitBudget(list, reserve, keep, keepVis + wearFloor); ph.fitBudget += now() - fbT0;
     const hsT0 = now(); this.sideScale = (await halveSide(list, this.sideShift)) ? 1 / (1 << this.sideShift) : 1; ph.halveSide += now() - hsT0;
     const layT1 = now();
     const layout = (): void => { this.pack(list); this.pools = []; groups.forEach((g, i) => this.planPool(g.lazy, g.minSlots, list, g.cls, g.cap, g.share, g.cls === "wear" ? visHold.slice(i + 1).reduce((t, b) => t + b, 0) : g.cls === "bld" ? bldHold : 0)); let b = this.totalFrames; for (const a of lazyList) { a.base = b; b += a.count; } this.totalFrames = b; };
@@ -983,6 +1012,14 @@ export class AtlasManager {
   private estimate(list: AtlasRT[]): number {
     return this.layerBytes(list) * this.layers;
   }
+  /** ADR-512: bytes upload() allocates for a packed resident list: RGBA8 colour layers + the side layers of each side
+   *  array's window (ADR-510: emissive / sheen / sway / tint mask only store the layers whose atlases carry them). */
+  private residentBytes(packed: readonly AtlasRT[]): number {
+    const S = this.layerSize, h = Math.max(1, S >> this.sideShift);
+    const has = (m: "emis" | MaskName) => packed.filter((a) => (m === "emis" ? !!a.emis : !!a.masks[m])).map((a) => a.layer);
+    const side = (["emis", "sheen", "sway", "tintmask"] as const).reduce((t, m) => t + sideWindow(has(m)).count, 0);
+    return this.layers * rgbaBytes(S, S, true) + side * rgbaBytes(h, h, true);
+  }
   /** Planner estimate: like estimate() but charging the shelf layer count (see shelfLayers). */
   private planEstimate(list: AtlasRT[]): number { return this.layerBytes(list) * this.planLayers; }
   /** Arrays allocated for a list (colour + emissive + masks present; pool pages add a tint mask array). */
@@ -1030,9 +1067,26 @@ export class AtlasManager {
   private poolReserveBytes(lazy: AtlasRT[], minSlots: number, resident: AtlasRT[], k?: number): number {
     const tint = (!this.planningRebuild && this.pools.some((p) => p.tint)) || lazy.some((a) => a.source.masks?.tintmask), emis = lazy.some((a) => a.source.emissiveUrl);
     const ks = this.poolScales(lazy); if (!ks.length) return 0;
-    const g = this.poolGeom(lazy, k !== undefined && ks.includes(k) ? k : ks.includes(0.5) ? 0.5 : ks[ks.length - 1]!);
+    const kk = k !== undefined && ks.includes(k) ? k : ks.includes(0.5) ? 0.5 : ks[ks.length - 1]!; const g = this.poolGeom(lazy, kk);
     const char = losslessCharPools(this.textureBudgetMB) && lazy.length > 0 && (lazy[0]!.lazy!.pool === 0 || lazy[0]!.lazy!.pool === 3);
-    return Math.ceil(minSlots / g.perLayer) * (char ? this.layerBytes(resident, tint, emis) : this.poolLayerBytes(resident, tint, emis)); // ADR-251: lossless char pools are RGBA8
+    return Math.ceil(minSlots / g.perLayer) * (char ? this.layerBytes(resident, tint, emis) : this.poolLayerCost(lazy, kk)); // ADR-251: lossless char pools are RGBA8
+  }
+  /**
+   * ADR-512: what upload() really allocates for one layer of a streamed (non-character) pool, the same model planPool
+   * charges since ADR-510: the colour layer in the own tail array (block-compressed at the levels planOwn allocates when
+   * a KTX2 target exists, else RGBA8 at those levels) plus only the side layers the pool carries (tint mask /
+   * emissive at layerSize >> sideShift). poolLayerBytes() charged all four side arrays with full mip chains for every pool
+   * layer (~9.6 MB where ~4-7 MB is allocated on the phone), so fitBudget held a ~165 MB reserve for ~85 MB of pools and
+   * halved the whole hot tier (doors, windows, beds, twig walls at 0.25x) once ADR-511's stairs page nudged it over.
+   */
+  private poolLayerCost(lazy: AtlasRT[], k: number): number {
+    const S = this.layerSize, side1 = rgbaBytes(Math.max(1, S >> this.sideShift), Math.max(1, S >> this.sideShift), true);
+    const pool = lazy[0]?.lazy?.pool; const cls: PoolClass = pool === 0 ? "wear" : pool === 1 ? "veh" : pool === 3 ? "body" : pool === 4 ? "stream" : "bld";
+    const tint = lazy.some((a) => a.source.masks?.tintmask), emis = cls !== "wear" && lazy.some((a) => a.source.emissiveUrl);
+    const comp = this.ktx2Target !== null; // as planPool charges it (planOwn compresses the whole tail when the target exists)
+    const levels = lazy.some((a) => PET_SHEET_RE.test(a.key)) ? OWN_MAX_LEVELS : this.ownLevelsFor([{ cls, k } as Pool]);
+    let c = 0; for (let l = 0, w = S; l < levels; l++, w = Math.max(1, w >> 1)) c += comp ? blockBytes(w, w) : w * w * 4;
+    return c + side1 * ((tint ? 1 : 0) + (emis ? 1 : 0));
   }
   /**
    * Choose pool scale + layer count from the budget left after the packed resident layers (and earlier pools); appends
@@ -1127,10 +1181,10 @@ export class AtlasManager {
    * (rare variants, distant LODs, one-shot fx, unreferenced) are shrunk first. Tries (hot, cold) best-first: hot 1 with cold
    * 1..MIN, then hot 0.5 with cold 0.5..MIN, ... Atlases larger than a layer are always shrunk.
    */
-  private async fitBudget(list: AtlasRT[], reserveBytes = 0, keepBytes = 0): Promise<void> {
+  private async fitBudget(list: AtlasRT[], reserveBytes = 0, keepBytes = 0, floorBytes = 0): Promise<void> {
     const S = this.layerSize; const full = this.textureBudgetMB * 1048576;
     this.classify(list);
-    for (const a of list) if (a.cold && VISIBLE_PIN_RE.test(a.key) && this.groundPinOk(a.key)) a.cold = false; // ADR-251: furniture / drawn-season gt never go cold (they are what the camera sits on)
+    for (const a of list) if (a.cold && ((VISIBLE_PIN_RE.test(a.key) && this.groundPinOk(a.key)) || BASE_PIN_RE.test(a.key))) a.cold = false; // ADR-251: furniture / drawn-season gt never go cold (they are what the camera sits on)
     const cap = (a: AtlasRT) => { let d = 1; const t = Math.max(a.img!.width, a.img!.height) / S; while (d > 1 / Math.max(1, t)) d /= 2; return d; };
     const caps = list.map(cap);
     // ADR-237: hot creature/character/zombie sheets (drawn recently; before anything was drawn every one but the 62 small
@@ -1142,10 +1196,14 @@ export class AtlasManager {
     // set joins BOTH bigger tiers (a pin=2 win must not leave the bushes/trees/zombies behind) and is
     // also tried alone as pin=3 when the bigger tiers do not fit.
     const corePin = list.map((a) => !a.cold && CORE_PIN_RE.test(a.key));
-    const pinned = list.map((a, i) => visPin[i]! || corePin[i]! || (!a.cold && FIDELITY_ATLAS_RE.test(a.key) && (this.recentlyUsed.size ? this.recentlyUsed.has(a.key) : !RESIDENT_CREATURE_RE.test(a.key))));
-    const visCorePin = list.map((_, i) => visPin[i]! || corePin[i]!);
-    let pin = 0; // 2 = creature + visible + core pins, 1 = ADR-251 visible + ADR-438 core pins, 3 = ADR-438 core pins only, 0 = none
-    const scaleOf = (i: number, h: number, c: number): number => { const a = list[i]!; const p = pin === 2 ? pinned[i] : pin === 1 ? visCorePin[i] : pin === 3 ? corePin[i] : false; return Math.min(caps[i]!, a.cold ? c : p ? 1 : h); };
+    // ADR-512: base-building sheets (trim-repacked) join every pin tier, and with the core set form tier 4, tried before core alone
+    const basePin = list.map((a) => !a.cold && BASE_PIN_RE.test(a.key) && a.scale === 1); // 1x page only: a pinned @2x page would be stored at 2x
+    const baseCorePin = list.map((_, i) => basePin[i]! || corePin[i]!);
+    const pinned = list.map((a, i) => visPin[i]! || corePin[i]! || basePin[i]! || (!a.cold && FIDELITY_ATLAS_RE.test(a.key) && (this.recentlyUsed.size ? this.recentlyUsed.has(a.key) : !RESIDENT_CREATURE_RE.test(a.key))));
+    const visCorePin = list.map((_, i) => visPin[i]! || corePin[i]! || basePin[i]!);
+    let pin = 0; // 2 = creature + visible + core pins, 1 = ADR-251 visible + ADR-438 core pins, 4 = ADR-512 base + core pins, 3 = ADR-438 core pins only, 0 = none
+    const pinSet = (): boolean[] | null => pin === 2 ? pinned : pin === 1 ? visCorePin : pin === 4 ? baseCorePin : pin === 3 ? corePin : null;
+    const scaleOf = (i: number, h: number, c: number): number => { const a = list[i]!; const p = pinSet()?.[i] ?? false; return Math.min(caps[i]!, a.cold ? c : p ? 1 : h); };
     const dims = (h: number, c: number) => list.map((a, i) => { const k = scaleOf(i, h, c); return { ...a, img: { width: Math.max(1, Math.floor(a.img!.width * k)), height: Math.max(1, Math.floor(a.img!.height * k)) } as ImageLike }; });
     const fits1 = (h: number, budget: number): number | null => {
       const anyCold = list.some((a) => a.cold);
@@ -1164,18 +1222,30 @@ export class AtlasManager {
     const fitsPacked = (h: number, budget: number): number | null => {
       const anyCold = list.some((a) => a.cold);
       for (let c = h; c >= MIN_ATLAS_DOWNSCALE; c /= 2) {
-        this.pack(dims(h, c));
+        const d = dims(h, c); this.pack(d);
         // pack() sets this.layers to the MaxRects count; a stubbed pack (unit tests) leaves it 0 — fall back
         // to the planning estimate there, so the core tier cannot spuriously "fit" without a real packing.
-        const est = this.layers > 0 ? this.layerBytes(list) * this.layers : this.planEstimate(list);
+        // ADR-512: charged like upload() allocates since ADR-510 (RGBA8 colour layers + only the side layers whose
+        // windows hold a masked atlas), not every side array on every layer (~5.6 MB/layer of phantom side arrays).
+        const est = this.layers > 0 ? this.residentBytes(d) : this.planEstimate(list);
         if (est <= budget) return c;
         if (!anyCold) break;
       }
       return null;
     };
+    /** One pin tier at hot scale h (null: the tier does not apply or does not fit). */
+    const fitsTier = (tier: number, h: number, budget: number): number | null => {
+      if (tier === 2 && !(h < 1 && pinned.some(Boolean))) return null;
+      if (tier === 1 && !(h < 1 && visCorePin.some(Boolean) && visCorePin.some((v, i) => v !== pinned[i]))) return null;
+      if (tier === 4 && !(h < 1 && basePin.some(Boolean))) return null;
+      if (tier === 3 && !(h < 1 && corePin.some(Boolean))) return null;
+      pin = tier; return tier === 3 || tier === 4 ? fitsPacked(h, budget) : fits1(h, budget);
+    };
     const fits = (h: number, budget: number): number | null => {
       if (h < 1 && pinned.some(Boolean)) { pin = 2; const c = fits1(h, budget); if (c !== null) return c; }
       if (h < 1 && visCorePin.some(Boolean) && visCorePin.some((v, i) => v !== pinned[i])) { pin = 1; const c = fits1(h, budget); if (c !== null) return c; }
+      // ADR-512: judged on the packed layer count like the core tier (the trimmed base sheets are small and pack tightly)
+      if (h < 1 && basePin.some(Boolean)) { pin = 4; const c = fitsPacked(h, budget); if (c !== null) return c; }
       if (h < 1 && corePin.some(Boolean)) { pin = 3; const c = fitsPacked(h, budget); if (c !== null) return c; }
       pin = 0; return fits1(h, budget);
     };
@@ -1185,7 +1255,7 @@ export class AtlasManager {
     let best: [number, number] | null = null; let keptReserve = reserveBytes; let demoted = 0;
     for (const r of [reserveBytes, keepBytes + (reserveBytes - keepBytes) / 2, keepBytes + (reserveBytes - keepBytes) / 4, keepBytes]) { const c = fits(1, full - r); if (c !== null) { best = [1, c]; keptReserve = r; break; } }
     if (!best && this.recentlyUsed.size) {
-      const idle = list.filter((a, i) => !a.cold && !visPin[i] && !this.recentlyUsed.has(a.key) && !CRISP_ATLAS_RE.test(a.key) && !CORE_PIN_RE.test(a.key)) /* ADR-145: creature sheets stay full res; pinned visible art (ground/furniture/buildings) is never demoted to cold, or its 1x pin would be overridden by the cold scale; ADR-438: the core pin set is never demoted either (a cold atlas cannot be pinned, and the re-tier round-trip would blur a bush/tree/zombie the player walks up to) */.sort((a, b) => (BUILD_ATLAS_RE.test(a.key) ? 1 : 0) - (BUILD_ATLAS_RE.test(b.key) ? 1 : 0) || b.img!.width * b.img!.height - a.img!.width * a.img!.height); // ADR-211: building art last
+      const idle = list.filter((a, i) => !a.cold && !visPin[i] && !basePin[i] && !this.recentlyUsed.has(a.key) && !CRISP_ATLAS_RE.test(a.key) && !CORE_PIN_RE.test(a.key)) /* ADR-145: creature sheets stay full res; pinned visible art (ground/furniture/buildings) is never demoted to cold, or its 1x pin would be overridden by the cold scale; ADR-438: the core pin set is never demoted either (a cold atlas cannot be pinned, and the re-tier round-trip would blur a bush/tree/zombie the player walks up to) */.sort((a, b) => (BUILD_ATLAS_RE.test(a.key) ? 1 : 0) - (BUILD_ATLAS_RE.test(b.key) ? 1 : 0) || b.img!.width * b.img!.height - a.img!.width * a.img!.height); // ADR-211: building art last
       for (const a of idle) { a.cold = true; demoted++; const c = fits(1, full - keepBytes); if (c !== null) { best = [1, c]; keptReserve = keepBytes; break; } }
     }
     if (!best) {
@@ -1193,7 +1263,17 @@ export class AtlasManager {
       // the whole budget only appended those pools over it (mobile: 187 MB of arrays at a 128 MB budget -> fbo OOM)
       // ADR-251: hot resolution before reserve size - at each hot scale try the full keep, then half of it (the pools
       // still get their floors; Xbox kept a 372 MB reserve at 0.25 while 150 MB of it stayed idle and furniture blurred)
-      for (let h = 0.5; h >= MIN_ATLAS_DOWNSCALE && !best; h /= 2) for (const r of [keepBytes, keepBytes / 2]) { if (best) break; keptReserve = r; const c = fits(h, full - r); if (c !== null) best = [h, c]; }
+      // ADR-512: at each hot scale a pin tier wins over a bigger reserve: the reserve above the pools' floor only buys LRU
+      // slots (planPool sizes the pools from the real remaining budget), while losing the tier drops doors, beds, trees and
+      // zombies to the halved hot scale. The smaller reserve never drops below the pools' 1x floor (`floorBytes`: every
+      // visible pool's 1x working set + the wear floor), so the resident art never takes the room a roof / stream page needs.
+      for (let h = 0.5; h >= MIN_ATLAS_DOWNSCALE && !best; h /= 2) for (const tier of [2, 1, 4, 3, 0]) for (const r of [keepBytes, Math.max(keepBytes / 2, Math.min(keepBytes, floorBytes))]) {
+        if (best) break; keptReserve = r; let c = fitsTier(tier, h, full - r);
+        // the base tier never drops the cold tier below the core tier's scale AND below BASE_PIN_COLD_FLOOR (the ADR-510
+        // phone plan's cold scale): a cold tier the core set alone would lift above that floor may go back to it, never below
+        if (c !== null && tier === 4) { const c3 = fitsTier(3, h, full - r); pin = 4; if (c3 !== null && c3 > c && c < BASE_PIN_COLD_FLOOR) c = null; }
+        if (c !== null) best = [h, c];
+      }
       // ADR-251: the pools are forced to their floor anyway (body, wear floor, one layer per visible pool), so a smaller
       // share of that floor is still held before resident art takes the whole budget (mobile ended 25 MB over 128)
       for (const r of [keepBytes / 2, keepBytes / 4, 0]) {
@@ -1204,8 +1284,8 @@ export class AtlasManager {
     const [h, c] = best ?? [MIN_ATLAS_DOWNSCALE, MIN_ATLAS_DOWNSCALE];
     this.downscale = h; this.coldDownscale = c;
     if (!best) pin = 0;
-    this.pinnedKeys = new Set(pin ? list.filter((_, i) => (pin === 2 ? pinned : pin === 1 ? visCorePin : corePin)[i]).map((a) => a.key) : []);
-    this.fitInfo = { reserveMB: Math.round(keptReserve / 1048576), reserveWantedMB: Math.round(reserveBytes / 1048576), demoted, pinned: [...this.pinnedKeys] };
+    this.pinnedKeys = new Set(pin ? list.filter((_, i) => pinSet()![i]).map((a) => a.key) : []);
+    this.fitInfo = { reserveMB: Math.round(keptReserve / 1048576), reserveWantedMB: Math.round(reserveBytes / 1048576), demoted, pinned: [...this.pinnedKeys], keepMB: Math.round(keepBytes / 1048576), floorMB: Math.round(floorBytes / 1048576) };
     this.pack(dims(h, c));
     if (h < 1) {
       const nc = list.filter((a) => a.cold).length;
@@ -1906,7 +1986,7 @@ export class AtlasManager {
       if (d && ia !== undefined && ia >= 0) {
         const da = this.atlases[ia]!; const fz = s.dirF?.[ai]; const fi = fz ? fz[di]! : d.frame; this.fill(da, fi, s, out);
         if (d.rect) { out.w = d.rect.w; out.h = d.rect.h; out.ax = d.anchor.x * d.rect.w; out.ay = d.anchor.y * d.rect.h; }
-        else if (!da.source.rects?.[fi]) { out.ax = d.anchor.x * da.fw; out.ay = d.anchor.y * da.fh; }
+        else if (!da.source.rects?.[fi]) { const t = da.trim?.[fi]; out.ax = d.anchor.x * da.fw - (t?.dx ?? 0); out.ay = d.anchor.y * da.fh - (t?.dy ?? 0); }
         out.sprite = spriteId; out.frame = fi; out.anim = an.name ?? ""; out.atlas = ia; out.dfi = di; return true;
       }
     }
@@ -2122,13 +2202,14 @@ export class AtlasManager {
     const r = a.source.rects?.[fi];
     out.entry = a.base + fi;
     if (r) { out.w = r.w; out.h = r.h; out.ax = r.ax; out.ay = r.ay; }
+    else if (a.trim) { const t = a.trim[fi]!; out.w = t.w; out.h = t.h; out.ax = s.anchorX * a.fw - t.dx; out.ay = s.anchorY * a.fh - t.dy; } // ADR-512: anchor stays in cell px
     else { out.w = a.fw; out.h = a.fh; out.ax = s.anchorX * a.fw; out.ay = s.anchorY * a.fh; }
     out.hasDamageFrames = false; out.flipX = false; out.sprite = -1; out.frame = -1; out.anim = ""; out.atlas = -1; out.dfi = -1;
   }
 
   /** For galleries/tools: every atlas with its frame count and loaded image. */
   listAtlases(): { key: string; id: number; count: number; image: ImageLike | null; emissive: ImageLike | null; rects?: RectTable; fw: number; fh: number; cols: number; scale: number; masks: Partial<Record<MaskName, string>> }[] {
-    return this.atlases.map((a) => ({ key: a.key, id: a.id, count: a.count, image: a.img, emissive: a.emis, ...(a.source.rects ? { rects: a.source.rects } : {}), fw: a.fw, fh: a.fh, cols: a.cols, scale: a.scale, masks: { ...a.maskUrls } }));
+    return this.atlases.map((a) => ({ key: a.key, id: a.id, count: a.count, image: a.img, emissive: a.emis, ...(a.trim ? { rects: a.trim.map((t) => ({ x: t.x, y: t.y, w: t.w, h: t.h, ax: -t.dx, ay: -t.dy })) } : a.source.rects ? { rects: a.source.rects } : {}), fw: a.fw, fh: a.fh, cols: a.cols, scale: a.scale, masks: { ...a.maskUrls } }));
   }
 
   dispose(): void {
@@ -2143,7 +2224,7 @@ export class AtlasManager {
 /** Sprite ids referenced by cosmetic wearables (hair, hats, tops, ...). */
 /** Frame rect of atlas-local frame `f`: an explicit dirFrames rect (extra entries), a TexturePacker rect, or undefined (grid). */
 function rectOf(a: AtlasRT, f: number): { x: number; y: number; w: number; h: number } | undefined {
-  const e = a.extra; return e && f >= e.n0 ? e.rects[f - e.n0] : a.source.rects?.[f];
+  const e = a.extra; return e && f >= e.n0 ? e.rects[f - e.n0] : a.trim ? a.trim[f] : a.source.rects?.[f];
 }
 /** Gives every distinct explicit dirFrames rect of each page its own frame-table entry (identical rects share one), so
  *  any anim (body, wear, swim/punch pages...) can list arbitrary per-frame (page, rect) pairs; grid frames keep their
@@ -2206,9 +2287,10 @@ export interface AtlasPoolFlags { streamWearables: boolean; streamVehicles: bool
  * The lazy pool sets `AtlasManager.rebuild` uses: an atlas in none of lazy/legacy/veh/bld/body/stream is resident
  * (its PNG page loads at rebuild; its KTX2 twins are never read). Pure, so the build can replay it (ADR-392).
  */
-export function atlasPoolSets(registry: AssetRegistry, sources: ReadonlyMap<string, AtlasSource>, f: AtlasPoolFlags): { lazyKeys: Set<string>; legacy: Set<string>; vehKeys: Set<string>; bldKeys: Set<string>; streamKeys: Set<string>; bodyKeys: Set<string>; bodyPages: Set<string> } {
+export function atlasPoolSets(registry: AssetRegistry, sources: ReadonlyMap<string, AtlasSource>, f: AtlasPoolFlags): { lazyKeys: Set<string>; legacy: Set<string>; retired: Set<string>; vehKeys: Set<string>; bldKeys: Set<string>; streamKeys: Set<string>; bodyKeys: Set<string>; bodyPages: Set<string> } {
   const lazyKeys = f.streamWearables ? wearableOnlyAtlases(registry) : new Set<string>();
   const legacy = f.streamVehicles ? legacyDirFrameAtlases(registry) : new Set<string>();
+  const retired = new Set<string>(); if (f.streamBuildingTiers) for (const a of registry.atlases.values()) if (RETIRED_BUILD_RE.test(a.key) && !lazyKeys.has(a.key) && !legacy.has(a.key)) retired.add(a.key);
   const vehKeys = new Set<string>(); if (f.streamVehicles) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && !lazyKeys.has(a.key) && !legacy.has(a.key) && isStreamedVehicleAtlas(a.key, src.url)) vehKeys.add(a.key); }
   const bldKeys = new Set<string>(); if (f.streamBuildingTiers) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && !lazyKeys.has(a.key) && !vehKeys.has(a.key) && isStreamedBuildingAtlas(a.key, src.url)) bldKeys.add(a.key); }
   // bodies (page geometry from the manifest: columns x rows x frame size per page, any number of pages) go compressed when KTX2 is available: KTX2 colour + tint mask KTX2
@@ -2217,7 +2299,7 @@ export function atlasPoolSets(registry: AssetRegistry, sources: ReadonlyMap<stri
   const streamKeys = new Set<string>(); if (f.streamSheets) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src && a.residency === "stream" && !lazyKeys.has(a.key) && !bodyPages0.has(a.key) && !vehKeys.has(a.key) && !bldKeys.has(a.key) && !legacy.has(a.key) && !(f.residentCreatures && (RESIDENT_CREATURE_RE.test(a.key) || RESIDENT_GROUND_RE.test(a.key) || RESIDENT_PLANT_RE.test(a.key))) && !/^(blob|data):/.test(src.url)) streamKeys.add(a.key); } // ADR-438: plant sheets load resident (see RESIDENT_PLANT_RE)
   const bodyPages = bodyAtlasKeys(registry);
   const bodyKeys = new Set<string>(); if (f.ktx2 && f.streamWearables) for (const a of registry.atlases.values()) { const src = sources.get(a.key); if (src?.ktx2 && bodyPages.has(a.key) && !lazyKeys.has(a.key) && !vehKeys.has(a.key) && !bldKeys.has(a.key) && !streamKeys.has(a.key) && !/^(blob|data):/.test(src.url)) bodyKeys.add(a.key); }
-  return { lazyKeys, legacy, vehKeys, bldKeys, streamKeys, bodyKeys, bodyPages };
+  return { lazyKeys, legacy, retired, vehKeys, bldKeys, streamKeys, bodyKeys, bodyPages };
 }
 /** ADR-392: atlases resident under every streaming configuration, so no device path ever reads their KTX2 twins
  *  (all flags on, low-budget residency: pets / critters / ground stay streamed, hence keep their KTX2). */

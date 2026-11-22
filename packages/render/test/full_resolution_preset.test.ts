@@ -93,7 +93,7 @@ describe("Full Resolution preset", () => {
     const a = new AtlasManager(gl, { registerLoader: () => {} } as never, { textureBudgetMB: 9 }) as any;
     a.atlases = []; a.coldDownscale = 1; a.downscale = 1; a.recentlyUsed.add("characters");
     const rt = (key: string, w: number): any => ({ key, img: { width: w, height: w }, emis: null, masks: {}, scale: 1, cold: false });
-    const list = [rt("buildings", 1024), rt("furniture", 1024), rt("decor", 1024)];
+    const list = [rt("buildings", 1024), rt("furniture", 1024), rt("props", 1024)];
     let last: any[] = []; a.pack = (l: any[]) => { last = l; }; a.planEstimate = () => last.reduce((t, x) => t + x.img.width * x.img.height * 4, 0); a.estimate = a.planEstimate;
     // 1024^2 RGBA8 = 4 MB each; budget 9 MB only fits the two pinned sheets at 1x plus decor cold at 0.25 (0.25 MB)
     await a.fitBudget(list, 0, 0);

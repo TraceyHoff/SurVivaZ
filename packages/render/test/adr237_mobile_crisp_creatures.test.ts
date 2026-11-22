@@ -19,8 +19,8 @@ function planner(a: any): { last: () => Map<string, number> } {
 }
 const MB = 1048576;
 // hot scene art (terrain, decor) + the creature / character / zombie sheets drawn this session
-const scene = (): any[] => [rt("tiles", 2048), rt("decor", 2048), rt("animals_medium", 1008), rt("characters", 1152, 768), rt("zombies", 912), rt("animals_large_sp", 1024, 896)];
-const used = ["tiles", "decor", "animals_medium", "characters", "zombies"];
+const scene = (): any[] => [rt("tiles", 2048), rt("props", 2048), rt("animals_medium", 1008), rt("characters", 1152, 768), rt("zombies", 912), rt("animals_large_sp", 1024, 896)];
+const used = ["tiles", "props", "animals_medium", "characters", "zombies"];
 
 describe("ADR-237: creatures, characters and zombies stay crisp on the mobile budget", () => {
   it("FIDELITY_ATLAS_RE covers creature / character / zombie sheets only", () => {
@@ -34,11 +34,11 @@ describe("ADR-237: creatures, characters and zombies stay crisp on the mobile bu
     await a.fitBudget(list, 0, 0);
     expect(a.downscale).toBe(0.5);
     const w = p.last();
-    expect(w.get("tiles")).toBe(1024); expect(w.get("decor")).toBe(1024); // the rest of the hot tier pays the x0.5
+    expect(w.get("tiles")).toBe(1024); expect(w.get("props")).toBe(1024); // the rest of the hot tier pays the x0.5
     expect(w.get("animals_medium")).toBe(1008); expect(w.get("characters")).toBe(1152); expect(w.get("zombies")).toBe(912);
     expect(w.get("animals_large_sp")).toBe(512); // hot but not drawn: no pin
     expect([...a.fitInfo.pinned].sort()).toEqual(["animals_medium", "characters", "zombies"]);
-    a.atlases = list.map((x: any) => ({ ...x, lazy: undefined })); a.retiered.add("tiles"); a.retiered.add("decor"); // halved art already had its re-tier
+    a.atlases = list.map((x: any) => ({ ...x, lazy: undefined })); a.retiered.add("tiles"); a.retiered.add("props"); // halved art already had its re-tier
     expect(a.needsRetier).toBe(false); // pinned sheets at x1 never ask for another re-tier
   });
   it("when x1 sheets do not fit, the plan is exactly the old one (no extra blur elsewhere, never over budget for the pin)", async () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AtlasManager } from "../src/assets/atlasManager.js";
+import { RETIRED_BUILD_RE, AtlasManager } from "../src/assets/atlasManager.js";
 import { vehicleManifestEntries, type VehicleRenderDef } from "../src/index.js";
 
 /**
@@ -28,6 +28,10 @@ function am(budget: number): any {
   a.atlases = []; a.coldDownscale = 1; a.downscale = 1; a.sideShift = 2;
   return a;
 }
+/** ADR-512: fitBudget runs with the pools' reserve (rebuild() passes it); 85 MB is the A16 256 MB plan's keep / 1x floor. */
+const KEEP = 85 * 1048576;
+const TRIMMED_H: Record<string, number> = { buildings_twig: 568, openings: 464, furniture: 732, decor: 492, defenses: 168, defenses_glow: 180, cz_mirror: 272, vitems_garage: 536, vitems_garage_t2: 536, vitems_garage_t3: 536,
+  building_tw: 560, pets_trough: 40, decor_apiary: 204, decor_ore_store: 196, decor_log_store: 128, decor_stick_store: 168, decor_crop_store: 124, decor_stone_store: 196, decor_dock: 160, decor_shipyard: 216 };
 /** Resident atlas list from the real merged manifests (ADR-438 harness): fitBudget packs it for real. */
 function residentList(): any[] {
   const atl = new Map<string, any>();
@@ -35,8 +39,10 @@ function residentList(): any[] {
     const m = JSON.parse(readFileSync(new URL(p, import.meta.url), "utf8"));
     for (const a of m.atlases) if (!atl.has(a.key)) atl.set(a.key, a);
   }
-  const resident = [...atl.values()].filter((a) => a.residency !== "stream" || /^nature_(crops|sprouts|saplings)$/.test(a.key));
-  return resident.map((a, i) => ({ key: a.key, id: i, img: { width: a.columns * a.frameW, height: a.rows * a.frameH }, emis: a.masks?.emissive ? {} : null, masks: a.masks?.sway ? { sway: {} } : {}, scale: 1, cold: false, count: a.columns * a.rows }));
+  // ADR-512: the retired wave-2 building sheets are not loaded, and the base sheets upload trim-repacked (heights measured
+  // by trimGridAtlas on the shipped sheets, same width)
+  const resident = [...atl.values()].filter((a) => (a.residency !== "stream" || /^nature_(crops|sprouts|saplings)$/.test(a.key)) && !RETIRED_BUILD_RE.test(a.key));
+  return resident.map((a, i) => ({ key: a.key, id: i, img: { width: a.columns * a.frameW, height: TRIMMED_H[a.key] ?? a.rows * a.frameH }, emis: a.masks?.emissive ? {} : null, masks: a.masks?.sway ? { sway: {} } : {}, scale: 1, cold: false, count: a.columns * a.rows }));
 }
 const WORLD = ["tiles", "decor", "resources", "resources_tall", "resources_huge", "nature_trees", "nature_crops", "nature_sprouts", "nature_saplings", "characters", "characters_b", "zombies", "zombies_brute", "zombies_runner", "zombies_mummy", "zombies_pumpkin", "animals_medium", "buildings", "furniture", "openings", "items", "equipment", "held"];
 /** The real vehicle pages: one lazy veh atlas per def in vehicles.json, at its manifest size. */
@@ -65,8 +71,8 @@ describe("ADR-449: vehicle pool stays crisp under memory pressure", () => {
     // (Pre-fix probe: k=0.5, 2 layers — every vehicle soft.)
     const list = residentList();
     const a = am(256); for (const k of WORLD) a.recentlyUsed.add(k);
-    await a.fitBudget(list, 0, 0);
-    expect(a.layers).toBe(5);
+    await a.fitBudget(list, KEEP, KEEP, KEEP);
+    expect(a.layers).toBe(6);
     a.pools = [];
     a.planPool(pages, 6, list, "veh", true);
     const pool = a.pools[0];
