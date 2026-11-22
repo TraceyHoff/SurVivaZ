@@ -12128,3 +12128,9 @@ and the magazine empties. Test: same file.
 so a hired worker dismissed while riding its employer's mount kept riding it (and could take it anywhere), and a
 viewer who lost access kept the saddlebag open. `mountSystem` now puts off any rider that `mayUseMount` refuses, and the
 container auto-close re-checks `canOpenSaddlebag`. Test: `packages/gameplay/test/adr515_mount_permission.test.ts`.
+
+**Claim piece cap did not survive a reload.** `maxPiecesPerZone` was a running tally (`zoneCounts` / `zoneOf`) written
+only by `placePiece` / `movePiece`. Pieces indexed on load or replication never counted, so every restart reset a claim to
+0, and pieces under a removed flag stayed booked to it. `zonePieceCount` now derives the count from the index (pieces
+inside the claim's disk; claims never overlap). It is cached per index edit through a new `StructureIndex.edits` counter,
+which `lifted()` does not rewind. The tally maps are gone. Test: `packages/gameplay/test/adr515_zone_full.test.ts`.

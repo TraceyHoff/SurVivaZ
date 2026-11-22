@@ -138,8 +138,6 @@ export function movePiece(world: World, actor: Entity, piece: Entity, req: Pick<
   world.set(piece, Transform, s.pos); world.setField(piece, BuildPiece, "rot", s.slot.rot);
   if (def.privilegeRadius > 0) invalidateZoneGrid(world);
   idx.addPiece(piece, s.slot, s.parent);
-  const own = zonesAt(world, s.pos.x, s.pos.y).filter((z) => z !== piece)[0]; // the claim that now counts it (ZoneFull)
-  if (own !== undefined) { idx.zoneOf.set(piece, own); idx.zoneCounts.set(own, (idx.zoneCounts.get(own) ?? 0) + 1); }
   for (const a of attachmentsOf(world, piece)) {
     if (!world.isAlive(a)) continue;
     world.set(a, Transform, s.pos);

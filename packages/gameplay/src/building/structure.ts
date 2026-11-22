@@ -92,8 +92,6 @@ export class StructureIndex {
   readonly chunkPieces = new Map<ChunkKey, Set<Entity>>();
   readonly chunkVersions = new Map<ChunkKey, number>();
   /** privilege zone (claim piece) -> piece count; piece -> zone. */
-  readonly zoneCounts = new Map<Entity, number>();
-  readonly zoneOf = new Map<Entity, Entity>();
   /** server: pieces whose stability must be (re)computed this tick; removals trigger region recompute. */
   readonly dirty = new Set<Entity>();
   readonly removedNeighbors = new Set<Entity>();
@@ -225,7 +223,6 @@ export class StructureIndex {
     }
     if (inf.gridId) { this.grid.remove(inf.gridId); this.byGrid.delete(inf.gridId); }
     const set = this.chunkPieces.get(inf.ck); if (set?.delete(e)) { this.bump(inf.ck); if (!set.size) this.chunkPieces.delete(inf.ck); }
-    const z = this.zoneOf.get(e); if (z !== undefined) { this.zoneOf.delete(e); this.zoneCounts.set(z, (this.zoneCounts.get(z) ?? 1) - 1); }
     this.dirty.delete(e); this.pendingDamage.delete(e);
     if (!keepSlot && this.world.isAlive(e) && this.world.has(e, PieceSlot)) this.world.remove(e, PieceSlot);
   }
@@ -236,12 +233,11 @@ export class StructureIndex {
    */
   lifted<T>(e: Entity, fn: () => T): T {
     const inf = this.info.get(e); if (!inf) return fn();
-    const zone = this.zoneOf.get(e); const ver = this.version; const cv = this.chunkVersions.get(inf.ck);
+    const ver = this.version; const cv = this.chunkVersions.get(inf.ck);
     const wasDirty = this.dirty.has(e); const dmg = this.pendingDamage.get(e);
     this.removePiece(e, true);
     try { return fn(); } finally {
       this.addPiece(e, inf.slot, inf.parent);
-      if (zone !== undefined) { this.zoneOf.set(e, zone); this.zoneCounts.set(zone, (this.zoneCounts.get(zone) ?? 0) + 1); }
       if (wasDirty) this.dirty.add(e); if (dmg !== undefined) this.pendingDamage.set(e, dmg);
       this.version = ver; if (cv === undefined) this.chunkVersions.delete(inf.ck); else this.chunkVersions.set(inf.ck, cv);
     }
@@ -250,7 +246,9 @@ export class StructureIndex {
   indexedAt(e: Entity): { slot: Slot; parent: Entity | 0 } | undefined { const i = this.info.get(e); return i ? { slot: { ...i.slot }, parent: i.parent } : undefined; }
   removePieceByEntity(e: Entity): void { this.removePiece(e); }
   chunkOf(e: Entity): ChunkKey { const tf = this.world.get(e, Transform)!; return chunkKeyOf(tf.x, tf.y); }
-  bump(ck: ChunkKey): void { this.chunkVersions.set(ck, (this.chunkVersions.get(ck) ?? 0) + 1); this.version++; }
+  bump(ck: ChunkKey): void { this.chunkVersions.set(ck, (this.chunkVersions.get(ck) ?? 0) + 1); this.version++; this.edits++; }
+  /** ADR-515: every add / remove, never rewound (lifted() restores `version`, not this): derived caches key on it. */
+  edits = 0;
   /** Bumped on any structural change (and door toggles); invalidates enclosure caches. */
   version = 0;
   /**

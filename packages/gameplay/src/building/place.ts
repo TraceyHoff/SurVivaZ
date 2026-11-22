@@ -13,7 +13,7 @@ export const CLAN_PALETTE_COUNT = 16;
 /** BuildPiece.tint for a clan: 1..CLAN_PALETTE_COUNT index into assets clanPalettes (ADR-077; wrapped since ADR-230). */
 import { spawnCrop } from "../farming.js";
 export const clanTintIndex = (clanId: number): number => clanId > 0 ? 1 + ((clanId - 1) % CLAN_PALETTE_COUNT) : 0;
-import { isWaterId, installSpatialIndex, SUBTILE, WaterDepth, waterDepthAt, WATER_SURFACE_HEIGHT } from "@engine/world";
+import { CHUNK_SIZE, chunkKey, isWaterId, installSpatialIndex, SUBTILE, WaterDepth, waterDepthAt, WATER_SURFACE_HEIGHT } from "@engine/world";
 import {
   AttachKind, BuildPiece, Container, ContainerViewers, CraftingStation, DoorState, EdgeSide, Emitter, Fuel, Health,
   PieceLink, PieceStability, PrivilegeZone, Tribe, Worker, Zombie,
@@ -244,6 +244,24 @@ export function ensurePersonalTribe(world: World, e: Entity): number {
  *  water-required pieces are claim-exempt — water has no Claim Flag, so requiring one would make docks
  *  unplaceable. They are public structures: anyone may use the station, and privilege still blocks foreign
  *  claim disks (there are none on open water). */
+/**
+ * ADR-515: pieces a claim counts toward `maxPiecesPerZone`: every indexed piece inside its disk (claims never overlap,
+ * ADR-315). Derived from the index, so loaded, replicated, moved and orphaned pieces all count; the old running tally
+ * started at 0 after every load and kept counting a removed flag's pieces. Cached per index edit.
+ */
+const zoneCountCache = new WeakMap<World, Map<Entity, { edits: number; n: number }>>();
+export function zonePieceCount(world: World, zone: Entity): number {
+  const idx = structures(world); const t = world.get(zone, Transform); const r = world.getField(zone, PrivilegeZone, "radius") ?? 0;
+  if (!t || !r) return 0;
+  let m = zoneCountCache.get(world); if (!m) zoneCountCache.set(world, (m = new Map()));
+  const c = m.get(zone); if (c && c.edits === idx.edits) return c.n;
+  let n = 0;
+  for (let cy = Math.floor((t.y - r) / CHUNK_SIZE); cy <= Math.floor((t.y + r) / CHUNK_SIZE); cy++) for (let cx = Math.floor((t.x - r) / CHUNK_SIZE); cx <= Math.floor((t.x + r) / CHUNK_SIZE); cx++) {
+    const set = idx.chunkPieces.get(chunkKey(cx, cy)); if (!set) continue;
+    for (const e of set) { if (e === zone) continue; const p = world.get(e, Transform); if (p && Math.hypot(p.x - t.x, p.y - t.y) <= r) n++; }
+  }
+  m.set(zone, { edits: idx.edits, n }); return n;
+}
 export const needsClaim = (def: PieceDef): boolean => def.privilegeRadius <= 0 && !def.stall && !def.requiresWater;
 
 /** A wall piece for ceiling support: wall-family or corner wall, not a wall-mounted decor piece. */
@@ -318,7 +336,7 @@ export function validatePlacement(world: World, builder: Entity, sn: Snapped, op
   // stalls: clanOnly needs a clan; core land claims (economy.claims) via the stall place permission rule
   if (def.stall && !canPlaceStall(world, builder, sn.pos.x, sn.pos.y, def.stall.clanOnly)) return BuildFail.NoPrivilege;
   const own = zones[0];
-  if (own !== undefined && (idx.zoneCounts.get(own) ?? 0) >= b.maxPiecesPerZone) return BuildFail.ZoneFull;
+  if (own !== undefined && zonePieceCount(world, own) >= b.maxPiecesPerZone) return BuildFail.ZoneFull;
   // terrain for ground-level pieces
   const tiles = def.placement === Placement.Cell || def.placement === Placement.Free ? idx.grid.footprintTiles(def.id, slot.tx, slot.ty, gridRot(def, slot.rot)) : def.placement === Placement.Tri ? [[slot.tx, slot.ty] as [number, number]] : [];
   const terrain = world.getResource(TerrainRes);
@@ -439,9 +457,6 @@ export function placePiece(world: World, builder: Entity | 0, sn: Snapped, opts:
   idx.addPiece(e, slot, sn.parent);
   indexEntity(world, e);
   if (def.surfaceHeight > 0 && isAuthority(world)) reseatSmallOn(world, e); // decor already on these tiles moves up onto the top
-  const own = zonesAt(world, sn.pos.x, sn.pos.y)[0];
-  if (own !== undefined) { idx.zoneOf.set(e, own); idx.zoneCounts.set(own, (idx.zoneCounts.get(own) ?? 0) + 1); }
-  if (def.privilegeRadius > 0) idx.zoneCounts.set(e, idx.zoneCounts.get(e) ?? 0);
   if (isAuthority(world)) {
     world.setField(e, PieceStability, "value", Math.max(0, Math.min(255, candidateStability(world, sn))));
     idx.dirty.add(e);
