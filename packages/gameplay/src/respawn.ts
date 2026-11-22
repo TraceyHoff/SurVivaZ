@@ -17,13 +17,13 @@ export const isBedKey = (key: string): boolean => key === "bed" || key.startsWit
 
 /** Every owned bed: its footprint plus the beside-bed respawn point. A bed nobody owns (abandoned-site
  * furniture, PieceOwner.player 0) is nobody's respawn point, so it is not listed. */
-function bedSpots(world: World): { bx: number; by: number; x: number; y: number; player: number }[] {
+function bedSpots(world: World): { bx: number; by: number; x: number; y: number; z: number; player: number }[] {
   if (!world.isRegistered(BuildPiece) || !world.isRegistered(PieceOwner)) return [];
-  const defs = gameplayDefs(world); const out: { bx: number; by: number; x: number; y: number; player: number }[] = [];
+  const defs = gameplayDefs(world); const out: { bx: number; by: number; x: number; y: number; z: number; player: number }[] = [];
   for (const b of world.query([BuildPiece, PieceOwner, Transform])) {
     const player = world.getField(b, PieceOwner, "player") ?? 0; if (!player) continue;
     const key = defs.pieces.get(world.getField(b, BuildPiece, "type")!)?.key; if (!key || !isBedKey(key)) continue;
-    const t = world.get(b, Transform)!; out.push({ bx: t.x, by: t.y, x: t.x + 1, y: t.y + 0.5, player }); // beside the bed, not inside its footprint
+    const t = world.get(b, Transform)!; out.push({ bx: t.x, by: t.y, x: t.x + 1, y: t.y + 0.5, z: t.z ?? 0, player }); // beside the bed, not inside its footprint
   }
   return out;
 }
@@ -41,7 +41,7 @@ export function bedRespawnPoint(world: World, e: Entity): SpawnPointXY | undefin
   for (const b of bedSpots(world)) {
     if (b.player !== pid) continue;
     const d = me ? (b.bx - me.x) ** 2 + (b.by - me.y) ** 2 : 0;
-    if (d < bd) { bd = d; best = { x: b.x, y: b.y }; }
+    if (d < bd) { bd = d; best = { x: b.x, y: b.y, ...(b.z ? { z: b.z } : {}) }; } // ADR-515: on the bed's floor (ground: no z)
   }
   return best;
 }

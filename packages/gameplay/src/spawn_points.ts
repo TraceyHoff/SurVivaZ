@@ -14,7 +14,8 @@ import { DEFAULT_TICK_HZ, defineResource, Transform, type Entity, type World } f
 import pvp from "../data/pvp.json";
 import { Dead, Survival } from "./components.js";
 
-export interface SpawnPointXY { x: number; y: number }
+/** `z` (ADR-515): building-floor height to land at (a bed upstairs); absent = the ground floor. */
+export interface SpawnPointXY { x: number; y: number; z?: number }
 const SpawnPointsRes = defineResource<{ points: SpawnPointXY[]; respawnAt?: ((e: Entity) => SpawnPointXY | undefined) | undefined }>("gameplay.SpawnPoints");
 /** Players within this many tiles of a spawn point count as crowding it. */
 export const CROWD_RADIUS = 24;

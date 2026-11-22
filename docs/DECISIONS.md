@@ -12113,3 +12113,18 @@ Tests: `packages/gameplay/test/adr514_legacy_floor_z.test.ts` (rule, idempotence
 it returned, so whatever did not fit the pack was destroyed with the piece. `refundOrDrop` (building/actions.ts) now puts
 the remainder in a Dropped loot bag (owner = the demolisher's PlayerId, ordinary dropped-bag lifetime) at the actor's
 feet. Test: `packages/gameplay/test/adr515_demolish_full_pack.test.ts`.
+
+**Respawn kept the floor you died on.** `respawnPlayer` set only x / y, so a player (or AI human) who died upstairs
+respawned at the bed / spawn point still at that floor's height. With no deck there the stand settle keeps the level's
+base z, so they floated a storey up and collided with that floor's walls. Spawn points now carry an optional `z`
+(`SpawnPointXY.z`). A bed gives its own floor, so a bed upstairs still respawns you upstairs. Anything else is the
+ground. Test: `packages/gameplay/test/adr515_respawn_floor.test.ts`.
+
+**Loaded rounds survived death.** `dropDeathBag` moved the pack into the bag but left the held weapon's magazine in
+`WeaponState`; on respawn the weapon-switch path handed those rounds to the new body. They now drop in the death bag
+and the magazine empties. Test: same file.
+
+**Mount permission held only at mount-up.** `checkRide` / `canOpenSaddlebag` ran when getting on or opening the bag,
+so a hired worker dismissed while riding its employer's mount kept riding it (and could take it anywhere), and a
+viewer who lost access kept the saddlebag open. `mountSystem` now puts off any rider that `mayUseMount` refuses, and the
+container auto-close re-checks `canOpenSaddlebag`. Test: `packages/gameplay/test/adr515_mount_permission.test.ts`.

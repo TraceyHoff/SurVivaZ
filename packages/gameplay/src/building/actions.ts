@@ -240,6 +240,7 @@ export function containerSystem(world: World): void {
   // auto-close: out of range (1.5x reach), dead, or container gone
   for (const e of world.query([Viewing])) {
     const c = world.getField(e, Viewing, "container")!;
-    if (!world.isAlive(c) || world.has(e, Dead) || distance(world, e, c) > b.containerReach * 1.5 || !canUseBaseStorage(world, e, c)) closeContainer(world, e); // ADR-207: kicked / left clan → closes
+    if (!world.isAlive(c) || world.has(e, Dead) || distance(world, e, c) > b.containerReach * 1.5 || !canUseBaseStorage(world, e, c)
+      || (world.isRegistered(Mount) && world.has(c, Mount) && !canOpenSaddlebag(world, e, c))) closeContainer(world, e); // ADR-207: kicked / left clan → closes; ADR-515: a saddlebag too
   }
 }

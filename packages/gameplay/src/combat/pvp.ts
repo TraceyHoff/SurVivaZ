@@ -12,11 +12,11 @@
  */
 import { defineCommand, defineResource, PlayerId, Transform, type CommandHandlers, type Entity, type World } from "@engine/core";
 import raw from "../../data/pvp.json";
-import { Anim, AnimState, Burning, CombatTag, Container, ContainerViewers, Dead, Equipment, Health, Inventory, LootBag, NO_SLOT, Survival } from "../components.js";
+import { Anim, AnimState, Burning, CombatTag, Container, ContainerViewers, Dead, Equipment, Health, Inventory, LootBag, NO_SLOT, Survival, WeaponState } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks } from "../defs.js";
 import { emit, ev } from "../events.js";
-import { listSlots, moveSlotTuples } from "../inventory.js";
+import { addItem, listSlots, moveSlotTuples } from "../inventory.js";
 import { bagSpawnTick, lootBagInit } from "../loot_despawn.js";
 import { LootSource, tagLootSource } from "../loot_labels.js";
 import { indexEntity } from "../spawn.js";
@@ -75,7 +75,11 @@ export function dropDeathBag(world: World, e: Entity): Entity | undefined {
   const t = world.get(e, Transform)!; const bag = world.create(); const ownerId = (hasPlayerId(world, e) ? world.getField(e, PlayerId, "id") : undefined) ?? 0;
   world.add(bag, Transform, { x: t.x, y: t.y, z: t.z }).add(bag, Container, { slotCount: Math.max(PVP.bagSlots, moves.length) }).add(bag, ContainerViewers)
     .add(bag, LootBag, lootBagInit(world, ownerId, "death", LootSource.Death));
-  moveSlotTuples(world, e, bag, moves); tagLootSource(world, bag, LootSource.Death); indexEntity(world, bag);
+  moveSlotTuples(world, e, bag, moves);
+  // ADR-515: rounds in the held weapon's magazine drop with it (they were handed back to the respawned body instead)
+  const ws = world.isRegistered(WeaponState) ? world.get(e, WeaponState) : undefined;
+  if (ws && ws.loaded > 0 && ws.ammoItem) { addItem(world, bag, ws.ammoItem, ws.loaded); world.set(e, WeaponState, { loaded: 0, ammoItem: 0, reloadUntilTick: 0, chargeStartTick: 0 }); }
+  tagLootSource(world, bag, LootSource.Death); indexEntity(world, bag);
   emit(world, DeathBagDropped, { bag, owner: e, ownerId, stacks: moves.length }); return bag;
 }
 /** Loot gate (container open / withdraw): owner-only window after the drop. Only death bags get the window: a
@@ -121,7 +125,7 @@ export function respawnPlayer(world: World, e: Entity): RespawnReject {
   const vt = gameplayDefs(world).vitals; const max = world.getField(e, Health, "max") ?? vt.maxHealth;
   world.remove(e, Dead); if (world.has(e, Burning)) world.remove(e, Burning); if (world.has(e, CombatTag)) world.remove(e, CombatTag);
   clearAfflictions(world, e); // Task 33: death clears diseases / illnesses / wetness — respawn with no health issues
-  world.set(e, Transform, { x: p.x, y: p.y });
+  world.set(e, Transform, { x: p.x, y: p.y, z: p.z ?? 0 }); // ADR-515: the point's floor, not the floor they died on
   world.setField(e, Health, "hp", Math.max(1, max * PVP.respawnHealthFrac));
   world.setField(e, Survival, "hunger", PVP.respawnHunger); world.setField(e, Survival, "thirst", PVP.respawnThirst); world.setField(e, Survival, "stamina", world.getField(e, Survival, "maxStamina")!);
   world.setField(e, Survival, "bodyTemp", vt.bodyTempNormal); // ADR-252: a hypothermic corpse respawned at 30 C and died again within seconds

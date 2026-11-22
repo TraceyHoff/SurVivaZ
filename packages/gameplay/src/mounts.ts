@@ -390,7 +390,8 @@ export function mountSystem(world: World, dt: number): void {
   // riders: drop broken links (mount gone / dead / taken / rider dead or in a vehicle), else carry the mount along
   for (const r of [...world.query([Riding])]) {
     const m = mountOfRider(world, r);
-    if (m === undefined || !world.has(m, Mount) || world.has(m, Dead) || world.has(r, Dead) || world.has(r, Driver) || (world.getField(m, Mount, "riderNetId") ?? 0) !== netIdOf(world, r)) { dismount(world, r); continue; }
+    if (m === undefined || !world.has(m, Mount) || world.has(m, Dead) || world.has(r, Dead) || world.has(r, Driver) || (world.getField(m, Mount, "riderNetId") ?? 0) !== netIdOf(world, r)
+      || !mayUseMount(world, r, m)) { dismount(world, r); continue; } // ADR-515: lost the right to it (dismissed worker, left the clan)
     const t = world.get(r, Transform)!; const mt = world.get(m, Transform);
     if (!mt || mt.x !== t.x || mt.y !== t.y || mt.facing !== t.facing || mt.z !== t.z) world.set(m, Transform, { x: t.x, y: t.y, z: t.z, facing: t.facing ?? 0 });
     const sp = mountSpecies(world.getField(r, Riding, "species") ?? 0); const speed = world.getField(r, Riding, "speed") ?? 0;
