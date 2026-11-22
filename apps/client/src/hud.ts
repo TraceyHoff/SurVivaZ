@@ -54,8 +54,8 @@ border:2px solid #74432C;border-radius:10px;box-shadow:0 2px 0 #432C24;padding:4
 #hud:focus-visible{outline:3px solid #FFD45A;outline-offset:3px}
 #hud .row{display:flex;align-items:center;gap:4px;margin:2px 0}#hud .bar{flex:1;height:6px;background:#E6C47E;border:1px solid #4A2F3D;border-radius:4px;overflow:hidden}
 #hud .lab{display:flex;width:14px;font-size:10px;justify-content:center}
-#hud .fill{height:100%;border-radius:3px;transition:width .2s}#hud .clock{display:flex;justify-content:space-between;margin-bottom:2px;color:#61402E;font-size:10px}
-#hud .clock .l{min-width:0;white-space:nowrap}#hud [data-hud=weather]{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:3px}
+#hud .fill{height:100%;border-radius:3px;transition:width .2s}#hud .clock{display:flex;flex-wrap:wrap;justify-content:space-between;column-gap:3px;margin-bottom:2px;color:#61402E;font-size:10px}
+#hud .clock .l{min-width:0;white-space:nowrap}#hud [data-hud=weather]{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:auto}
 #hud [data-hud=season]{margin-left:2px;font-size:10px}
 #hud .row[data-stat=temp] .bar{position:relative;overflow:visible}#hud .row[data-stat=temp] .grad{position:absolute;inset:0;border-radius:3px;background:${GAUGE_GRADIENT}}
 #hud .row[data-stat=temp] .air{position:absolute;top:-2px;bottom:-2px;width:3px;margin-left:-1.5px;background:#FFFAF0;border:1px solid #3B2433;border-radius:2px;box-sizing:border-box;transition:left .4s}

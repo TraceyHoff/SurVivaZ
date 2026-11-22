@@ -27,7 +27,7 @@ beforeEach(() => {
   nav = new UINav({ root: document.body, pollGamepads: false } as unknown as ConstructorParameters<typeof UINav>[0]);
   nav.open("inventory", el);
 });
-const focus = (label: string): void => { [...document.querySelectorAll("button")].find((b) => b.textContent === label)!.focus(); };
+const focus = (label: string): void => { Array.from(document.querySelectorAll("button")).find((b) => b.textContent === label)!.focus(); };
 const at = (): string => document.activeElement?.textContent ?? "";
 const press = (d: "up" | "down" | "left" | "right"): string => { nav.move(d); return at(); };
 

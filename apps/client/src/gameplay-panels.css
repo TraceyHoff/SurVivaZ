@@ -15,7 +15,9 @@ html[data-nav-focus] .gm-modal .gm-panel button:focus,html[data-nav-focus] .gm-m
 .gm-modal .gm-panel [data-role=body] button[aria-pressed=true],.gm-modal .gm-panel [data-role=chat-channels] button[aria-pressed=true],.gm-modal .gm-panel [data-role=whisper-picker] button[aria-pressed=true]{color:var(--cz-ink);text-shadow:0 1px 0 rgba(255,250,240,.7);
   background:none;box-shadow:none;border-style:solid;border-width:14px 16px 18px 16px;border-image:image-set(url("../../../assets/ui/kit/css/ui_btn_gold_normal.png") 1x, url("../../../assets/ui/kit/css/ui_btn_gold_normal@2x.png") 2x) 29.167% 33.333% 37.500% 33.333% fill / 14px 16px 18px 16px stretch;padding:0 4px}
 @media (hover:hover){.gm-modal .gm-panel button[aria-pressed=true]:not(:disabled):hover{border-image-source:image-set(url("../../../assets/ui/kit/css/ui_btn_gold_hover.png") 1x, url("../../../assets/ui/kit/css/ui_btn_gold_hover@2x.png") 2x)}}
-.gm-modal .gm-panel [data-role=body] button[aria-pressed=true]::after{content:"";position:absolute;top:-8px;right:-8px;width:22px;height:22px;background:image-set(url("../../../assets/ui/kit/css/ui_ic_check.png") 1x, url("../../../assets/ui/kit/css/ui_ic_check@2x.png") 2x) center/contain no-repeat;pointer-events:none}
+/* ADR-513: the badge is placed from the padding box, inside the 14/16 px gold frame: -8px put it over the label ("Screen shake: On",
+   "×1"); -18/-20 keeps it on the frame corner, clear of the text */
+.gm-modal .gm-panel [data-role=body] button[aria-pressed=true]::after{content:"";position:absolute;top:-18px;right:-20px;width:22px;height:22px;background:image-set(url("../../../assets/ui/kit/css/ui_ic_check.png") 1x, url("../../../assets/ui/kit/css/ui_ic_check@2x.png") 2x) center/contain no-repeat;pointer-events:none}
 .gm-modal .gm-panel [data-role=body] button[aria-pressed=false]{opacity:.92}
 /* section headings */
 .gm-modal .gm-panel [data-role=section]{display:flex;align-items:center;gap:8px;color:var(--cz-bark);font-size:15px;letter-spacing:.02em;margin-top:4px}
@@ -1294,9 +1296,9 @@ html[data-slot-dragging] .gm-modal .gm-panel [data-role=inv-layout] button[data-
 .gm-modal .gm-panel [data-role=craft-tools] input{flex:1 1 140px;min-width:0}
 .gm-modal .gm-panel [data-role=craft-counts]{display:flex;gap:4px}
 .gm-modal .gm-panel [data-role=body] [data-role=recipe-grid]{grid-template-columns:repeat(auto-fill,86px);gap:4px;max-height:min(36vh,280px);overflow-y:auto;overscroll-behavior:contain;padding:4px;border-radius:10px;background:rgba(116,67,44,.10);justify-content:start}
-.gm-modal .gm-panel [data-role=body] [data-role=recipe-grid] button[data-role=recipe]{position:relative;width:86px;height:86px;min-height:0;padding:40px 0 0;border-width:10px;border-image-width:10px;text-align:center;font-size:11px;line-height:1.1;overflow:hidden}
+.gm-modal .gm-panel [data-role=body] [data-role=recipe-grid] button[data-role=recipe]{position:relative;width:86px;height:auto;min-height:86px;padding:40px 0 0;border-width:10px;border-image-width:10px;text-align:center;font-size:11px;line-height:1.1;overflow:hidden}
 .gm-modal .gm-panel [data-role=body] [data-role=recipe-grid] button[data-role=recipe]::after{left:50%;top:2px;width:36px;height:36px;margin:0;transform:translateX(-50%)}
-.gm-modal .gm-panel [data-role=recipe-grid] button .nm{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
+.gm-modal .gm-panel [data-role=recipe-grid] button .nm{display:block;padding:0 0 4px;overflow-wrap:anywhere}
 .gm-modal .gm-panel [data-role=recipe-grid] button .ct{position:absolute;right:0;top:0;font-size:11px;font-weight:700}
 .gm-modal .gm-panel [data-role=recipe-grid] button[data-sel]{box-shadow:0 0 0 3px #5A9A4A}
 .gm-modal .gm-panel [data-role=craft-details]{padding:8px 10px;min-height:64px;border-radius:10px;background:#FFFAF0;border:2px solid #E6C47E;display:flex;flex-direction:column;gap:4px;font-size:14px}
@@ -1310,10 +1312,10 @@ html[data-slot-dragging] .gm-modal .gm-panel [data-role=inv-layout] button[data-
 /* ADR-288: short landscape phones need the same single-row category strip as portrait. */
 @media (max-width:620px),(max-height:500px){.gm-modal .gm-panel [data-role=body] [data-role=build-cats],.gm-modal .gm-panel [data-role=body] [data-role=build-tiers]{flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;scroll-padding:8px}}
 .gm-modal .gm-panel [data-role=build-cats] button,.gm-modal .gm-panel [data-role=build-tiers] button{flex:0 0 auto;padding:2px 10px;font-size:13px;text-transform:capitalize;min-height:38px}
-.gm-modal .gm-panel [data-role=body] :is([data-role=build-cats],[data-role=build-tiers],[data-role=craft-cats]) button[aria-pressed=true]::after{display:none}
+.gm-modal .gm-panel [data-role=body] :is([data-role=build-cats],[data-role=build-tiers],[data-role=craft-cats],[data-role=craft-counts]) button[aria-pressed=true]::after{display:none}
 .gm-modal .gm-panel [data-role=build-tiers] button[data-locked]{opacity:.7}
 .gm-modal .gm-panel [data-role=body] [data-role=piece-grid]{grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:6px;max-height:min(38vh,300px);overflow-y:auto;overscroll-behavior:contain;padding:6px;border-radius:10px;background:rgba(116,67,44,.10)}
-.gm-modal .gm-panel [data-role=body] [data-role=piece-grid] button[data-role=piece]{position:relative;height:102px;min-height:0;padding:34px 2px 2px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;text-align:center;font-size:12px;line-height:1.15;overflow:hidden;border-width:10px 10px 12px;border-image-width:10px 10px 12px}
+.gm-modal .gm-panel [data-role=body] [data-role=piece-grid] button[data-role=piece]{position:relative;height:auto;min-height:102px;padding:34px 2px 2px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:2px;text-align:center;font-size:12px;line-height:1.15;overflow:hidden;border-width:10px 10px 12px;border-image-width:10px 10px 12px}
 .gm-modal .gm-panel [data-role=piece-grid] button[data-role=piece]::before{content:attr(data-glyph);position:absolute;left:50%;top:0;transform:translateX(-50%);font-size:28px;line-height:32px;pointer-events:none}
 .gm-modal .gm-panel [data-role=piece-grid] button[data-role=piece][data-locked]::before{content:"🔒";filter:grayscale(1);opacity:.8}
 /* ADR-229: Art's items_build icons replace the glyph (32px cells, crisp at 1x/2x); locked tiles keep the art, greyed with a lock badge.
@@ -1324,8 +1326,8 @@ html[data-slot-dragging] .gm-modal .gm-panel [data-role=inv-layout] button[data-
 .gm-modal .gm-panel [data-role=piece-grid] button[data-role=piece][data-bicon][data-tint=clan]::before{background-color:var(--bt,#fff);background-blend-mode:multiply;-webkit-mask:var(--cz-icon,none) var(--cz-ipos,center) / var(--cz-isize,contain) no-repeat;mask:var(--cz-icon,none) var(--cz-ipos,center) / var(--cz-isize,contain) no-repeat}
 .gm-modal .gm-panel [data-role=world-tools] button[data-bicon]{display:flex;align-items:center;gap:6px}
 .gm-modal .gm-panel [data-role=world-tools] button[data-bicon]::before{content:"";flex:none;width:32px;height:32px;background:var(--cz-icon,none) var(--cz-ipos,center) / var(--cz-isize,contain) no-repeat}
-.gm-modal .gm-panel [data-role=piece-grid] button .nm{font-weight:700;text-transform:capitalize;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;max-width:100%}
-.gm-modal .gm-panel [data-role=piece-grid] button .ct{font-size:11px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.gm-modal .gm-panel [data-role=piece-grid] button .nm{font-weight:700;text-transform:capitalize;display:block;overflow-wrap:anywhere;max-width:100%}
+.gm-modal .gm-panel [data-role=piece-grid] button .ct{font-size:11px;opacity:.85;white-space:normal;overflow-wrap:anywhere;max-width:100%}
 .gm-modal .gm-panel [data-role=piece-grid] button[data-short] .ct{color:#B4443A;opacity:1}
 .gm-modal .gm-panel [data-role=piece-grid] button[aria-pressed=true]::after{top:-4px;right:-4px;width:18px;height:18px}
 .gm-modal .gm-panel [data-role=build-details]{margin-top:6px;padding:8px 10px;border-radius:10px;background:#FFFAF0;border:2px solid #E6C47E;display:flex;flex-direction:column;gap:6px;font-size:14px}
