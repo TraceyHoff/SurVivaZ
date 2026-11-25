@@ -34,6 +34,7 @@ import { PRIO_NEAR } from "./gl/vram.js";
 import { DeckNeighbors, rotSideMask, deckTopPx, pieceTieBreak, exactTieBreak, vertexPostGlBias, DECK_EDGE_EPS, DECK_SEAM_BAND, DECK_SEAM_SHIFT } from "./building/deckFaces.js";
 import { crackAnim, lCornerArmPivots, PieceCoverIndex, pieceHiddenByStory, pieceShouldCutaway, tileKey, ROT_EXACT_PIVOT, ROT_NO_OCCLUDE, ROT_DECK_LIFT, ROT_VERTEX_POST } from "./building/modular.js";
 import { InteriorRoute, inInteriorRegion, interiorOrder, type InteriorRegion } from "./vehicles/interiorPass.js";
+import { clampGlassRectToRoofline } from "./vehicles/seats.js";
 
 export const INSTANCE_FLOATS = 40;
 /** ADR-381: per-part static-cache signature fields (see gatherPieces) — every input to a static part's instances. */
@@ -77,6 +78,11 @@ const SWIM_CLIP = 0.45, SWIM_BOB_PX = 1.5;
 export const COLD_BREATH = 0.4;
 /** Depth-key step between a character's paper-doll layers (10 layers < HELD_BIAS; far below one tile = 1.0). */
 export const LAYER_BIAS = 0.001;
+/** ADR-528: per-vertex depth margin the window-glass quad keeps over the riders it tints — just enough to
+ * clear the foremost paper-doll layer (10 x LAYER_BIAS) and a held item in front (HELD_BIAS). With this
+ * margin the quad loses the depth test to anything more than ~0.045 tiles in front of the deepest rider's
+ * plane (a pedestrian that close is inside the vehicle body), while still tinting every rider behind the glass. */
+export const GLASS_DEPTH_MARGIN = HELD_BIAS + 10 * LAYER_BIAS;
 /** Frame px of slack below the body cell for wear cells / outline that reach lower than the body (see paper-doll depth). */
 const CHAR_DEPTH_MARGIN = 24;
 /**
@@ -87,6 +93,35 @@ const CHAR_DEPTH_MARGIN = 24;
 export function paperDollDepth(key: number, frameH: number, anchorY: number, scale: number, zPerPx: number): { footDy: number; key: number } {
   const footDy = (Math.max(0, frameH - anchorY) + CHAR_DEPTH_MARGIN) * scale; return { footDy, key: key - footDy * zPerPx };
 }
+
+/**
+ * ADR-527 (2): a window-sized glass quad, as the writeOne inputs for one merged window rect (screen px, y down).
+ * The quad is one stretched frame: the vertex shader's slice bounds (aC.zw) and top clip (aJ.w) crop it to the
+ * rect, so the frame's own dims bound the rect — the scale is max(rectW / frameW, rectH / frameH). The anchor
+ * is VIRTUAL, at the frame's bottom centre: the authored anchor of a rider's body frame sits ~5 px above the
+ * frame bottom (feet, ay 59 of h 64), which would hang the glass (h - ay) * scale below the window. With the
+ * virtual anchor the pivot sits on the rect's bottom edge (x = centre, y = y1), the slice spans the frame width
+ * and the top clip the frame height, so the quad IS the rect exactly. Returns undefined for a degenerate
+ * rect/frame. The caller passes the frame (entry + dims) and sets o[39] = topClip after writeOne; the instance
+ * also needs flags NoOutline | GLASS_QUAD, alpha 1 and shadow alpha 0 (see emitWindowGlassQuad).
+ */
+export interface WindowGlassQuad { x: number; y: number; key: number; scale: number; entry: number; ax: number; ay: number; sliceL: number; sliceR: number; topClip: number }
+export function windowGlassQuad(rect: { x0: number; y0: number; x1: number; y1: number }, key: number, frame: Pick<ResolvedFrame, "entry" | "w" | "h">): WindowGlassQuad | undefined {
+  const w = rect.x1 - rect.x0, h = rect.y1 - rect.y0;
+  if (!(w > 0) || !(h > 0) || !(frame.w > 0) || !(frame.h > 0)) return undefined;
+  const s = Math.max(w / frame.w, h / frame.h);
+  return { x: rect.x0 + w / 2, y: rect.y1, key, scale: s, entry: frame.entry, ax: frame.w / 2, ay: frame.h, sliceL: -w / (2 * s), sliceR: w / (2 * s), topClip: h / s };
+}
+
+/** ADR-527 (2): one merged window rect per vehicle for the WebGL2 glass quad, accumulated in prepare() and
+ * flushed before the sort. roof is the roofline's absolute endpoints (from the first rider); maxPivotKey the
+ * deepest rider's UNDROPPED pivot key and pivotY that rider's pivot screen-y — the quad's pivot sits on the
+ * merged rect's bottom edge, (y1 - pivotY) px below that pivot, so its key is maxPivotKey less that drop
+ * (ADR-528: the old maxKey + maxBelt x zPerPx formula double-counted the beltline drop the vertex shader
+ * already adds per row, lifting the quad ~0.26 above the riders and tinting over a pedestrian within ~half a
+ * tile in front of the window); frame the first rider's body frame (entry + dims only — the quad uses a
+ * virtual anchor, see windowGlassQuad). */
+export interface WindowGlassAcc { vehicle: number; x0: number; y0: number; x1: number; y1: number; roof: { x0: number; y0: number; x1: number; y1: number } | undefined; maxPivotKey: number; pivotY: number; frame: { entry: number; w: number; h: number } }
 /**
  * Depth key of the behind-wall silhouette (drawn with depth GREATER): in front of every paper-doll layer of its own
  * character (layers draw at key + j * LAYER_BIAS, nearer than the body), so it only passes where a real occluder wrote
@@ -111,6 +146,11 @@ export const RFX_EDGE = 32768;
 /** ADR-404 instance flag: an upright under a seated rfx roof. aF carries its clip line: x = px above the pivot at the pivot column, y = change per
  *  screen px, z = 1 when a far roof corner bends it down (V), w = that corner's screen px, and its wet / cold / heat inputs are unused (build pieces never set them). */
 export const ROOF_CLIP = 65536;
+/** ADR-527 (2): instance flag for a window-sized glass quad (one per vehicle): the fragment shader outputs flat
+ * glass tint + screen-anchored sheen and ignores the texel, so the tint reads as one window instead of following
+ * each rider. Bit 131072 is free: SpriteFlag uses 1..128, the shaders use 256..65536 (see the flag survey in the
+ * ADR-527 DECISIONS entry). The quad carries NoOutline too (no outline ring on the glass) and no Flat. */
+export const GLASS_QUAD = 131072;
 /** ADR-269: default character-only silhouette outline (union of body + worn layers): 1 atlas texel of dark plum, a
  *  little darker / more defined than the baked line art alone. Independent of the global StyleConfig.outline (off). */
 export const CHARACTER_OUTLINE = { widthPx: 1, color: [0.08, 0.05, 0.09, 0.72] as const };
@@ -142,8 +182,9 @@ export interface GameplayBindings {
   /** ADR-322: rider on a swimming moose: water row as px above the doll's seat pivot (negative = below); clip pixels under it. */
   riderClip?: (entity: number) => number | undefined;
   /** ADR-518: vehicle rider window (VehicleView RiderPlacement.clip): rows shown, 1x px above the doll's seat pivot; pixels
-   *  below `bottom` (door / beltline) and above `top` (roof underside; 0 = none) are clipped. */
-  riderWindow?: (entity: number) => { bottom: number; top: number } | undefined;
+   *  below `bottom` (door / beltline) and above `top` (roof underside; 0 = none) are clipped. ADR-522: Canvas2D
+   *  honours the same band (riderWindowBand) + glass sheen; WebGL2 adds the glass tint in the sprite FS. */
+  riderWindow?: (entity: number) => { bottom: number; top: number; glass?: { lo: number; hi: number; vehicle: number; roof?: { x0: number; y0: number; x1: number; y1: number } } } | undefined;
   /** Wetness {level u8 0..255} (art's 0-3 intensity maps onto 0..255). */
   wetness?: WetnessDefT;
   /** BodyTemp {cold, heat u8; shivering 0/1}: shivering gates the shiver, cold scales it and drives the frost rim, heat drives flush. */
@@ -221,7 +262,7 @@ uniform highp sampler2D uFrames;
 uniform float uZPerPx, uHH, uHW, uTime, uWind, uOutline;
 uniform int uShadowPass, uShadowMode;
 uniform vec2 uShadowDir; uniform float uBlobAspect; uniform vec2 uWindVec; // screen-x wind direction, strength 0..1
-out vec4 vFx; out vec3 vUvRaw; flat out int vLayer; out float vAlpha; flat out int vFlags; flat out vec4 vRect; out vec3 vTint; flat out vec3 vMisc; out vec2 vLocal; out vec2 vScr; flat out float vOcc; flat out ivec2 vFB; flat out vec4 vTint2; flat out float vSwayPx; flat out vec4 vLT; out vec2 vDeck; flat out ivec2 vDeckM; flat out float vSeed; out vec2 vRoofClip; flat out vec3 vRoofLine;
+out vec4 vFx; out vec3 vUvRaw; flat out int vLayer; out float vAlpha; flat out int vFlags; flat out vec4 vRect; out vec3 vTint; flat out vec3 vMisc; out vec2 vLocal; out vec2 vScr; flat out float vOcc; flat out ivec2 vFB; flat out vec4 vTint2; flat out float vSwayPx; flat out vec4 vLT; out vec2 vDeck; flat out ivec2 vDeckM; flat out float vSeed; out vec2 vRoofClip; flat out vec3 vRoofLine; flat out float vWinGlass; // ADR-522: rider seen through a window (aJ.w > 0, not Flat)
 uniform vec2 uViewPx; // drawing-buffer size (device px): sprite pivots snap to whole device pixels (no shimmer / half-texel blur)
 vec2 snapPivot(vec2 p) {
   if (uViewPx.x <= 0.0) return p;
@@ -238,6 +279,7 @@ void main() {
   vFx = (flags & ${ROOF_CLIP}) != 0 ? vec4(0.0) : aF; vFlags = flags; vRect = uvr; vTint = aD.rgb; int fw = int(dim.w + 0.5); vFB = ivec2(fw & 15, fw >> 4); vMisc = vec3(aE.y, aE.z, float(fw & 1)); vAlpha = aB.w;
   vTint2 = aH; vSwayPx = 0.0; vLT = aI; vSeed = aB.z;
   vLocal = c * 2.0 - 1.0; vOcc = aG.w; vScr = aA.xy; vDeck = vec2(0.0); vDeckM = ivec2(0); vRoofClip = vec2(-1.0, 0.0); vRoofLine = vec3(0.0);
+  vWinGlass = (flags & 8) == 0 && aJ.w > 0.0 ? 1.0 : 0.0; // ADR-522: window top clip (same condition as yTop below)
   if (uShadowPass == 1) {
     if (aE.x <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
     vAlpha = aE.x;
@@ -290,7 +332,7 @@ void main() {
 export const PAINT_MASK_ONLY = 9;
 const FS = /* glsl */ `#version 300 es
 precision highp float; precision highp int;
-in vec4 vFx; in vec3 vUvRaw; flat in int vLayer; in float vAlpha; flat in int vFlags; flat in vec4 vRect; in vec3 vTint; flat in vec3 vMisc; in vec2 vLocal; in vec2 vScr; flat in float vOcc; flat in ivec2 vFB; flat in vec4 vTint2; flat in float vSwayPx; flat in vec4 vLT; in vec2 vDeck; flat in ivec2 vDeckM; flat in float vSeed; in vec2 vRoofClip; flat in vec3 vRoofLine;
+in vec4 vFx; in vec3 vUvRaw; flat in int vLayer; in float vAlpha; flat in int vFlags; flat in vec4 vRect; in vec3 vTint; flat in vec3 vMisc; in vec2 vLocal; in vec2 vScr; flat in float vOcc; flat in ivec2 vFB; flat in vec4 vTint2; flat in float vSwayPx; flat in vec4 vLT; in vec2 vDeck; flat in ivec2 vDeckM; flat in float vSeed; in vec2 vRoofClip; flat in vec3 vRoofLine; flat in float vWinGlass;
 uniform vec3 uSeason; // ADR-239: fall, winter, snow cap
 uniform highp sampler2DArray uAtlas, uPoolTex, uEmis, uSheenM, uSwayM, uTintM; uniform highp sampler2D uTints;
 #define vUv vec3(vUvRaw.xy, float(vLayer)) // flat int array layer (no interpolated layer index)
@@ -371,6 +413,17 @@ void main() {
     if (a <= 0.01) discard;
     oColor = vec4(uShadowColor, a * uShadowAlpha * vAlpha);
     oEmissive = vec4(0.0);
+    return;
+  }
+  if ((vFlags & ${GLASS_QUAD}) != 0) { // ADR-527 (2): a window-sized glass quad (one per vehicle): flat glass tint
+    // + the same screen-anchored sheen as the rider glass (ADR-522), no art — the tint reads as one window.
+    // The quad's instance alpha is 1, so the output alpha is the Canvas2D tint's 0.12 (RIDER_GLASS_TINT).
+    vec3 gc = vec3(0.69, 0.81, 0.91);
+    float ph = fract((vScr.x + vScr.y * 0.6) / 110.0);
+    gc = mix(gc, vec3(1.0), (1.0 - smoothstep(0.0, 0.10, abs(ph - 0.5))) * 0.08);
+    float ga = 0.12 * vAlpha * uAlphaMul;
+    oColor = vec4(gc, ga);
+    oEmissive = vec4(0.0, 0.0, 0.0, ga);
     return;
   }
   vec3 uv = vUv;
@@ -459,6 +512,11 @@ void main() {
     col = mix(col, gc, 0.68); alpha *= 0.62 + 0.08 * sin(uTime * 4.0); // ADR-196: clearer green/red, ~0.6 alpha, subtle pulse
   }
   if ((vFlags & 512) != 0) col = clamp((col - 0.5) * uFaceContrast + 0.5, 0.0, 1.0); // face/eyes: small contrast lift (after tint + status)
+  if (vWinGlass > 0.5) { // ADR-522: glass tint + sheen over a rider seen through the window (Canvas2D: drawRiderGlass)
+    col = mix(col, vec3(0.78, 0.87, 0.93), 0.12);
+    float ph = fract((vScr.x + vScr.y * 0.6) / 110.0);
+    col = mix(col, vec3(1.0), (1.0 - smoothstep(0.0, 0.10, abs(ph - 0.5))) * 0.08);
+  }
   float e = (vFlags & 2) != 0 ? 1.0 : 0.0;
   if (vMisc.z > 0.5) { vec4 em = texture(uEmis, sideUv(vUv, uWinE)); e = max(e, max(em.r, max(em.g, em.b)) * em.a * ((vFlags & 64) != 0 ? uNightGate : 1.0)); } // 64: night-only emissive
   oColor = vec4(col, alpha);
@@ -749,6 +807,29 @@ export class SpriteBatch {
     return o;
   }
 
+  /** ADR-527 (2): emit one glass quad for a merged window rect (the WebGL2 twin of the Canvas2D merged glass).
+   * The rect is clamped to the roofline first (shared with Canvas2D); the quad's key sits just above the riders
+   * at every row of the window. The quad's pivot is on the rect's bottom edge, (y1 - pivotY) px below the
+   * deepest rider's pivot, and each px of height adds zFactor / zStep to the vertex key, so the pivot key is
+   * maxPivotKey less that drop plus GLASS_DEPTH_MARGIN (ADR-528: the old maxKey + maxBelt * zPerPx + HELD_BIAS
+   * added the beltline drop the vertex shader already adds per row, lifting the quad ~0.26 above the riders —
+   * enough to tint over a pedestrian within ~half a tile in front of the window. The margin is the same at
+   * every window row and for every rider: the deepest rider's margin is exactly GLASS_DEPTH_MARGIN, and other
+   * riders' margins are larger by their key/pivot offsets. The quad casts no shadow (shadow alpha 0) and
+   * carries NoOutline | GLASS_QUAD; the fragment shader outputs flat glass tint + screen-anchored sheen for it
+   * and ignores the texel. */
+  emitWindowGlassQuad(acc: WindowGlassAcc): void {
+    const rect = clampGlassRectToRoofline(acc, acc.roof);
+    if (!rect) return;
+    const zPerPx = this.zFactor / this.iso.zStep;
+    const key = acc.maxPivotKey - (acc.y1 - acc.pivotY) * zPerPx + GLASS_DEPTH_MARGIN;
+    const q = windowGlassQuad(rect, key, acc.frame);
+    if (!q) return;
+    const o = this.writeOne(q.x, q.y, q.key, q.scale, { entry: q.entry, ax: q.ax, ay: q.ay } as ResolvedFrame, SpriteFlag.NoOutline | GLASS_QUAD, 0, 1, q.sliceL, q.sliceR, 0, 0, 0, 0, 0, 0);
+    o[39] = q.topClip;
+    this.push(o, 0);
+  }
+
   private layerBase = new Float32Array(INSTANCE_FLOATS);
   /** Layer tint: primary -> rgb 12..14, secondary -> 28..30, mode+1 / strength / saturation -> 33..35. multiply / lerp
    *  colours are divided by the layer's tintNeutral here (see layerTint). */
@@ -794,6 +875,8 @@ export class SpriteBatch {
     const { world, alpha, rect, atlas } = cx;
     this.frameNo++;
     this.n = 0; this.depthMin = cx.depthMin; this.depthRange = cx.depthRange;
+    // ADR-527 (2): one merged window rect per vehicle for the glass quad, flushed before the sort
+    const glassAcc = new Map<number, WindowGlassAcc>();
     if (!atlas.registry) { this.visible = 0; return; }
     const sp = world.store(Sprite), tr = world.store(Transform), pv = world.store(PrevTransform);
     const sh = world.store(Shadow), oc = world.store(Occluder), ls = world.store(LightSource);
@@ -1047,6 +1130,18 @@ export class SpriteBatch {
       let dkey = key; if (bodyL) { const pd = paperDollDepth(key, res.h, res.ay, scale, this.zFactor / this.iso.zStep); o0[15] = pd.footDy; o0[2] = dkey = pd.key; }
       if (e === this.focusEntity && occ.silhouette) { this.silInst.set(o0.subarray(0, INSTANCE_FLOATS)); this.silInst[27] = 0; this.silInst[2] = silhouetteKey(dkey, layers?.length ?? 0); this.silOn = true; }
       this.pushOcc(o0, 0, occT, occ.mode);
+      // ADR-527 (2): merge this rider's window rect into its vehicle's glass quad (the binding is a pure
+      // lookup, so re-reading it here is cheap). The rect is the window's own outline in screen px (same as
+      // the Canvas2D merged rect); the roofline is absolute from the first rider (the line is the same from
+      // every rider: one z per def's cabin seats). maxPivotKey / pivotY track the deepest rider's UNDROPPED
+      // pivot key and pivot screen-y (ADR-528: the quad's key is computed from those, not from dkey).
+      if (bodyL) { const rw = cx.bindings.riderWindow?.(e); if (rw?.glass) {
+        const g = rw.glass, sc = scale;
+        const r = { x0: sx + g.lo * sc, x1: sx + g.hi * sc, y0: sy - rw.top * sc, y1: sy - rw.bottom * sc };
+        const a = glassAcc.get(g.vehicle);
+        if (a) { a.x0 = Math.min(a.x0, r.x0); a.x1 = Math.max(a.x1, r.x1); a.y0 = Math.min(a.y0, r.y0); a.y1 = Math.max(a.y1, r.y1); if (key > a.maxPivotKey) { a.maxPivotKey = key; a.pivotY = sy; } }
+        else glassAcc.set(g.vehicle, { ...r, vehicle: g.vehicle, roof: g.roof ? { x0: sx + g.roof.x0 * sc, y0: sy - g.roof.y0 * sc, x1: sx + g.roof.x1 * sc, y1: sy - g.roof.y1 * sc } : undefined, maxPivotKey: key, pivotY: sy, frame: { entry: res.entry, w: res.w, h: res.h } });
+      } }
       let dress = true;
       // page priority: 0 = local player, else squared tile distance to them; near characters (<= PRIO_NEAR) are
       // exempt from the dress cap and the ladder's wearable eviction and win pool slots over farther ones
@@ -1170,6 +1265,10 @@ export class SpriteBatch {
     this.staticInstances = 0;
     const bpDef = cx.bindings.buildPiece;
     if (bpDef) this.gatherPieces(cx, world.store(bpDef), hasFocus, fwx, fwy, playerLevel, cut);
+
+    // ADR-527 (2): one window-sized glass quad per vehicle, after every rider (so the quad's key clears the
+    // riders' keys) and before the sort (so it is sorted with the rest of the frame).
+    for (const acc of glassAcc.values()) this.emitWindowGlassQuad(acc);
 
     // ---- sort ----
     const n = this.n; const sorted = this.sortKeys.subarray(0, n);

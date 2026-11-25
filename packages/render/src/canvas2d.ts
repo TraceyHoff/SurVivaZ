@@ -38,6 +38,7 @@ import { VfxLayer } from "./vfx.js";
 import { WeatherFx } from "./weatherFx.js";
 import { newStats, type FrameStats } from "./gl/util.js";
 import { BED_SORT_EPS, occluderFade, roofClipAt, roofClipLine, type GameplayBindings } from "./sprites.js";
+import { clampGlassRectToRoofline } from "./vehicles/seats.js";
 import { DeckNeighbors, rotSideMask, deckTopPx, deckClipPolygon, deckSeamPatches, pieceTieBreak, exactTieBreak, pieceOrder, VERTEX_POST_BIAS } from "./building/deckFaces.js";
 import { lCornerArmPiece, lCornerArmPivots, PieceCoverIndex, pieceShouldCutaway, pieceHiddenByStory, isEnclosurePieceKey, tileKey, ROT_EXACT_PIVOT, ROT_DECK_LIFT, ROT_VERTEX_POST, ROT_NO_OCCLUDE } from "./building/modular.js";
 import { isoZDepthFactor } from "./depth.js";
@@ -65,6 +66,48 @@ const C2D_SIDE: Record<number, [number, number, number]> = {
 
 /** ADR-145: snap a sprite origin to a whole device pixel (x*s + o integer) so nearest-neighbour pixel art keeps even texel widths. */
 export function snapPx(v: number, s: number, o: number): number { return s >= 1 ? (Math.round(v * s + o) - o) / s : v; }
+
+/** ADR-522: clip-rect half-width (pivot-relative px) for the rider window band: far wider than any doll, so the
+ *  band clips rows only (beltline..roof); the glass sheen is as wide as the rider, so the vehicle body outside the
+ *  rider stays untouched. */
+export const RIDER_WINDOW_HALF_W = 512;
+/** ADR-522: glass over a rider seen through a window (Canvas2D fill styles; WebGL2 uses the same tint in sprites.ts). */
+export const RIDER_GLASS_TINT = "rgba(176, 206, 232, 0.12)";
+export const RIDER_GLASS_SHEEN = "rgba(255, 255, 255, 0.10)";
+/**
+ * ADR-522: a rider window band (VehicleView RiderPlacement.clip, 1x px above the seat pivot) as a pivot-relative
+ * clip rect at drawn scale `k` (y = the roof underside, h = the visible rows), or undefined when there is no band:
+ * no clip = draw whole, and a clip whose top is at/below its bottom = no window (hidden behind the body).
+ */
+export function riderWindowBand(clip: { bottom: number; top: number } | undefined, k: number): { y: number; h: number } | undefined {
+  if (!clip || clip.top <= clip.bottom) return undefined;
+  return { y: -clip.top * k, h: (clip.top - clip.bottom) * k };
+}
+/**
+ * ADR-522: glass tint + a diagonal sheen stripe over a rider clipped to its window band, inside the
+ * pivot-translated, band-clipped context. `halfW` is the rider's half-width in drawn px (the tint covers the rider,
+ * not the whole window). The band clip contains the stripe, so it never spills onto the roof or door.
+ */
+export function drawRiderGlass(g: CanvasRenderingContext2D, band: { y: number; h: number }, halfW: number): void {
+  g.fillStyle = RIDER_GLASS_TINT; g.fillRect(-halfW, band.y, halfW * 2, band.h);
+  const slant = band.h * 0.35, w = Math.max(8, band.h * 0.22), x0 = -halfW * 0.3;
+  g.fillStyle = RIDER_GLASS_SHEEN;
+  g.beginPath(); g.moveTo(x0, band.y); g.lineTo(x0 + slant, band.y + band.h); g.lineTo(x0 + slant + w, band.y + band.h); g.lineTo(x0 + w, band.y); g.closePath(); g.fill();
+}
+
+/**
+ * ADR-525 (c): glass tint + a diagonal sheen stripe over a whole vehicle window, in iso-px (the renderer's loop-level
+ * coordinate space: pivot screen position + window interval, band rows). Unlike drawRiderGlass (the rider-width
+ * fallback for seats with no window outline), the tint spans the window's own outline and the stripe is anchored to
+ * the window (30% across it), so it reads as light on the glass instead of following the rider.
+ */
+export function drawWindowGlass(g: CanvasRenderingContext2D, r: { x0: number; y0: number; x1: number; y1: number }): void {
+  const w = r.x1 - r.x0, h = r.y1 - r.y0; if (w <= 0 || h <= 0) return;
+  g.fillStyle = RIDER_GLASS_TINT; g.fillRect(r.x0, r.y0, w, h);
+  const slant = h * 0.35, sw = Math.max(8, h * 0.22), x0 = r.x0 + w * 0.3;
+  g.fillStyle = RIDER_GLASS_SHEEN;
+  g.beginPath(); g.moveTo(x0, r.y0); g.lineTo(x0 + slant, r.y1); g.lineTo(x0 + slant + sw, r.y1); g.lineTo(x0 + sw, r.y0); g.closePath(); g.fill();
+}
 
 /** ADR-182: water colour from deep (#3484bc) toward shallow (#4f93bf) by shore tint 0..1. */
 /** ADR-184: deep blue -> shore turquoise (same endpoints as the WebGL2 mesh). */
@@ -693,7 +736,50 @@ export class Canvas2DRenderer {
     if (reg) for (const pc of this.gatherPieces(world, reg)) items.push({ e: pc.e, sx: pc.sx, sy: pc.sy, depth: pc.depth, ord: pc.ord, front: false, pc });
     items.sort((a, b) => (a.depth - b.depth) || (a.ord - b.ord)); // ADR-197: total order (no equal-key coin flips) // Flat ground decals (roads) first: always under feet and entities
     const an = this.bindings.animState; const tick = world.tick;
+    // ADR-525 (c): one merged window-glass rect per vehicle (iso-px), drawn once in depth order (ADR-528:
+    // flushed inside the loop once its riders are drawn) so the tint never stacks per rider. Riders without
+    // a window outline (open seats) keep the rider-width glass inline.
+    // ADR-527 (1): each entry also carries the roofline (absolute endpoints, from the first rider — the line is
+    // the same from every rider: all cabin seats of a def share one z, and the v-dependence cancels), so the
+    // merged rect's top can be clamped to it at draw time and the glass never rises above the roof.
+    // ADR-528: the merged glass must draw in depth order, not after the whole loop — a pedestrian in front of
+    // a window was tinted by the post-loop flush. The per-vehicle depth is precomputed here (the max item depth
+    // over the vehicle's riders with a visible glass band — the same gate the loop uses), because the rect is
+    // not complete until every rider is drawn and the loop cannot know the last rider until it has passed them.
+    // Items are sorted by depth, so once the loop reaches an item deeper than a vehicle's glass depth, every
+    // rider of that vehicle has been drawn and its rect is complete.
+    const glassDepth = new Map<number, number>();
     for (const it of items) {
+      if (it.pc) continue;
+      const sp = world.get(it.e, Sprite)!; if (sp.scale > 0 && sp.scale < 0.01) continue;
+      const rw = this.bindings.riderWindow?.(it.e);
+      if (!rw?.glass || !riderWindowBand(rw, sp.scale || 1)) continue;
+      glassDepth.set(rw.glass.vehicle, Math.max(glassDepth.get(rw.glass.vehicle) ?? -Infinity, it.depth));
+    }
+    const vehicleGlass = new Map<number, { x0: number; y0: number; x1: number; y1: number; roof: { x0: number; y0: number; x1: number; y1: number } | undefined }>();
+    const recordGlass = (glass: { lo: number; hi: number; vehicle: number; roof?: { x0: number; y0: number; x1: number; y1: number } }, px: number, py: number, b: { y: number; h: number }, kk: number): void => {
+      const r = { x0: px + glass.lo * kk, x1: px + glass.hi * kk, y0: py + b.y, y1: py + b.y + b.h,
+        roof: glass.roof ? { x0: px + glass.roof.x0 * kk, y0: py - glass.roof.y0 * kk, x1: px + glass.roof.x1 * kk, y1: py - glass.roof.y1 * kk } : undefined };
+      const m = vehicleGlass.get(glass.vehicle);
+      if (m) { m.x0 = Math.min(m.x0, r.x0); m.x1 = Math.max(m.x1, r.x1); m.y0 = Math.min(m.y0, r.y0); m.y1 = Math.max(m.y1, r.y1); if (!m.roof) m.roof = r.roof; }
+      else vehicleGlass.set(glass.vehicle, r);
+    };
+    /** Draw (and drop) every merged glass rect whose vehicle's riders are all drawn — its precomputed depth
+     * below `upto` — in depth order. Called before each item deeper than the glass, and once after the loop
+     * for the deepest glass. */
+    const flushGlass = (upto: number): void => {
+      if (!vehicleGlass.size) return;
+      const due = [...vehicleGlass.keys()].filter((v) => (glassDepth.get(v) ?? Infinity) < upto)
+        .sort((a, b) => (glassDepth.get(a) ?? 0) - (glassDepth.get(b) ?? 0));
+      for (const v of due) {
+        const r = vehicleGlass.get(v)!;
+        const clamped = clampGlassRectToRoofline(r, r.roof);
+        if (clamped) drawWindowGlass(g, clamped);
+        vehicleGlass.delete(v);
+      }
+    };
+    for (const it of items) {
+      if (vehicleGlass.size) flushGlass(it.depth);
       if (it.pc) { this.drawPiece(it.pc, s, ox, oy); if (it.pc.hearth) this.drawHearth(it.pc.sx, it.pc.sy, time, entityIndex(it.e), s, ox, oy, it.pc.scale); continue; }
       const sp = world.get(it.e, Sprite)!; if (sp.scale > 0 && sp.scale < 0.01) continue;
       let anim = "idle"; let tAnim = time;
@@ -707,6 +793,11 @@ export class Canvas2DRenderer {
         if (def && isFireAnim(def)) { anim = "idle"; tAnim = fireAnimTime(time, entityIndex(it.e)); hearth = true; }
       }
       const facing = world.get(it.e, Transform)!.facing + vFace; const k = sp.scale || 1; // ADR-253: art facing = world facing + view
+      // ADR-522: a rider in a true-scale vehicle cab shows only through the window band (beltline..roof), as WebGL2
+      // (sprites.ts riderWindow binding). A band with no visible rows = no window: hidden behind the body.
+      const rw = this.bindings.riderWindow?.(it.e);
+      const band = riderWindowBand(rw, k);
+      if (rw && !band) continue;
       // ADR-134 flinch: brief brightness flash + tilt about the foot (same bindings as WebGL's hitFlash)
       const hf = this.bindings.hitFlash?.(it.e) ?? 0; const tilt = this.bindings.hitTilt?.(it.e) ?? 0;
       const fx = (): void => { if (tilt) g.rotate(tilt); if (hf > 0) g.filter = `brightness(${(1 + 2.5 * Math.min(1, hf)).toFixed(2)})`; };
@@ -723,9 +814,12 @@ export class Canvas2DRenderer {
           const body = ls.find((p) => p.layer.slot === "body");
           const bRect: [number, number, number, number] | null = body ? [it.sx + bx - body.ref.anchorX * k, it.sx + bx - body.ref.anchorX * k + body.ref.w * k, it.sy + by - body.ref.anchorY * k, it.sy + by] : null;
           const occA = this.occAlpha(world, it.e, occ, it.front, bRect, body ? body.ref.anchorY * k : 0, 0, isActor);
+          // ADR-522: clip every layer to the window band, then glass over the clipped doll (same band on WebGL2)
+          if (band) { g.save(); g.translate(snapPx(it.sx + bx, s, ox), snapPx(it.sy + by, s, oy)); g.beginPath(); g.rect(-RIDER_WINDOW_HALF_W, band.y, RIDER_WINDOW_HALF_W * 2, band.h); g.clip(); }
           for (const p of ls) { const li = this.layerImage(p); if (!li) continue; const r = p.ref;
             g.save(); g.translate(snapPx(it.sx + bx, s, ox), snapPx(it.sy + by, s, oy)); fx(); if (occA < 1) g.globalAlpha = occA; if (r.flipX) g.scale(-1, 1);
             g.drawImage(li.img, li.x, li.y, r.w, r.h, (p.dx - r.anchorX) * k, (p.dy - r.anchorY) * k, r.w * k, r.h * k); g.restore(); stats.drawCalls++; }
+          if (band) { const halfW = (body ? body.ref.w : Math.max(...ls.map((p) => p.ref.w))) * k / 2 + 2; g.globalAlpha = occA; if (rw?.glass) recordGlass(rw.glass, snapPx(it.sx + bx, s, ox), snapPx(it.sy + by, s, oy), band, k); else drawRiderGlass(g, band, halfW); g.restore(); }
           stats.sprites++; continue;
         }
       }
@@ -743,9 +837,19 @@ export class Canvas2DRenderer {
       // ADR-417: tall static props / explicit Occluders in front of the focus whose rect overlaps it fade (WebGL occlusion)
       const occA = this.occAlpha(world, it.e, occ, it.front, [it.sx - f.anchorX * k, it.sx - f.anchorX * k + dw, it.sy - f.anchorY * k, it.sy], f.anchorY * k, sp.flags, isActor);
       g.save(); g.translate(snapPx(it.sx, s, ox), snapPx(it.sy, s, oy)); fx(); if (f.flipX) g.scale(-1, 1); if (sAl !== undefined || occA < 1) g.globalAlpha = Math.min(1, sAl ?? 1) * occA;
-      g.drawImage(img, f.x, f.y, f.w, f.h, -f.anchorX * k, -f.anchorY * k, dw, dh); g.restore(); stats.sprites++; stats.drawCalls++;
+      if (band) { g.beginPath(); g.rect(-RIDER_WINDOW_HALF_W, band.y, RIDER_WINDOW_HALF_W * 2, band.h); g.clip(); } // ADR-522: window band
+      g.drawImage(img, f.x, f.y, f.w, f.h, -f.anchorX * k, -f.anchorY * k, dw, dh);
+      if (band) { if (rw?.glass) recordGlass(rw.glass, snapPx(it.sx, s, ox), snapPx(it.sy, s, oy), band, k); else drawRiderGlass(g, band, f.w * k / 2 + 2); } // ADR-522: glass over the clipped rider; ADR-525 (c): window glass is merged and drawn once after the loop
+      g.restore(); stats.sprites++; stats.drawCalls++;
       if (hearth) this.drawHearth(it.sx, it.sy, time, entityIndex(it.e), s, ox, oy, k);
     }
+    // ADR-525 (c): window glass, once per vehicle over all its riders (the merged rects are the windows' own
+    // outlines, so the tint never stacks per rider and the sheen stripe stays on the glass).
+    // ADR-527 (1): the merged rect's top is clamped to the roofline first — the glass never draws above the
+    // roof (the RV's rear roof is higher than its front cab roof, so the unclamped union overhung ~7 px).
+    // A rect the clamp empties draws nothing (the window is entirely above its own roofline).
+    // ADR-528: most glass already flushed inside the loop, in depth order; this is the tail for the deepest glass.
+    flushGlass(Infinity);
     // ADR-246: weather sprites (same spawner as WebGL2, half the rate), over the scene and under the lightmap
     if (reg) this.drawWeatherFx(world, reg, wr.kind, wt, day.daylight, time, s, ox, oy, stats);
     // ADR-216: real lightmap (ambient + additive iso light ellipses) multiplied onto the scene, like the WebGL LightPass

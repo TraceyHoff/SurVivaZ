@@ -7,7 +7,7 @@ import { PACK_DIR, readManifestJson } from "@engine/assets/node";
 import { RETIRED_BUILD_RE, AtlasManager } from "../src/assets/atlasManager.js";
 import {
   LightSource, Occluder, Sprite, VehicleView, artScaleFor, artSeat, heightX, modelZScale, resolveVehicleArt, seatZScale, targetHeightPx, toWorld,
-  PLAYER_HEIGHT_PX, Z_PER_M, VEHICLE_SEAT_ART, PX_PER_M_HEIGHT, RIDER_CLIP_HIDDEN, RIDER_DK_ART, RIDER_LEG_PX, RIDER_HEAD_PX, footprintKeyAt, windowBand, VIEW_RISE, WINDSCREEN_RAKE_M, type VehicleRenderDef,
+  PLAYER_HEIGHT_PX, Z_PER_M, VEHICLE_SEAT_ART, PX_PER_M_HEIGHT, RIDER_CLIP_HIDDEN, RIDER_DK_ART, RIDER_LEG_PX, RIDER_HEAD_PX, footprintKeyAt, windowBand, windowGlassSpan, windowGlassRoofline, VIEW_RISE, WINDSCREEN_RAKE_M, type VehicleRenderDef,
 } from "../src/index.js";
 // @ts-expect-error untyped build script
 import { seatTable } from "../scripts/gen-vehicle-seats.mjs";
@@ -72,12 +72,12 @@ describe("ADR-518 true-scale vehicles", () => {
         n++;
       });
     });
-    expect(n).toBe(384);
+    expect(n).toBe(456); // 57 Art seats x 8 facings (ADR-521 adds 9: van rows 3-4, pickup bed, RV rows 2-3)
   });
 
   const mk = () => { const w = new World(); w.register(Transform); for (const c of [Sprite, LightSource, Occluder]) w.register(c); return w; };
-  it("riders sit on Art's seats and beat the body over every row they show: cab seats through the glass only, bikes whole, extra seats hidden", () => {
-    let shown = 0, hidden = 0; let w = mk(), v = new VehicleView(w, reg, { art: true });
+  it("riders sit on Art's seats and beat the body over every row they show: cab seats through the glass only, bikes whole, extra seats hidden (van's 8th seat is on Art's row-4 seat since ADR-521)", () => {
+    let shown = 0, hidden = 0, shown104 = 0; let w = mk(), v = new VehicleView(w, reg, { art: true });
     for (const view of [0, 1, 2, 3]) for (let dir = 0; dir < 8; dir++) {
       w = mk(); v = new VehicleView(w, reg, { art: true }); // fresh smoother: the first sync snaps to the snapshot pose
       const h = (dir * Math.PI) / 4, sedan = def("car_sedan"), bike = def("bike_road"), van = def("van_passenger");
@@ -110,9 +110,15 @@ describe("ADR-518 true-scale vehicles", () => {
         expect(K + (hs / 16) / 3).toBeLessThan(footprintKeyAt(K, hs + rows[0]!, top, below, 1 / 48, 16));
       }
       expect(by(103).cropped).toBe(false);
-      expect(by(104).clip).toEqual(RIDER_CLIP_HIDDEN); // gameplay seat 8 of 8: Art paints 4 window seats
+      // ADR-521: gameplay seat 8 of 8 is Art's row-4 seat (a window seat), so its clip is the windowBand for this
+      // view/dir — a real band where the seat shows, RIDER_CLIP_HIDDEN only where the far side hides it (never hidden
+      // for lack of a seat, as it was under ADR-518).
+      const hv104 = h + view * (Math.PI / 2), cu104 = (Math.cos(hv104) + Math.sin(hv104)) / Math.SQRT2, cv104 = (Math.cos(hv104) - Math.sin(hv104)) / Math.SQRT2;
+      const band104 = windowBand(van, 7, cu104, cv104);
+      if (band104) { shown104++; const glass104 = windowGlassSpan(van, 7, cu104, cv104)!; expect(by(104).clip).toEqual({ bottom: band104.bottom, top: band104.top, glass: { ...glass104, vehicle: 3, roof: windowGlassRoofline(van, 7, cu104, cv104) } }); }
+      else expect(by(104).clip).toEqual(RIDER_CLIP_HIDDEN);
     }
-    expect(shown).toBeGreaterThan(16); expect(hidden).toBeGreaterThan(4);
+    expect(shown).toBeGreaterThan(16); expect(hidden).toBeGreaterThan(4); expect(shown104).toBeGreaterThan(0);
     // side view (Art "E"): the far-side driver is under the roof (hidden); the near-side passenger shows hip..chest through the glass
     w = mk(); v = new VehicleView(w, reg, { art: true });
     const e = v.sync([{ key: 1, def: def("car_sedan"), x: 10, y: 10, heading: -Math.PI / 4, occupants: [101, 102, 0, 0] }], 0, { darkness: 0 });

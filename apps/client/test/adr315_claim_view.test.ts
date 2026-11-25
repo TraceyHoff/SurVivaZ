@@ -12,6 +12,8 @@ import { makeWorld, plantClaim, spawnLearned } from "../../../packages/gameplay/
 const d = G.defaultDefs(); const FLAG = d.pieceId("claim_totem"); const R = d.pieces.get(FLAG)!.privilegeRadius;
 const setPid = (w: World, e: Entity, id: number) => { if (!w.isRegistered(PlayerId)) w.register(PlayerId); if (w.has(e, PlayerId)) w.set(e, PlayerId, { id }); else w.add(e, PlayerId, { id }); };
 const moveTo = (w: World, e: Entity, x: number, y: number) => w.set(e, Transform, { ...w.get(e, Transform)!, x, y });
+// ADR-524: Interact only offers what is in front — point the player's facing at the target before Interacting.
+const face = (w: World, e: Entity, x: number, y: number) => { const t = w.get(e, Transform)!; w.set(e, Transform, { ...t, facing: Math.atan2(y - t.y, x - t.x) }); };
 function world() {
   const w = makeWorld(); const me = spawnLearned(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 }); setPid(w, me, 1);
   const other = spawnLearned(w, { x: 200, y: 0, maxWeight: 0, clientId: 2 }); setPid(w, other, 2);
@@ -54,7 +56,7 @@ describe("ADR-315 claim preview rings", () => {
 
 describe("ADR-315 Use / hand on a Claim Flag", () => {
   it("Interact at a flag picks the claim toggle — never a panel or inventory", () => {
-    const { w, me, mine } = world(); const t = w.get(mine, Transform)!; moveTo(w, me, t.x + 1, t.y + 0.5);
+    const { w, me, mine } = world(); const t = w.get(mine, Transform)!; moveTo(w, me, t.x + 1, t.y + 0.5); face(w, me, t.x, t.y);
     expect(G.interactPanel({ world: w, player: me })).toEqual({ panel: "claim", piece: mine });
     const hold = holdStation({ kind: 0, lostAt: 0 }, { claim: mine }, () => true, 0);
     expect(hold).toEqual({ station: mine, kind: CLAIM_HINT_KIND, lostAt: 0 }); // the hand icon over the flag
@@ -63,6 +65,7 @@ describe("ADR-315 Use / hand on a Claim Flag", () => {
     const { w, me, mine } = world(); const t = w.get(mine, Transform)!; moveTo(w, me, t.x + 3, t.y + 0.5);
     const sn = G.snapPlacement(w, { piece: d.pieceId("basic_storage_box"), x: t.x + 3.5, y: t.y + 1.5, level: 0, rot: 0, tier: 0, variant: 0 });
     if (typeof sn === "number") throw new Error(String(sn)); const box = G.placePiece(w, me, sn, { pay: false });
+    const bt = w.get(box, Transform)!; face(w, me, bt.x, bt.y); // the box is east-south of the player; the flag sits behind
     expect(G.interactPanel({ world: w, player: me })).toEqual({ panel: "storage", piece: box });
   });
   it("toggles a client-local border on any flag, and forgets destroyed flags", () => {

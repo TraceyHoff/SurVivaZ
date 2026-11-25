@@ -1,5 +1,6 @@
 import { MOUNT_BOTS } from "../mount_defs.js";
 import { isUnderground } from "../terrain_depth.js";
+import { inFrontOf } from "../compass.js"; // ADR-524: bots face a door / container before toggling / opening it
 import { walkerWaypoint } from "../systems/creature_nav.js";
 import { planTerrainBase, findRampOnRoute } from "./terrain_base.js";
 import { WORN_PATH_TRIPS } from "./worn_paths.js"; // ADR-419: same "frequent route" threshold that wears a path (ADR-413)
@@ -257,7 +258,12 @@ export function goTo(c: Ctx, o: { moveX: number; moveY: number; aimX: number; ai
         const w = worldOf(c), wp = w ? walkerWaypoint(w, c.agent.bb.num("selfEntity") as Entity, c.self.x, c.self.y, near.x, near.y) : undefined; // ADR-382: always route (see the main path below)
         toward(o, c.self.x, c.self.y, wp?.x ?? near.x, wp?.y ?? near.y, s); return viaDoor;
       }
-      if (!door.open) { stop(o); if (c.self.tick - c.bb.num("doorAt", -1e9) > 20) { o.actions.push(`door:${door.id}`); c.bb.set("doorAt", c.self.tick); } return viaDoor; }
+      // ADR-524: only open the door when the bot faces it (same ±60° cone as the player's Interact
+      // pick). Movement turns Transform.facing toward the walk (movement.ts ADR-305), so a bot that
+      // walked up to the doorway is facing it; a bot that somehow stands here facing away waits
+      // instead of toggling a door it cannot see. The close-behind toggle below is NOT gated — the
+      // bot walks away from the door there, so it faces away by definition.
+      if (!door.open) { stop(o); if (inFrontOf(c.self.x, c.self.y, c.self.facing, door.x, door.y) && c.self.tick - c.bb.num("doorAt", -1e9) > 20) { o.actions.push(`door:${door.id}`); c.bb.set("doorAt", c.self.tick); } return viaDoor; }
       c.bb.set("doorPhase", 1); c.bb.set("doorShut", 1); toward(o, c.self.x, c.self.y, far.x, far.y, 0.6); return viaDoor;
     }
     c.bb.set("doorPhase", 0);

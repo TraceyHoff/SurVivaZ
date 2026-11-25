@@ -17,3 +17,14 @@ export const compassDir = (heading: number): string => {
 export const compassOf = (facing: number): { heading: number; dir: string } => {
   const heading = compassHeading(facing); return { heading, dir: compassDir(heading) };
 };
+
+/** ADR-524: Interact only picks a target right in front — a ±60° half-angle cone (dot >= 0.5). */
+export const INTERACT_FACING_DOT = 0.5;
+/** True when (tx, ty) lies inside the ±60° cone around `facing` (world atan2 radians, same convention as
+ *  Transform.facing); a target on top of the actor counts as in front. Shared by the player's Interact
+ *  pick (menus.ts) and the bots' door / container work (ai/base_behaviors.ts). */
+export function inFrontOf(fx: number, fy: number, facing: number, tx: number, ty: number): boolean {
+  const dx = tx - fx, dy = ty - fy, d = Math.hypot(dx, dy);
+  if (d < 0.01) return true;
+  return (dx * Math.cos(facing) + dy * Math.sin(facing)) / d >= INTERACT_FACING_DOT;
+}

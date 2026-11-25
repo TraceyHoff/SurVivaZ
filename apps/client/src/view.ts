@@ -317,7 +317,7 @@ export function blackFrameStep(st: BlackCheckState, r: { gl?: WebGL2RenderingCon
  * (motor or drawn) the rider sits in, in every view rotation. The sim snaps a rider to the vehicle centre; the
  * placement is the seat (the doll's `vehicle` seat socket lands on it, sprites.ts). PrevTransform matches so the
  * rider does not interpolate from the centre. Riders with no view entity yet are skipped. */
-export function applyVehicleRiderPlacements(net: World, view: World, map: Map<Entity, Entity>, placements: readonly RiderPlacement[], windows?: Map<number, { bottom: number; top: number }>): void {
+export function applyVehicleRiderPlacements(net: World, view: World, map: Map<Entity, Entity>, placements: readonly RiderPlacement[], windows?: Map<number, { bottom: number; top: number; glass?: { lo: number; hi: number; vehicle: number } }>): void {
   windows?.clear(); // ADR-518: rider window clips (true-scale cab seats), rebuilt from this frame's placements
   for (const p of placements) {
     const ne = netIdEntity(net, p.rider); if (ne === undefined) continue;
@@ -1169,7 +1169,7 @@ export class IsoView {
   /** ADR-319 rider gait per rider view entity (anim chain ride_idle / ride_walk / ride_gallop). */
   private rideOf = new Map<number, 0 | 1 | 2>();
   /** ADR-322: rider ve -> swim clip (px above the seat pivot); mount -> {act, tick it began} (rider own clock). */
-  private riderClipOf = new Map<number, number>(); /** ADR-518: vehicle rider view entity -> window clip */ private riderWinOf = new Map<number, { bottom: number; top: number }>(); private mountAct = new Map<Entity, { act: MountAct; at: number }>();
+  private riderClipOf = new Map<number, number>(); /** ADR-518: vehicle rider view entity -> window clip */ private riderWinOf = new Map<number, { bottom: number; top: number; glass?: { lo: number; hi: number; vehicle: number } }>(); private mountAct = new Map<Entity, { act: MountAct; at: number }>();
   /** ADR-319 / ADR-320 view-only layers of a mount: saddle overlay and (while ridden) the fore layer drawn over the rider. ADR-361: the harness overlay, one step below the saddle. */
   private mountLayers = new Map<Entity, { harness?: Entity; saddle?: Entity; fore?: Entity }>();
   /**

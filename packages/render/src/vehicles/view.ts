@@ -25,7 +25,7 @@ import { modelHeight, modelZScale } from "./model.js";
 import type { InteriorRegion } from "./interiorPass.js";
 import { ART_INTERIOR, resolveVehicleArt, type VehicleArtBinding, type VehicleArtTable } from "./artPack.js";
 import { PLAYER_HEIGHT_Z, tallerThanPlayer } from "./scale.js";
-import { artSeat, windowBand } from "./seats.js";
+import { artSeat, windowBand, windowGlassSpan, windowGlassRoofline } from "./seats.js";
 import { vehicleSpriteKey } from "./atlas.js";
 import { vehiclePaint } from "./paint.js";
 
@@ -55,8 +55,14 @@ export interface VehicleViewOpts {
 export interface VehicleSpatial { insert(e: Entity, x: number, y: number): void; remove(e: Entity): void }
 export interface RiderPlacement { rider: number; vehicle: number; seat: number; x: number; y: number; z: number; facing: number; cropped: boolean;
   /** ADR-518: rider rows to show, 1x px above the seat pivot (the doll's seat socket): pixels below `bottom` and above
-   *  `top` are clipped (top 0 = no top clip). Absent = draw the whole rider. */
-  clip?: { bottom: number; top: number } }
+   *  `top` are clipped (top 0 = no top clip). Absent = draw the whole rider.
+   *  ADR-525 (c): `glass` is the cabin glass at the seat as a pivot-relative interval on the screen-x axis (1x px),
+   *  with the vehicle key so the Canvas2D renderer draws each vehicle's window glass once (one merged rect per
+   *  vehicle, after all its riders). Absent for open seats (no glass to span) — those keep the rider-width glass.
+   *  ADR-527 (1): `glass.roof` is the roofline over the window in the same pivot-relative 1x-px frame (x along the
+   *  screen-x axis, y = height above the pivot): the merged glass rect is clamped to it, so it never rises above
+   *  the roof (the RV's rear roof is higher than its front cab roof). */
+  clip?: { bottom: number; top: number; glass?: { lo: number; hi: number; vehicle: number; roof?: { x0: number; y0: number; x1: number; y1: number } } } }
 export interface VehiclePose { x: number; y: number; z: number; heading: number; dir: number; interior: boolean }
 
 interface Rec { smooth: PoseSmoother; segs: Entity[]; segIds: number[]; intIds: number[]; lights: Entity[]; def: VehicleRenderDef; pose: VehiclePose; seen: number;
@@ -177,6 +183,8 @@ export class VehicleView {
         if (as) {
           const [px, py] = toWorld(x, y, hq, as.u, as.v); const p = { x: px, y: py, z: z + as.z };
           const band = as.draw === "window" ? windowBand(s.def, i, cu, cv) : undefined;
+          const glass = band ? windowGlassSpan(s.def, i, cu, cv) : undefined; // ADR-525 (c): the window's own outline, for the Canvas2D glass pass
+          const roof = glass ? windowGlassRoofline(s.def, i, cu, cv) : undefined; // ADR-527 (1): the roofline the merged glass must not rise above
           const draw = as.draw === "window" && !band ? "hidden" : as.draw;
           // screen height of the seat above the body pivot (z units): z - view-axis offset x (tileH / 2) / zStep
           const dxy = vu(px, py) + vv(px, py) - (vu(x, y) + vv(x, y)); const hz = as.z - dxy * (this.iso.tileH / 2) / this.iso.zStep;
@@ -193,7 +201,7 @@ export class VehicleView {
           // move along the view axis (screen position unchanged): view-space (d, d, k d) = world R(-view) (d, d)
           const key = vu(p.x, p.y) + vv(p.x, p.y) + p.z * this.zf, kk = this.iso.tileH / this.iso.zStep, dd = (need - key) / (2 + kk * this.zf);
           p.x += (vc + vsn) * dd; p.y += (vc - vsn) * dd; p.z += dd * kk;
-          const clip = band ? { bottom: band.bottom, top: band.top } : draw === "hidden" ? { ...RIDER_CLIP_HIDDEN } : undefined;
+          const clip = band ? { bottom: band.bottom, top: band.top, ...(glass ? { glass: { ...glass, vehicle: s.key, ...(roof ? { roof } : {}) } } : {}) } : draw === "hidden" ? { ...RIDER_CLIP_HIDDEN } : undefined;
           out.push({ rider: rid, vehicle: s.key, seat: i, x: p.x, y: p.y, z: p.z, facing: hq, cropped: draw !== "over", ...(clip ? { clip } : {}) });
           continue;
         }

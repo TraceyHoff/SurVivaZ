@@ -45,6 +45,7 @@ const itemDefKey = (w: World, item: number): string => gameplayDefs(w).items.get
 import { COSMETICS, EquipCosmeticCmd, SetAppearanceCmd, canEditAppearance, hasCreatedLook, unlocksOf } from "../customization.js";
 import { canLootBagAt } from "../combat/pvp.js";
 import { isBaseStoragePiece } from "../ai/storage_api.js";
+import { inFrontOf } from "../compass.js";
 import { PartyAcceptCmd, PartyDeclineCmd, PartyInviteCmd, PartyKickCmd, PartyLeaveCmd, PARTY_RULES } from "../party.js";
 import { PlaceMapMarkerCmd, RemoveMapMarkerCmd } from "../map_marker_commands.js";
 import { MAP_MARKER_LABEL_MAX } from "../components.js";
@@ -544,9 +545,13 @@ export type InteractPanel =
 /** What Interact / Use should do: the closest eligible target. Doors compete by distance with storage, loot,
  *  stations, wardrobes, pets and workers so standing at a house door opens the door instead of a chest through
  *  the wall (ADR-303). Use never opens inventory unless that closest target is a container, loot bag, death bag,
- *  or crafting station (etc.). */
+ *  or crafting station (etc.). ADR-524: a candidate counts only when the player is right in front of it (the
+ *  ±60° cone of `inFrontOf`) — a nearer window/door behind or beside the player no longer steals the tap from
+ *  the storage box, pet or stall they face. If nothing is in front, Interact does nothing. */
 export function interactPanel(c: MenuCtx): InteractPanel | undefined {
-  const s = nearestStall(c, STALL_INTERACT_RANGE); if (s !== undefined) return { panel: "trade", stall: s };
+  const w = c.world; const me = w.get(c.player, Transform);
+  const front = (e: Entity): boolean => { const t = w.get(e, Transform); return !!me && !!t && inFrontOf(me.x, me.y, me.facing, t.x, t.y); };
+  const s = nearestStall(c, STALL_INTERACT_RANGE); if (s !== undefined && front(s)) return { panel: "trade", stall: s };
   const door = nearestDoor(c);
   const flag = nearestClaimFlag(c);
   const wardrobe = nearestWardrobePiece(c);
@@ -555,17 +560,17 @@ export function interactPanel(c: MenuCtx): InteractPanel | undefined {
   const storage = nearestStoragePiece(c);
   type Cand = { d: number; pri: number; pick: InteractPanel };
   const cands: Cand[] = [];
-  if (door) cands.push({ d: door.d, pri: 0, pick: { panel: "door", piece: door.entity } });
-  if (flag) cands.push({ d: flag.d, pri: 0.5, pick: { panel: "claim", piece: flag.entity } });
-  if (bag) {
+  if (door && front(door.entity)) cands.push({ d: door.d, pri: 0, pick: { panel: "door", piece: door.entity } });
+  if (flag && front(flag.entity)) cands.push({ d: flag.d, pri: 0.5, pick: { panel: "claim", piece: flag.entity } });
+  if (bag && front(bag.entity)) {
     const locked = !canLootBagAt(c.world, c.player, bag.entity, ctxTick(c));
     cands.push({ d: bag.d, pri: 1, pick: locked ? { panel: "lootLocked", bag: bag.entity } : { panel: "loot", bag: bag.entity } });
   }
-  if (storage) cands.push({ d: storage.d, pri: 2, pick: { panel: "storage", piece: storage.entity } });
-  if (wardrobe) cands.push({ d: wardrobe.d, pri: 3, pick: { panel: "wardrobe" } });
-  if (pet && !(nearestOpenable(c, pet.d) < pet.d)) cands.push({ d: pet.d, pri: 4, pick: { panel: "pet", pet: pet.entity } });
-  if (worker && !(nearestOpenable(c, worker.d) < worker.d)) cands.push({ d: worker.d, pri: 5, pick: { panel: "worker", worker: worker.entity } });
-  if (st) cands.push({ d: stationDistance(c, st.station), pri: 6, pick: { panel: "station", ...st } });
+  if (storage && front(storage.entity)) cands.push({ d: storage.d, pri: 2, pick: { panel: "storage", piece: storage.entity } });
+  if (wardrobe && front(wardrobe.entity)) cands.push({ d: wardrobe.d, pri: 3, pick: { panel: "wardrobe" } });
+  if (pet && front(pet.entity) && !(nearestOpenable(c, pet.d) < pet.d)) cands.push({ d: pet.d, pri: 4, pick: { panel: "pet", pet: pet.entity } });
+  if (worker && front(worker.entity) && !(nearestOpenable(c, worker.d) < worker.d)) cands.push({ d: worker.d, pri: 5, pick: { panel: "worker", worker: worker.entity } });
+  if (st && front(st.station)) cands.push({ d: stationDistance(c, st.station), pri: 6, pick: { panel: "station", ...st } });
   if (!cands.length) return undefined;
   cands.sort((a, b) => a.d - b.d || a.pri - b.pri);
   return cands[0]!.pick;
@@ -622,13 +627,15 @@ export function nearestLootBag(c: MenuCtx, r = gameplayDefs(c.world).building.co
   for (const e of w.query([LootBag, Transform])) { if (carried.has(e)) continue; const t = w.get(e, Transform)!; const d = Math.hypot(t.x - me.x, t.y - me.y); if (d <= r && (!best || d < best.d)) best = { entity: e, d }; }
   return best;
 }
-/** Distance to the nearest non-pet, non-station LootBag / Container within `r` (Infinity if none). */
+/** Distance to the nearest non-pet, non-station LootBag / Container within `r` (Infinity if none).
+ *  ADR-524: only openables the player faces count — a chest behind the player must not suppress a pet
+ *  or worker they face. */
 function nearestOpenable(c: MenuCtx, r: number): number {
   const w = c.world; const me = w.get(c.player, Transform); if (!me) return Infinity; let bd = Infinity;
   const carried = carriedBags(w);
   for (const q of [[LootBag, Transform], [Container, Transform]] as const) for (const e of w.query([...q], [Dead])) {
     if (carried.has(e)) continue;
-    if (e === c.player || w.has(e, PlayerId) || w.has(e, Pet) || w.has(e, CraftingStation)) continue; const t = w.get(e, Transform)!; const d = Math.hypot(t.x - me.x, t.y - me.y); if (d <= r && d < bd) bd = d;
+    if (e === c.player || w.has(e, PlayerId) || w.has(e, Pet) || w.has(e, CraftingStation)) continue; const t = w.get(e, Transform)!; const d = Math.hypot(t.x - me.x, t.y - me.y); if (d <= r && d < bd && inFrontOf(me.x, me.y, me.facing, t.x, t.y)) bd = d;
   }
   return bd;
 }

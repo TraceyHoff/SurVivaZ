@@ -1,5 +1,5 @@
 {
- "$comment": "Writes <pack>/seats.vehicles.json: per vehicle key (aliases listed), every rider seat with its model position (metres,\nvehicle-local: x forward, y right, z up) and, per facing (E, SE, S, SW, W, NW, N, NE = the sheet's dir order), the seat\nH-point as 1x px offsets from the sprite pivot (@2x: double them) plus the draw-order rule:\n  draw \"over\"   - open seat (bikes): draw the seated rider after (in front of) the vehicle sprite.\n  draw \"window\" - cabin seat: draw the rider after the vehicle sprite but only the screen rows clipTop..clipBottom (roof\n                  underside .. beltline at that seat, 1x px from the pivot); below the beltline the door hides the legs,\n                  above clipTop the roof covers the head. Fallback without clipping: draw it before the sprite (occluded).\nAlso measures every key's E view from the shipped pages (opaque top above the pivot, opaque length) for the docs table.",
+ "$comment": "Writes <pack>/seats.vehicles.json: per vehicle key (aliases listed), every rider seat with its model position (metres,\nvehicle-local: x forward, y right, z up) and, per facing (E, SE, S, SW, W, NW, N, NE = the sheet's dir order), the seat\nH-point as 1x px offsets from the sprite pivot (@2x: double them) plus the draw-order rule:\n  draw \"over\"   - open seat (bikes): draw the seated rider after (in front of) the vehicle sprite.\n  draw \"window\" - cabin seat: draw the rider after the vehicle sprite but only the screen rows clipTop..clipBottom (roof\n                  underside .. beltline at that seat, 1x px from the pivot); below the beltline the door hides the legs,\n                  above clipTop the roof covers the head. Fallback without clipping: draw it before the sprite (occluded).\nAlso measures every key's E view from the shipped pages (opaque top above the pivot, opaque length) for the docs table.\nOpen-bed seat (truck_pickup seat_bed, ADR-521): a \"window\" seat outside the cabin, so it is clipped to the bed rail (beltZ = rail top 1.39 m; roofZ 2.8 m = open sky, just above the rider's head and below the front-view hide threshold 2.86 m, so the cab hides the bed rider from directly ahead). \"cabin\": false excludes the seat from the cabin box the window clip is measured against; omit it (default true) for ordinary cabin seats.",
  "scale": {
   "pxPerMetreLength": 45.255,
   "pxPerMetreHeight": 30.286,
@@ -1709,6 +1709,7 @@
     "width": 2.0,
     "height": 1.85
    },
+   "rearGlass": false,
    "seats": [
     {
      "name": "driver",
@@ -1831,6 +1832,69 @@
        "y": -31.6,
        "clipTop": -59.0,
        "clipBottom": -38.1
+      }
+     }
+    },
+    {
+     "name": "seat_bed",
+     "u": -1.5,
+     "v": 0.0,
+     "z": 1.0,
+     "zPx": 30.3,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.39,
+      "roofZ": 2.8
+     },
+     "cabin": false,
+     "facings": {
+      "E": {
+       "x": -67.9,
+       "y": -30.3,
+       "clipTop": -84.8,
+       "clipBottom": -42.1
+      },
+      "SE": {
+       "x": -48.0,
+       "y": -54.3,
+       "clipTop": -108.8,
+       "clipBottom": -66.1
+      },
+      "S": {
+       "x": -0.0,
+       "y": -64.2,
+       "clipTop": -118.7,
+       "clipBottom": -76.0
+      },
+      "SW": {
+       "x": 48.0,
+       "y": -54.3,
+       "clipTop": -108.8,
+       "clipBottom": -66.1
+      },
+      "W": {
+       "x": 67.9,
+       "y": -30.3,
+       "clipTop": -84.8,
+       "clipBottom": -42.1
+      },
+      "NW": {
+       "x": 48.0,
+       "y": -6.3,
+       "clipTop": -60.8,
+       "clipBottom": -18.1
+      },
+      "N": {
+       "x": 0.0,
+       "y": 3.7,
+       "clipTop": -50.9,
+       "clipBottom": -8.2
+      },
+      "NE": {
+       "x": -48.0,
+       "y": -6.3,
+       "clipTop": -60.8,
+       "clipBottom": -18.1
       }
      }
     }
@@ -2497,6 +2561,254 @@
        "clipBottom": -12.1
       }
      }
+    },
+    {
+     "name": "seat_row3_l",
+     "u": -1.446,
+     "v": -0.367,
+     "z": 0.7,
+     "zPx": 21.2,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.813,
+      "roofZ": 1.704
+     },
+     "facings": {
+      "E": {
+       "x": -65.4,
+       "y": -29.5,
+       "clipTop": -59.9,
+       "clipBottom": -32.9
+      },
+      "SE": {
+       "x": -34.5,
+       "y": -50.2,
+       "clipTop": -80.6,
+       "clipBottom": -53.6
+      },
+      "S": {
+       "x": 16.6,
+       "y": -53.9,
+       "clipTop": -84.3,
+       "clipBottom": -57.3
+      },
+      "SW": {
+       "x": 58.0,
+       "y": -38.5,
+       "clipTop": -68.9,
+       "clipBottom": -41.9
+      },
+      "W": {
+       "x": 65.4,
+       "y": -12.9,
+       "clipTop": -43.3,
+       "clipBottom": -16.3
+      },
+      "NW": {
+       "x": 34.5,
+       "y": 7.8,
+       "clipTop": -22.6,
+       "clipBottom": 4.4
+      },
+      "N": {
+       "x": -16.6,
+       "y": 11.5,
+       "clipTop": -18.9,
+       "clipBottom": 8.1
+      },
+      "NE": {
+       "x": -58.0,
+       "y": -3.9,
+       "clipTop": -34.3,
+       "clipBottom": -7.4
+      }
+     }
+    },
+    {
+     "name": "seat_row3_r",
+     "u": -1.446,
+     "v": 0.367,
+     "z": 0.7,
+     "zPx": 21.2,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.813,
+      "roofZ": 1.704
+     },
+     "facings": {
+      "E": {
+       "x": -65.4,
+       "y": -12.9,
+       "clipTop": -43.3,
+       "clipBottom": -16.3
+      },
+      "SE": {
+       "x": -58.0,
+       "y": -38.5,
+       "clipTop": -68.9,
+       "clipBottom": -41.9
+      },
+      "S": {
+       "x": -16.6,
+       "y": -53.9,
+       "clipTop": -84.3,
+       "clipBottom": -57.3
+      },
+      "SW": {
+       "x": 34.5,
+       "y": -50.2,
+       "clipTop": -80.6,
+       "clipBottom": -53.6
+      },
+      "W": {
+       "x": 65.4,
+       "y": -29.5,
+       "clipTop": -59.9,
+       "clipBottom": -32.9
+      },
+      "NW": {
+       "x": 58.0,
+       "y": -3.9,
+       "clipTop": -34.3,
+       "clipBottom": -7.4
+      },
+      "N": {
+       "x": 16.6,
+       "y": 11.5,
+       "clipTop": -18.9,
+       "clipBottom": 8.1
+      },
+      "NE": {
+       "x": -34.5,
+       "y": 7.8,
+       "clipTop": -22.6,
+       "clipBottom": 4.4
+      }
+     }
+    },
+    {
+     "name": "seat_row4_l",
+     "u": -2.0,
+     "v": -0.367,
+     "z": 0.7,
+     "zPx": 21.2,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.813,
+      "roofZ": 1.704
+     },
+     "facings": {
+      "E": {
+       "x": -90.5,
+       "y": -29.5,
+       "clipTop": -59.9,
+       "clipBottom": -32.9
+      },
+      "SE": {
+       "x": -52.3,
+       "y": -59.1,
+       "clipTop": -89.5,
+       "clipBottom": -62.5
+      },
+      "S": {
+       "x": 16.6,
+       "y": -66.5,
+       "clipTop": -96.9,
+       "clipBottom": -69.9
+      },
+      "SW": {
+       "x": 75.7,
+       "y": -47.3,
+       "clipTop": -77.7,
+       "clipBottom": -50.8
+      },
+      "W": {
+       "x": 90.5,
+       "y": -12.9,
+       "clipTop": -43.3,
+       "clipBottom": -16.3
+      },
+      "NW": {
+       "x": 52.3,
+       "y": 16.7,
+       "clipTop": -13.7,
+       "clipBottom": 13.2
+      },
+      "N": {
+       "x": -16.6,
+       "y": 24.1,
+       "clipTop": -6.4,
+       "clipBottom": 20.6
+      },
+      "NE": {
+       "x": -75.7,
+       "y": 4.9,
+       "clipTop": -25.5,
+       "clipBottom": 1.5
+      }
+     }
+    },
+    {
+     "name": "seat_row4_r",
+     "u": -2.0,
+     "v": 0.367,
+     "z": 0.7,
+     "zPx": 21.2,
+     "draw": "window",
+     "window": {
+      "beltZ": 0.813,
+      "roofZ": 1.704
+     },
+     "facings": {
+      "E": {
+       "x": -90.5,
+       "y": -12.9,
+       "clipTop": -43.3,
+       "clipBottom": -16.3
+      },
+      "SE": {
+       "x": -75.7,
+       "y": -47.3,
+       "clipTop": -77.7,
+       "clipBottom": -50.8
+      },
+      "S": {
+       "x": -16.6,
+       "y": -66.5,
+       "clipTop": -96.9,
+       "clipBottom": -69.9
+      },
+      "SW": {
+       "x": 52.3,
+       "y": -59.1,
+       "clipTop": -89.5,
+       "clipBottom": -62.5
+      },
+      "W": {
+       "x": 90.5,
+       "y": -29.5,
+       "clipTop": -59.9,
+       "clipBottom": -32.9
+      },
+      "NW": {
+       "x": 75.7,
+       "y": 4.9,
+       "clipTop": -25.5,
+       "clipBottom": 1.5
+      },
+      "N": {
+       "x": 16.6,
+       "y": 24.1,
+       "clipTop": -6.4,
+       "clipBottom": 20.6
+      },
+      "NE": {
+       "x": -52.3,
+       "y": 16.7,
+       "clipTop": -13.7,
+       "clipBottom": 13.2
+      }
+     }
     }
    ]
   },
@@ -2767,6 +3079,7 @@
     "width": 2.5,
     "height": 3.4
    },
+   "rearGlass": false,
    "seats": [
     {
      "name": "driver",
@@ -2889,6 +3202,254 @@
        "y": -63.3,
        "clipTop": -93.5,
        "clipBottom": -70.6
+      }
+     }
+    },
+    {
+     "name": "seat_row2_l",
+     "u": -2.15,
+     "v": -0.46,
+     "z": 1.05,
+     "zPx": 31.8,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.66,
+      "roofZ": 2.29
+     },
+     "facings": {
+      "E": {
+       "x": -97.3,
+       "y": -42.2,
+       "clipTop": -79.8,
+       "clipBottom": -60.7
+      },
+      "SE": {
+       "x": -54.1,
+       "y": -73.6,
+       "clipTop": -111.1,
+       "clipBottom": -92.0
+      },
+      "S": {
+       "x": 20.8,
+       "y": -80.4,
+       "clipTop": -118.0,
+       "clipBottom": -98.9
+      },
+      "SW": {
+       "x": 83.5,
+       "y": -58.8,
+       "clipTop": -96.4,
+       "clipBottom": -77.3
+      },
+      "W": {
+       "x": 97.3,
+       "y": -21.4,
+       "clipTop": -58.9,
+       "clipBottom": -39.9
+      },
+      "NW": {
+       "x": 54.1,
+       "y": 10.0,
+       "clipTop": -27.6,
+       "clipBottom": -8.5
+      },
+      "N": {
+       "x": -20.8,
+       "y": 16.8,
+       "clipTop": -20.7,
+       "clipBottom": -1.6
+      },
+      "NE": {
+       "x": -83.5,
+       "y": -4.8,
+       "clipTop": -42.3,
+       "clipBottom": -23.2
+      }
+     }
+    },
+    {
+     "name": "seat_row2_r",
+     "u": -2.15,
+     "v": 0.46,
+     "z": 1.05,
+     "zPx": 31.8,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.66,
+      "roofZ": 2.29
+     },
+     "facings": {
+      "E": {
+       "x": -97.3,
+       "y": -21.4,
+       "clipTop": -58.9,
+       "clipBottom": -39.9
+      },
+      "SE": {
+       "x": -83.5,
+       "y": -58.8,
+       "clipTop": -96.4,
+       "clipBottom": -77.3
+      },
+      "S": {
+       "x": -20.8,
+       "y": -80.4,
+       "clipTop": -118.0,
+       "clipBottom": -98.9
+      },
+      "SW": {
+       "x": 54.1,
+       "y": -73.6,
+       "clipTop": -111.1,
+       "clipBottom": -92.0
+      },
+      "W": {
+       "x": 97.3,
+       "y": -42.2,
+       "clipTop": -79.8,
+       "clipBottom": -60.7
+      },
+      "NW": {
+       "x": 83.5,
+       "y": -4.8,
+       "clipTop": -42.3,
+       "clipBottom": -23.2
+      },
+      "N": {
+       "x": 20.8,
+       "y": 16.8,
+       "clipTop": -20.7,
+       "clipBottom": -1.6
+      },
+      "NE": {
+       "x": -54.1,
+       "y": 10.0,
+       "clipTop": -27.6,
+       "clipBottom": -8.5
+      }
+     }
+    },
+    {
+     "name": "seat_row3_l",
+     "u": -2.7,
+     "v": -0.46,
+     "z": 1.05,
+     "zPx": 31.8,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.66,
+      "roofZ": 2.29
+     },
+     "facings": {
+      "E": {
+       "x": -122.2,
+       "y": -42.2,
+       "clipTop": -79.8,
+       "clipBottom": -60.7
+      },
+      "SE": {
+       "x": -71.7,
+       "y": -82.4,
+       "clipTop": -119.9,
+       "clipBottom": -100.8
+      },
+      "S": {
+       "x": 20.8,
+       "y": -92.9,
+       "clipTop": -130.4,
+       "clipBottom": -111.4
+      },
+      "SW": {
+       "x": 101.1,
+       "y": -67.6,
+       "clipTop": -105.2,
+       "clipBottom": -86.1
+      },
+      "W": {
+       "x": 122.2,
+       "y": -21.4,
+       "clipTop": -58.9,
+       "clipBottom": -39.9
+      },
+      "NW": {
+       "x": 71.7,
+       "y": 18.8,
+       "clipTop": -18.8,
+       "clipBottom": 0.3
+      },
+      "N": {
+       "x": -20.8,
+       "y": 29.3,
+       "clipTop": -8.3,
+       "clipBottom": 10.8
+      },
+      "NE": {
+       "x": -101.1,
+       "y": 4.0,
+       "clipTop": -33.5,
+       "clipBottom": -14.4
+      }
+     }
+    },
+    {
+     "name": "seat_row3_r",
+     "u": -2.7,
+     "v": 0.46,
+     "z": 1.05,
+     "zPx": 31.8,
+     "draw": "window",
+     "window": {
+      "beltZ": 1.66,
+      "roofZ": 2.29
+     },
+     "facings": {
+      "E": {
+       "x": -122.2,
+       "y": -21.4,
+       "clipTop": -58.9,
+       "clipBottom": -39.9
+      },
+      "SE": {
+       "x": -101.1,
+       "y": -67.6,
+       "clipTop": -105.2,
+       "clipBottom": -86.1
+      },
+      "S": {
+       "x": -20.8,
+       "y": -92.9,
+       "clipTop": -130.4,
+       "clipBottom": -111.4
+      },
+      "SW": {
+       "x": 71.7,
+       "y": -82.4,
+       "clipTop": -119.9,
+       "clipBottom": -100.8
+      },
+      "W": {
+       "x": 122.2,
+       "y": -42.2,
+       "clipTop": -79.8,
+       "clipBottom": -60.7
+      },
+      "NW": {
+       "x": 101.1,
+       "y": 4.0,
+       "clipTop": -33.5,
+       "clipBottom": -14.4
+      },
+      "N": {
+       "x": 20.8,
+       "y": 29.3,
+       "clipTop": -8.3,
+       "clipBottom": 10.8
+      },
+      "NE": {
+       "x": -71.7,
+       "y": 18.8,
+       "clipTop": -18.8,
+       "clipBottom": 0.3
       }
      }
     }

@@ -12246,3 +12246,393 @@ Verified in WebGL2 (swiftshader, 160 MB budget): all 30 keys with a gameplay def
 Remaining limit: more than 8 big vehicles on screen at once at a 1024-layer budget still leaves the farthest-requested
 ones waiting for a slot.
 Test: `packages/render/test/adr520_vehicle_pool_split.test.ts`.
+
+## ADR-521: all passengers in seats (SurVivaZ)
+
+ADR-518 seated riders on Art's seats but hid gameplay seats beyond Art's (van 8 vs 4, pickup 3 vs 2, RV 6 vs 2)
+and had no seat at all for the pickup bed or the van's rear rows. Every player/AI-human occupant now draws in a
+seat. Data only — no new art; the nine added seats are derived from the shipped sprites' measured glass (pixel
+analysis of the atlases against the engine's `dirFrame` pivots, verified by the band landing on glass: van side
+views 0.70–0.89 glass over the band, RV box side views 0.90–1.00, matching the shipped seats' 0.57–0.89).
+
+**Van (8 seats).** Rows 3–4 added under the side glass, sharing the cab's belt/roof (beltZ 0.813, roofZ 1.704, z 0.7,
+v ±0.367): row 3 at u −1.446 (the cab's 1.033 m row pitch), row 4 at u −2.00 (0.55 m behind row 3; the side glass runs
+to u −2.28 E / −2.23 W, so the doll stays inside it on both sides). Rear rows show through the rear window from
+behind and hide from ahead, as the front rows occlude them.
+
+**Pickup bed (3rd seat).** Deliberate deviation from "draw the whole rider": the bed seat is a `"window"` seat
+clipped to the bed rail (beltZ 1.39 = the rail top, roofZ 2.8 = open sky), not `"over"`. With `"over"` the doll's
+legs (26 px below the hip) would paint through the bed side down to near the ground — the ghost ADR-518 eliminated.
+With the clip the torso and head show above the rail and the legs hide behind it, which is the "sitting in the bed"
+look, using the proven machinery and no new code. roofZ 2.8 is above the rider's head top (2.12 m) and below the
+front-view hide threshold (2.86 m), so the cab hides the bed rider from directly ahead (no lap through the cab);
+from behind the rider shows above the tailgate. Seat: u −1.5 (mid-bed, ahead of the rear wheel at −1.97), v 0,
+z 1.0 (bed floor ~0.9 + hip). On Canvas2D the clip is ignored until ADR-522, so the bed rider draws whole there —
+the same interim state as all cab riders today.
+
+**RV (6 seats).** Rows 2–3 added in the rear side-window region — the only stretch glassed on both sides (E rear
+window z 1.66–2.85, W window z 1.66–2.29; the intersection is used): rows at u −2.15 and −2.70, v ±0.46, z 1.05,
+beltZ 1.66, roofZ 2.29. The gameplay dinette positions (u ~1.58, 0.73) were rejected: no glass there on the W side,
+so riders would ghost. The box rows therefore sit in the rear (bedroom) area, not at the dinette. They show in the
+side views and hide from ahead; from behind they show through the model's rear window.
+
+**Cabin box.** `windowBand` now measures the cabin box from cabin seats only. A seat carries `"cabin": false` (7th
+tuple element in `seats.data.ts`, folded by `gen-vehicle-seats.mjs`, default 1) when it sits outside the cabin; the
+bed seat is the only one. Without this the bed seat (u −1.5) would extend the box to u0 −2.25 and close the pickup
+cab riders' rear-view band (top −29 < 0) — a silent regression of shipped ADR-518 behaviour. The bed seat's own
+bands are still correct (side view lowered by the side distance, rear view unlowered at the rail).
+
+**Known limits (not fixed here).** The RV has no rear window in the art (only 9 glass columns in the N frame), so
+the box rows paint over the solid rear face in the direct rear view — the `windowBand` model assumes a rear window.
+The pickup likewise has no rear window, so its cab riders show from behind through a fictional one (pre-existing
+ADR-518 behaviour, unchanged). The RV's cab seats sit ~0.18 m behind the cab window's rear edge (window u 2.61–3.89,
+seats u 2.427), so the near-side cab rider's band lands on solid body (glass 0.04 in the E view) — pre-existing
+ADR-518 data, needs Art or a seat-data correction, flagged for follow-up. The RV's diagonal views are approximate:
+the diagonal glass is a thin sloped strip the rectangular band only partly covers (SE 0.00, SW 0.91), as with the
+shipped cab seats (0.05–0.57). One belt/roof per seat is the side window's edges; the rear window's edges differ,
+so rear-view bands extend slightly beyond the rear glass (pre-existing model limitation).
+Test: `packages/render/test/adr521_all_passengers_in_seats.test.ts` (5 tests; 4 of 5 fail without the fix, and the
+cabin-box test fails with the bed seat present but the `seats.ts` fix reverted). ADR-518's test updated: seat count
+384 → 456, and the van's 8th rider now shows a real band where the near side faces the camera.
+
+## ADR-522: behind-glass realism on Canvas2D (SurVivaZ)
+
+ADR-518's window clip lived in the WebGL2 sprite shader only: the Canvas2D fallback never read the
+`riderWindow` binding, so every cab rider drew whole there — legs through the door, head through the roof — and
+with no glass cue at all a clipped rider reads as pasted on the window. Canvas2D now clips the rider to the same
+`windowBand` values WebGL2 uses, and both renderers lay a subtle glass tint + sheen over the clipped rider, so
+the rider reads as inside behind glass instead of pasted on it.
+
+**Canvas2D (`canvas2d.ts`).** `riderWindowBand(clip, k)` turns a `RiderPlacement.clip` (1x px above the seat pivot)
+into a pivot-relative clip rect (y = roof underside, h = visible rows); a band with no visible rows
+(`RIDER_CLIP_HIDDEN`, top <= bottom) skips the rider entirely — no window, hidden behind the body. The clip is
+applied in both draw paths: the paper-doll path (one outer save/clip around every layer — the real in-game rider
+path) and the plain-sprite path. After the clipped draw, `drawRiderGlass` lays the glass over the rider only
+(tint `rgba(176, 206, 232, 0.12)` + a diagonal white sheen stripe at 0.10, as wide as the rider's frame, inside
+the band clip): the tint covers the rider, not the whole window, so the vehicle body outside the rider stays
+untouched. No seat data changed, no new art, no input code touched (gamepad / keyboard / touch unaffected).
+
+**WebGL2 (`sprites.ts`).** The clip behaviour is unchanged. A new flat varying `vWinGlass` (1 when the instance
+carries a window top clip, `aJ.w > 0` and not Flat — the same condition as the shader's top clip, so swim and
+deck uses of `aJ` are unaffected) mixes the rider's colour 12% toward pale glass blue
+`vec3(0.78, 0.87, 0.93)` plus a faint diagonal screen-space sheen stripe, matching the Canvas2D glass. The
+shadow, silhouette and outline-only passes return before the mix, so they are unaffected.
+
+**Pickup bed seat.** The Canvas2D clip covers it exactly like a cab seat, reusing its own `windowBand` values
+(beltZ 1.39 / roofZ 2.8, z 1.0): in the E side view the band is `{bottom: -10.82, top: 31.89}`. The side-view
+sightline over the rail crosses below the hip, so the band dips below the seat pivot (the lap shows above the
+rail, as sitting in a real truck bed) but stays well above the feet, so the lower legs are cut and the doll is
+never drawn whole (band 42.7 px vs the full doll's 60). The head essentially shows (top 31.9 vs head top 34:
+the top ~2 px of the head is clipped in the side view by the model's lowering — the pre-existing ADR-521 model,
+unchanged here).
+
+**Known limits (not fixed here).** The glass is a uniform tint + stripe, not a per-window reflection: it cannot
+know the window's outline, so the sheen follows the rider, not the glass. The RV/pickup rear-window and diagonal
+approximations from ADR-521 are unchanged (rear-view bands still extend slightly beyond the rear glass; the RV
+cab band still lands on solid body in the E view).
+Test: `packages/render/test/adr522_behind_glass_canvas2d.test.ts` (8 tests: band math re-derived from the seat
+tuples, the bed-seat band, hidden/no-clip cases, and a recording-context render drive of both Canvas2D draw
+paths — clip rect, rider draw inside it, glass fills after it; 8/8 fail without the fix, 8/8 pass with it).
+Gate: 13 files / 90 tests pass (ADR-522 + ADR-518/519/520/521 + vehicles + canvas2d suites); typecheck clean
+with lockfile-pinned TypeScript 5.9.3 across all 11 workspace projects. Visual check still owed on the user's
+phone/Xbox: riders read as behind glass (not pasted on) on both renderers, bed rider clipped to the rail.
+
+## ADR-523: roof-wall gap — no fault in current code; ADR-433 wiring pinned end to end (SurVivaZ)
+
+The Nov 23 screenshot (1-story log house, hip shake roof, stone foundation, seeded cabin) shows the roof
+floating above the walls on the south and east faces, the interior floor and furniture visible through the
+gap, with a raised grass terrace north of the house and the ground falling away to the south. Measured from
+the screenshot the gap is ~42px on screen at zoom ~2.4, i.e. ~17px at 1x. With the roof tile half a tile
+north of the wall the visible gap is 16·Δ − 17 (1x px), where Δ is the roof-floor minus wall-top level
+difference — so the screenshot is Δ ≈ 2: the wall is grounded about two terrain levels below its roof tile.
+
+**That size is the fingerprint of the pre-ADR-433 failure, not a new bug.** Before ADR-433 a boundary wall
+grounded on the minimum height of all tiles it touches (ADR-412), so over a 2-level drop outside the terrace
+the south wall sank to the outside height while the roof stayed on the inside height — exactly Δ = 2. ADR-433
+(Nov 18, live since the Nov 18 push) fixed that mechanism with the deck-aware rule (prefer a touching tile
+carrying a deck at level+1, else at the wall's own level, else the min fallback). ADR-511 changed the floor
+height, not the grounding, and a pre-ADR-511 stale roof z would sink the roof ~2 levels — the opposite
+direction from the screenshot.
+
+**The gap does not reproduce in current code, in any cabin state this repo can construct.** A new harness
+drives the real `IsoView.render` mirror pass headlessly and reads the view Transform.z the render loop
+actually assigns: a fresh hand-built cabin like the screenshot's, a HipGable layout, a real stamped cabin
+(ruin 0.3, via `stampAbandonedSite` + `drainAbandonedStamps`), and a sweep of all 24 cabin kinds — every
+perimeter wall and roof grounds at the inside height over a 2-level drop, and the flat control agrees. Fresh
+builds and pre-ADR-511-equivalent states agree: pieces re-derive z from their slot level on load (ADR-514),
+so no stale z can lift a roof or sink a wall.
+
+**Ruled out with measurement, not by eye.** The shk skin is identical to base art (same extents, anchors and
+opaque-pixel counts per tile, so the ADR-404 seat measurement holds for it); a roof at the wrong level would
+be an 80px gap, not 17px; cutaway is out (player outside on dirt, roof and walls opaque, and an active
+cutaway hides the roof outright); the roof clip plane is always ≥ 87px, above the 68px eave bottom, so a clip
+can never open a gap — and hip edge walls get no clip by design, the roof winning the 25px overlap by
+`RFX_SEAT_BIAS` / painter order; foundation deck lift self-corrects through the same clip; the static chunk
+cache signature includes view z and lift, so it cannot go stale on grounding; all wall/roof manifest scales
+are 1 and no wall/roof fallback carries a scale; every wall-art resolution path leads to the 80px art, not
+the old 48px art; and the deck pass in `view.ts` is untouched since the ADR-433 commit (only a
+behaviourally identical refactor of the `grBase` line), so no Nov 19–22 commit regressed it. The ADR-432/
+433/404/412 suites still pass at HEAD (63/63), as do ADR-511 (4/4), ADR-514 (7/7 across three files) and
+ADR-521/522 (5/5, 8/8).
+
+**What ships in this slice: the regression pin, no production change.** ADR-433 recorded an honest cut —
+its render-loop wiring (deck set built in the GPiece pass, passed to `groundBoundaryPiece` and the ghost) was
+verified by code reading only, because IsoView needs a canvas/renderer and could not be instantiated in
+vitest. The new harness closes that cut: it is the first test to pin the wiring end to end (deck set contents,
+per-frame re-grounding, wall-top/roof-seat pair, and the HipGable lift/clip agreement). No production code
+change is warranted — every constructible state renders correctly — and none is made here. No new art, no
+input code touched (gamepad / keyboard / touch unaffected).
+
+**Honest limit.** The one state this VM cannot construct is a live chunk whose piece records, or a phone
+still serving a bundle, predates the Nov 18 ADR-433 deploy: the gap's size matches that code exactly, so a
+stale cached bundle on the phone (Edge/PWA cache) is the most likely explanation for the Nov 23 shot. The
+check owed is on the user's phone: the menu version marker must be at or past the Nov 18 build. If the gap
+still shows on a current build, the next step is the live chunk's piece records — a state no repo generator
+produces — not another code change.
+Test: `apps/client/test/adr523_roof_wall_gap.test.ts` (5 tests: south wall over a 2-level drop, flat
+control, HipGable lift + clip plane, real stamped ruin cabin, sweep of all 24 cabin kinds; 5/5 pass, and
+they fail if the deck wiring regresses — the south wall sinks to the dropped outside height).
+Gate: 5/5 new tests; 63/63 ADR-432/433/412/404; 4/4 ADR-511; 7/7 ADR-514; 5/5 ADR-521; 8/8 ADR-522;
+typecheck clean with lockfile-pinned TypeScript 5.9.3 across all 11 workspace projects. Visual check still
+owed on the user's phone: roof sits on the walls with no gap, fresh build and pre-ADR-511 save, and the menu
+version marker confirms a post-Nov-18 build.
+
+## ADR-524: interaction targeting — Interact only picks what is right in front (SurVivaZ)
+
+**Root cause (proved with failing tests first).** `interactPanel` in `packages/gameplay/src/ui/menus.ts`
+ranked every candidate purely by Euclidean distance (`cands.sort((a, b) => a.d - b.d || a.pri - b.pri)`)
+with no facing check anywhere, and `window_shutters` has `def.door: true`, so `nearestDoor` returns
+windows. A door/window 0.5 tiles behind or beside the player beat a storage box 1.5 tiles ahead of them,
+and the same distance-only pick drove the pet/worker suppression (`nearestOpenable`) and the stall's
+immediate trade return. Bots had the same gap in reverse: `goTo` toggled a shut door whenever the bot
+reached the doorway, whatever it faced, and `containerSeq` opened a container from any angle.
+
+**The fix — a ±60° facing cone, one shared helper.** `INTERACT_FACING_DOT = 0.5` and `inFrontOf(fx, fy,
+facing, tx, ty)` live in `packages/gameplay/src/compass.ts` (facing's home; it imports only
+`@engine/world`, so neither `ui/` nor `ai/` grows a cycle — `menus.ts` already reaches `ai/` via
+`recruitment.ts → planner.ts → base_behaviors.ts`). Dot of the facing unit vector with the direction to
+the target >= 0.5; a target on top of the actor counts as in front. The cone reuses the `canSee`
+dot-product form, not a new atan2.
+
+- **A. Player pick (`interactPanel`, menus.ts).** Every candidate — stall, door, claim flag, loot bag,
+  storage, wardrobe, pet, worker, station — is filtered to in-front targets only (the `nearest*`
+  helpers are untouched: same signatures, same behaviour; `nearestStall`'s view-helper caller in
+  gameplay-panels.ts is unaffected). Distance still ranks among in-front candidates, priority still
+  breaks ties. `nearestOpenable` now counts only openables in front, so a chest behind the player no
+  longer suppresses a pet they face. If nothing is in front, `interactPanel` returns undefined and
+  Interact does nothing. The single choke point (Interact press → `interactPanel`, and the `menus.pick`
+  prompt) covers keyboard, gamepad and touch.
+- **B. Bot door toggle (`goTo`, ai/base_behaviors.ts).** The OPEN action (bot crossing a shut door) is
+  emitted only when the bot faces the door in the same cone. Safe in live play because movement turns
+  `Transform.facing` toward the walk (movement.ts ADR-305), so a bot that walked up to the doorway is
+  facing it. The close-behind toggle is NOT gated — the bot walks away from the door there, so it faces
+  away by definition.
+- **C. Bot container open — CUT, do not re-add blindly.** Gating `copen:` on facing deadlocks live bots:
+  a bot stops walking once in container range and then calls `containerSeq` every think, facing only
+  turns while moving (ADR-305: never reset on idle), and bots reach a box via pathfinder waypoints /
+  stand points offset from it, so the final facing can sit >60° off the box. A refused open repeats
+  forever — the bot never moves again, the withdraw never happens. Proved by isolation: with B+C the
+  adr252 live suite drops 8/8 → 5/8 (bots never finish the base / bed / sleep steps); with B only it
+  stays 8/8. So `containerSeq` opens regardless of facing, and the loot path (no `copen` step) was never
+  gated. A future fix would need the caller to keep turning toward the piece while the open is refused
+  (a `turn-to-face` step in the base_work / withdraw callers), not a refusal inside `containerSeq`.
+
+**Pinned behaviour kept.** ADR-440's window-is-a-door pin and ADR-303's door-wins / storage-opens pins
+still hold, with facing now set explicitly in their setups (the default spawn facing is east, 0, and
+neither pin faced its target before — `spawnPlayer` leaves `Transform.facing` at its 0 default):
+adr440.test.ts sets the player facing north toward the N shutter; adr303_door_interact.test.ts sets the
+player facing north toward the shed door. That is extending the pins, not weakening them: the window is
+still offered as a door when the player faces it. The full gate caught two more pins in
+`apps/client/test/adr315_claim_view.test.ts` that assumed a no-facing pick (Interact at a flag with the
+flag behind the player; a closer box 63° off the facing): both now face their target (`face` helper) —
+the flag toggle and the closer-box-wins rule still hold.
+
+Test: `packages/gameplay/test/adr524_interact_targeting.test.ts` (9 tests: storage in front beats a nearer
+door behind; door in front beats storage behind; shutter in front offered as a door, same shutter behind
+not offered; nothing in front → undefined; pet in front not suppressed by a closer openable behind; stall
+behind does not open trade, facing it does; bot facing a shut door opens it crossing, bot not facing it
+does not toggle; close-behind toggle ungated on facing; containerSeq ungated on facing — the cut, pinned).
+The 7 steal tests fail on the pre-fix code (proved by stashing `packages/gameplay/src/` and re-running:
+7 failed / 3 passed, the 3 passing being the keep-behaviour tests); all 9 pass with the fix.
+Gate: 9/9 new tests; neighbours 77/77 (menus, adr303, adr160, adr440, pets, task4_interact_storage,
+station_crafting, task22_recruitment); bot suites 93/93 (adr252, adr445 live, adr265, adr203, adr205,
+adr448, adr382, adr337) plus adr252 live 8/8 (`apps/client/test/adr252_ai_humans_live.test.ts`);
+typecheck clean with lockfile-pinned TypeScript 5.9.3 across all 11 workspace projects. No new art, no
+package self-imports, no push — implementation + gate only. Visual check still owed on the user's phone:
+stand beside a chest with a window/door closer behind you and Interact opens the chest.
+
+## ADR-528: glass depth — the quad must not tint over a pedestrian in front of the window (SurVivaZ)
+
+**The cut (user asked 2026-11-24 to fix it before the ADR-521–527 batch pushes; ADR-526 stays reserved for the
+fresh-start delete).** The ADR-527 window-sized glass quad's depth key (`maxKey + maxBelt * (zFactor / zStep) +
+HELD_BIAS`, ~+0.42 over the riders) could tint over a pedestrian standing within ~half a tile in front of a vehicle
+window while overlapping the quad rect. The same class of limitation existed on Canvas2D, where the merged glass
+drew after the whole items loop.
+
+**Depth model (verified in code, not assumed).** The sprite pass IS depth-tested (`DEPTH_TEST`, `LESS`,
+`depthMask(true)`; only the interior pass disables it), so per-vertex keys decide visibility, not sort order. A
+per-vertex key is the pivot key plus the clamped height term times `zPerPx` (`zFactor / zStep` = (1/3)/16 = 1/48);
+`paperDollDepth` drops a character's drawn key by `footDy * zPerPx` (`footDy` = below-pivot extent + `CHAR_DEPTH_MARGIN`
+24). The old formula double-counted: the quad's pivot sits on the merged rect's bottom edge, `maxBelt` px below the
+riders' pivots, so the vertex shader already adds that drop per row — adding it again in the pivot key lifted the
+quad's per-vertex margin over the riders to ~0.26 (harness; ~0.19–0.65 on real vehicles, where `footDy` is 29 and
+the beltline ~18–29 px), and a pedestrian `d` tiles south of the deepest rider beats the quad only when
+`(4/3)d > margin`, i.e. `d > 0.75 * margin` (~0.14–0.49 tiles). The fix tracks the deepest rider's UNDROPPED pivot
+key and pivot screen-y (`maxPivotKey` / `pivotY`, updated together in the accumulator) and sets the quad key to
+`maxPivotKey - (y1 - pivotY) * zPerPx + GLASS_DEPTH_MARGIN`, where `GLASS_DEPTH_MARGIN` = `HELD_BIAS + 10 *
+LAYER_BIAS` = 0.06 — just enough to clear the foremost paper-doll layer and a held item in front. The per-vertex
+margin over the deepest rider is exactly 0.06 at every window row, and larger for other riders by their key/pivot
+offsets, so a pedestrian more than ~0.045 tiles in front of the rider's plane wins the depth test — a position
+inside the vehicle body. The sort key is no longer the invariant (the quad's pivot sits below the riders' pivots,
+so its pivot key is lower than the riders' dropped keys in some frames); the tests now assert the per-vertex keys.
+`WindowGlassAcc` drops `maxKey` / `maxBelt` for `maxPivotKey` / `pivotY`; the ADR-527 flush test is updated to the
+new acc shape with an exact key pin.
+
+**Canvas2D twin.** The merged glass drew after the whole items loop, so it tinted over anything nearer. Now the
+per-vehicle depth is precomputed before the loop (the max item depth over the vehicle's riders with a visible glass
+band — the same gate the loop uses, since the rect is not complete until every rider is drawn) and the glass is
+flushed inside the loop, in depth order, once the loop reaches an item deeper than that depth (`flushGlass`, guarded
+by `vehicleGlass.size` so the common case costs one property read per item), with a post-loop `flushGlass(Infinity)`
+for the deepest glass. The same depth-ordered flush also covers building pieces drawn in front of a window.
+
+Test: `packages/render/test/adr528_glass_pedestrian.test.ts` (2 tests: a WebGL2 prepare-level test — a rider plus
+pedestrians at 0.1, 0.3 and 1 tile in front of the window; the 0.1- and 0.3-tile pedestrians beat the quad at every
+overlapping row, the 1-tile one is the control, the rider stays tinted by 0.05 over the foremost paper-doll layer,
+and the quad key is pinned exactly; a Canvas2D drive test — the glass fillRect comes after the rider's drawImage and
+before the pedestrian's). Proved to fail without the fix: the WebGL2 test fails on the old code (quad key 19.904 vs
+19.706; the 0.1-tile pedestrian tinted by 0.625) and the Canvas2D test fails on the old post-loop flush (glass after
+both draws). Gate: 2/2 new tests; neighbours 113 files / 727 passed / 2 skipped (full render package + ADR-524,
+pre-Canvas2D-change run) and 32/32 targeted after the Canvas2D change (adr528/527/522/525); typecheck clean with
+lockfile-pinned TypeScript 5.9.3 across all 11 workspace projects. Full gate (HEAD after ADR-528, log
+`~/workspace/work/final_full_gate_528.log`, 2026-11-25 ~01:26–01:53 CST, 27.3 min): **5,557 passed / 2 failed / 9
+skipped (5,568 tests, 831 files)** — the only 2 failures are the known pre-existing ones (`pack.test.ts` KEYS.md
+ENOENT; `bench.test.ts` autosave p95 60.85 ms vs 50 ms wall-clock flake). +2 passed / +2 tests / +1 file vs the
+ADR-527 gate are exactly the ADR-528 tests. Gate verdict: GREEN (modulo the 2 known pre-existing failures).
+Nothing pushed — push decision is the parent's. No new art, no package self-imports, no input change, no push —
+implementation + gate only. Known limitations: the merged quad is one plane at the deepest rider, so a pedestrian
+standing between two riders' depth planes (alongside the vehicle, between seats) is still tinted where they overlap
+the rect — a single quad cannot express per-rider planes (per-rider glass was removed by ADR-525 for stacking); the
+Canvas2D pre-pass mirrors the loop's band gate but not frame-resolution failure, so a rider whose art fails to
+resolve still inflates the vehicle's glass depth and delays the flush (only when rider art is missing); the
+post-loop glass still does not fade with occlusion (carried over from ADR-525).
+
+## ADR-527: glass cuts — merged glass clamped to the roofline, window-sized glass quad on WebGL2 (SurVivaZ)
+
+**The two cuts (user asked 2026-11-24 to fix them before the ADR-521–525 batch pushes; ADR-526 is reserved
+for the fresh-start delete).** (a) On Canvas2D the merged window-glass rect could overhang the RV cab roof by ~7 px
+at the top. (b) On WebGL2 the glass tint still covered only the rider's pixels — no window-sized glass quad.
+
+**A third defect found while reproducing (a).** `windowGlassSpan`'s screen-x axis was negated (`(-cv, cu)` instead
+of `(cv, -cu)`): every rider's span was mirrored about its pivot, so a van's merged tint rect was 424 px wide
+against a true projected cabin box of 186 px — the tint overhung the window by ~119 px on both ends. The ADR-525
+span pins had pinned the mirrored values. The axis is corrected (`(cv, -cu)`, increasing screen-x is increasing u
+on the E view — verified against the pivots' `worldToScreen` positions) and the two pins corrected to the true
+values. The old "either sign gives the same interval" doc claim was wrong and is removed.
+
+**(a) Roofline clamp.** New pure `windowGlassRoofline(d, i, cu, cv)` (seats.ts) returns the window's top edge in the
+pivot-relative 1x-px frame: side face — roofline runs along u, the rear (min-u) seat's roof at the u0 end, the front
+(max-u) seat's roof at the u1 end, so a stepped roof (RV rear 2.29 m, front cab 2.047 m) is a stepped line, not a
+flat cap; end face (windscreen / rear window) — flat at the visible end's seats' roof. Height at an end uses the
+band-top formula `(roof - z - Dtop * VIEW_RISE) * PX_PER_M_HEIGHT` with the same raked ray distance `Dtop` as
+`windowBand`. Same guards as `windowBand`: cabin seats only, `rearGlass: 0` rear view returns undefined.
+`VehicleView` attaches the roofline to the clip's `glass` field; it flows through the `riderWindow` binding and
+`riderWinOf` to `Canvas2DRenderer`, which clamps each merged rect to the roofline (`clampGlassRectToRoofline`,
+shared in seats.ts: top clamped to the linear interpolation between the roofline's absolute endpoints; rects
+clamped empty are skipped; no roofline → unchanged) before drawing it once after the items loop. All cabin seats
+of a def share one z, and the v-dependence cancels, so the line is identical from every rider — the rect is clamped
+to the first rider's roofline. Checked on all vehicle defs with merged glass, not just the RV: single-roof windows
+(van, sedan) are flat and the clamp is a no-op there.
+
+**(b) Window-sized glass quad on WebGL2.** New `GLASS_QUAD` flag (131072 — the next free bit; `SpriteFlag` uses
+1–128, shaders use 256–65536). The FS gains one branch right after the shadow-pass early return, before texture
+sampling: when `GLASS_QUAD` is set it outputs the flat glass colour `(0.69, 0.81, 0.91)` — the Canvas2D
+`RIDER_GLASS_TINT` colour — plus the same screen-anchored sheen formula as the ADR-522 rider glass
+(`fract((vScr.x + vScr.y * 0.6) / 110.0)`, `* 0.08` toward white), alpha `0.12 * vAlpha * uAlphaMul`, and returns
+early (the texel is ignored). No other shader change. The quad geometry comes from `windowGlassQuad` (sprites.ts,
+pure): it takes the merged rect and the rider body frame and computes the `writeOne` inputs, with a **virtual
+anchor** at the frame's bottom centre (`ax = frame.w / 2, ay = frame.h`) — the authored anchor (24, 59.0016 on a
+48×64 frame) would hang the glass `(h - ay) * s` (~31 px for a 300 px window) below the window. The pivot sits on
+the rect's bottom edge, `sliceL / sliceR = ∓W / (2s)`, `topClip = H / s`. In `prepare()`, each rider's window rect,
+absolute roofline, max depth key and deepest beltline are merged per vehicle (`WindowGlassAcc`), the rect is
+clamped to the roofline with the same shared helper as Canvas2D, and one quad is flushed per vehicle just before
+the sort via `emitWindowGlassQuad`: depth key `maxKey + maxBelt * (zFactor / zStep) + HELD_BIAS` — the epsilon
+must exceed `|bottom| * uZPerPx` (~0.35 for a 17 px beltline) plus layer/held bias, so the quad sorts in front of
+the riders; shadow alpha 0 (no shadow). The VS geometry is untouched: quad corners come from the slice bounds and
+the top clip, the bottom at the pivot row when the anchor is at the frame's bottom edge. `vWinGlass` is 1 for the
+quad but the FS glass branch returns before that block, so it is harmless.
+
+Test: `packages/render/test/adr527_glass_cuts.test.ts` (10 tests: 2 Canvas2D drive tests — RV merged tint spans the
+projected cabin box and never rises above its roofline, van merged tint spans its single-roof window; 3 roofline
+pins — RV steps with the seats, single-roof flat, windscreen flat at the front roof, undefined for open / over
+seats, the glassless rear view and a missing seat; 3 clamp + quad-spec pins; 1 flush-method test — one instance,
+GLASS_QUAD + NoOutline flags, not Flat, alpha 1, shadow 0, virtual anchor, `o[39] > 0`, key above the riders'
+keys; 2 prepare-level wiring tests — one rider yields a body instance + exactly one glass quad, two riders merge
+into one quad and a rider with no glass adds none). Proved to fail without the fix: the two Canvas2D drive tests
+fail on the old code (RV off by 231.8 px, van by 119.1 px — the mirror). The ADR-525 span pins were corrected to
+the true values; the ADR-518 clip pin now includes the `roof` field. Gate: 10/10 new tests; neighbours 38/38
+(adr518/521/522/525/527); full render package 111 files, 717 passed / 2 skipped; typecheck clean with
+lockfile-pinned TypeScript 5.9.3 across all 11 workspace projects (see the batch gate). No new art, no package
+self-imports, no push — implementation + gate only. Visual checks still owed on the user's phone: the merged glass
+never rising above the RV cab roof or past the window ends on either renderer, and the glass reading as one window
+on WebGL2. Known limitations: the quad's depth key (~+0.42 over the riders) can tint over a pedestrian standing
+within ~half a tile in front of the window while overlapping the rect — the same class of limitation as the
+Canvas2D glass, which draws after everything; the post-loop glass does not fade with occlusion (carried over from
+ADR-525).
+
+## ADR-525: honest caveats from ADR-521/522 — bed-seat head clip, rear-view ghosts, glass follows the rider (SurVivaZ)
+
+**The three caveats (user asked 2026-11-24 to fix them).** (a) The pickup bed seat's head was clipped ~2 px in side
+view: the E-view band top was 31.89 px above the H-point, the doll's head top is ~34 px. (b) RV / pickup riders
+ghosted from a direct rear view: the rear-row riders sit ~0.75 m from the rear end, so their band is wide open
+through the "rear window" — but those vehicles have no rear window. (c) The glass tint + diagonal sheen stripe were
+drawn as wide as the rider, so the glass effect followed the rider instead of sitting on the window.
+
+**(a) Open-sky band top.** `windowBand` lowered every band top by the camera-ray climb (`Dtop * VIEW_RISE`), which is
+the roof edge's doing — but an open seat (cabin 0, the pickup bed) has open sky above it, not a roof edge. The top
+is now unlowered for an open seat, *except* when the ray leaves through the front end (the cab's windscreen), where
+the cab roof caps the sightline: `openSky = cabin 0 && !(Du < Dv && cu > 0)`. The side-view bed top is now
+(2.8 - 1.0) * 30.286 = 54.51 px (head clears); the bottom still lowers (the rail hides the legs). The exception
+matters: without it the bed rider showed from ahead through the cab (top 54.51 instead of -1.9) — a ghost the
+ADR-521 "hidden from ahead" pin caught during the gate. Cabin seats are untouched (their tops still lower).
+
+**(b) Rear-glass flag.** A per-def `rearGlass` flag in Art's `seats.vehicles.json` (default glass, `false` for
+`camper_rv` and `truck_pickup` only — the two known cases, no guessing about other vehicles) flows through
+`gen-vehicle-seats.mjs` into `seats.data.ts` (`rearGlass: 0 | 1`, drift-pinned by the ADR-518 test). `windowBand`
+returns undefined when a cabin seat's ray leaves through the rear end (`cu < 0 && Du < Dv`) of a def with no rear
+glass. Open seats never hide by this rule (the bed rider is in the open air). The rule only fires on rear-end
+exits: diagonal rear views that leave through the side glass still show, and cars with a rear window still show
+their rearmost riders from behind. Note the band math already hides most riders from directly behind (the roofline
+covers them at this camera angle — e.g. a sedan's driver); the rule catches the ones the math lets through: the
+riders within ~0.75 m of the glassless rear end.
+
+**(c) Glass spans the window (Canvas2D).** `windowGlassSpan` (seats.ts, pure) projects the cabin box onto the
+screen-x axis at the seat — a metre along it is `PX_PER_M_LENGTH` px (the engine iso projection: sx = (u - v) * 32,
+so a unit step along the screen-x diagonal moves sx by 32 * sqrt(2) = 45.255). `VehicleView` attaches the span to
+the rider clip (`glass: { lo, hi, vehicle }`); it flows through the `riderWindow` binding and `riderWinOf` to
+`Canvas2DRenderer`, which merges one rect per vehicle (the union of its riders' window rects) and draws it once
+after the items loop (`drawWindowGlass`: tint + a sheen stripe anchored 30% across the window). One rect per vehicle
+is load-bearing: drawing it per rider would stack the 0.12 tint up to 8x in a full van. The band clip on the rider
+itself is unchanged. Seats with no window outline (open seats, "over" seats) and clips without a span keep the old
+rider-width glass (`drawRiderGlass`) as the fallback. WebGL2: no shader change — the sheen was already
+screen-anchored (sprites.ts `vScr` is the fragment's screen position, so the stripe is fixed to the glass, not the
+rider); the tint still covers only the rider's pixels there, because spanning the window would need a new
+window-sized glass quad in the sprite pass (non-uniform instance scale) — that is the remaining cut, not done here.
+
+**Pins updated, not weakened.** ADR-522: the bed band top is now the unlowered open-sky cap, and the band is taller
+than the whole doll (the legs are still cut, by the bottom of the band). ADR-521: the bed top pin is the unlowered
+cap; the cabin-box test now pins the box via the front view (windscreen) and the bed seat's own rear-view band, and
+the RV's rear rows hide from a direct rear view (they were the ghost); the van's rear rows still show through its
+rear window. ADR-518: the seat-104 clip pin now includes the `glass` field.
+
+Test: `packages/render/test/adr525_caveat_fixes.test.ts` (12 tests: open-sky top + cab-seat top still lowered; rear
+hiding incl. the bed rider and sedan rear rows showing; diagonal rear views; the span math incl. the windscreen
+width; the clip carrying the span + vehicle key; `drawWindowGlass` geometry; one merged tint for two riders in a van
+after the last rider draw; the rider-width fallback). Proved to fail without the fix: with seats.ts + canvas2d.ts
+reverted, 4/5 ADR-521 tests fail (bed top, cabin box, rear rows, full house); with canvas2d.ts alone reverted, the
+ADR-522 drive test's window-span tint assertion fails. Gate: 12/12 new tests; neighbours 32/32 (adr518/521/522/525);
+typecheck clean with lockfile-pinned TypeScript 5.9.3 across all 11 workspace projects (see the batch gate). No new
+art, no package self-imports, no push — implementation + gate only. Visual checks still owed on the user's phone:
+the bed rider's full head above the rail at play zoom; no RV/pickup riders visible from a direct rear view; the
+glass tint reading as one window, not a tinted rider. Known limitations: the merged window rect is the union
+bounding box, so on the RV it can overhang the cab roof by ~7 px at the top; the post-loop glass does not fade with
+occlusion (a vehicle behind a tall building keeps full glass alpha); the WebGL2 tint still covers only the rider.

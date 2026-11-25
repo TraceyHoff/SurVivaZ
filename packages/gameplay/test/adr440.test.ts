@@ -9,7 +9,7 @@
  * Opening / closing doors and window shutters goes through the same Interact → ToggleDoor path (see the last block).
  */
 import { describe, expect, it } from "vitest";
-import { setSeason, setTimeOfDay, Weather, type Entity, type World } from "@engine/core";
+import { setSeason, setTimeOfDay, Transform, Weather, type Entity, type World } from "@engine/core";
 import * as G from "../src/index.js";
 import { collect, makeWorld, spawnLearned, steps } from "./helpers.js";
 import { ambientTemperature, shelteredAirTemp } from "../src/systems/environment.js";
@@ -273,6 +273,7 @@ describe("ADR-440 doors and windows share the Interact toggle path", () => {
   it("ToggleDoor flips window shutters through the same action as a door, and Interact offers it", () => {
     const h = hut({ walls: { N: "window", S: "wall", W: "wall", E: "wall" } });
     const w = h.w; const p = spawnLearned(w, { x: 10.5, y: 10.5 });
+    w.set(p, Transform, { facing: -Math.PI / 2 }); // ADR-524: face north, toward the shutter — Interact only offers what is in front
     const shutters = h.inserts.N!;
     const att = G.resolveAttachment(w, shutters, G.AttachKind.Door)!;
     expect(w.getField(att, G.DoorState, "open")).toBe(0);

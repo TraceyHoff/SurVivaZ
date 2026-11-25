@@ -15,6 +15,7 @@ describe("ADR-303 house doors and supported floors", () => {
     expect(door).toBeDefined();
     const dt = w.get(door!, Transform)!;
     const me = spawnLearned(w, { x: dt.x, y: dt.y + 0.45, clientId: 1 });
+    w.set(me, Transform, { facing: -Math.PI / 2 }); // ADR-524: face the door (north, toward it) — Interact only offers what is in front
     w.add(me, PlayerId, { id: 1 });
     const pick = G.interactPanel({ world: w, player: me });
     expect(pick).toEqual({ panel: "door", piece: door });
