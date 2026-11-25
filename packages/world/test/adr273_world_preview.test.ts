@@ -31,7 +31,12 @@ describe("ADR-272 sampled seed preview and wilderness", () => {
     for (let y = 384; y < 640; y += 2) for (let x = 384; x < 640; x += 2) {
       const h = g.heightAt(x, y); min = Math.min(min, h); max = Math.max(max, h); face = Math.max(face, Math.abs(h - g.heightAt(x + 1, y)), Math.abs(h - g.heightAt(x, y + 1)));
     }
-    expect(HEIGHT_MAX).toBe(26); expect(min).toBeLessThanOrEqual(3); expect(max).toBeGreaterThanOrEqual(25); expect(max).toBeLessThanOrEqual(26); expect(face).toBeGreaterThan(3);
+    // ADR-530: the old window pins (min <= 3, max 25..26) were the 0..26 range reached everywhere.
+    // The new extremes are broad domes/valleys, so one 256-tile quadrant shows large relief as a
+    // range, not as both absolute extremes (those are asserted over the full +/-512 survey in
+    // adr530). The face bound flips too: the wilderness is walkable now, so no face exceeds 3.
+    expect(HEIGHT_MAX).toBe(100); expect(min).toBeGreaterThanOrEqual(-100); expect(max).toBeLessThanOrEqual(100);
+    expect(max - min).toBeGreaterThanOrEqual(140); expect(face).toBeLessThanOrEqual(3);
     for (const p of computeSpawnPoints(g)) for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) {
       const tx = Math.floor(p.x) + x, ty = Math.floor(p.y) + y, h = g.heightAt(tx, ty);
       expect(Math.abs(h - g.heightAt(tx + 1, ty))).toBeLessThanOrEqual(3);

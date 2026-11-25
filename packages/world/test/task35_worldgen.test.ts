@@ -2,7 +2,7 @@
  * Task 35 / ADR-254: seeded worldgen — different seeds differ; same seed is deterministic; heights vary with ledges.
  */
 import { describe, it, expect } from "vitest";
-import { CHUNK_SIZE, ProceduralGenerator, computeSpawnPoints, randomWorldSeed, HEIGHT_MAX } from "../src/index.js";
+import { CHUNK_SIZE, ProceduralGenerator, computeSpawnPoints, randomWorldSeed, HEIGHT_MAX, HEIGHT_MIN } from "../src/index.js";
 
 describe("ADR-254 / Task 35 seeded worldgen", () => {
   it("same seed is deterministic for tiles, heights and resource nodes", () => {
@@ -40,7 +40,7 @@ describe("ADR-254 / Task 35 seeded worldgen", () => {
     let maxDrop = 0;
     for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
       const h = g.heightAt(x, y);
-      expect(h).toBeGreaterThanOrEqual(0);
+      expect(h).toBeGreaterThanOrEqual(HEIGHT_MIN); // ADR-530: generated ground reaches -100
       expect(h).toBeLessThanOrEqual(HEIGHT_MAX);
       heights.add(h);
       for (const [dx, dy] of [[1, 0], [0, 1]] as const) maxDrop = Math.max(maxDrop, Math.abs(h - g.heightAt(x + dx, y + dy)));

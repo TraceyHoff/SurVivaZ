@@ -66,13 +66,13 @@ describe("ADR-419 ramp planning (pure)", () => {
     expect(G.planRamp(w, 0, 0, 0, -1, -16)).toEqual({ ok: false, fail: G.TerrainFail.Limit }); // 136 edits > 96
   });
 
-  it("an already-graded ramp plans nothing (BadTile), and a ramp past the -300/326 bounds is a Limit", () => {
+  it("an already-graded ramp plans nothing (BadTile), and a ramp past the -100/100 bounds is a Limit", () => {
     const w = makeWorld(); field(w, 2);
     const p = G.spawnPlayer(w, { x: 0.5, y: 0.5, maxWeight: 0 }); hold(w, p, "stone_shovel"); G.addItem(w, p, id("soil"), 6);
     const r = G.planRamp(w, 0, 0, 1, 0, 3); expect(r.ok).toBe(true); if (!r.ok) return;
     expect(G.gradeRamp(w, p, r.plan)).toBe(G.TerrainFail.None);
     expect(G.planRamp(w, 0, 0, 1, 0, 3)).toEqual({ ok: false, fail: G.TerrainFail.BadTile });
-    G.setTerrainDig(w, 0, 0, 324); // foot at 326: any up-ramp exceeds the ceiling
+    G.setTerrainDig(w, 0, 0, 98); // foot at 100: any up-ramp exceeds the ceiling
     expect(G.planRamp(w, 0, 0, 1, 0, 1)).toEqual({ ok: false, fail: G.TerrainFail.Limit });
   });
 });

@@ -165,7 +165,11 @@ export interface EnvironmentTuning {
   readonly shelterTempBonus: number; readonly weather: readonly WeatherDef[];
   /** ADR-239 seasons (absent = seasons off). */
   readonly seasons?: SeasonsTuning;
-  readonly altitudeLapse: number; readonly humidityPerIntensity: number; readonly windChillPerSpeed: number;
+  readonly altitudeLapse: number;
+  /** ADR-530: caps on the total altitude-lapse effect (°C) — cold cap at altitude, warm cap below
+   *  sea level. Absent = the world defaults (30 / 15); environment.json carries the knobs. */
+  readonly altitudeLapseColdCap?: number; readonly altitudeLapseWarmCap?: number;
+  readonly humidityPerIntensity: number; readonly windChillPerSpeed: number;
   /** ADR-472: wet x wind synergy — the extra felt penalty multiplier on top of the additive wet/wind terms. */
   readonly windWetSynergyMul: number;
   readonly surface: { readonly rainPerSec: number; readonly dryPerSec: number; readonly windDryMul: number; readonly windDryRefSpeed: number; readonly sunDryMul: number; /** ADR-466 snow: u8 units/s (0..255 = 0..~30 cm) at intensity 1; melt releases meltWetMul wetness units per melted snow unit. */ readonly snowPerSec: number; readonly meltPerSec: number; readonly meltWetMul: number };

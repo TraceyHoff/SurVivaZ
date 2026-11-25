@@ -11,8 +11,10 @@ import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/
 import type { Rect } from "./camera.js";
 import { TileId, isWaterTile } from "./ids.js";
 
-/** ADR-263: tileHeight's "missing / empty" value (heights may now be negative: shovel pits go to -25 and below). */
-export const NO_TILE_HEIGHT = -99;
+/** ADR-263: tileHeight's "missing / empty" value (heights may now be negative: shovel pits go to -25 and below).
+ * ADR-529: -9999 (was -99) — real ground now reaches -100 (shovel floor) and -250 in the follow-up range
+ * raise, so the old sentinel collided with real deep ground and read it as void. */
+export const NO_TILE_HEIGHT = -9999;
 /** Height of tile (tx,ty) or NO_TILE_HEIGHT when the tile is missing/empty. */
 export function tileHeight(map: TileMap, tx: number, ty: number): number {
   const c = map.getChunk(tileToChunk(tx), tileToChunk(ty));

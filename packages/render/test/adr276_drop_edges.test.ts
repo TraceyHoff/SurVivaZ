@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { TileMap, tileToLocal, viewRect } from "@engine/world";
 import { terrainDropEdges, DROP_EDGE_GLSL } from "../src/dropEdges.js";
+import { NO_TILE_HEIGHT } from "../src/tilemap.js";
 import { TileTerrain } from "../src/terrainTiles.js";
 import type { AtlasManager } from "../src/assets/atlasManager.js";
 
@@ -26,7 +27,7 @@ function height(map: TileMap, x: number, y: number, z: number): void {
 
 describe("ADR-276 camera-hidden terrain cuts", () => {
   it("ignores flat ground, uphill, void / unloaded neighbours and water's fractional inset", () => {
-    expect(terrainDropEdges(3, 3, 4, -99, 2.75)).toEqual([0, 0, 0, 0]);
+    expect(terrainDropEdges(3, 3, 4, NO_TILE_HEIGHT, 2.75)).toEqual([0, 0, 0, 0]);
     expect(terrainDropEdges(0, -6, -2, -25, -1)).toEqual([6, 2, 8, 1]);
     const map = new TileMap();
     for (let y = -1; y <= 1; y++) for (let x = -1; x <= 1; x++) height(map, x, y, 0);

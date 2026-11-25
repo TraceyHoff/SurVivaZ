@@ -10,8 +10,8 @@ export type ChunkKey = string;
 export class Chunk {
   readonly tiles = new Uint16Array(CHUNK_AREA);
   /** Terrain height level per tile. ADR-263: signed so a shovel can dig below level 0.
-   *  ADR-411: Int16 (was Int8) — absolute terrain levels now span -300..326 (generated ground 0..26,
-   *  shovel ±300), which does not fit a byte. The codec is v2 for the same reason (see chunkCodec.ts). */
+   *  ADR-411: Int16 (was Int8) — absolute terrain levels now span -100..100 (ADR-529: was -300..326;
+   *  absolute bounds, not generated ground 0..26 + shovel 100), which does not fit a byte. The codec is v2 for the same reason (see chunkCodec.ts). */
   readonly height = new Int16Array(CHUNK_AREA);
   /** ADR-263: height edits since the last drain (heights have no delta stream; TileSync resends the chunk in full). */
   heightEdited = false;

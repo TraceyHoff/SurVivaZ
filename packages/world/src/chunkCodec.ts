@@ -15,7 +15,7 @@ export const CHUNK_VERSION = 2;
  *   entities: u32 n, n x (u8 compCount, compCount x (u8 tableIndex, record))
  * Transform x/y are stored chunk-relative (precision: see WorldOrigin guidance) and rebased on decode.
  * No storage backend: callers persist the bytes (ChunkProvider.save / their own store).
- * ADR-411: v2 widens heights to i16 because absolute terrain levels now span -300..326 (v1's byte held -60..75).
+ * ADR-411: v2 widens heights to i16 because absolute terrain levels now span -100..100 (ADR-529: was -300..326; v1's byte held -60..75).
  * v1 blobs still decode (heights read as u8 and sign-extended; legacy flow-water bytes decode as before).
  */
 let scratch = new ArrayBuffer(1 << 16); let scratchView = new DataView(scratch);

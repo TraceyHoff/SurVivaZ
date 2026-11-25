@@ -42,8 +42,9 @@
  * Canvas2D keeps flat diamonds (fallback renderer only) — not wired to this model yet.
  */
 
-/** Render heights at or below this are a missing/void tile (cf. tilemap NO_TILE_HEIGHT = -99; groundSideLevels uses -90). */
-export const SLOPE_VOID = -90;
+/** Render heights at or below this are a missing/void tile (cf. tilemap NO_TILE_HEIGHT = -9999; groundSideLevels uses SLOPE_VOID).
+ * ADR-529: -9000 (was -90) — real ground now reaches -100 and -250 in the follow-up raise. */
+export const SLOPE_VOID = -9000;
 
 export type GroundShapeKind = "flat" | "ramp" | "wedge" | "valley" | "peak" | "stepped";
 

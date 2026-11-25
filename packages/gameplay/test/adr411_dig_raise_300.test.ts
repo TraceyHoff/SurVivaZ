@@ -1,5 +1,5 @@
-// ADR-411: dig 300 down / raise 300 up through the real shovel flow, from generated ground at both ends
-// (0 and HEIGHT_MAX 26); water / persist / render / underground at the new extremes.
+// ADR-411: dig 100 down / raise 100 up through the real shovel flow, from generated ground at both ends
+// (0 and HEIGHT_MAX 26); water / persist / render / underground at the new extremes (ADR-529: was 300).
 import { describe, expect, it } from "vitest";
 import { setSeason, type Entity, type World } from "@engine/core";
 import { TileMap, FLOW_WATER_LEVEL_MIN, FLOW_WATER_LEVEL_MAX, flowWaterRaw, isFlowWater, renderTileHeight, terrainLevel, WATER_TILE } from "@engine/world";
@@ -22,72 +22,73 @@ const hold = (w: World, p: Entity, key: string): void => {
 };
 const hAt = (w: World, x: number, y: number): number => w.resource(G.TerrainRes).heightAt(x, y);
 
-describe("ADR-411 dig 300 / raise 300", () => {
-  it("bounds are [-300, 326] = generated ground [0, 26] ± 300, and the flow encoding agrees", () => {
-    expect(G.LEVEL_MIN).toBe(-300); expect(G.LEVEL_MAX).toBe(326);
-    expect(G.TERRAIN.minLevel).toBe(-300); expect(G.TERRAIN.maxLevel).toBe(326);
+describe("ADR-411 dig 100 / raise 100 (ADR-529)", () => {
+  it("bounds are exactly [-100, 100]: the absolute ceiling is the range, not generated ground + range, and the flow encoding agrees", () => {
+    expect(G.LEVEL_MIN).toBe(-100); expect(G.LEVEL_MAX).toBe(100);
+    expect(G.TERRAIN.minLevel).toBe(-100); expect(G.TERRAIN.maxLevel).toBe(100);
     expect(FLOW_WATER_LEVEL_MIN).toBe(G.LEVEL_MIN); expect(FLOW_WATER_LEVEL_MAX).toBe(G.LEVEL_MAX);
-    expect(G.TERRAIN_EDIT_RANGE).toBe(300);
+    expect(G.TERRAIN_EDIT_RANGE).toBe(100);
   });
 
-  it("from generated ground 26: raise 300 to the ceiling, then dig 626 to the floor, both through the shovel", () => {
+  it("from generated ground 26: raise 74 to the ceiling, then dig 200 to the floor, both through the shovel", () => {
     const w = makeWorld(); field(w, 26); const p = G.spawnPlayer(w, { x: 0.5, y: 0.5, clientId: 1, maxWeight: 0 });
-    hold(w, p, "stone_shovel"); G.addItem(w, p, id("soil"), 300);
-    for (let i = 0; i < 300; i++) expect(G.editTerrain(w, p, 1, 0, 1)).toBe(G.TerrainFail.None);
-    expect(hAt(w, 1, 0)).toBe(326); expect(G.terrainDigAt(w, 1, 0)).toBe(300);
+    hold(w, p, "stone_shovel"); G.addItem(w, p, id("soil"), 74);
+    for (let i = 0; i < 74; i++) expect(G.editTerrain(w, p, 1, 0, 1)).toBe(G.TerrainFail.None);
+    expect(hAt(w, 1, 0)).toBe(100); expect(G.terrainDigAt(w, 1, 0)).toBe(74);
     expect(G.editTerrain(w, p, 1, 0, 1)).toBe(G.TerrainFail.Limit); // exactly at the bound, not before
     expect(G.countItem(w, p, id("soil"))).toBe(0);
-    for (let i = 0; i < 626; i++) expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.None);
-    expect(hAt(w, 1, 0)).toBe(-300); expect(G.terrainDigAt(w, 1, 0)).toBe(-326);
+    for (let i = 0; i < 200; i++) expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.None);
+    expect(hAt(w, 1, 0)).toBe(-100); expect(G.terrainDigAt(w, 1, 0)).toBe(-126);
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.Limit);
-    expect(G.countItem(w, p, id("soil"))).toBe(626);
+    expect(G.countItem(w, p, id("soil"))).toBe(200);
   });
 
-  it("from generated ground 0: dig 300 to the floor through the shovel (Limit exactly at -300)", () => {
+  it("from generated ground 0: dig 100 to the floor through the shovel (Limit exactly at -100)", () => {
     const w = makeWorld(); field(w, 0); const p = G.spawnPlayer(w, { x: 0.5, y: 0.5, clientId: 1, maxWeight: 0 });
     hold(w, p, "stone_shovel");
-    for (let i = 0; i < 300; i++) expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.None);
-    expect(hAt(w, 1, 0)).toBe(-300); expect(G.terrainDigAt(w, 1, 0)).toBe(-300);
+    for (let i = 0; i < 100; i++) expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.None);
+    expect(hAt(w, 1, 0)).toBe(-100); expect(G.terrainDigAt(w, 1, 0)).toBe(-100);
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.Limit);
-    expect(G.isUnderground(w, 1, 0)).toBe(true); expect(G.undergroundDepthAt(w, 1, 0)).toBe(300);
+    expect(G.isUnderground(w, 1, 0)).toBe(true); expect(G.undergroundDepthAt(w, 1, 0)).toBe(100);
   });
 
-  it("a -300 pit floods from a lake and keeps its level through flow / render; water at 326 encodes too", () => {
+  it("a -100 pit floods from a lake and keeps its level through flow / render; water at 100 encodes too", () => {
     const w = makeWorld(); const map = field(w, 0); map.setTile(0, 0, WATER_TILE);
     const t = w.resource(G.TerrainRes);
-    G.setTerrainDig(w, 1, 0, -300); expect(G.terrainFlowStep(w)).toBe(1);
+    G.setTerrainDig(w, 1, 0, -100); expect(G.terrainFlowStep(w)).toBe(1);
     expect(t.tileAt(1, 0)).toBe(WATER_TILE);
     const raw = t.rawHeightAt!(1, 0);
     expect(isFlowWater(WATER_TILE, raw)).toBe(true);
-    expect(terrainLevel(WATER_TILE, raw)).toBe(-300); expect(renderTileHeight(WATER_TILE, raw)).toBe(-300);
-    expect(hAt(w, 1, 0)).toBe(-300); expect(G.waterSurfaceAt(t, 1, 0)).toBe(-300);
-    // a water tile set to the ceiling encodes through the same path
+    expect(terrainLevel(WATER_TILE, raw)).toBe(-100); expect(renderTileHeight(WATER_TILE, raw)).toBe(-100);
+    expect(hAt(w, 1, 0)).toBe(-100); expect(G.waterSurfaceAt(t, 1, 0)).toBe(-100);
+    // a water tile set to the flow-water ceiling encodes through the same path (land and flow water
+    // now share the 100 cap, so a water tile's dig record can no longer run ahead of its decoded height)
     map.setTile(5, 5, WATER_TILE);
-    G.setTerrainDig(w, 5, 5, 326);
-    expect(terrainLevel(WATER_TILE, t.rawHeightAt!(5, 5))).toBe(326);
-    expect(renderTileHeight(WATER_TILE, t.rawHeightAt!(5, 5))).toBe(326);
-    expect(flowWaterRaw(326)).toBe(1326);
+    G.setTerrainDig(w, 5, 5, 100);
+    expect(terrainLevel(WATER_TILE, t.rawHeightAt!(5, 5))).toBe(100);
+    expect(renderTileHeight(WATER_TILE, t.rawHeightAt!(5, 5))).toBe(100);
+    expect(flowWaterRaw(100)).toBe(1100);
   });
 
-  it("TerrainEdit dig ±300 persists through the chunk codec (i16 field, v2 heights)", async () => {
+  it("TerrainEdit dig ±100 persists through the chunk codec (i16 field, v2 heights)", async () => {
     const { Chunk, encodeChunk, decodeChunk } = await import("@engine/world");
     const w = makeWorld(); const map = field(w, 0);
-    G.setTerrainDig(w, 1, 0, -300); G.setTerrainDig(w, 2, 0, 300);
+    G.setTerrainDig(w, 1, 0, -100); G.setTerrainDig(w, 2, 0, 100);
     const edits = [...w.query([G.TerrainEdit])]; expect(edits).toHaveLength(2);
     const chunk = map.getChunk(0, 0)!;
-    expect(chunk.getHeight(1, 0)).toBe(-300); expect(chunk.getHeight(2, 0)).toBe(300);
+    expect(chunk.getHeight(1, 0)).toBe(-100); expect(chunk.getHeight(2, 0)).toBe(100);
     const bytes = encodeChunk(chunk, { world: w, entities: edits });
     const w2 = makeWorld();
     const dec = decodeChunk(bytes, { world: w2 });
-    expect(dec.chunk.getHeight(1, 0)).toBe(-300); expect(dec.chunk.getHeight(2, 0)).toBe(300);
+    expect(dec.chunk.getHeight(1, 0)).toBe(-100); expect(dec.chunk.getHeight(2, 0)).toBe(100);
     expect(dec.entities).toHaveLength(2);
     const digs = dec.entities.map((e) => w2.getField(e, G.TerrainEdit, "dig")).sort((a, b) => a! - b!);
-    expect(digs).toEqual([-300, 300]);
+    expect(digs).toEqual([-100, 100]);
   });
 
-  it("60°F at 300 levels down in winter, while shallow ground follows the season", () => {
+  it("60°F at 100 levels down in winter, while shallow ground follows the season", () => {
     const w = makeWorld({ dayLengthTicks: 24_000 }); field(w, 2);
-    G.setTerrainDig(w, 4, 4, -302); // height -300, 300 below ground
+    G.setTerrainDig(w, 4, 4, -102); // height -100, 102 below ground
     G.setTerrainDig(w, 6, 4, -2); // height 0, 2 below ground: still surface weather
     setSeason(w, 2, 2); // winter
     expect(G.isUnderground(w, 4.5, 4.5)).toBe(true);
@@ -96,7 +97,7 @@ describe("ADR-411 dig 300 / raise 300", () => {
   });
 
   it("renderTileHeight passes land through at the extremes", () => {
-    expect(renderTileHeight(3, -300)).toBe(-300); expect(renderTileHeight(3, 326)).toBe(326);
-    expect(terrainLevel(3, -300)).toBe(-300); expect(terrainLevel(3, 326)).toBe(326);
+    expect(renderTileHeight(3, -100)).toBe(-100); expect(renderTileHeight(3, 100)).toBe(100);
+    expect(terrainLevel(3, -100)).toBe(-100); expect(terrainLevel(3, 100)).toBe(100);
   });
 });

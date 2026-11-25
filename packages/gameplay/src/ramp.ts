@@ -70,7 +70,7 @@ const axis = (dx: number, dy: number): boolean =>
  * Plan a ramp: foot (x,y), axis direction (dx,dy), signed height change delta.
  * Pure except reading terrain heights; never writes. Fails BadTile for a zero delta,
  * a non-axis direction or a downhill step into water; Limit for |delta| > 16, a
- * target outside -300..326, or more than 96 edits; NotLoaded for an unloaded tile.
+ * target outside -100..100, or more than 96 edits; NotLoaded for an unloaded tile.
  */
 export function planRamp(world: World, x: number, y: number, dx: number, dy: number, delta: number): RampPlanResult {
   x = Math.floor(x); y = Math.floor(y); dx = Math.floor(dx); dy = Math.floor(dy); delta = Math.floor(delta);

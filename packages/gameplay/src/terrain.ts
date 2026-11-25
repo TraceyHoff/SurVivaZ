@@ -3,7 +3,8 @@
  *  - A shovel (any tier, items.json tool.kind "shovel") raises or lowers the ground one level per use. Players use the
  *    one in their main hand (hotbar); hired AI humans may use one carried in their bag. Edits write the chunk height
  *    field ADR-254 generated (so cliff faces / ledge lips redraw) and keep a TerrainEdit entity with the offset from the
- *    generated ground; absolute terrain levels are limited to -300..326 (ADR-411: generated ground 0..26 ± 300).
+ *    generated ground; absolute terrain levels are limited to -100..100 (ADR-411/529: the absolute bounds
+ *    are ±TERRAIN_EDIT_RANGE, not generated ground 0..26 ± 100).
  *  - Flowing water: water spreads, one tile per neighbour per flow step, from any water tile into an adjacent dug tile
  *    (dig < 0) whose bed is at or below the source water's surface (a natural lake's surface is the flat ADR-182 level,
  *    a flowed tile's surface is its own bed). Raised ground (walls / berms) and undug ground never flood, so elevated

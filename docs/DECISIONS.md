@@ -12636,3 +12636,373 @@ the bed rider's full head above the rail at play zoom; no RV/pickup riders visib
 glass tint reading as one window, not a tinted rider. Known limitations: the merged window rect is the union
 bounding box, so on the RV it can overhang the cab roof by ~7 px at the top; the post-loop glass does not fade with
 occlusion (a vehicle behind a tall building keeps full glass alpha); the WebGL2 tint still covers only the rider.
+
+## ADR-529: void sentinels + absolute bounds ±100 (SurVivaZ)
+
+**Context (worldgen batch, slice 1 of 4; prep `~/workspace/work/worldgen-next-batch-prep.md` §2).** The
+void sentinels collided with real ground below −90: `NO_TILE_HEIGHT = −99` (`packages/render/src/tilemap.ts`)
+and `SLOPE_VOID = −90` (`packages/world/src/slope.ts`) meant any neighbour below −90 read as missing/void in
+the mesh `low()`, the slope classifier, `groundSideLevels`, `terrainDropEdges`, and the waterfall classifiers —
+so a shovel pit dug past −90 (pits already reach −300 today) lost its cliff faces toward the low neighbour and
+its slope/drop treatment. The audit found every `<= sentinel` use in src: the two constants plus hardcoded
+literals in `terrainTiles.ts` (`hRaw` −99, `dropX/dropY` and skirt `hideX/hideY` `> −99`) and `dropEdges.ts`
+(`h <= −99`), and the `<= −90` in `groundArt.ts` `groundSideLevels`. Not sentinels, audited and left alone:
+`waterDepth.ts` `raw <= −99` (legacy ADR-297 negative-byte decode), `timeOfDay.ts` sun elevation −90,
+`apps/client/src/audio/events.ts` `lastChase/lastAttackAt: −99` (timestamp sentinel), and the ADR-411 history
+in `persist/src/migrate.ts` and the ADR-411 DECISIONS entry. The user decided (2026-11-24) the absolute range
+is ±100 total with the shovel matching it (not ±250 yet, not shovel ±300 on top), so this slice also narrows
+the bounds; the raise to ±250 comes later, once ±100 is proven. No generator change: `heightFromNoise` is
+untouched, so nothing visible changes except the shovel's max dig/raise.
+
+**Decision.** `NO_TILE_HEIGHT` −99 → −9999; `SLOPE_VOID` −90 → −9000; the hardcoded literals now use the
+constants (`terrainTiles.ts` imports `NO_TILE_HEIGHT` from `tilemap.js`; `dropEdges.ts` likewise;
+`groundArt.ts` imports `SLOPE_VOID` from `@engine/world`). `TERRAIN_EDIT_RANGE` 300 → 100
+(`packages/gameplay/src/terrain_depth.ts`): absolute terrain bounds are now exactly [−100, 100] — the
+ceiling is `TERRAIN_EDIT_RANGE` itself, not `HEIGHT_MAX + TERRAIN_EDIT_RANGE` (the additive formula briefly
+shipped [−100, 126] and was corrected in a follow-up commit on this ADR: from generated ground g a shovel
+can raise at most 100−g and dig at most g+100). `FLOW_WATER_LEVEL_MIN/MAX` −300/326 → −100/100
+(`packages/world/src/waterDepth.ts`): the v2 code
+is unchanged, only its range narrows to raw 900..1100 (`FLOW_WATER_MIN_RAW_V2` 900). The flow-water cap now
+equals the land ceiling, so a water tile's dig record can no longer run ahead of its decoded height (see the
+former known cut below). Comment-only range
+updates in `chunk.ts`, `chunkCodec.ts`, `net/src/tiles.ts`, `terrain_base.ts`, `ramp.ts`, `terrain.ts`,
+`components.ts`, `canvasGroundHeight.ts`. Bounds pins updated, not weakened: `adr411_varied_heights.test.ts`
+(flow water −100..100, land −100/100), `adr296_297_extents.test.ts` (one loop −100..100 for both land and
+flow water), `adr411_dig_raise_300.test.ts` (shovel from ground 26 raises 74 to the ceiling, digs 200 to the
+floor, bounds [−100, 100], pit −100, water at 100), `task36_terrain.test.ts`
+(clamps −100..100, soil counts recomputed: 102 dug + 98 added = 200 raises; worker extremes 100 dug + 100
+added = 200 raises), `adr419_ramp.test.ts` (foot at
+100), `net/test/tiles.test.ts` (signed i16 round-trip at −100/100). Three more tests fed −99 as a void
+neighbour and failed until their inputs moved to the constants: `adr409_ground_shape.test.ts` (`VOID =
+SLOPE_VOID`), `adr251_pool_budget.test.ts` (`groundSideLevels(1, SLOPE_VOID, SLOPE_VOID)`),
+`adr276_drop_edges.test.ts` (`terrainDropEdges(..., NO_TILE_HEIGHT, ...)`).
+
+**Former known cut — flow cap sat below the land ceiling (fixed by the follow-up commit on this ADR).**
+Flow water capped at ±100 while land reached 126, so a water tile set above 100 read back at 100, and its
+`TerrainEdit` dig record could run ahead of the decoded height (observed: `setTerrainDig(999)` on a flooded
+pit left dig 126 while the height read 100; a following `setTerrainDig(−999)` then stored dig −74). The
+absolute ceiling is now exactly 100 for both land and flow water, so the divergence is gone: the deep-pits
+test asserts the ceiling clamp on land, and `adr529_void_sentinels.test.ts` asserts land and flow water
+agree at the shared 100 cap. Unreachable in live play even before the fix — flood beds are ≤ 26 (dug ground
+only) and a shovel raise on water converts it to earth — only the `setTerrainDig` test/tool API could
+produce it. The deep-pits test's ceiling-clamp assertions sit on a land tile; with the caps now equal, the
+same clamp is assertable on a flooded tile too. Other limits: the GL mesh / instance builders need a GL context (none in the VM), so the
+new tests exercise the exact height/void helpers those builders call rather than the builders themselves; the
+`adr411_dig_raise_300.test.ts` filename still says 300 though it now tests ±100 (titles updated, file not
+renamed).
+
+Test: `packages/render/test/adr529_void_sentinels.test.ts` (9 tests: sentinels pinned; `tileHeight` at −100/−250
+real vs unloaded/empty void; mesh cliff/waterfall gate at −100; slope classifier ramps at −99/−100 and −250/−251;
+`groundSideLevels` + `terrainDropEdges` at −100/−250 vs void; Canvas2D tilt/cliff at −100 vs void; waterfall
+lip/fall to a −100 neighbour vs void; flow-water codec −100..100 + clamps; chunk codec land −100..100 + flow
+−100..100, with land and flow water agreeing at the shared 100 cap). Proved to fail on pre-change code: 9/9 fail with the source stashed (7/7 before two
+discriminators were added — the `tileHeight` and chunk-codec tests then also failed once they asserted
+distinguishability from void and the flow clamp at 126). Neighbours: full `packages/world/test` +
+`packages/render/test` + gameplay terrain/water/depth suites + persist codec tests + net tiles — **1,020 passed
+/ 2 skipped / 0 failed (154 files)**. Typecheck clean with lockfile-pinned TypeScript 5.9.3 across
+world/render/gameplay/net/persist. Nothing pushed — implementation + commit only, coordinator gates.
+
+## ADR-530: height range −100..+100 with lapse cap + preview rescale (SurVivaZ)
+
+**Context (worldgen batch, slice 2 of 4; prep `~/workspace/work/worldgen-next-batch-prep.md` §1–§4, with
+the §0 user decisions overriding: ±100 now, not ±250; new worlds only; flat budget ≥60% near spawn /
+≥40% per region; starter river byte-identical).** `heightFromNoise` spanned [0, 26] (`HEIGHT_MAX = 26`):
+`plateau (0..3) × relief (2..8) + detail (0..2)`, clamped at 0. Two things stopped there: the field never
+went below 0, and the plateau terraces are 6..10-level faces at full relief — closed walls no walker can
+cross. Measured baseline (5-seed survey, ±512 step 2): min 0 / max 26, flat 87% everywhere, but the BFS
+from spawn reaches only **42–60%** of land (seed 1: 42.5%, 42: 46.6%, 1234: 60.1%, 424242: 48.4%,
+9001: 52.8%). The diagnostic that isolates it: land-only BFS with no step limit reaches 99.7–99.8%, so
+water does not partition the map — the terrace faces do. The ≥99% navigability invariant therefore forces
+the terraces out of the wilderness, not just a bigger range: no closed >3-face barrier may exist anywhere
+in the survey window, including the 160..384 ring, so the retune starts at 160, not at 384.
+
+**Decision.** `HEIGHT_MAX` 26 → 100, new `HEIGHT_MIN = −100` (`packages/world/src/generator.ts`, plus a
+symmetric `heightMin` option knob; the absolute bounds stay exactly [−100, +100] from ADR-529 —
+`TERRAIN_EDIT_RANGE` and the sentinels are untouched, so the ±250 raise later is a knob change:
+`HEIGHT_MAX`/`HEIGHT_MIN` + `TERRAIN_EDIT_RANGE`). `heightFromNoise` keeps the ADR-411 field as `base`
+and blends past the spawn disc: terrace fade 160 → 288 (plateau faces shrink to nothing) and signed-relief
+fade 160 → 416 (a smooth signed field grows to the full range). At distance ≤ 160 both fades are 0, so the
+inner zone is byte-identical gentle ground (faces ≤ 3, heights ≤ 7) and region zero's elevated-lake siting
+(probes ≤ ~116 tiles) and spillway walk (≤ ~180 tiles) are unchanged — the starter layout stays
+byte-identical, pinned per seed in the new tests. The signed field is `valueNoise` at 2 wide scales
+reusing the `HEIGHT_SALT` family (0.70 × scale 128 + 0.30 × scale 48), centred on (H+L)/2 and amplified
+×1.3: the amplification matters because a weighted sum dilutes each octave's extremes (at the 128-scale
+maximum the 48-scale octave sits near its mean), so a bare sum tops out near ±80 on some seeds while ×1.3
+reaches the caps on all 5 survey seeds. The 128-scale octave carries the broad shape; the 48-scale octave
+adds texture without steepening the field past walkable steps. Generation-time only: no new per-tick scans,
+nothing per frame. Chunk-gen time (same 100-chunk × 5-rep method before/after): origin 0.91 → 1.02–1.05
+ms/chunk (+12–14%), wilderness 1.29–1.52 → 1.41–1.69 ms/chunk (+9–11%) — two extra `valueNoise` calls
+per tile.
+
+**Climate lapse cap.** `altitudeLapse` 0.6 °C/level is ±60 °C at ±100 uncapped. New shared helper
+`altitudeLapseEffect` (`packages/world/src/climate.ts`, used by `DefaultClimateModel` and by
+`gameplayClimateModel` in `packages/gameplay/src/systems/environment.ts`) clamps the total altitude term
+to −30 °C at the top and +15 °C at the bottom, as data knobs `altitudeLapseColdCap: 30` /
+`altitudeLapseWarmCap: 15` in `packages/gameplay/data/environment.json` (optional fields on
+`EnvironmentTuning`, defaulting to the world constants when absent). The rate stays exact for the first 50
+levels up and the first 25 levels down — where most play happens — and saturates beyond. The cold cap is
+the wider one: cold is survivable with fur and shelter (a summer peak reads −9 °C at noon, bitter but
+climbable, not −39 °C), while the warm cap is tighter because a canyon floor already sits near the summer
+heat-wave band (+15 keeps a midsummer floor at 36 °C at noon, hot, not the 81 °C oven the uncapped rate
+gives). The ±250 follow-up re-tunes these knobs, it does not remove them.
+
+**Preview rescale.** `packages/world/src/preview.ts`: the relief light `0.86 + h × 0.018 − slope × 0.065`
+saturates at h ≥ 31 (all high ground pinned at the 1.42 clamp, washed out white). Rescaled to
+`0.86 + h × 0.0038 − slope × 0.008`: a 100-level peak reads 1.24, a −100 floor reads exactly the 0.48
+floor, so the height term alone never pins; the slope term is rescaled likewise (0.065 → 0.008): 12-tile
+preview steps are steeper on the new relief, and at 0.015 ~8% of land pixels still pinned at a clamp; at
+0.008 it is ~2%, ceiling pins ≤0.7%.
+
+**Survey (5 seeds, ±512 step 2).** min −100 / max 100 on every seed; flat within 384 of origin 85.9–90.2%
+(budget 60%); flat per far region 40%+ (four ±256 windows around region centres (1,0), (0,1), (1,1),
+(−1,−1)); BFS from spawn 99.36–99.90% (budget 99%; baseline 42–60%); spawn patches gentle (faces ≤ 3)
+with features on; region-zero starter pins unchanged (lake/pond/elevated-lake/spillway per seed).
+
+**Range pins updated, not weakened.** `adr411_varied_heights.test.ts` (survey min/max [−100, 100],
+`HEIGHT_MAX` 100 / `HEIGHT_MIN` −100, gentle-zone bound kept), `adr273_world_preview.test.ts` (the
+[384, 640] quadrant window shows large relief as a range, max−min ≥ 140, not as both absolute extremes —
+those live in the full ±512 adr530 survey — and its face bound flips from `> 3` to `≤ 3`: the wilderness
+is walkable now), `adr383_elevated_lakes.test.ts`, `adr386_waterfalls.test.ts`, `task35_worldgen.test.ts`
+(preview/height levels in [HEIGHT_MIN, HEIGHT_MAX], not [0, HEIGHT_MAX]).
+
+Test: `packages/world/test/adr530_height_range.test.ts` (12 tests: constants; 5-seed survey min/max,
+bounds, flat near spawn, flat per region, BFS; spawn gentle; starter pins),
+`packages/world/test/adr530_climate_preview.test.ts` (4 tests: lapse-effect caps, peak/canyon noon
+temperatures, preview flat-plateau light pins at h = −100/0/50/100, real-seed shade variety + clamp
+fraction), `packages/gameplay/test/adr530_lapse_cap.test.ts` (2 tests: JSON knobs, gameplay-model cap).
+Proved to fail on pre-change code: 16/18 fail (the 2 passes are the starter pins and the seed-1 spawn
+test, which the change must preserve — including the preview real-seed test, which fails pre-change at
+33% of land pixels pinned at a light clamp, and the survey tests, which fail on min/max and BFS).
+Neighbours: full `packages/world/test` — **178 passed / 0 failed (28 files)**; gameplay adr252 + travel + terrain/water/environment
+suites — **199 passed / 0 failed (17 files)**; `packages/render/test` + `packages/persist/test` —
+**794 passed / 1 failed / 2 skipped (139 files)**, the one failure being the known pre-existing
+`bench.test.ts` autosave wall-clock flake (it passes alone, 1/1 — same flake as in the ADR-528 gate).
+Typecheck clean with lockfile-pinned TypeScript 5.9.3 across world/gameplay/render/net/persist
+(one fix during the slice: `h0` needed a non-null assertion under `noUncheckedIndexedAccess`).
+Nothing pushed — implementation + commit only, coordinator gates.
+
+**Honest cuts.** The old 8-level wilderness cliffs are gone by design — the terrace fade trades them for
+smooth rolling ±100 relief, because any closed >3-face barrier breaks the 99% BFS bar; cliff faces still
+occur at water/feature edges (elevated-lake rims, spillway falls) but not as terrain walls. Massifs and
+canyons are not shaped yet — the range is reached, the shaping is ADR-531/532. The preview's deepest
+ground still pins at the 0.48 floor on ~2% of land pixels (steep + deep combined). Phone/Xbox visual
+checks still owed: whether 100-level relief reads as mountains at play zoom, and whether the lapse cap
+feels right in live play (harness numbers only so far).
+
+**Fix-up (2026-11-24): flat benches restore single-level ruin footprints.** ADR-530's smooth field broke
+the ADR-384 neighbour guard: `adr384_single_level_ruins.test.ts` "SITE_CHANCE restored to 0.25" fell to
+flatRate 0.111 (band 0.30–0.47), realised ruin density 0.028 (band 0.08–0.13) — ruins ~3.5× rarer than
+intended. Cause: the smooth field removed the ADR-411 terrace plateaus that made exactly-flat footprints
+common; ADR-531's massifs are all ≥770 tiles out, so they cannot be the cause. The fix is generator-side
+only (`packages/world/src/generator.ts`): seeded flat benches in the wilderness, outside the 160-tile
+spawn disc (inner ≤160 stays byte-identical). One bench per 64-tile lattice cell, centre jittered ±2,
+core a Chebyshev square of half-side 24–26 pinned exactly flat at the cell's pure-field mid-range level,
+skirt grading linearly back to the natural field and completing exactly at the cell edge in Chebyshev
+distance — so the field is continuous across cells by construction and two benches can never interact
+(the cell-confined design; a dense-lattice Voronoi variant measured maxStep 109, BFS 49%). A face gate
+shrinks (never rejects) an over-steep bench until its worst single-tile face — bench grade plus local
+natural gradient, sampled on 8 rays — fits the ADR-272 bound (threshold 2.7, bound 3); benches with a
+cap below 14 are rejected. Benches never touch massifs: suppressed where the bump is >0 and within 10
+tiles of a massif disc (the ADR-531 slope path starts up to R+8 outside the disc, and a bench skirt on
+the approach walled one entry off with a >1 step — seed 1234 cone at (1237,219) failed until the
+suppression was added). No change to SITE_CHANCE, `siteTerrainOk`, or the adr384 bands. Result:
+flatRate 0.317, realised 0.082; survey min −100/max +100 every seed, flat384 81.5–84.8%, BFS
+99.09–99.88%; 0 faces over the ADR-272 window; chunk-gen origin 1.27 ms/chunk (unchanged), wilderness
+2.26 vs 2.05 ms/chunk (+10%, inside ADR-530's +9–14% band). These benches also restore flat footprints
+for player building generally. New test `packages/world/test/adr530_flat_benches.test.ts` (5 tests:
+benches exist in the wilderness and are exactly flat inside, none reaches ≤160, `benches:false`
+disables them, a flat disc of radius ≥20 exists by height alone) — proved to fail 5/5 on pre-fix code.
+Neighbours: full `packages/world/test` 200/200; adr384 9/9; adr252-live 8/8; gameplay terrain/water +
+travel 92/92; adr445/448 live 19/19; world typecheck clean (TS 5.9.3). Honest cuts: the face gate's
+ray sampling is sparse (8 rays × 3 points), so the 2.7 threshold carries the margin against unsampled
+faces rather than a proof; ~30% of bench cores sit underwater (level ≤0) and are left alone — raising
+them would punch flat islands into lakes. Nothing pushed — implementation + commit only.
+
+## ADR-531: mountains — massifs with shape variety + guaranteed slope sides (SurVivaZ)
+
+**Context (worldgen batch, slice 3 of 4; prep `~/workspace/work/worldgen-next-batch-prep.md` §3–§4, with
+the §0 user decisions overriding: ±100 now, not ±250; new worlds only; large features rare; flat budget
+≥60% near spawn / ≥40% per region; starter layout byte-identical).** ADR-530 reached ±100 but the relief
+is unshaped rolling ground — no mountains. This slice adds seeded massifs: 1–3 per scaled region, none in
+region zero (every non-zero region is ≥768 tiles from the origin, so no massif comes within 384 of spawn),
+discs never crossing a region edge (no cross-region lookup, no seam).
+
+**Field.** `massifsInRegion(rx, ry)` (memoised, cap 16, like `regionWater`) returns the region's massifs;
+`massifBumpAt(m, tx, ty)` is the pure profile shared by the generator and the tests. A massif is an
+additive bump on the natural field (`max(natural + bump, ±100)`), so its edge meets the surrounding ground
+with no seam. Centres sit on low-to-moderate base ground (preferred band −10..25, so a massif is a
+prominence rising from its surroundings), clear of forced water, great lakes and biome sea, ≥280 tiles
+apart, and — the fix that cost a debugging round — clear of the *sited* elevated lake and its bowl rim
+and spillway, not just the hash layout: siting moves the lake, and a massif centred on the sited disc has
+its summit swallowed by the bowl override (measured pre-fix: a peak-56 mesa reading 6, a peak-32 volcano
+reading 100 at its rim). Siting probes read the base field with massifs off (`includeMassifs = false` on
+`heightFromNoise`), so the starter layout stays byte-identical and siting never depends on call order.
+
+**Shapes.** Cone, ridge (elongated 1.8× on its long axis), mesa (flat top to 0.3 radius), dome (cosine),
+volcano (cone + crater bowl: rim 1.0, floor ~0.69 — a real dip, no crater lake; that would need flow-water
+handling in the bowl, deferred as a cut). Heights sample the range: foothills 30–65 (65%), major 70–90
+(32%), signature 95–100 (~3% roll, roughly one per few regions); the target is capped at base + 120 and
+the amplitude floored at 20, so every massif is a real prominence (summit ≈ target, never under it).
+
+**Gradient control (the navigability guarantee).** The profile is terraced in tiles-per-level: the
+slope-side sector rises ≤1 level/tile (an ADR-409 ramp — walkable), other faces ≤2 (climbable cliffs); the
+profile's own worst step is 2 (measured), never a >3 wall from any massif. The slope sector faces the
+gentlest natural descent, not a random direction: 16 directions are scored by their worst 4-tile window
+gradient on the combined field plus a penalty when the ray ends above the summit. A random direction was
+measured to fail (a peak-34 cone whose slope ray climbed to 67 — its "summit" sat on a sustained
+2-levels/tile natural face no ≤1-step path could cross). The natural field itself steps 2 levels on
+~8–12% of wilderness tiles (measured probe), so the approach path is asserted as a ≤1-step BFS inside the
+slope wedge — it may jog around scattered natural noise bumps — not as a straight ray, which no direction
+can promise. Saddles apply only to close pairs (discs overlapping or nearly touching, D ≤ R1+R2+40): two
+massifs separated by a lake or a wide lowland have no ridge between them to dip (measured: a peak-32 mesa
+474 tiles from its neighbour across a lake, whose segment min is just its own flat top) — their pass is
+the slope sector.
+
+**Altitude bands (no new art).** Rock above 55, snow above 70 where the lapse-adjusted band temperature
+is under the `COVER_DEFAULTS` snow temperature (at 70+ levels the 0.6 °C/level lapse puts every band under
+it), reusing tiles 5/6. The height is threaded once through `load()`/`sampleAt()`/`tileAt()` into
+`tileFromNoise`/`surface`, so banded tiles agree with stored heights; `nodesInChunk` skips banding (it only
+needs water vs land) and computes the banded tile lazily only when a tree is rolled. Treeline: kind 5
+(`tree`) is never placed on rock/snow ground, in `load()` and `nodesInChunk()` alike (same pure check, so
+the ADR-343 lockstep holds; the ADR-500 hash grid is ±128 tiles, where heights stay ≤8, so its pin is
+untouched).
+
+**Survey (5 seeds × 5 regions).** 50 massifs; summits min 31 / max 97; ≥80: 6; ≥95: 2 (the rarity bound).
+50/50 slope paths (≤1-step BFS base→summit inside the slope wedge); 4 close-pair saddles, each dipping
+≥5 below the lower peak; max massif-profile step 2; flat within 384 of origin 85.9–90.2% (budget 60%);
+BFS from spawn 99.36–99.90% (budget 99%); 6 volcanos in the survey, all with a crater bowl ≥0.2×amp deep.
+Bands: 87,724 sampled flank tiles, 8,595 rock / 8,375 snow, 0 violations; treeline: 0 trees above 55 in
+45 summit chunks (112 below), trees still generate near spawn.
+
+**Cost.** Generation-time only (valueNoise at 2–3 scales, existing salts); no new per-tick scans, nothing
+per frame. Chunk-gen, same 100-chunk × 5-rep probe before/after on this VM: warm steady-state origin
+1.32 → 1.25 ms/chunk (unchanged within noise), wilderness 1.83 → 2.05 ms/chunk (+12%, the per-tile
+massif lookup); massif layout is a one-time ~17.5 ms per region first touch (memoised; water siting is
+~10.6 ms for comparison). (The ADR-530 entry's 1.03/1.55 figures used a different probe method and are
+not comparable to these numbers.)
+
+**Pre-existing failure found, not caused by this slice — ADR-384 ruin flat-share.** `adr384_single_level_ruins.test.ts`
+(SITE_CHANCE density) fails with flatRate **0.111** (band 0.30–0.47), reproduced *identically* on the
+ADR-530 base with this slice stashed (same 0.1111111). Cause: `siteTerrainOk` needs a footprint with
+exactly zero height spread, and ADR-530's smooth field removed the terrace plateaus that made exactly-flat
+footprints common (~0.35) — massifs cannot be involved (the survey is ±352 tiles; the nearest massif disc
+is ≥770 from the origin, and the value is bit-identical with and without this slice). Consequence if left
+alone: realised ruin density 0.25 × 0.111 ≈ **0.028** of chunks get a ruin, vs the intended ~0.10 — ruins
+~3.5× rarer. Not widened here: blessing 0.111 would also need the realised-density bar (0.08) rethought,
+and whether to retune SITE_CHANCE or relax the strict single-level gate is a product decision for the
+coordinator, not a silent band edit in this slice.
+
+Test: `packages/world/test/adr531_massifs.test.ts` (10 tests: layout, distribution, 50 slope paths,
+saddles, profile gradient, flat/BFS), `packages/world/test/adr531_altitude_bands.test.ts` (3 tests: rock/
+snow bands, treeline, volcano bowls). Proved to fail on pre-change code: 8/13 fail (the 5 flat/BFS tests
+pass — they are the ADR-530 invariants the change must preserve).
+Neighbours: full `packages/world/test` — **191 passed / 0 failed (30 files)**; adr252-live **8/8**;
+travel suites (`adr252_ai_humans`, `adr324_world_travel`, `adr441_travel_stuck`, `adr305_travel_facing`) —
+**35 passed**; gameplay terrain/water suites — **145 passed / 1 failed (14 files)**, the one failure being
+the pre-existing ADR-384 flat-share above (identical on base); render slope + preview suites —
+**48 passed (7 files)**. Typecheck clean with lockfile-pinned TypeScript 5.9.3 across
+world/gameplay/render/net/persist. Nothing pushed — implementation + commit only, coordinator gates.
+
+**Honest cuts.** No crater lakes on volcanos (dry bowls; water in a crater needs flow encoding). Saddles
+are only asserted for close pairs — most massifs stand alone, and their pass is the slope sector. The
+slope path is a BFS that jogs around natural noise, not a straight ramp: a walker following the slope
+ray itself may hit a scattered 2-level natural step and need to sidestep a tile. Massif lakebeds: a disc
+overlapping a lake raises the hidden lakebed (water tiles render at surface 0 regardless, as under
+ADR-530's natural highs) — the visible flanks are the land parts. Phone/Xbox visual checks still owed:
+whether massifs read as mountains at play zoom, whether slope sides read as walkable, and whether snowcaps
+and the treeline look right in each season.
+
+## ADR-532 — Canyons: carved channels with graded entries, exits, and crossings (2026-11-24)
+
+**Decision.** Carve 1–2 canyons per scaled region (none in region zero, none within 384 tiles of
+origin) along seeded meandering paths (two-sine centreline, same family as the river centreline),
+V-profile (floorHalf 7, wall grade 1.2) or slot-profile (floorHalf 3, wall grade 1.6). Depth
+25–87 realised (sampled 65% 25–60, 30% 60–80, 5% 85–100, capped by the rim and the ±100 absolute
+floor); length 200–400; deep (≥85) canyons rare. Floor is the rim-line minus a depth envelope
+(`floor(t) = round(rimLine(t) − depth·env(t))`, env ramping over `ceil(depth/s)` tiles at each end),
+1-Lipschitz by construction and anchored exactly at both rims (`floor(0)=floorStart`,
+`floor(L)=floorEnd`) — every canyon terminates (peters out), which is its crossing; no
+ford/bridge variants built. Walls are fixed-grade with NO cutoff (`profile = floor + grade·(d −
+floorHalf)`, floored to integer levels; carved = `min(ground, profile)`), so the wall ends wherever
+the rising profile meets local ground and there is no footprint edge to step off. Carve order:
+after the base height field (massifs + benches), before water features resolve — canyon beats
+biome, water beats canyon where a river runs in it. Siting keeps the centreline clear of massif
+discs, great lakes, and elevated-lake bowls (clearance `floorHalf + ceil(200/grade) + 15`, sampled
+every 8 tiles), keeps the footprint bbox inside its region, suppresses the carve where
+`massifBump > 0` or within 10 tiles of a massif disc (same approach as the ADR-530 bench fix-up),
+and keeps the floor band (`floorHalf + 8`) clear of spillway channels (point-to-segment against
+the sample polyline — a spillway crossing the floor would cut the floor walk with a waterfall
+face). Siting probes use the pre-canyon height field (`includeCanyons=false`), so layout never
+depends on canyons or call order. Generation-time only (valueNoise at 2–3 scales, existing salts
++ `CANYON_SALT`); no new per-tick scans, nothing per frame. `canyons?: false` option (tests only)
+gives the canyon-free control.
+
+**Sub-sea-level floors hold water (user decision 5).** Where a canyon floor dips below 0 it is
+forced to natural water (tile 1, bed at the floor, surface 0 — same encoding as biome sea; shallow
+tile 8 where the shore cover applies): `tileFromNoise` returns tile 1 when the tile is on the
+floor (`d ≤ floorHalf`) or the wall profile itself is below 0. Dry floors stay ≥ 0. A wall tile
+whose *natural* ground dips below 0 while the wall profile stays ≥ 0 keeps the engine's
+pre-existing dry-below-0 behaviour (out of scope — e.g. a forest-floor tile at −1). **Flood
+interaction (ADR-467):** canyon-floor water IS sea-level water (`waterSurfaceAt` returns 0,
+`isWaterId(1)` true), so ADR-467 floods can seed from a canyon river onto its low banks exactly
+as from any river — no exemption is given or needed (verified by reading `flood.ts`: seeds on
+rain/storm or spring melt, `SEA_SURFACE = 0`, waterfall rule excludes only non-sea-level water).
+
+**Survey (5 seeds × 5 regions, 28 canyons).** Depths min 27 max 87, ≥60: 6, ≥85: 1 (rare). Design
+floor step ≤1 everywhere; realised floor walk max step 4 — 4 steps, all pre-existing in the
+canyon-free field (natural bench edges the canyon did not create), 0 canyon-created. Graded
+entry AND exit per canyon (≤3-step BFS, rim 30 tiles out → floor at t=12 / t=L−12). Crossing per
+canyon: termination at both ends, plus region BFS reaches land on both sides of every canyon
+midpoint (2–4 side pairs per seed). Wall steps: 6,720 >3-level 4-neighbour steps in canyon
+fields, 6,720 pre-existing in the canyon-free field, **0 added**. Region (1,0): flat 67.4–69.0%
+(≥40%), BFS 99.30–99.46% (≥99%). Spawn ±512: flat within 384 81.5–84.8% (≥60%), BFS from spawn
+99.09–99.88% (≥99%; seed 42 at 99.09% is the known thin margin, unchanged from the ADR-530
+base). adr384: flatRate **0.317** (band 0.30–0.47), realised density **0.082** (band 0.08–0.13) —
+unchanged from the ADR-530 fix-up base (the ADR-531 entry's 0.111 was measured on the pre-fix-up
+base). Chunk-gen timing (100 chunks, region (1,0), seed 1234): canyons on 3.60 ms/chunk vs off
+2.28 ms/chunk mean over 3 reps; steady-state (reps 2–3) +0.44 ms/chunk (+19%, canyon regions
+only — region zero pays nothing, `canyonProfileAt` returns early there). First load of a canyon
+region also pays the one-time siting computation (memoised per region). Generation-time only.
+
+**Trials rejected (probed, not shipped).** (1) Floor as the greatest 1-Lipschitz envelope of
+`min(rim − depth, ground)`: pulled `floor(0)` up to 40 levels below the rim where a bench skirt
+descended past the mouth — a cliff at the entry. Replaced by the rim-line-minus-envelope floor.
+(2) Fixed-reach wall: left a 65-level cliff where a floor clamped at −100 faced ground at +72.
+(3) Adaptive per-t wall (rim/width sampled at its own edge): rim/width went stale between the
+last sample and the stored width, and the hard u>1 cutoff stepped 4 levels at the wall edge
+(14 new >3 steps, then 17,084 in cross-section boxes). Fixed-grade with no cutoff won.
+(4) Meander too steep (slope 1.38, curve speed ~1.7/step) built 4-level steps on entry walks —
+gentled to slope ≤ ~0.7. (5) Fractional depths/profile heights leaked out of `heightAt` (Chunk
+heights are i16, truncate on load) — depth rounded to int, profile floored. (6) A spillway
+crossing a floor cut the floor walk with a 53-level step — fixed by the floor-band spillway
+avoidance above, not by letting the canyon override the spillway (water beats canyon).
+
+**Test bug found by the full-suite run (not a generator defect).** The floor-walk test's
+`continue` on a pre-existing >3 step skipped `prev = pt`, so the walk compared each later tile
+against a stale point 100+ tiles back and reported a phantom 53-step. Fixed by always advancing
+`prev`. Lesson: never `continue` past the state update in a walk loop.
+
+Test: `packages/world/test/adr532_canyons.test.ts` (6 tests: layout, depth/length stats, design
+floor grade + anchored ends, realised floor walk + graded entry/exit, sub-sea-level water,
+wall-step comparison), `packages/world/test/adr532_navigability.test.ts` (10 tests: 5 seeds ×
+region (1,0) flat/BFS/severance + spawn flat384/BFS). Proved to fail on pre-change code (stash
+revert): 11 fail (all 6 canyon tests + 5 region-severance tests, `canyonsInRegion is not a
+function`); the 5 spawn flat/BFS tests pass — they are the ADR-530/531 invariants the change
+must preserve.
+Neighbours: full `packages/world/test` — **212 passed / 0 failed (33 files)**; adr252-live
+**8/8**; travel suites (`adr305_travel_facing`, `adr324_world_travel`, `adr329_route_water`,
+`adr345_water_navigation`, `adr441_travel_stuck`) — **49 passed (6 files, incl. adr252-live)**;
+gameplay terrain/water suites + adr384 — **90 passed (8 files)**; render slope + preview suites —
+**34 passed (6 files)**. Typecheck clean with lockfile-pinned TypeScript 5.9.3 across all workspace
+projects (`pnpm -r typecheck`). Nothing pushed — implementation + commit only, coordinator gates.
+
+**Honest cuts.** Max straight-line mouth step is 4 (diagonal sampling across a bench edge on the
+approach); the ≤3-step BFS entry/exit is the binding check and passes for every canyon. Worst
+realised floor-walk step is 4 in one spot, proven pre-existing on the `canyons: false` control.
+25/28 canyons have a sub-0 design floor (river gorges; ~18% of sampled floor tiles are dry) —
+the rim-band scoring prefers rims in 0..70 but the natural field centres on 0, so most floors
+run below sea level; dry canyons exist but are the minority. No ford/bridge variants: every
+crossing is termination. Wall tiles whose natural ground dips below 0 with profile ≥ 0 keep the
+engine's pre-existing dry-below-0 behaviour. Chunk gen costs ~+0.4 ms/chunk steady-state in
+canyon regions (see timing above). Phone/Xbox visual checks still owed: whether canyons read as
+canyons at play zoom, whether floors/walls read as walkable, river water in sub-0 floors.

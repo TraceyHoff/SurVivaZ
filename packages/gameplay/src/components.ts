@@ -347,9 +347,11 @@ export const Tamed = defineComponent("Tamed", { kind: "u8", owner: "u32", fedUnt
 export const Road = defineComponent("Road", { surface: "u8", mask: "u8", owner: "u32" }, { networked: true, persistent: true });
 export const enum RoadSurface { None = 0, Path = 1, Gravel = 2, Paved = 3 }
 /** ADR-263 (Task 36) shovel terrain edit: standalone entity at a tile centre (like Road). dig = levels raised (+) or dug
- * (-) relative to the generated ground there, within ±TERRAIN_EDIT_RANGE (ADR-411: 300; was an i8 holding the
- * ADR-297 ±25..75 range — a ±300 offset needs i16). Networked (client depth / darkness / HUD temperature) and
- * persistent (the chunk height is saved with the chunk; this keeps the "how far below ground" reference). */
+ * (-) relative to the generated ground there; the absolute level clamps to ±TERRAIN_EDIT_RANGE (ADR-411: 300;
+ * ADR-529: 100; was an i8 holding the ADR-297 ±25..75 range — the field stays i16: the chunk height array
+ * still needs it for flow-water raws up to 1100), so dig spans -(g+100)..(100-g) for generated ground g.
+ * Networked (client depth / darkness / HUD temperature) and persistent (the chunk height is saved with the
+ * chunk; this keeps the "how far below ground" reference). */
 export const TerrainEdit = defineComponent("TerrainEdit", { dig: "i16" }, { networked: true, persistent: true });
 /** ADR-467 (floods): one entity per flooded tile, at the tile centre (like TerrainEdit). origTile = the tile id
  *  before flooding (restored on drain; the raw height is the bed level and never changes). drainTick = the

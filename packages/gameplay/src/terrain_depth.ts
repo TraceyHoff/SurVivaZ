@@ -3,18 +3,23 @@
  * without ESM cycles): TerrainEdit tile index and underground depth.
  */
 import { Transform, type Entity, type World } from "@engine/core";
-import { HEIGHT_MAX, worldTileKey, worldTileFromKey } from "@engine/world";
+import { worldTileKey, worldTileFromKey } from "@engine/world";
 import { TerrainEdit } from "./components.js";
 
-/** ADR-411: how far (levels) a shovel may dig below / raise above a tile's generated ground. */
-export const TERRAIN_EDIT_RANGE = 300;
+/** ADR-411: absolute terrain level bounds. ADR-529: the bounds are exactly ±100 total (user decision
+ * 2026-11-24: the shovel matches the range; the raise to ±250 comes later, once ±100 is proven) — the
+ * ceiling is the range itself, NOT generated ground + range. Shovel edits clamp to these absolute bounds:
+ * from generated ground g you can raise at most 100−g and dig at most g+100. Raising to ±250 later is a
+ * single-knob change to TERRAIN_EDIT_RANGE (plus HEIGHT_MAX in ADR-530's successor). */
+export const TERRAIN_EDIT_RANGE = 100;
 
 export const TERRAIN = {
-  /** ADR-411: absolute terrain levels, relative to the world height-zero datum. A shovel may dig 300 levels
-   *  below / raise 300 levels above a tile's generated ground (user clarification 2026-11-17); generated
-   *  ground spans [0, HEIGHT_MAX], so the absolute bounds are [-300, HEIGHT_MAX + 300] = [-300, 326].
+  /** ADR-411: absolute terrain levels, relative to the world height-zero datum. Shovel edits clamp to
+   *  [-TERRAIN_EDIT_RANGE, +TERRAIN_EDIT_RANGE] = [-100, 100] (ADR-529: was [-300, 326] via the additive
+   *  HEIGHT_MAX + range formula — that formula is gone; generated ground spans [0, HEIGHT_MAX] but the
+   *  ceiling is absolute, so ground at 26 can rise only 74).
    *  (ADR-297's bounds were -60..75.) */
-  minLevel: -TERRAIN_EDIT_RANGE, maxLevel: HEIGHT_MAX + TERRAIN_EDIT_RANGE,
+  minLevel: -TERRAIN_EDIT_RANGE, maxLevel: TERRAIN_EDIT_RANGE,
   /** Reach (tiles from the body centre to the target tile centre). */ reach: 3,
   /** Dug this many levels below ground (or more) = underground. */ undergroundDepth: 3,
   /** Underground air temperature (60°F). */ undergroundTempC: (60 - 32) * 5 / 9,
@@ -23,7 +28,7 @@ export const TERRAIN = {
   /** Tile id for freshly dug / piled earth (render TileId.Dirt). */ earthTile: 4,
 } as const;
 
-/** Absolute level bounds (flowing-water height encoding range, ADR-263 waterDepth.ts; ADR-411: -300..326). */
+/** Absolute level bounds (flowing-water height encoding range, ADR-263 waterDepth.ts; ADR-411: -300..326; ADR-529: -100..100 — the flow-water cap now equals the land ceiling). */
 export const LEVEL_MIN = TERRAIN.minLevel, LEVEL_MAX = TERRAIN.maxLevel;
 interface EditIdx { tiles: Map<number, Entity>; size: number; tick: number }
 const idxCache = new WeakMap<World, EditIdx>();

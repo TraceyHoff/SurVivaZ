@@ -10,6 +10,7 @@
  * Cell: 68x52 px (64x48 art + 2 px pad), diamond centre at frame px (34, 18) = anchor (0.5, 18/52); @2x pages 136x104.
  */
 import { TileId } from "./ids.js";
+import { SLOPE_VOID } from "@engine/world";
 import { allWaterfallArtKeys } from "./waterfallTiles.js";
 
 /** Land materials, lowest -> highest priority: a higher material's edge overlay is drawn onto a lower neighbour. */
@@ -142,11 +143,11 @@ export const groundSideKey = (mat: GroundMaterial, season: number, level: number
 /**
  * ADR-251: side-face instances for a land cell at height z: one per level of drop on the camera-facing sides, with the
  * skirt mask bits of that level (1 = +x neighbour lower, 2 = +y neighbour lower; the face art's right half is +x, the
- * left half +y). Drops < 0.5 level (e.g. the 0.25 water inset) draw none; void neighbours (-99) are left to the mesh.
+ * left half +y). Drops < 0.5 level (e.g. the 0.25 water inset) draw none; void neighbours (SLOPE_VOID) are left to the mesh.
  */
 export function groundSideLevels(z: number, hx: number, hy: number, out: { level: number; mask: number }[] = []): { level: number; mask: number }[] {
   out.length = 0;
-  const lv = (h: number): number => (h <= -90 ? 0 : Math.min(GROUND_SIDE_MAX_LEVELS, Math.max(0, Math.round(z - h))));
+  const lv = (h: number): number => (h <= SLOPE_VOID ? 0 : Math.min(GROUND_SIDE_MAX_LEVELS, Math.max(0, Math.round(z - h))));
   const nx = lv(hx), ny = lv(hy);
   for (let i = 0; i < Math.max(nx, ny); i++) out.push({ level: i, mask: (nx > i ? 1 : 0) | (ny > i ? 2 : 0) });
   return out;

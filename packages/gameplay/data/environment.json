@@ -193,6 +193,8 @@
     }
   ],
   "altitudeLapse": 0.6,
+  "altitudeLapseColdCap": 30,
+  "altitudeLapseWarmCap": 15,
   "humidityPerIntensity": 0.4,
   "windChillPerSpeed": 1.5,
   "windWetSynergyMul": 0.5,

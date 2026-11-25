@@ -38,16 +38,20 @@ export const FLOW_WATER_OFFSET = 80, FLOW_WATER_MIN_RAW = 50;
  * added -60..-31 and 48..75 levels. Natural generated water is nonnegative (0..12).
  * No chunk format migration, wider arrays, or extra per-column layers. */
 /** ADR-411: absolute terrain levels now span -300..326 (generated ground 0..26, shovel ±300), which no byte
- * encoding can hold. Flowed water at those levels uses a v2 code: raw = level + FLOW_WATER_OFFSET_V2
- * (700..1326), stored in the chunk's i16 height array. Natural water is still 0..12 and land is stored
- * directly, so the v2 code is unambiguous — and a v1 chunk's legacy bytes still decode via the old branches
- * below (checked after the v2 branch, since a v2 raw >= 1000 also satisfies the legacy >= 50 test). */
+ * encoding can hold. ADR-529: the range is now -100..100 (absolute bounds — the flow-water cap now equals
+ * the land ceiling); the v2 code is unchanged, only its range narrows to raw 900..1100. Flowed water at those levels uses a v2 code:
+ * raw = level + FLOW_WATER_OFFSET_V2 (700..1326 at ±300; 900..1100 now), stored in the chunk's i16 height
+ * array. Natural water is still 0..12 and land is stored directly, so the v2 code is unambiguous — and a
+ * v1 chunk's legacy bytes still decode via the old branches below (checked after the v2 branch, since a v2
+ * raw >= 1000 also satisfies the legacy >= 50 test). */
 export const FLOW_WATER_OFFSET_V2 = 1000;
 /** ADR-411: flow-water level range — the same absolute bounds as gameplay's TERRAIN (see terrain_depth.ts);
- * kept here because the world package cannot import gameplay. The gameplay ADR-411 test asserts they agree. */
-export const FLOW_WATER_LEVEL_MIN = -300, FLOW_WATER_LEVEL_MAX = 326;
+ * kept here because the world package cannot import gameplay. The gameplay ADR-411 test asserts they agree.
+ * ADR-529: -100..100 (was -300..326); the raise to ±250 comes later, once ±100 is proven. */
+export const FLOW_WATER_LEVEL_MIN = -100, FLOW_WATER_LEVEL_MAX = 100;
 /** ADR-411: smallest v2 raw (level -300 + offset 1000). v2 raws are 700..1326; legacy raws are -128..127,
- * so this threshold separates them — the offset itself (1000) would misread deep v2 water as legacy. */
+ * so this threshold separates them — the offset itself (1000) would misread deep v2 water as legacy.
+ * ADR-529: smallest v2 raw is now 900 (level -100 + 1000); v2 raws are 900..1100. */
 export const FLOW_WATER_MIN_RAW_V2 = FLOW_WATER_OFFSET_V2 + FLOW_WATER_LEVEL_MIN;
 export function isFlowWater(id: number, raw: number): boolean { return isWaterId(id) && (raw >= FLOW_WATER_MIN_RAW || raw <= -71); }
 export function flowWaterRaw(level: number): number {

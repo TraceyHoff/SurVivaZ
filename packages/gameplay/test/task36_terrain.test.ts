@@ -1,4 +1,4 @@
-// ADR-263/297/411: shovel terrain editing (-300..326), flowing water, underground darkness / 60°F / growth.
+// ADR-263/297/411: shovel terrain editing (-100..100), flowing water, underground darkness / 60°F / growth.
 import { describe, expect, it } from "vitest";
 import { setSeason, Transform, Weather, type Entity, type World } from "@engine/core";
 import { TileMap, isFlowWater, renderTileHeight, terrainLevel, WATER_TILE } from "@engine/world";
@@ -22,7 +22,7 @@ const hold = (w: World, p: Entity, key: string): void => {
 const hAt = (w: World, x: number, y: number): number => w.resource(G.TerrainRes).heightAt(x, y);
 
 describe("ADR-263 shovel terrain editing", () => {
-  it("needs a shovel in hand; raises and lowers one level per use and clamps at absolute -300..326", () => {
+  it("needs a shovel in hand; raises and lowers one level per use and clamps at absolute -100..100", () => {
     const w = makeWorld(); field(w, 2); const p = G.spawnPlayer(w, { x: 0.5, y: 0.5, clientId: 1 });
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.NoShovel);
     expect(hAt(w, 1, 0)).toBe(2);
@@ -30,12 +30,12 @@ describe("ADR-263 shovel terrain editing", () => {
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.None);
     expect(hAt(w, 1, 0)).toBe(1); expect(G.terrainDigAt(w, 1, 0)).toBe(-1);
     expect(w.resource(G.TerrainRes).tileAt(1, 0)).toBe(G.TERRAIN.earthTile); // dug earth
-    for (let i = 0; i < 310; i++) G.editTerrain(w, p, 1, 0, -1);
-    expect(G.terrainDigAt(w, 1, 0)).toBe(-302); expect(hAt(w, 1, 0)).toBe(-300);
+    for (let i = 0; i < 110; i++) G.editTerrain(w, p, 1, 0, -1);
+    expect(G.terrainDigAt(w, 1, 0)).toBe(-102); expect(hAt(w, 1, 0)).toBe(-100);
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.Limit);
-    G.addItem(w, p, id("soil"), 324); // the 302 dug units fill the pit; another 324 reach absolute +326
-    for (let i = 0; i < 630; i++) G.editTerrain(w, p, 1, 0, 1);
-    expect(G.terrainDigAt(w, 1, 0)).toBe(324); expect(hAt(w, 1, 0)).toBe(326);
+    G.addItem(w, p, id("soil"), 98); // the 102 dug units fill the pit; another 98 reach absolute +100
+    for (let i = 0; i < 200; i++) G.editTerrain(w, p, 1, 0, 1);
+    expect(G.terrainDigAt(w, 1, 0)).toBe(98); expect(hAt(w, 1, 0)).toBe(100);
     expect(G.editTerrain(w, p, 1, 0, 1)).toBe(G.TerrainFail.Limit);
     expect(G.editTerrain(w, p, 9, 9, -1)).toBe(G.TerrainFail.TooFar);
     // back to ground removes the edit record
@@ -76,7 +76,7 @@ describe("ADR-263 shovel terrain editing", () => {
     // Digging a mound back down also yields soil; a rejected boundary edit does not.
     G.setTerrainDig(w, 1, 0, 1);
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.None); expect(G.countItem(w, p, id("soil"))).toBe(1);
-    G.setTerrainDig(w, 1, 0, -302);
+    G.setTerrainDig(w, 1, 0, -102);
     expect(G.editTerrain(w, p, 1, 0, -1)).toBe(G.TerrainFail.Limit); expect(G.countItem(w, p, id("soil"))).toBe(1);
   });
 
@@ -100,16 +100,16 @@ describe("ADR-263 shovel terrain editing", () => {
     if (worker) { w.add(p, G.Worker, {} as never); G.addItem(w, p, id("stone_shovel"), 1); }
     else hold(w, p, "stone_shovel");
     const bytes = [...map.loadedChunks()].reduce((n,c) => n + c.height.byteLength + c.tiles.byteLength, 0);
-    for (let i=0;i<300;i++) expect(G.editTerrain(w,p,1,0,-1)).toBe(G.TerrainFail.None);
-    expect(hAt(w,1,0)).toBe(-300); expect(G.countItem(w,p,id("soil"))).toBe(300);
+    for (let i=0;i<100;i++) expect(G.editTerrain(w,p,1,0,-1)).toBe(G.TerrainFail.None);
+    expect(hAt(w,1,0)).toBe(-100); expect(G.countItem(w,p,id("soil"))).toBe(100);
     expect(G.editTerrain(w,p,1,0,-1)).toBe(G.TerrainFail.Limit);
-    G.addItem(w,p,id("soil"),326);
-    for(let i=0;i<626;i++) expect(G.editTerrain(w,p,1,0,1)).toBe(G.TerrainFail.None);
-    expect(hAt(w,1,0)).toBe(326); expect(G.countItem(w,p,id("soil"))).toBe(0);
+    G.addItem(w,p,id("soil"),100);
+    for(let i=0;i<200;i++) expect(G.editTerrain(w,p,1,0,1)).toBe(G.TerrainFail.None);
+    expect(hAt(w,1,0)).toBe(100); expect(G.countItem(w,p,id("soil"))).toBe(0);
     expect(G.editTerrain(w,p,1,0,1)).toBe(G.TerrainFail.Limit);
     expect([...w.query([G.TerrainEdit])]).toHaveLength(1);
     expect([...map.loadedChunks()].reduce((n,c)=>n+c.height.byteLength+c.tiles.byteLength,0)).toBe(bytes);
-    G.setTerrainDig(w,1,0,-999); expect(hAt(w,1,0)).toBe(-300); expect(G.terrainDigAt(w,1,0)).toBe(-300);
+    G.setTerrainDig(w,1,0,-999); expect(hAt(w,1,0)).toBe(-100); expect(G.terrainDigAt(w,1,0)).toBe(-100);
   });
 
   it("negative heights round-trip through the chunk codec and net runs as signed bytes", async () => {
@@ -143,15 +143,17 @@ describe("ADR-263 flowing water", () => {
     expect(G.inWater(w, 4.5, 0.5)).toBe(true);
   });
 
-  it("ADR-411: deep flooded pits retain -300 and fill with exactly one Soil", () => {
+  it("ADR-411: deep flooded pits retain -100 and fill with exactly one Soil", () => {
     const w=makeWorld(); const map=field(w,0); map.setTile(0,0,WATER_TILE);
-    G.setTerrainDig(w,1,0,-300); expect(G.isUnderground(w,1,0)).toBe(true);
-    expect(G.terrainFlowStep(w)).toBe(1); expect(hAt(w,1,0)).toBe(-300);
-    G.setTerrainDig(w,1,0,999);expect(hAt(w,1,0)).toBe(326);expect(G.terrainDigAt(w,1,0)).toBe(326);
-    G.setTerrainDig(w,1,0,-999);expect(hAt(w,1,0)).toBe(-300);expect(G.terrainDigAt(w,1,0)).toBe(-300);
+    G.setTerrainDig(w,1,0,-100); expect(G.isUnderground(w,1,0)).toBe(true);
+    expect(G.terrainFlowStep(w)).toBe(1); expect(hAt(w,1,0)).toBe(-100);
+    // setTerrainDig clamps at the absolute bounds (land and flow water now share the 100 cap, so the
+    // ceiling clamp is assertable on a flooded tile too — it previously read back at 100 while land reached 126)
+    G.setTerrainDig(w,2,0,999);expect(hAt(w,2,0)).toBe(100);expect(G.terrainDigAt(w,2,0)).toBe(100);
+    G.setTerrainDig(w,2,0,-999);expect(hAt(w,2,0)).toBe(-100);expect(G.terrainDigAt(w,2,0)).toBe(-100);
     const p=G.spawnPlayer(w,{x:2.5,y:.5});hold(w,p,"stone_shovel");G.addItem(w,p,id("soil"),1);
     expect(G.editTerrain(w,p,1,0,1)).toBe(G.TerrainFail.None);
-    expect(G.countItem(w,p,id("soil"))).toBe(0);expect(hAt(w,1,0)).toBe(-300);
+    expect(G.countItem(w,p,id("soil"))).toBe(0);expect(hAt(w,1,0)).toBe(-100);
     expect(w.resource(G.TerrainRes).tileAt(1,0)).toBe(G.TERRAIN.earthTile);
     expect(G.editTerrain(w,p,1,0,-1)).toBe(G.TerrainFail.Limit);
   });

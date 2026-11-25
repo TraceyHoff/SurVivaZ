@@ -94,7 +94,7 @@ describe("ADR-414 Canvas2D ground heights", () => {
     const map2 = new TileMap(); fill3(map2, 1);
     map2.unloadChunk(0, 0); // every neighbour is void now
     const g2 = c2dGroundGeometry(1, (dx, dy) => c2dNeighbourLow(map2, dx, dy));
-    expect(g2.faces).toEqual([]); // no giant void faces at the load edge (the mesh draws to -99 there)
+    expect(g2.faces).toEqual([]); // no giant void faces at the load edge (the mesh draws to NO_TILE_HEIGHT there)
   });
 
   it("cliff shades match the mesh (tilemap.ts cliffShade): +u 0.62, +v 0.8, far sides 0.28", () => {

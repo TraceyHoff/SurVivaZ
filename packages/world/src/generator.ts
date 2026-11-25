@@ -73,10 +73,234 @@ export function randomWorldSeed(random: () => number = Math.random): number {
 
 /** ADR-254: terrain height levels. Biome noise still drives tile bands; a separate height field adds hills, plateaus and ledges.
  * ADR-411: raised 22 -> 26 (relief 2..8, so plateau 3 x 8 + detail 2 = 26 is actually reached — the old
- * 22 was unreachable: plateau 3 x relief 6 + detail 2 topped out at 20 on every measured seed). */
-export const HEIGHT_MAX = 26;
+ * 22 was unreachable: plateau 3 x relief 6 + detail 2 topped out at 20 on every measured seed).
+ * ADR-530: raised to [-100, 100]. The old field never went below 0, and its plateau terraces are
+ * 6..10-level faces at full relief — closed walls the BFS can never cross (baseline: only 42-60% of
+ * land reachable from spawn on 5 seeds). Past the spawn disc the terraces fade out and a smooth
+ * signed field fades in, so the whole window stays walkable; see heightFromNoise. */
+export const HEIGHT_MAX = 100;
+export const HEIGHT_MIN = -100;
 const HEIGHT_SALT = 0x6834; // "h4"
 const TERRACE_SALT = 0x7465; // "te"
+
+/** ADR-530 fix-up: flat benches restore single-level ruin footprints on the smooth relief.
+ *  ADR-530's smooth field removed the ADR-411 terrace plateaus that made exactly-flat footprints
+ *  common (flatRate 0.35 -> 0.111, realised ruin density 0.10 -> 0.028), so the wilderness gets
+ *  seeded flat benches: one per lattice cell of `cell` tiles, present with probability `chance`,
+ *  centre jittered by up to `jitter` tiles from the cell centre, core a Chebyshev SQUARE of
+ *  half-side `coreMin..coreMax` pinned exactly flat at the bench level, and a skirt that grades
+ *  back to the natural field linearly, completing exactly at the cell edge in Chebyshev distance
+ *  (so both sides of a shared edge already read the natural field and the field is continuous
+ *  across cells by construction). A square fits rectangular footprints far better than a disc of
+ *  the same area (fit efficiency ~0.85 vs ~0.70), and its span to the cell edge is uniform in
+ *  the Chebyshev metric, so the ramp's grade is the same in every direction. The bench level is
+ *  the MID-RANGE of the pure bench-free natural field over its whole cell (not the core mean,
+ *  which can sit at one end of the cell's range and leave the ramp to climb the full range on
+ *  the far side): the mid-range minimises the worst |natural - level| over the skirt, and it
+ *  alone lifted the BFS ~0.4%. A FACE GATE keeps the ramp inside the ADR-272 face bound (no
+ *  single-tile step > 3): for each of 8 rays from the centre, the face there is (largest
+ *  |natural - level| along the ray) / (ray span) + (local natural gradient); solving face <=
+ *  `gradeGate` for the core radius gives the ray's cap, and an over-steep bench is SHRUNK to
+ *  the smallest cap over rays instead of rejected — shrinking lengthens the span, which gentles
+ *  the ramp, and keeps most of the capture (a grade-only reject gate cost too much capture for
+ *  the same faces, and a face-aware reject gate's sparse sampling missed faces). Benches with a
+ *  cap below 14 are rejected. Defaults (cell 64, core 24-26, gradeGate 2.7): flatRate 0.317,
+ *  realised 0.082, BFS 99.09-99.88% over the 5 survey seeds, 0 faces over the ADR-272 window.
+ *  A bench's whole influence fits inside its own lattice cell (`coreMax <= cell / 2 - jitter -
+ *  2`, enforced in the constructor): each cell is self-contained, so two benches can never
+ *  interact — no Voronoi step between pinned levels (measured up to 109 levels on a dense
+ *  lattice, a wall network that cut the spawn BFS to 49%), no jump ring where a skirt ends.
+ *  (Designs tried and rejected: a clamped skirt — its cap cut a jump ring around every bench,
+ *  BFS 80% even with non-overlapping cores; a wide fixed-width smoothstep blend across cells —
+ *  kept the Voronoi flip, BFS 52%, survey extremes muted to -92; a fixed 10-tile skirt confined
+ *  to its cell — ramp too steep where the field varies most, BFS 97.8% with 7% of skirt tiles
+ *  unreachable; smoothstep within the cell — worse BFS than linear (min 97.9% vs 98.4%) though
+ *  better capture; an unbounded cone (clamp without a cap) — cell-edge steps, BFS 74-92%; a
+ *  weighted multi-bench blend — weight normalisation diluted the core bench at its edge,
+ *  faces up to 17; a grade-only reject gate — too blunt, flatRate 0.293 at 0 faces; a
+ *  face-aware reject gate — sparse ray sampling missed faces, 31 faces at gg 3.0.) A bench
+ *  centre must sit at Chebyshev distance >= 160 + cell/2 + jitter + 1 from the origin, so its
+ *  cell can never reach the byte-identical inner zone (spawn disc / starter layout). Benches
+ *  never touch massif discs: the override applies only where the massif bump is 0, and never
+ *  within 10 tiles of a massif disc — the ADR-531 slope path starts up to R+8 outside the disc,
+ *  and a bench skirt on the approach can wall the entry off with a >1 step. Benches also
+ *  restore flat footprints for player building generally. Generation-time only; nothing per
+ *  tick or per frame. */
+/** Bench knobs (all numbers — widened from the const defaults so the constructor clamp below
+ *  can narrow coreMin/coreMax without fighting literal types). `gradeGate` is the face
+ *  threshold the shrink enforces (ADR-272 bound is 3; default 2.7 leaves margin for rounding
+ *  and unsampled points); 0 disables the gate. */
+export interface BenchOptions { cell: number; jitter: number; chance: number; coreMin: number; coreMax: number; gradeGate: number }
+export const BENCH_DEFAULTS: BenchOptions = { cell: 64, jitter: 2, chance: 1.0, coreMin: 24, coreMax: 26, gradeGate: 2.7 };
+const BENCH_SALT = 0x626e; // "bn"
+
+/** One flat bench: centre tile, core half-side, and its pinned level (integer). The core is the
+ *  Chebyshev square {max(|dx|, |dy|) <= r0} — a square fits rectangular footprints far better
+ *  than a disc of the same area, and its span to the cell edge is uniform in the Chebyshev
+ *  metric, so the ramp's grade is the same in every direction. */
+export interface Bench { cx: number; cy: number; r0: number; level: number }
+/** Bench geometry without its level (pure function of seed + lattice cell). `sMax` is the
+ *  Chebyshev distance from the centre to the cell edge — the blend completes there. */
+interface BenchGeom { cx: number; cy: number; r0: number; sMax: number }
+/** ADR-531: mountains — massifs with shape variety + guaranteed slope sides.
+ *  A massif is a seeded bump on the natural field: 1–3 per scaled region, never in region zero
+ *  (so the starter layout stays byte-identical), discs never crossing a region edge (so no
+ *  cross-region lookup and no seam). Heights sample the ±100 range — foothills ~30–65, major
+ *  massifs 70–90, a full-100 peak rare (a ~3% signature roll per massif, roughly one per few
+ *  regions) — and the bump is additive, so its edge meets the surrounding ground with no seam.
+ *  The profile is terraced in tiles-per-level: the slope-side sector rises ≤1 level/tile (an
+ *  ADR-409 ramp — walkable), other faces ≤2 levels/tile (climbable cliffs, never a >3 wall from
+ *  the massif itself). Each massif also gets a saddle/pass where the ridge dips to its nearest
+ *  neighbour. Generation-time only (valueNoise at 2–3 scales, existing salts); no new per-tick
+ *  scans, nothing per frame. */
+export const MASSIF_ROCK_LINE = 55;
+export const MASSIF_SNOW_LINE = 70;
+export const MASSIF_TREELINE = 55;
+/** Kind 5 is `tree` in DEFAULT_BANDS (ids.lock.json resources) — the treeline suppresses it. */
+export const TREE_KIND = 5;
+
+export type MassifShape = "cone" | "ridge" | "mesa" | "dome" | "volcano";
+export interface Massif {
+  /** Peak tile (absolute coords). */
+  cx: number; cy: number;
+  /** Target summit height in absolute levels (the bump is sized so base + amp ≈ peak). */
+  peak: number;
+  /** Bump amplitude in levels above the local base height at the centre. */
+  amp: number;
+  shape: MassifShape;
+  /** Centre of the slope-side sector (radians) and its half-width. */
+  slopeDir: number; slopeHalfWidth: number;
+  /** Tiles per level on the slope sector (≤1 level/tile) and on the other faces (≤2). */
+  wSlope: number; wCliff: number;
+  /** Max disc extent in tiles (amp × wSlope × ridge elongation). */
+  radius: number;
+  /** Ridge only: the long-axis direction and elongation (1 for other shapes). */
+  ridgeDir: number; ridgeElongation: number;
+}
+
+function angNorm(a: number): number { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
+/** Slope-sector factor: 1 inside the sector, cosine falloff over a 1.0-rad transition, 0 outside.
+ *  The transition is wide on purpose: the sector edge changes the profile's radius with angle, and
+ *  a narrow transition makes the tangential gradient steep enough to step 3 levels (measured). */
+function sectorFactor(dTheta: number, halfWidth: number): number {
+  const a = Math.abs(angNorm(dTheta));
+  if (a <= halfWidth) return 1;
+  const t = (a - halfWidth) / 1.0;
+  if (t >= 1) return 0;
+  return 0.5 + 0.5 * Math.cos(Math.PI * t);
+}
+/** Normalised profile (1 at the summit, 0 at the disc edge). The volcano is normalised so its
+ *  crater rim is 1.0 and its bowl floor is ~0.69 — a real crater dip, not a flat top. */
+function shapeProfile(shape: MassifShape, u: number): number {
+  switch (shape) {
+    case "dome": return 0.5 + 0.5 * Math.cos(Math.PI * Math.min(u, 1));
+    case "mesa": return u <= 0.3 ? 1 : Math.max(0, 1 - (u - 0.3) / 0.7);
+    case "volcano":
+      if (u < 0.22) return 0.6875 + 0.3125 * (u / 0.22);
+      return Math.max(0, 1 - (u - 0.22) / 0.78);
+    default: return Math.max(0, 1 - u); // cone, ridge
+  }
+}
+/** ADR-531: one massif's bump at (tx, ty) in levels (0 outside its disc). Pure function of the
+ *  massif record — the generator and the tests share it. Max radial gradient is the profile's
+ *  max derivative over tiles-per-level: ≤1 level/tile on the slope sector, ≤2 elsewhere
+ *  (dome 1.57/1.0 at worst), so the massif itself never builds a >3-level wall. */
+export function massifBumpAt(m: Massif, tx: number, ty: number): number {
+  const dx = tx - m.cx, dy = ty - m.cy;
+  if (Math.abs(dx) > m.radius || Math.abs(dy) > m.radius) return 0;
+  const d = Math.hypot(dx, dy);
+  const theta = Math.atan2(dy, dx);
+  const w = m.wCliff + (m.wSlope - m.wCliff) * sectorFactor(theta - m.slopeDir, m.slopeHalfWidth);
+  const elong = 1 + (m.ridgeElongation - 1) * Math.cos(theta - m.ridgeDir) ** 2;
+  const R = m.amp * w * elong;
+  if (d >= R) return 0;
+  return Math.floor(m.amp * shapeProfile(m.shape, d / R));
+}
+
+/** ADR-532: canyons — carved channels with graded entries, exits, and crossings.
+ *  A canyon is a seeded meandering path (same math family as the river centreline: a straight
+ *  axis plus a two-sine lateral meander), 200–400 tiles long, 1–2 per scaled region, never in
+ *  region zero (so the starter layout stays byte-identical) and never within 384 tiles of the
+ *  origin (non-zero regions start 768 out). Profiles: V (wide floor, gentle 1.2-level/tile
+ *  walls) and slot (narrow floor, steep but ≤1.6-level/tile walls — never a >3 wall from the
+ *  canyon itself). Depth samples 25–60 most of the time, 60–80 sometimes, 85–100 rarely
+ *  (~5% — a signature roll), capped by the ramp budget and by the absolute floor (HEIGHT_MIN).
+ *  The floor is a 1-Lipschitz envelope of (rim line − depth × envelope, min the actual ground
+ *  at the centreline), so it grades ≤1/tile along its whole length: you walk in at the low end
+ *  and out the other end. The envelope ramps the depth in and out over ramp = depth / slope
+ *  budget tiles, so the canyon peters out at both ends — that termination IS its crossing (no
+ *  canyon spans region-edge to region-edge: length ≤ 400 < 1536, and its whole carve footprint
+ *  stays inside its region). The wall is floor + grade x distance past the floor edge with
+ *  no cutoff: carved = min(pre-canyon height, profile) ends the wall wherever the rising
+ *  profile meets the local ground, so there is no footprint edge to step off (a fixed-reach
+ *  wall left a 65-level cliff where a floor clamped at −100 faced ground at +72, and a per-t
+ *  adaptive wall went stale at its own edge), and min() never steepens a step past the worse
+ *  of the natural field and the profile. The 1.6 slot grade is the
+ *  bound that keeps 4-neighbour profile steps ≤3 (the wall gradient plus the meander drift
+ *  along a diagonal neighbour caps at ~2.7 before flooring; 2.0 reached 4). Carve order:
+ *  after the base field (massifs + benches), before water features resolve — canyon beats
+ *  biome, water beats canyon where a river runs in it (spillway / island / elevated-bowl
+ *  overrides return after the carve). Siting keeps the whole carve footprint clear of massif
+ *  discs, great lakes and elevated-lake bowls (a bowl rim across the floor would be a >3 wall
+ *  across the walk), by the footprint's own wall reach. Floors MAY dip below sea level (user
+ *  canyon-carved tile below 0 holds water (natural tile 1, bed at the floor, surface 0 — the
+ *  same encoding as biome sea), never dry land below sea level; dry floors stay ≥ 0. Flood
+ *  interaction (ADR-467): that water IS sea-level water, so a storm can seed a flood from a
+ *  canyon river onto its low banks (bed ≤ surface, ≤3 tiles out) exactly as from any river —
+ *  the canyon needs no flood exemption, and none is given. Generation-time only (valueNoise
+ *  at 2–3 scales, existing salts); no new per-tick scans, nothing per frame. */
+export type CanyonProfile = "v" | "slot";
+export interface Canyon {
+  /** Start of the axis (absolute coords); the centreline is axis + lateral meander. */
+  sx: number; sy: number; ux: number; uy: number;
+  /** Centreline length in tiles (200–400). */
+  length: number;
+  profile: CanyonProfile;
+  /** Realised max depth in levels below the rim line (12–100). */
+  depth: number;
+  /** Rim levels at the two ends (pre-canyon heights at the centreline endpoints). */
+  floorStart: number; floorEnd: number;
+  /** The floor is a 1-Lipschitz function of t (rim line − depth × envelope, clamped to the
+   *  absolute floor): it grades ≤1/tile along its whole length and is anchored at both rims.
+   *  The realised centreline walk is min(ground, floor) — where the ground dips below the
+   *  floor the walk follows the dip at the natural gradient (≤3), so the walk never steps
+   *  past the worse of the natural field and the floor. The wall is floor + grade x distance
+   *  past the floor edge with no cutoff: it runs until the rising profile meets the local
+   *  ground, so there is no footprint edge to step off. */
+  floor: number[];
+  /** Half-width of the flat floor (V 7, slot 3) and wall grade in levels/tile (V 1.2, slot 1.6). */
+  floorHalf: number; wallGrade: number;
+  /** Lookup bound: floorHalf + the farthest the wall can reach (a 200-level climb at the
+   *  profile grade) + slack. The wall itself has no cutoff — it runs until the rising
+   *  profile meets the local ground, however far that is; the bound only limits the bbox. */
+  wallReach: number;
+  /** Two-sine lateral meander of the centreline (tiles, tiles, radians). */
+  amp1: number; lam1: number; ph1: number; amp2: number; lam2: number; ph2: number;
+  /** Carve footprint (centreline ± floorHalf + wallReach), fully inside the region. */
+  bbox: { x0: number; y0: number; x1: number; y1: number };
+}
+const CANYON_SALT = 0x6361; // "ca"
+
+/** Lateral meander of a canyon centreline at parameter t. */
+function canyonMeander(c: Canyon, t: number): number {
+  return c.amp1 * Math.sin((2 * Math.PI * t) / c.lam1 + c.ph1) + c.amp2 * Math.sin((2 * Math.PI * t) / c.lam2 + c.ph2);
+}
+/** Point on the canyon centreline at parameter t (0..length; defined either side of it too). */
+export function canyonCentreAt(c: Canyon, t: number): { x: number; y: number } {
+  const m = canyonMeander(c, t);
+  return { x: c.sx + c.ux * t - c.uy * m, y: c.sy + c.uy * t + c.ux * m };
+}
+/** Floor level at parameter t (the 1-Lipschitz floor, integer levels). */
+export function canyonFloorAt(c: Canyon, t: number): number {
+  return c.floor[Math.max(0, Math.min(c.length, Math.round(t)))]!;
+}
+/** A canyon candidate before its floor array is built (scored on centreline samples only). */
+interface CanyonSpec {
+  sx: number; sy: number; ux: number; uy: number; length: number; profile: CanyonProfile;
+  depth: number; floorStart: number; floorEnd: number;
+  floorHalf: number; wallGrade: number;
+  amp1: number; lam1: number; ph1: number; amp2: number; lam2: number; ph2: number;
+}
 
 export interface ProceduralOptions {
   seed: number;
@@ -92,6 +316,8 @@ export interface ProceduralOptions {
   cover?: false | Partial<typeof COVER_DEFAULTS>;
   /** ADR-254: cap on generated height levels (default HEIGHT_MAX). Tests may lower it. */
   heightMax?: number;
+  /** ADR-530: floor on generated height levels (default HEIGHT_MIN). Tests may raise it. */
+  heightMin?: number;
   /** ADR-255: forced lake / river / pond. false = off (tests). Default on. */
   waterFeatures?: false;
   /** ADR-383: elevated lake (water above sea level, held in a bowl of higher terrain). false = off (tests).
@@ -104,6 +330,17 @@ export interface ProceduralOptions {
    *  built without it (travel, preview, spawn points, tests) are byte-identical to before. */
   sunkenCacheKind?: number;
   sunkenCacheChance?: number;
+  /** ADR-532: canyons (carved channels with graded entries, exits, and crossings). false =
+   *  off (tests — the canyon-free control for the wall-step comparison). Defaults on. */
+  canyons?: false;
+  /** ADR-530 fix-up: flat benches / plateaus in the wilderness smooth field. false = off (tests).
+   *  Defaults: BENCH_DEFAULTS. A bench is a seeded disc (one per lattice cell) whose core is pinned
+   *  exactly flat at the local mean level, with a skirt that blends back to the natural field,
+   *  completing exactly at the cell boundary — so no new >3-level wall appears and neighbouring
+   *  benches never interact. Benches sit outside the protected spawn disc (their cell can never
+   *  reach Chebyshev 160 of the origin), so the inner zone stays byte-identical and the
+   *  region-zero starter layout is untouched. */
+  benches?: false | Partial<BenchOptions>;
 }
 /** ADR-249 ground cover. shallow: water (1) within `shallowBand` noise of the shore -> 8. forest: forest-band dirt (4)
  *  at least `forestMargin` noise inside the band where a canopy field > `canopy` -> 7 (edges stay dirt / farmable).
@@ -137,12 +374,31 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
    *  layouts use the same knobs; the layout still computes a lake when off, but nothing reads it. */
   private readonly elevated: Required<ElevatedLakeOptions> | undefined;
   private readonly regionWater = new Map<string, { seed: number; layout: WaterFeatureLayout }>();
+  /** ADR-531: memoised massif layouts per scaled region (cap 16, like regionWater). */
+  private readonly regionMassifs = new Map<string, Massif[]>();
+  /** ADR-532: memoised canyon layouts per scaled region (cap 16, like regionMassifs). */
+  private readonly regionCanyons = new Map<string, Canyon[]>();
+  /** ADR-530 fix-up: memoised bench levels per lattice cell (cap 1024, FIFO like regionWater). */
+  private readonly benchCellStatsCache = new Map<string, { level: number; range: number }>();
+  private readonly benchMaxR0Cache = new Map<string, number>();
+  /** ADR-530 fix-up: bench knobs (undefined = benches off). */
+  private readonly benchOpts: BenchOptions | undefined;
   private guaranteed: { kind: number; tx: number; ty: number }[] | undefined;
   /** kind -> band tile ids that may host it (from nodeKinds lists). */
   private readonly kindTiles: Map<number, number[]>;
   private readonly allKinds: number[];
   constructor(readonly opts: ProceduralOptions) {
     this.bands = opts.bands ?? DEFAULT_BANDS;
+    this.benchOpts = opts.benches === false ? undefined : { ...BENCH_DEFAULTS, ...(opts.benches ?? {}) };
+    if (this.benchOpts) {
+      // The core must fit inside its own lattice cell with room for a ramp in every direction:
+      // the centre sits at cell/2 (+/- jitter) from the cell's edges, so coreMax is clamped to
+      // cell/2 - jitter - 2. Each cell is then self-contained — two benches can never interact,
+      // so no Voronoi step between pinned levels and no jump ring where a skirt ends (measured
+      // up to 109 levels / BFS 49-80% on cross-cell designs).
+      const maxR0 = Math.floor(this.benchOpts.cell / 2 - this.benchOpts.jitter) - 2;
+      this.benchOpts = { ...this.benchOpts, coreMax: Math.min(this.benchOpts.coreMax, maxR0), coreMin: Math.min(this.benchOpts.coreMin, maxR0) };
+    }
     this.elevated = opts.elevatedLakes === false ? undefined : { ...ELEVATED_LAKE_DEFAULTS, ...(opts.elevatedLakes ?? {}) };
     this.water = opts.waterFeatures === false ? undefined : waterFeatureLayout(opts.seed, this.elevated);
     // ADR-386: noise-aware siting for region zero's elevated lake (uses the height field, so it runs
@@ -193,6 +449,568 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     return isForcedWater(reg.seed, reg.lx, reg.ly, reg.layout) || spillLevelAt(reg.layout, reg.lx, reg.ly) !== undefined;
   }
   /**
+   * ADR-531: the massifs of region (rx, ry) — 1–3 seeded bumps, or [] in region zero (the starter
+   * region keeps its layout exactly, and every non-zero region is ≥768 tiles from the origin, so
+   * no massif ever comes within 384 of spawn). Memoised (cap 16, like regionWater); deterministic
+   * in (seed, rx, ry). Centres sit on low-to-moderate base ground (preferred band −10..25, so a
+   * massif is a prominence rising from its surroundings, not a bump on an already-high plateau),
+   * clear of forced water, great lakes and biome sea, ≥280 tiles apart (so the saddle between
+   * neighbours is a real dip), and with their discs inside the region (no cross-region lookup).
+   */
+  massifsInRegion(rx: number, ry: number): Massif[] {
+    if (rx === 0 && ry === 0) return [];
+    const key = `${rx},${ry}`;
+    const hit = this.regionMassifs.get(key); if (hit) return hit;
+    const ms = this.computeMassifs(rx, ry);
+    if (this.regionMassifs.size >= 16) this.regionMassifs.delete(this.regionMassifs.keys().next().value!);
+    this.regionMassifs.set(key, ms);
+    return ms;
+  }
+  private computeMassifs(rx: number, ry: number): Massif[] {
+    const seed = fnv1a(`${rx},${ry}`, this.opts.seed >>> 0);
+    const rng = new Rng(seed);
+    const n = 1 + rng.int(0, 3);
+    const ox = rx * REGION_SIZE, oy = ry * REGION_SIZE;
+    // Sited water layout for avoidance — waterFeatureLayout's hash position is only the baseline:
+    // siting MOVES the elevated lake, and a massif centred on the sited disc has its summit
+    // swallowed by the bowl override (measured: a peak-56 mesa reading 6, a peak-32 volcano
+    // reading 100 at its rim). layoutFor triggers siting, which is deterministic here — its
+    // probes read the base field with massifs off, so no circularity and no call-order dependence.
+    // When water features are off there is nothing to avoid.
+    const sited = this.water ? this.layoutFor(ox, oy)?.layout : undefined;
+    const candidates: { x: number; y: number; base: number }[] = [];
+    for (let i = 0; i < 10; i++) {
+      // Centres stay 392 in from the region edge: the largest disc (a ridge at amp 130 ×
+      // wSlope 1.6 × elongation 1.8 ≈ 374) still fits inside the region.
+      const lx = Math.round(rng.range(-392, 392)), ly = Math.round(rng.range(-392, 392));
+      const x = ox + lx, y = oy + ly;
+      if (sited) {
+        const k = waterFeatureAt(seed, lx, ly, sited);
+        // The elevated-lake kind counts only when elevated lakes are on (otherwise the sited
+        // layout still carries the hash baseline, which the generator ignores).
+        if (k !== "none" && (k !== "elevatedLake" || this.elevated)) continue;
+        if (sited.greatLake && Math.hypot(lx - sited.greatLake.x, ly - sited.greatLake.y) <= sited.greatLake.r + 10) continue;
+        if (this.elevated && sited.elevatedLake) {
+          // The bowl raises ground around the disc (rim + rimWidth); keep the centre clear of
+          // it, so the massif's base is the true natural field, not the bowl's flat shelf.
+          const el = sited.elevatedLake;
+          const rim = this.elevated.rimWidth * REGION_FEATURE_SCALE;
+          if (Math.hypot(lx - el.x, ly - el.y) <= el.r + rim + 10) continue;
+        }
+        // A spillway channel overrides heights to its own levels — a summit on one would read
+        // as the channel, not the peak.
+        if (sited.spillway && sited.spillway.tiles.some((t) => Math.abs(t.x - lx) < 25 && Math.abs(t.y - ly) < 25)) continue;
+      }
+      if (this.bandOf(this.noiseAt(x, y)).tile === 1) continue;
+      candidates.push({ x, y, base: this.naturalHeightAt(x, y) });
+    }
+    // Prefer base ground near −10..25 (distance from that band, then lower base first): a massif
+    // rising from a deep basin would need an oversized bump to reach its target peak.
+    const baseScore = (base: number): number => (base < -10 ? -10 - base : base > 25 ? base - 25 : 0);
+    candidates.sort((a, b) => baseScore(a.base) - baseScore(b.base) || a.base - b.base);
+    const picked: { x: number; y: number; base: number }[] = [];
+    for (const cap of [30, 60, Infinity]) {
+      for (const c of candidates) {
+        if (picked.length >= n) break;
+        if (picked.includes(c)) continue;
+        if (c.base > cap) continue;
+        if (picked.some((p) => Math.hypot(p.x - c.x, p.y - c.y) < 280)) continue;
+        picked.push(c);
+      }
+      if (picked.length >= n) break;
+    }
+    if (!picked.length && candidates.length) picked.push(candidates[0]!); // unreachable in practice — never 0 massifs
+    if (!picked.length) picked.push({ x: ox, y: oy, base: this.naturalHeightAt(ox, oy) });
+    const out: Massif[] = [];
+    for (const c of picked) {
+      const roll = rng.next();
+      const shape: MassifShape = roll < 0.25 ? "cone" : roll < 0.45 ? "ridge" : roll < 0.65 ? "mesa" : roll < 0.85 ? "dome" : "volcano";
+      const pr = rng.next();
+      const sampled = pr < 0.65 ? 30 + rng.next() * 35 : pr < 0.97 ? 70 + rng.next() * 20 : 95 + rng.next() * 5;
+      // A full-100 peak is a ~3% signature roll, and a massif never overshoots its own bump:
+      // the target is capped at base + 120 so the summit lands on it instead of under it.
+      const peak = Math.round(Math.min(sampled, c.base + 120));
+      const amp = Math.max(20, Math.min(130, Math.round(peak - c.base)));
+      const wSlope = shape === "dome" ? 1.9 : shape === "mesa" ? 1.7 : 1.6;
+      const ridgeElongation = shape === "ridge" ? 1.8 : 1;
+      const ridgeDir = rng.next() * 2 * Math.PI;
+      // The slope side faces the gentlest natural descent, not a random direction: a massif
+      // sited on a steep natural hillside has no walkable face on its uphill side (measured:
+      // a peak-34 cone whose slope ray climbed to 67 — its "summit" sat on a sustained
+      // 2-levels/tile natural face no ≤1-step path could cross). Sample 16 directions; for
+      // each, walk the ray to the disc edge on the combined field (natural + trial bump) and
+      // score the worst 4-tile window gradient — scattered single 2-steps (common in the
+      // natural field) score ~0.5, a sustained steep face ~2 — plus a penalty when the ray
+      // ends above the summit (the base ring must be below the peak, or the approach climbs
+      // over a higher hill to reach a lower "summit"). The gentlest direction is the slope
+      // side; the approach path then jogs around scattered steps inside the wide wedge.
+      let slopeDir = 0, bestScore = Infinity;
+      for (let k = 0; k < 16; k++) {
+        const th = (k / 16) * 2 * Math.PI;
+        const elongTh = 1 + (ridgeElongation - 1) * Math.cos(th - ridgeDir) ** 2;
+        const rTh = amp * wSlope * elongTh;
+        const trial: Massif = {
+          cx: c.x, cy: c.y, peak, amp, shape, slopeDir: th, slopeHalfWidth: 0.85,
+          wSlope, wCliff: 1.0, radius: rTh, ridgeDir, ridgeElongation,
+        };
+        const steps = Math.max(8, Math.floor(rTh));
+        const win: number[] = [this.naturalHeightAt(c.x, c.y) + massifBumpAt(trial, c.x, c.y)];
+        for (let r = 1; r <= steps; r++) {
+          const x = Math.round(c.x + Math.cos(th) * r), y = Math.round(c.y + Math.sin(th) * r);
+          const h = this.naturalHeightAt(x, y) + massifBumpAt(trial, x, y);
+          win.push(h);
+        }
+        let worst = 0;
+        for (let r = 0; r + 4 <= steps; r++) worst = Math.max(worst, Math.abs(win[r + 4]! - win[r]!) / 4);
+        const endPenalty = Math.max(0, win[steps]! - win[0]!) / 8;
+        const score = worst + endPenalty;
+        if (score < bestScore) { bestScore = score; slopeDir = th; }
+      }
+      out.push({
+        cx: c.x, cy: c.y, peak, amp, shape,
+        slopeDir, slopeHalfWidth: 0.85,
+        wSlope, wCliff: 1.0, radius: amp * wSlope * ridgeElongation,
+        ridgeDir, ridgeElongation,
+      });
+    }
+    return out;
+  }
+  /** ADR-531: total massif bump at (tx, ty) — the max bump over the tile's own region's massifs
+   *  (discs never cross a region edge, so no cross-region lookup). 0 in region zero. */
+  private massifBump(tx: number, ty: number): number {
+    const rx = Math.floor((tx + REGION_HALF) / REGION_SIZE), ry = Math.floor((ty + REGION_HALF) / REGION_SIZE);
+    if (rx === 0 && ry === 0) return 0;
+    let best = 0;
+    for (const m of this.massifsInRegion(rx, ry)) {
+      const b = massifBumpAt(m, tx, ty);
+      if (b > best) best = b;
+    }
+    return best;
+  }
+  /**
+   * ADR-532: the canyons of region (rx, ry) — 1–2 seeded channels, or [] in region zero (the
+   * starter region keeps its layout exactly, and every non-zero region is ≥768 tiles from the
+   * origin, so no canyon ever comes within 384 of spawn). Memoised (cap 16, like massifs);
+   * deterministic in (seed, rx, ry).
+   */
+  canyonsInRegion(rx: number, ry: number): Canyon[] {
+    if (rx === 0 && ry === 0) return [];
+    if (this.opts.canyons === false) return [];
+    const key = `${rx},${ry}`;
+    const hit = this.regionCanyons.get(key); if (hit) return hit;
+    const cs = this.computeCanyons(rx, ry);
+    if (this.regionCanyons.size >= 16) this.regionCanyons.delete(this.regionCanyons.keys().next().value!);
+    this.regionCanyons.set(key, cs);
+    return cs;
+  }
+  private computeCanyons(rx: number, ry: number): Canyon[] {
+    const seed = fnv1a(`canyon:${rx},${ry}`, this.opts.seed >>> 0);
+    const rng = new Rng(seed);
+    const ox = rx * REGION_SIZE, oy = ry * REGION_SIZE;
+    // Sited water layout for avoidance — same reasoning as computeMassifs: siting MOVES the
+    // elevated lake, and a bowl rim across the canyon floor would be a >3 wall across the
+    // walk. layoutFor triggers siting, which reads the base field with canyons off, so no
+    // circularity and no call-order dependence. When water features are off there is nothing
+    // to avoid.
+    const sited = this.water ? this.layoutFor(ox, oy)?.layout : undefined;
+    const massifs = this.massifsInRegion(rx, ry);
+    const H = this.opts.heightMax ?? HEIGHT_MAX, L = this.opts.heightMin ?? HEIGHT_MIN;
+    const want = 1 + (rng.next() < 0.35 ? 1 : 0);
+    const picked: Canyon[] = [];
+    for (let slot = 0; slot < want; slot++) {
+      let best: { spec: CanyonSpec; score: number } | undefined;
+      // Tier 0 is strict (rim span ≤ 0.35L, separation ≥ 150); tier 1 relaxes the span and
+      // the separation before a slot goes unfilled — the obstacle clearances never relax
+      // (see tryCanyonCandidate). A missing canyon is a rarer world, not a broken one.
+      for (let tier = 0; tier < 2 && !best; tier++) {
+        for (let attempt = 0; attempt < 12; attempt++) {
+          const cand = this.tryCanyonCandidate(rx, ry, ox, oy, rng, sited, massifs, H, L, tier, picked);
+          if (cand && (!best || cand.score < best.score)) best = cand;
+        }
+      }
+      if (best) picked.push(this.buildCanyon(best.spec, L));
+    }
+    return picked;
+  }
+  /** ADR-532: one canyon candidate, scored on centreline samples (its floor array is built
+   *  only for the winning candidate). Returns undefined when the candidate fails a hard
+   *  constraint: the carve footprint must stay inside the region, clear of massif discs,
+   *  great lakes and elevated-lake bowls by its own wall reach, clear of already-picked
+   *  canyons, and its two rim ends must be close enough that the floor can grade ≤1/tile
+   *  between them with room left for the depth ramps. */
+  private tryCanyonCandidate(rx: number, ry: number, ox: number, oy: number, rng: Rng,
+    sited: WaterFeatureLayout | undefined, massifs: Massif[],
+    _H: number, Lbound: number, tier: number, picked: Canyon[]): { spec: CanyonSpec; score: number } | undefined {
+    void rx; void ry; void _H;
+    const profile: CanyonProfile = rng.next() < 0.55 ? "v" : "slot";
+    const floorHalf = profile === "v" ? 7 : 3;
+    const wallGrade = profile === "v" ? 1.2 : 1.6;
+    const length = 200 + Math.floor(rng.next() * 201);
+    const roll = rng.next();
+    const depthSampled = Math.round(roll < 0.65 ? 25 + rng.next() * 35 : roll < 0.95 ? 60 + rng.next() * 20 : 85 + rng.next() * 15);
+    const theta = rng.next() * 2 * Math.PI;
+    const ux = Math.cos(theta), uy = Math.sin(theta);
+    // Gentle meander: the centreline's slope stays ≤ ~0.7, so the curve moves ≤1.22 tiles
+    // per unit t — a steeper meander (measured 1.38) made consecutive centreline samples
+    // span ~1.7 tiles and built 4-level steps on the entry walk and the cross-sections.
+    const amp1 = 6 + rng.next() * 5, lam1 = 160 + rng.next() * 80, ph1 = rng.next() * 2 * Math.PI;
+    const amp2 = 2 + rng.next() * 1.5, lam2 = 80 + rng.next() * 40, ph2 = rng.next() * 2 * Math.PI;
+    const lx = Math.round(rng.range(-450, 450)), ly = Math.round(rng.range(-450, 450));
+    const sx = ox + lx, sy = oy + ly;
+    // Siting clearance is the WORST-case wall reach: the wall climbs at most the
+    // full ±100 range (200 levels) at the profile grade, so a wall can reach
+    // floorHalf + 200/grade past the centreline. The clearance is strict in both tiers —
+    // relaxing it would let a wall run into a massif disc, where the carve suppression
+    // would cut the wall off mid-climb and leave a cliff; only the rim span and the
+    // canyon-canyon separation relax in tier 1. Between-sample slack (samples every 8
+    // tiles) is covered by the +15.
+    const wallReach = floorHalf + Math.ceil(200 / wallGrade) + 15;
+    const clearance = wallReach;
+    const spec0: Omit<CanyonSpec, "depth" | "floorStart" | "floorEnd"> = {
+      sx, sy, ux, uy, length, profile, floorHalf, wallGrade,
+      amp1, lam1, ph1, amp2, lam2, ph2,
+    };
+    const centre = (t: number): { x: number; y: number } => {
+      const m = amp1 * Math.sin((2 * Math.PI * t) / lam1 + ph1) + amp2 * Math.sin((2 * Math.PI * t) / lam2 + ph2);
+      return { x: sx + ux * t - uy * m, y: sy + uy * t + ux * m };
+    };
+    // Centreline samples (every 8 tiles) + rim heights, for the clearance and scoring checks.
+    const samples: { x: number; y: number; rim: number }[] = [];
+    for (let t = 0; t <= length; t += 8) {
+      const p = centre(t);
+      const lx2 = p.x - ox, ly2 = p.y - oy;
+      if (Math.abs(lx2) > REGION_HALF - clearance || Math.abs(ly2) > REGION_HALF - clearance) return undefined;
+      for (const m of massifs) {
+        if (Math.hypot(p.x - m.cx, p.y - m.cy) - m.radius < clearance) return undefined;
+      }
+      if (sited?.greatLake && Math.hypot(p.x - (ox + sited.greatLake.x), p.y - (oy + sited.greatLake.y)) - sited.greatLake.r < clearance) return undefined;
+      if (this.elevated && sited?.elevatedLake) {
+        const rim = this.elevated.rimWidth * REGION_FEATURE_SCALE;
+        if (Math.hypot(p.x - (ox + sited.elevatedLake.x), p.y - (oy + sited.elevatedLake.y)) - (sited.elevatedLake.r + rim) < clearance) return undefined;
+      }
+      samples.push({ ...p, rim: this.preCanyonHeightAt(Math.round(p.x), Math.round(p.y)) });
+    }
+    // The sample loop steps by 8, so the last sample can sit short of the endpoint —
+    // add the endpoint itself so the spillway polyline check covers the whole floor.
+    {
+      const p = centre(length);
+      const last = samples[samples.length - 1]!;
+      if (Math.hypot(p.x - last.x, p.y - last.y) > 0.5) {
+        const lx2 = p.x - ox, ly2 = p.y - oy;
+        if (Math.abs(lx2) > REGION_HALF - clearance || Math.abs(ly2) > REGION_HALF - clearance) return undefined;
+        samples.push({ ...p, rim: this.preCanyonHeightAt(Math.round(p.x), Math.round(p.y)) });
+      }
+    }
+    // ADR-532: the spillway channel overrides the carve (water beats canyon — its tiles
+    // read the channel level, not the canyon floor), so a spillway crossing the floor
+    // band would cut the floor walk with a waterfall face (measured: a 53-level step
+    // where a spillway crossed a floor). The channel is 1 tile wide, so the floor band
+    // only needs floorHalf + 8 of clearance from its tiles — the walls may cross it
+    // (water interrupts a wall harmlessly; it must not interrupt the floor). Checked
+    // against the sample POLYLINE (point-to-segment), not the sample points: a 1-tile
+    // channel can pass between two samples 8 tiles apart.
+    if (sited?.spillway) {
+      for (const st of sited.spillway.tiles) {
+        const qx = ox + st.x, qy = oy + st.y;
+        for (let i = 0; i + 1 < samples.length; i++) {
+          const a = samples[i]!, b = samples[i + 1]!;
+          const vx = b.x - a.x, vy = b.y - a.y;
+          const len2 = vx * vx + vy * vy;
+          const u = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((qx - a.x) * vx + (qy - a.y) * vy) / len2));
+          const cx = a.x + u * vx, cy = a.y + u * vy;
+          if (Math.hypot(qx - cx, qy - cy) < floorHalf + 8) return undefined;
+        }
+      }
+    }
+    for (const o of picked) {
+      for (const s of samples) {
+        for (let t = 0; t <= o.length; t += 8) {
+          const q = canyonCentreAt(o, t);
+          if (Math.hypot(q.x - s.x, q.y - s.y) < (tier === 0 ? 150 : 100)) return undefined;
+        }
+      }
+    }
+    const p0 = centre(0), p1 = centre(length);
+    const floorStart = this.preCanyonHeightAt(Math.round(p0.x), Math.round(p0.y));
+    const floorEnd = this.preCanyonHeightAt(Math.round(p1.x), Math.round(p1.y));
+    const span = Math.abs(floorEnd - floorStart);
+    if (span > (tier === 0 ? 0.35 : 0.5) * length) return undefined;
+    const s = 1 - span / length;
+    const rimMid = this.preCanyonHeightAt(Math.round(centre(length / 2).x), Math.round(centre(length / 2).y));
+    const depth = Math.min(depthSampled, Math.floor(0.4 * s * length), rimMid - Lbound - 2);
+    if (depth < 12) return undefined;
+    // Score: prefer rims in the 0..70 band (room to dig without hitting the absolute floor,
+    // and high enough that a good share of floors stay dry instead of every canyon becoming
+    // a river gorge — the natural field centres on 0, so a band starting below 0 fills the
+    // survey with sub-sea-level floors), then a small rim span, then depth.
+    const meanRim = samples.reduce((a, b) => a + b.rim, 0) / samples.length;
+    const bandPenalty = meanRim < 0 ? -meanRim : meanRim > 70 ? meanRim - 70 : 0;
+    const score = bandPenalty + 40 * (span / length) - depth * 0.02;
+    return { spec: { ...spec0, depth, floorStart, floorEnd }, score };
+  }
+  /** ADR-532: build a canyon record from a winning spec — the floor array and the carve
+   *  footprint bbox. The floor is the rim line minus depth × envelope, clamped to the
+   *  absolute floor: the rim line grades span/length ≤ 0.35 and the envelope ramps at
+   *  depth/ramp ≤ 1 − span/length, so the floor grades ≤1/tile by construction (rounding a
+   *  1-Lipschitz function keeps it 1-Lipschitz, and clamping does too), and it is anchored
+   *  at both rims — floor(0) = rimStart, floor(L) = rimEnd, so the mouth has no step at all.
+   *  (An earlier design took a 1-Lipschitz envelope of min(rim − depth, ground): the backward
+   *  pass pulled floor(0) up to 40 levels below the rim when a bench skirt descended past
+   *  the mouth — a cliff at the entry. The floor may sit above the actual ground where the
+   *  centreline dips (the realised walk then follows the dip at the natural gradient, ≤3);
+   *  the carved height is min(ground, floor), so the walk never steps past the worse of the
+   *  natural field and the 1-Lipschitz floor.) */
+  private buildCanyon(spec: CanyonSpec, Lbound: number): Canyon {
+    const { length, floorStart, floorEnd, depth, floorHalf, wallGrade } = spec;
+    const s = 1 - Math.abs(floorEnd - floorStart) / length;
+    const ramp = Math.max(1, Math.ceil(depth / Math.max(s, 0.2)));
+    const centre = (t: number): { x: number; y: number } => canyonCentreAt(spec as Canyon, t);
+    const floor: number[] = [];
+    for (let t = 0; t <= length; t++) {
+      const rim = floorStart + ((floorEnd - floorStart) * t) / length;
+      const env = Math.min(1, t / ramp, (length - t) / ramp);
+      floor.push(Math.max(Lbound, Math.round(rim - depth * env)));
+    }
+    // No wall cutoff: the wall is floor + grade x distance past the floor edge, and it runs
+    // until the rising profile meets the local ground (carved = min(ground, profile)), however
+    // far that is. A fixed reach cut the wall off mid-climb and left a 65-level cliff where a
+    // floor clamped at -100 faced ground at +72; an adaptive per-t wall (rim/width sampled at
+    // its own edge) was tried next and was worse — the rim/width pair went stale between the
+    // last sample and the stored width, and the hard u>1 cutoff stepped 4 levels at the wall
+    // edge. wallReach is only the lookup bound for the bbox: floorHalf + a 200-level climb at
+    // the profile grade + slack.
+    const wallReach = floorHalf + Math.ceil(200 / wallGrade) + 5;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let t = 0; t <= length; t += 4) {
+      const p = centre(t);
+      x0 = Math.min(x0, p.x); x1 = Math.max(x1, p.x); y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y);
+    }
+    const pad = wallReach + 2;
+    return {
+      ...spec, floor, wallReach,
+      bbox: { x0: Math.floor(x0 - pad), y0: Math.floor(y0 - pad), x1: Math.ceil(x1 + pad), y1: Math.ceil(y1 + pad) },
+    };
+  }
+  /** ADR-532: the base height without canyons (massifs + benches included). Canyon siting
+   *  reads this, so a canyon never sits on its own carve; water/massif siting never sees a
+   *  canyon either (they pass includeCanyons=false), so siting never depends on call order. */
+  private preCanyonHeightAt(tx: number, ty: number): number {
+    return this.heightFromNoise(tx, ty, this.noiseAt(tx, ty), null, null, null, true, true, false);
+  }
+  /** ADR-532: the canyon profile height at (tx, ty) — the floor level inside the floor band,
+   *  rising at the wall grade past it, with no cutoff (the wall ends where the rising profile
+   *  meets the local ground) — or undefined where no canyon reaches. The deepest (lowest)
+   *  profile wins where two canyons would overlap (siting keeps them apart, so this is
+   *  belt-and-braces). The profile is a pure function of the canyon record; the generator and
+   *  the tests share it through canyonsInRegion + canyonCentreAt/canyonFloorAt. */
+  private canyonProfileAt(tx: number, ty: number): { profile: number; d: number; floorHalf: number } | undefined {
+    const rx = Math.floor((tx + REGION_HALF) / REGION_SIZE), ry = Math.floor((ty + REGION_HALF) / REGION_SIZE);
+    if (rx === 0 && ry === 0) return undefined;
+    let best: { profile: number; d: number; floorHalf: number } | undefined;
+    for (const c of this.canyonsInRegion(rx, ry)) {
+      if (tx < c.bbox.x0 || tx > c.bbox.x1 || ty < c.bbox.y0 || ty > c.bbox.y1) continue;
+      const dx = tx - c.sx, dy = ty - c.sy;
+      const t = dx * c.ux + dy * c.uy;
+      const lat = -dx * c.uy + dy * c.ux;
+      let tt: number, d: number;
+      if (t < 0) {
+        const p = canyonCentreAt(c, 0);
+        d = Math.hypot(tx - p.x, ty - p.y); tt = 0;
+      } else if (t > c.length) {
+        const p = canyonCentreAt(c, c.length);
+        d = Math.hypot(tx - p.x, ty - p.y); tt = c.length;
+      } else {
+        d = Math.abs(lat - canyonMeander(c, t)); tt = t;
+      }
+      if (d > c.floorHalf + c.wallReach) continue;
+      const ti = Math.max(0, Math.min(c.length, Math.round(tt)));
+      const floor = c.floor[ti]!;
+      // Integer levels: the wall profile is continuous in d, so it must be floored — a
+      // fractional profile would leak fractional heights out of heightAt (Chunk heights are
+      // i16 and would truncate them on load, so the stored chunk and heightAt would disagree).
+      // The wall rises at the profile grade with no cutoff: carved = min(ground, profile) ends
+      // the wall wherever the rising profile meets the local ground, so there is no footprint
+      // edge to step off (a fixed reach cut it off mid-climb; a per-t adaptive wall went
+      // stale at its own edge). The profile step between 4-neighbours stays <=3: the wall
+      // gradient plus the meander drift caps at ~2.7 before flooring at the 1.6 slot grade.
+      const profile = d <= c.floorHalf ? floor : Math.floor(floor + c.wallGrade * (d - c.floorHalf));
+      if (!best || profile < best.profile) best = { profile, d, floorHalf: c.floorHalf };
+    }
+    return best;
+  }
+  /** ADR-530 fix-up: true when (tx, ty) is within 10 tiles of a massif disc (Chebyshev distance
+   *  to the centre <= radius + 10). Benches are suppressed there (see heightFromNoise): the
+   *  ADR-531 slope path starts up to R+8 outside the disc, and a bench skirt on the approach
+   *  can wall the disc entry off with a >1 step. Massif centres sit >=392 in from a region
+   *  edge and the largest disc is ~374, so a disc edge is within 2 tiles of a region edge at
+   *  most — the 10-tile buffer can cross it, so tiles near a region edge check the neighbour
+   *  region(s) too. massifsInRegion is memoised, so this is cheap. */
+  private nearMassif(tx: number, ty: number): boolean {
+    const rx = Math.floor((tx + REGION_HALF) / REGION_SIZE), ry = Math.floor((ty + REGION_HALF) / REGION_SIZE);
+    const ox = tx - rx * REGION_SIZE, oy = ty - ry * REGION_SIZE;
+    const regions: [number, number][] = [[rx, ry]];
+    if (ox > REGION_HALF - 12) regions.push([rx + 1, ry]);
+    if (ox < -REGION_HALF + 12) regions.push([rx - 1, ry]);
+    if (oy > REGION_HALF - 12) regions.push([rx, ry + 1]);
+    if (oy < -REGION_HALF + 12) regions.push([rx, ry - 1]);
+    for (const [arx, ary] of regions) {
+      for (const m of this.massifsInRegion(arx, ary)) {
+        if (Math.max(Math.abs(tx - m.cx), Math.abs(ty - m.cy)) <= m.radius + 10) return true;
+      }
+    }
+    return false;
+  }
+  /** ADR-530 fix-up: the bench geometry of lattice cell (gx, gy) — pure function of (seed, gx, gy),
+   *  or undefined when the cell has no bench. All sub-values derive from one hash2 call, split by
+   *  multiplication, so a per-tile lookup stays cheap. A bench centre must sit at Chebyshev
+   *  distance >= 160 + cell/2 + jitter + 1 from the origin: a cell tile sits at most cell/2 +
+   *  jitter from its centre, so no influenced tile can reach the byte-identical inner zone. */
+  private benchGeom(gx: number, gy: number): BenchGeom | undefined {
+    const o = this.benchOpts; if (!o) return undefined;
+    const u = hash2(((this.opts.seed >>> 0) ^ BENCH_SALT) >>> 0, gx, gy);
+    if (u >= o.chance) return undefined;
+    const frac = (x: number): number => x - Math.floor(x);
+    const jx = (frac(u * 73.7) - 0.5) * 2 * o.jitter;
+    const jy = (frac(u * 149.3) - 0.5) * 2 * o.jitter;
+    const cx = gx * o.cell + o.cell / 2 + jx;
+    const cy = gy * o.cell + o.cell / 2 + jy;
+    // Outside the protected disc: no bench cell may reach Chebyshev 160 of the origin (the
+    // byte-identical inner zone / spawn disc). A cell tile sits at most cell/2 + jitter from
+    // its centre in Chebyshev distance, so a centre at >= 160 + cell/2 + jitter + 1 keeps every
+    // influenced tile outside 160.
+    if (Math.max(Math.abs(cx), Math.abs(cy)) < 160 + o.cell / 2 + o.jitter + 1) return undefined;
+    let r0 = Math.max(1, o.coreMin + Math.floor(frac(u * 311.9) * (o.coreMax - o.coreMin + 1)));
+    // Face gate: shrink (don't reject) an over-steep bench until its worst single-tile face —
+    // the bench grade plus the local natural gradient, sampled per ray — fits the ADR-272 bound.
+    // A grade-only gate rejects benches whose ramp is steep only where the natural field is
+    // gentle (harmless), and a reject loses the whole bench; shrinking the core lengthens the
+    // span, which gentles the ramp, and keeps most of the capture. 0 disables the gate.
+    if (o.gradeGate > 0) {
+      const maxR0 = this.benchMaxR0(gx, gy, cx, cy);
+      if (maxR0 < 14) return undefined;
+      r0 = Math.min(r0, maxR0);
+    }
+    const x0 = gx * o.cell, x1 = x0 + o.cell, y0 = gy * o.cell, y1 = y0 + o.cell;
+    const sMax = Math.min(cx - x0, (x1 - 1) - cx, cy - y0, (y1 - 1) - cy);
+    return { cx, cy, r0, sMax };
+  }
+  /** ADR-530 fix-up: the largest core half-side a bench may have without building a face over
+   *  the ADR-272 bound (3 levels), or -1 to reject it. For each of 8 rays from the centre, the
+   *  face there is (largest |natural - level| along the ray) / (ray span) + (local natural
+   *  gradient); solving face <= FACE_T for the core radius gives the ray's cap, and the bench
+   *  takes the smallest cap over rays. Memoised per lattice cell; pure in (seed, cell), so no
+   *  call-order dependence. */
+  private benchMaxR0(gx: number, gy: number, cx: number, cy: number): number {
+    const key = `${gx},${gy}`;
+    const hit = this.benchMaxR0Cache.get(key); if (hit !== undefined) return hit;
+    const o = this.benchOpts!;
+    const FACE_T = o.gradeGate; // ADR-272 bound is 3; the default 2.9 leaves margin for rounding
+    const level = this.benchCellStats(gx, gy).level;
+    const x0 = gx * o.cell, x1 = x0 + o.cell, y0 = gy * o.cell, y1 = y0 + o.cell;
+    let cap = Infinity;
+    for (let k = 0; k < 8; k++) {
+      const a = (k / 8) * Math.PI * 2;
+      const dx = Math.cos(a), dy = Math.sin(a);
+      let rEdge = Infinity;
+      if (dx > 0) rEdge = Math.min(rEdge, (x1 - cx) / dx);
+      else if (dx < 0) rEdge = Math.min(rEdge, (x0 - cx) / dx);
+      if (dy > 0) rEdge = Math.min(rEdge, (y1 - cy) / dy);
+      else if (dy < 0) rEdge = Math.min(rEdge, (y0 - cy) / dy);
+      let maxDev = 0, grad = 0;
+      for (const f of [1 / 3, 2 / 3, 1]) {
+        const px = Math.round(cx + rEdge * f * dx), py = Math.round(cy + rEdge * f * dy);
+        const n = this.pureNaturalHeightAt(px, py);
+        maxDev = Math.max(maxDev, Math.abs(n - level));
+        grad = Math.max(grad, Math.abs(this.pureNaturalHeightAt(px + 1, py) - n),
+          Math.abs(this.pureNaturalHeightAt(px, py + 1) - n));
+      }
+      // Need maxDev / (rEdge - r0) + grad <= FACE_T. If the natural gradient alone is already
+      // at the bound, no core size fixes this ray — reject the bench.
+      if (grad >= FACE_T) { cap = -1; break; }
+      cap = Math.min(cap, rEdge - maxDev / (FACE_T - grad));
+    }
+    const maxR0 = cap === -1 ? -1 : Math.floor(cap);
+    if (this.benchMaxR0Cache.size >= 1024) this.benchMaxR0Cache.delete(this.benchMaxR0Cache.keys().next().value!);
+    this.benchMaxR0Cache.set(key, maxR0);
+    return maxR0;
+  }
+  /** ADR-530 fix-up: a bench cell's pure-field stats — the pinned level (mid-range over the cell,
+   *  see benchLevel) and the range. Memoised per lattice cell; pure in (seed, cell), so no
+   *  call-order dependence. */
+  private benchCellStats(gx: number, gy: number): { level: number; range: number } {
+    const key = `${gx},${gy}`;
+    const hit = this.benchCellStatsCache.get(key); if (hit) return hit;
+    const o = this.benchOpts!;
+    let lo = Infinity, hi = -Infinity;
+    for (let y = gy * o.cell; y < (gy + 1) * o.cell; y += 6)
+      for (let x = gx * o.cell; x < (gx + 1) * o.cell; x += 6) {
+        const n = this.pureNaturalHeightAt(x, y);
+        if (n < lo) lo = n; if (n > hi) hi = n;
+      }
+    const stats = { level: Math.round((lo + hi) / 2), range: hi - lo };
+    if (this.benchCellStatsCache.size >= 1024) this.benchCellStatsCache.delete(this.benchCellStatsCache.keys().next().value!);
+    this.benchCellStatsCache.set(key, stats);
+    return stats;
+  }
+  /** ADR-530 fix-up: a bench's pinned level — the mid-range (min+max)/2 of the pure bench-free
+   *  natural field over its whole lattice cell, sampled on a 6-tile grid. The mid-range (not the
+   *  core mean) minimises the worst |natural - level| over the skirt, which is what sets the
+   *  ramp's steepest grade: the core mean can sit at one end of the cell's range, leaving the
+   *  ramp to climb the full range on the far side. The core stays exactly flat at whatever level
+   *  is pinned, so footprint capture is unaffected. Memoised per lattice cell; pure in (seed,
+   *  cell), so no call-order dependence. */
+  private benchLevel(gx: number, gy: number, b: BenchGeom): number {
+    return this.benchCellStats(gx, gy).level;
+  }
+  /** ADR-530 fix-up: the bench-free natural field at (tx, ty) — no massifs, no benches, no
+   *  lake/spill/island overrides. Bench levels and massif/siting probes read this, so neither
+   *  depends on the other and neither depends on call order. */
+  private pureNaturalHeightAt(tx: number, ty: number): number {
+    return this.heightFromNoise(tx, ty, this.noiseAt(tx, ty), null, null, null, false, false, false);
+  }
+  /** ADR-530 fix-up: the bench of the tile's own lattice cell — with its pinned level — or
+   *  undefined when the cell has no bench. A bench's whole influence fits inside its own cell,
+   *  so only the tile's own cell can ever reach it: no 3x3 scan, no cross-cell interaction.
+   *  Exported for the bench test, which pins the generator property directly. Tiles inside the
+   *  protected inner zone never have a bench. */
+  benchAt(tx: number, ty: number): Bench | undefined {
+    const o = this.benchOpts; if (!o) return undefined;
+    if (Math.max(Math.abs(tx), Math.abs(ty)) <= 160) return undefined;
+    const gx = Math.floor(tx / o.cell), gy = Math.floor(ty / o.cell);
+    const b = this.benchGeom(gx, gy);
+    if (!b) return undefined;
+    return { cx: b.cx, cy: b.cy, r0: b.r0, level: this.benchLevel(gx, gy, b) };
+  }
+  /** ADR-530 fix-up: the bench override on the natural field at (tx, ty). Inside the (square)
+   *  core the height is pinned exactly flat at the bench level; outside it, a linear blend eases
+   *  back to the natural field, completing exactly at the Chebyshev square's edge (s = sMax) —
+   *  so both sides of a shared cell edge already read the natural field and the field is
+   *  continuous across cell edges by construction. The blend factor depends only on Chebyshev
+   *  distance from the centre, so it has no angular variation and builds no radial spoke walls.
+   *  Linear, not smoothstep: for a fixed width the linear ramp has the lowest possible peak
+   *  gradient (smoothstep concentrates it 1.5x in the middle — measured BFS 97.7% vs the 99% bar
+   *  — and the BFS samples every 2 tiles, so peak gradient is what closes rings). Only where the
+   *  massif bump is 0, so massif discs read exactly as ADR-531 left them. */
+  private benchHeight(tx: number, ty: number, natural: number): number {
+    const o = this.benchOpts; if (!o) return natural;
+    if (Math.max(Math.abs(tx), Math.abs(ty)) <= 160) return natural;
+    const gx = Math.floor(tx / o.cell), gy = Math.floor(ty / o.cell);
+    const b = this.benchGeom(gx, gy);
+    if (!b) return natural;
+    const s = Math.max(Math.abs(tx - b.cx), Math.abs(ty - b.cy));
+    const level = this.benchLevel(gx, gy, b);
+    if (s <= b.r0) return level;
+    if (s >= b.sMax) return natural;
+    const u = (s - b.r0) / (b.sMax - b.r0);
+    return Math.round(level + (natural - level) * u);
+  }
+  /** ADR-531: the base height without massifs (the ADR-530 field). Massif siting reads this, so
+   *  a massif never sits on its own bump; the elevated-lake siting / spillway probes (which call
+   *  heightFromNoise with massifs off) stay identical to ADR-530. */
+  private naturalHeightAt(tx: number, ty: number): number {
+    return this.heightFromNoise(tx, ty, this.noiseAt(tx, ty), undefined, undefined, undefined, false, false, false);
+  }
+  /**
    * ADR-386: noise-aware siting for one region's elevated lake, then its spillway (see spillwayFor).
    * The hash layout is only the baseline: the lake's cardinal/distance are re-picked by the height
    * field, not the hash. Candidates are the two free cardinals (neither the lake nor the pond uses
@@ -221,7 +1039,7 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     const d0 = Math.round(Math.max(Math.abs(el.x), Math.abs(el.y)) - 0.5);
     const isSea = (lx: number, ly: number): boolean => this.bandOf(this.noiseAt(originX + lx, originY + ly)).tile === 1;
     const baseHeight = (lx: number, ly: number): number =>
-      this.heightFromNoise(originX + lx, originY + ly, this.noiseAt(originX + lx, originY + ly), null, null);
+      this.heightFromNoise(originX + lx, originY + ly, this.noiseAt(originX + lx, originY + ly), null, null, undefined, false, false, false);
     let best: { x: number; y: number; ringMean: number; dOff: number; order: number } | undefined;
     let hashScore: number | undefined;
     for (let order = 0; order < ordered.length; order++) {
@@ -319,7 +1137,7 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     const inDisc = (lx: number, ly: number): boolean => elevatedLakeDist(layout, lx, ly) <= r;
     const inWindow = (lx: number, ly: number): boolean => Math.abs(lx) <= SPILLWAY_WINDOW && Math.abs(ly) <= SPILLWAY_WINDOW;
     const baseHeight = (lx: number, ly: number): number =>
-      this.heightFromNoise(originX + lx, originY + ly, this.noiseAt(originX + lx, originY + ly), null, null);
+      this.heightFromNoise(originX + lx, originY + ly, this.noiseAt(originX + lx, originY + ly), null, null, undefined, false, false, false);
     const N4 = [[1, 0], [-1, 0], [0, 1], [0, -1]] as const;
     // Nearest lower water to the lake (the spill target): ring scan out from the rim so the closest
     // sea is found first. Pure steepest descent was tried first and stalled on the terrace plateaus
@@ -452,9 +1270,17 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     return 0.65 * valueNoise(seed, tx, ty, 48) + 0.35 * valueNoise(seed ^ 0xabc, tx, ty, 12);
   }
   /**
-   * ADR-254: continuous height in [0, heightMax]. Biome noise keeps shores low and peaks high; an independent
+   * ADR-254: continuous height in [heightMin, heightMax]. Biome noise keeps shores low and peaks high; an independent
    * multi-octave field adds hills and ridges; a terrace field snaps some areas into plateaus so neighbouring tiles
    * form clear ledges (drops of 2+ levels) that the cliff / gt_side passes can draw.
+   * ADR-530: the range is [-100, 100]. The old field (plateau x relief 2..8, clamped >= 0) never went below 0,
+   * and its terraces are 6..10-level faces at full relief — closed walls no walker can cross. Past the spawn
+   * disc the terraces fade out (160 -> 288) and a smooth signed field fades in (160 -> 416), so the wilderness
+   * is big rolling relief instead of walled plateaus: the BFS from spawn reaches >= 99% of land, and the flat
+   * budget holds. At distance <= 160 both fades are 0, so the inner zone is byte-identical gentle ground
+   * (and region zero's elevated-lake siting / spillway walk, which read the base field within ~180 tiles,
+   * are unchanged — the starter layout stays byte-identical). The new field is valueNoise at 3 scales
+   * reusing the HEIGHT_SALT family; generation-time only, nothing per tick or per frame.
    */
   heightAt(tx: number, ty: number): number { return this.heightFromNoise(tx, ty, this.noiseAt(tx, ty)); }
   private heightFromNoise(tx: number, ty: number, biome: number,
@@ -464,8 +1290,20 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
      *  caller already checked, so the lookup is skipped; a number is the channel level itself). */
     spLevel: number | null | undefined = undefined,
     /** ADR-424: precomputed island disc for this tile (undefined = look it up; null = none). */
-    isl: { x: number; y: number; r: number; dist: number } | null | undefined = undefined): number {
-    const seed = this.opts.seed >>> 0; const H = this.opts.heightMax ?? HEIGHT_MAX;
+    isl: { x: number; y: number; r: number; dist: number } | null | undefined = undefined,
+    /** ADR-531: false = the base field without massifs (elevated-lake siting / spillway probes
+     *  and massif siting itself — those must read exactly the ADR-530 field, so the starter
+     *  layout stays byte-identical and siting never depends on call order). */
+    includeMassifs = true,
+    /** ADR-530 fix-up: false = the base field without benches (bench levels themselves, massif
+     *  siting, and the elevated-lake siting / spillway probes — all must read the bench-free
+     *  field, so siting never depends on benches and bench levels never depend on themselves). */
+    includeBenches = true,
+    /** ADR-532: false = the base field without canyons (massif/bench/elevated-lake siting
+     *  and canyon siting itself — a canyon never sits on its own carve, and siting never
+     *  depends on call order). */
+    includeCanyons = true): number {
+    const seed = this.opts.seed >>> 0; const H = this.opts.heightMax ?? HEIGHT_MAX; const L = this.opts.heightMin ?? HEIGHT_MIN;
     const field = 0.55 * valueNoise(seed ^ HEIGHT_SALT, tx, ty, 48)
       + 0.30 * valueNoise(seed ^ HEIGHT_SALT ^ 0x111, tx, ty, 18)
       + 0.15 * valueNoise(seed ^ HEIGHT_SALT ^ 0x222, tx, ty, 8);
@@ -475,14 +1313,53 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     const detail = Math.floor(field * 2) + Math.floor(biome * 2); // 0..2
     // Gentle starter hills (all adjacent faces <=3); grow the relief over a wide transition,
     // not a ring-shaped cliff. Beyond it, eight-level terraces make real cliffs and deep valleys.
-    // ADR-411: relief tops out at 8, so plateau 3 x 8 + detail 2 = HEIGHT_MAX (26) is actually reached.
+    // ADR-411: relief tops out at 8, so plateau 3 x 8 + detail 2 = 26 was actually reached.
     // ADR-423: the 160/224 transition stays — it is distance-from-spawn, not region size, so heights
-    // at old coordinates are unchanged.
+    // at old coordinates are unchanged within the spawn disc.
     const distance = Math.max(Math.abs(tx), Math.abs(ty));
     const blend = Math.max(0, Math.min(1, (distance - 160) / 224)), relief = 2 + 6 * blend;
     const gentleDetail = Math.floor(field + biome);
     const localDetail = Math.floor(gentleDetail + (detail - gentleDetail) * blend);
-    const natural = Math.max(0, Math.min(H, Math.floor(plateau * relief) + localDetail));
+    const base = Math.floor(plateau * relief) + localDetail; // 0..26, the ADR-411 field
+    // ADR-530: terrace fade 160 -> 288 (plateau faces shrink to nothing) and signed-relief fade
+    // 160 -> 416 (the smooth field grows to the full [L, H] range). The smooth field is the same
+    // multi-octave field without terraces; the signed field is valueNoise at 2 wide scales, centred
+    // on (H+L)/2 and amplified x1.3. The amplification matters: a weighted sum dilutes each octave's
+    // extremes (at the 128-scale maximum the 48-scale octave sits near its mean), so a bare sum
+    // tops out near +/-80 on some seeds; x1.3 puts the caps inside the sum's reach on all 5 survey
+    // seeds. The 128-scale octave carries the broad shape (few cells, gentle gradients); the
+    // 48-scale octave adds texture without steepening the field past walkable steps.
+    const terraceFade = Math.max(0, Math.min(1, (distance - 160) / 128));
+    const smooth = Math.floor(field * 26); // terrace-free 0..26 from the same multi-octave field
+    const mid = Math.floor(base * (1 - terraceFade) + smooth * terraceFade);
+    const reliefFade = Math.max(0, Math.min(1, (distance - 160) / 256));
+    const outerField = 0.70 * valueNoise(seed ^ HEIGHT_SALT ^ 0x333, tx, ty, 128)
+      + 0.30 * valueNoise(seed ^ HEIGHT_SALT ^ 0x444, tx, ty, 48);
+    const outer = Math.max(L, Math.min(H, Math.floor((outerField - 0.5) * (H - L) * 1.3 + (H + L) / 2)));
+    let natural = Math.max(L, Math.min(H, Math.floor(mid * (1 - reliefFade) + outer * reliefFade)));
+    // ADR-531: massif bumps ride on the natural field (additive, so a disc edge meets the
+    // surrounding ground with no seam; the bump itself falls to 0 at its own edge). Clamped
+    // to [L, H] with the field. Skipped for base-field probes (includeMassifs false).
+    const bump = includeMassifs ? this.massifBump(tx, ty) : 0;
+    if (bump !== 0) natural = Math.max(L, Math.min(H, natural + bump));
+    // ADR-530 fix-up: flat benches pin their core to the local mean level and grade back to the
+    // natural field at <=1 level per tile of distance. Only where the massif bump is 0, so
+    // massif discs read exactly as ADR-531 left them, and never within 10 tiles of a massif
+    // disc — the ADR-531 slope path starts outside the disc, and a bench skirt on the approach
+    // can wall the entry off with a >1 step. Skipped for base-field probes.
+    if (includeBenches && bump === 0 && !this.nearMassif(tx, ty)) natural = this.benchHeight(tx, ty, natural);
+    // ADR-532: canyon carve — after the base field (massifs + benches), before water features
+    // resolve. carved = min(pre-canyon height, profile): the wall meets the local ground
+    // wherever it reaches it, and min() never steepens a step past the worse of the natural
+    // field and the profile. Never inside a massif disc or within 10 tiles of one (the same
+    // suppression as the bench fix-up — siting already keeps the footprint clear, so this
+    // only ever fires on the footprint's far edge, where the profile is already above the
+    // ground and min() would return the natural height anyway). Spillway / island /
+    // elevated-bowl overrides below still win (water beats canyon where a river runs in it).
+    if (includeCanyons) {
+      const p = this.canyonProfileAt(tx, ty);
+      if (p && this.massifBump(tx, ty) === 0 && !this.nearMassif(tx, ty)) natural = Math.min(natural, p.profile);
+    }
     // ADR-386: a spillway channel overrides the bowl (the rim breach cuts the beach shelf) and the
     // natural field alike — the channel is carved water at its own descending levels. The base-field
     // probe (el === null, spLevel === null) never sees it: the spillway is computed from the base
@@ -520,15 +1397,23 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
    *  surface level, exactly as load() stores it, so preview thumbnails agree with loaded chunks. */
   sampleAt(tx: number, ty: number): { tile: number; height: number } {
     const n = this.noiseAt(tx, ty);
-    const tile = this.tileFromNoise(tx, ty, n, this.bandOf(n));
     const { el, sp, isl } = this.lakeAndSpill(tx, ty);
     // ADR-386: one layout lookup per tile (lakeAndSpill); the hold / spill level are threaded into
     // heightFromNoise as already-known (el ?? null, null) so it does not look them up again.
     // ADR-424: the island disc likewise (isl ?? null).
-    const height = sp !== undefined ? flowWaterRaw(sp) : el && el.dist <= el.r ? flowWaterRaw(el.level) : this.heightFromNoise(tx, ty, n, el ?? null, null, isl ?? null);
+    // ADR-531: the terrain height (massifs included) is threaded into the tile bands, so the
+    // rock/snow bands agree with the stored height exactly as load() stores it.
+    const terrainH = this.heightFromNoise(tx, ty, n, el ?? null, null, isl ?? null);
+    const height = sp !== undefined ? flowWaterRaw(sp) : el && el.dist <= el.r ? flowWaterRaw(el.level) : terrainH;
+    const tile = this.tileFromNoise(tx, ty, n, this.bandOf(n), terrainH);
     return { tile, height };
   }
-  private tileFromNoise(tx: number, ty: number, n: number, band: NonNullable<ProceduralOptions["bands"]>[number]): number {
+  private tileFromNoise(tx: number, ty: number, n: number, band: NonNullable<ProceduralOptions["bands"]>[number],
+    /** ADR-531: already-known terrain height (undefined = compute lazily for land bands). */
+    height?: number,
+    /** ADR-531: false = skip the altitude bands (nodesInChunk only needs water vs land, and the
+     *  treeline check computes the banded tile lazily — see bandedTile). */
+    altitudeBands = true): number {
     // ADR-424: island ground overrides everything — the island disc is land inside the great lake
     // even where the biome noise underneath is water. Outer ring sand (beach), interior grass.
     // The biome band still drives node placement in load(), so islands can grow trees like any grass.
@@ -538,11 +1423,41 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
       const waterBand = this.bands.find((b) => b.tile === 1) ?? this.bands[0]!;
       return this.surface(tx, ty, 0, waterBand, true);
     }
-    return this.surface(tx, ty, n, band, false);
+    // ADR-531: altitude bands need the tile height; land bands compute it lazily (the water band
+    // never bands, so tileAt stays cheap on water).
+    const h = altitudeBands && band.tile !== 1 ? (height ?? this.heightFromNoise(tx, ty, n)) : undefined;
+    // ADR-532: a canyon-carved tile below sea level holds water (a river channel at the floor,
+    // surface 0 — the same natural-water encoding as biome sea), never dry land below sea
+    // level. Floor tiles (d <= floorHalf) are water whenever their height is below 0; wall
+    // tiles are water only where the canyon profile itself is below 0 (a submerged bank) —
+    // a natural dip below 0 beside a dry wall keeps the pre-existing dry-below-0 behaviour,
+    // which is out of this slice's scope. The profile lookup is bbox-gated, so tiles nowhere
+    // near a canyon pay one map lookup, not a height computation; the height is only computed
+    // when a canyon profile actually covers the tile (nodesInChunk passes altitudeBands=false,
+    // so h is undefined there and this is the only height it pays).
+    if (band.tile !== 1) {
+      const prof = this.canyonProfileAt(tx, ty);
+      if (prof) {
+        const hh = h ?? this.heightFromNoise(tx, ty, n);
+        if (hh < 0 && (prof.d <= prof.floorHalf || prof.profile < 0)) return 1;
+      }
+    }
+    return this.surface(tx, ty, n, band, false, h);
   }
   /** Final ground tile: band tile, then ADR-246 mud, then ADR-249 cover. `forced` = ADR-255 water feature. */
-  private surface(tx: number, ty: number, n: number, band: NonNullable<ProceduralOptions["bands"]>[number], forced = false): number {
-    const t = forced ? 1 : this.mudOr(tx, ty, n, band); const c = this.opts.cover; if (c === false || (!forced && t !== band.tile)) return t;
+  private surface(tx: number, ty: number, n: number, band: NonNullable<ProceduralOptions["bands"]>[number], forced = false,
+    /** ADR-531: terrain height for the altitude bands (undefined = no banding). */
+    height?: number): number {
+    const t = forced ? 1 : this.mudOr(tx, ty, n, band);
+    // ADR-531 altitude bands, independent of the cover knob: rock above MASSIF_ROCK_LINE, snow
+    // above MASSIF_SNOW_LINE where the lapse-adjusted band temperature is cold enough (the
+    // COVER_DEFAULTS snow rule + band temp — at 70+ levels the 0.6 °C/level lapse puts every band
+    // under the snow temperature). Water (1) never bands. No new art: existing rock (5) / snow (6).
+    if (!forced && height !== undefined && t !== 1) {
+      if (height >= MASSIF_SNOW_LINE && (band.temp ?? 15) - 0.6 * height <= COVER_DEFAULTS.snowTemp) return 6;
+      if (height >= MASSIF_ROCK_LINE) return 5;
+    }
+    const c = this.opts.cover; if (c === false || (!forced && t !== band.tile)) return t;
     const o = { ...COVER_DEFAULTS, ...(c ?? {}) }; const bi = this.bands.indexOf(band); const lo = bi > 0 ? this.bands[bi - 1]!.max : 0;
     if (t === 1) { // shallows: shore end of the water band, or any water tile touching land (biome or non-feature)
       const up = this.bands[bi + 1];
@@ -594,7 +1509,7 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
       const tx = cx * CHUNK_SIZE + lx, ty = cy * CHUNK_SIZE + ly;
       const n = this.noiseAt(tx, ty);
       const band = this.bandOf(n);
-      const i = ly * CHUNK_SIZE + lx; const tile = this.tileFromNoise(tx, ty, n, band); c.tiles[i] = tile;
+      const i = ly * CHUNK_SIZE + lx; const { el, sp, isl } = this.lakeAndSpill(tx, ty);
       // ADR-383: elevated-lake water stores the ADR-263/297 flow encoding of its surface level, so the
       // renderer (renderTileHeight), terrainLevel and waterSurfaceAt all read the lake surface, not the
       // flat ADR-182 level. Every other tile stores its heightFromNoise level (bowl included) as before.
@@ -602,11 +1517,18 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
       // One layout lookup per tile (lakeAndSpill); the hold / spill level are threaded into
       // heightFromNoise as already-known (el ?? null, null) so it does not look them up again.
       // ADR-424: the island disc likewise (isl ?? null) — island tiles store beach 1 / grass 2.
-      const { el, sp, isl } = this.lakeAndSpill(tx, ty);
-      c.height[i] = sp !== undefined ? flowWaterRaw(sp) : el && el.dist <= el.r ? flowWaterRaw(el.level) : this.heightFromNoise(tx, ty, n, el ?? null, null, isl ?? null);
+      // ADR-531: the terrain height is computed once and threaded into the tile bands, so the
+      // rock/snow bands agree with the stored height. (Flow water stores its own level instead.)
+      const terrainH = this.heightFromNoise(tx, ty, n, el ?? null, null, isl ?? null);
+      c.height[i] = sp !== undefined ? flowWaterRaw(sp) : el && el.dist <= el.r ? flowWaterRaw(el.level) : terrainH;
+      const tile = this.tileFromNoise(tx, ty, n, band, terrainH); c.tiles[i] = tile;
       // No land resources on water (forced features or biome). Band chance still uses biome band kinds.
       if (tile !== 1 && tile !== 8 && band.nodeKinds?.length && rng.next() < (band.nodeChance ?? 0)) {
-        nodes.push({ tx, ty, kind: rng.pick(band.nodeKinds) }); occupied.add(i);
+        const kind = rng.pick(band.nodeKinds);
+        // ADR-531 treeline: kind 5 is `tree` in DEFAULT_BANDS — no trees on rock/snow ground.
+        // The tile here is already the altitude-banded tile, so this is the same pure check
+        // nodesInChunk makes with its lazily banded tile (ADR-343 lockstep).
+        if (kind !== TREE_KIND || (tile !== 5 && tile !== 6)) { nodes.push({ tx, ty, kind }); occupied.add(i); }
       }
       this.trySunkenCache(cacheRng, cacheChance, tx, ty, tile, i, nodes, occupied);
     }
@@ -629,6 +1551,12 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     nodes.push({ tx, ty, kind: this.opts.sunkenCacheKind! }); occupied.add(i);
   }
 
+  /** ADR-531: the altitude-banded tile at (tx, ty) (rock/snow above the treeline), for the
+   *  treeline check in nodesInChunk — load() already holds this tile, so it checks it directly. */
+  private bandedTile(tx: number, ty: number, n: number, band: NonNullable<ProceduralOptions["bands"]>[number]): number {
+    return this.tileFromNoise(tx, ty, n, band, this.heightFromNoise(tx, ty, n));
+  }
+
   /**
    * ADR-343: node placements of a chunk only (no tiles / heights): the same tile loop as load(), with the same rng
    * draws in the same order, so the placements agree exactly with what the server spawns for the chunk — prospecting
@@ -646,10 +1574,16 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
       const tx = cx * CHUNK_SIZE + lx, ty = cy * CHUNK_SIZE + ly;
       const n = this.noiseAt(tx, ty);
       const band = this.bandOf(n);
-      const i = ly * CHUNK_SIZE + lx; const tile = this.tileFromNoise(tx, ty, n, band);
+      const i = ly * CHUNK_SIZE + lx; const tile = this.tileFromNoise(tx, ty, n, band, undefined, false);
       // No land resources on water (forced features or biome). Band chance still uses biome band kinds.
+      // ADR-531: the tile here is unbanded (only water vs land matters for the roll); the treeline
+      // check below computes the banded tile lazily, only when a tree is rolled — same pure check
+      // as load(), so the two loops stay in lockstep (ADR-343).
       if (tile !== 1 && tile !== 8 && band.nodeKinds?.length && rng.next() < (band.nodeChance ?? 0)) {
-        nodes.push({ tx, ty, kind: rng.pick(band.nodeKinds) }); occupied.add(i);
+        const kind = rng.pick(band.nodeKinds);
+        let blocked = false;
+        if (kind === TREE_KIND) { const bt = this.bandedTile(tx, ty, n, band); blocked = bt === 5 || bt === 6; }
+        if (!blocked) { nodes.push({ tx, ty, kind }); occupied.add(i); }
       }
       this.trySunkenCache(cacheRng, cacheChance, tx, ty, tile, i, nodes, occupied);
     }

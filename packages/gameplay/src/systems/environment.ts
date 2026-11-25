@@ -11,7 +11,7 @@
  *  - seasons (ADR-239): core Season on the environment; season weather tables + seasonal temperature live here.
  */
 import { addModifier, dayNoise, entityIndex, evaluate, ModOp, Season, seasonFromDays, timeOfDay, sunFractionOf, Transform, Weather, type Entity, type SeasonInfo, type TimeOfDayInfo, type World } from "@engine/core";
-import { CHUNK_SIZE, ClimateRes, climateAt, EmitterIndexRes, isWaterId, type BaseClimate, type ClimateContext, type ClimateModel, type ClimateSample } from "@engine/world";
+import { CHUNK_SIZE, ClimateRes, climateAt, EmitterIndexRes, isWaterId, ALTITUDE_LAPSE_COLD_CAP, ALTITUDE_LAPSE_WARM_CAP, altitudeLapseEffect, type BaseClimate, type ClimateContext, type ClimateModel, type ClimateSample } from "@engine/world";
 import { Buffs, ChunkSurface, Exposure, Inventory, RoomHeat, Stat, Wetness } from "../components.js";
 import { fillContainer } from "../food.js";
 import { listSlots } from "../inventory.js";
@@ -191,7 +191,7 @@ export function gameplayClimateModel(env: EnvironmentTuning, world?: World): Cli
       const wd = weatherDef(env, ctx.weather.kind as WeatherKind);
       const si = world ? worldSeason(world, env, ctx.time) : OFF_SEASON;
       return {
-        temperature: seasonalTemperature(env, si, ctx.time, ctx.weather, b.temperature - env.baseTemp) - env.altitudeLapse * b.altitude,
+        temperature: seasonalTemperature(env, si, ctx.time, ctx.weather, b.temperature - env.baseTemp) + altitudeLapseEffect(b.altitude, env.altitudeLapse, env.altitudeLapseColdCap ?? ALTITUDE_LAPSE_COLD_CAP, env.altitudeLapseWarmCap ?? ALTITUDE_LAPSE_WARM_CAP),
         humidity: Math.min(1, b.humidity + env.humidityPerIntensity * (wd.wetnessPerSec > 0 ? ctx.weather.intensity : 0)),
         altitude: b.altitude, windDir: ctx.weather.windDir, windSpeed: ctx.weather.windSpeed,
         weatherKind: ctx.weather.kind, weatherIntensity: ctx.weather.intensity,

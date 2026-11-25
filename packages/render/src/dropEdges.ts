@@ -1,8 +1,10 @@
 /** ADR-276: top-surface relief, not a HUD marker. View-ordered +u,+v,-u,-v drop depths.
  * Only inspect the four resident neighbours when a chunk is rebuilt; void/stream boundaries are not pits.
  * Water's 0.25-level surface inset must not create a false ledge. */
+import { NO_TILE_HEIGHT } from "./tilemap.js";
+
 export function terrainDropEdges(z: number, u: number, v: number, nu: number, nv: number): [number, number, number, number] {
-  const depth = (h: number): number => h <= -99 || z - h < 1 ? 0 : Math.min(8, z - h);
+  const depth = (h: number): number => h <= NO_TILE_HEIGHT || z - h < 1 ? 0 : Math.min(8, z - h);
   return [depth(u), depth(v), depth(nu), depth(nv)];
 }
 

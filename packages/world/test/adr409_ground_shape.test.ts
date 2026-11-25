@@ -5,9 +5,9 @@
  * vertex is exactly 1 level below this tile.
  */
 import { describe, it, expect } from "vitest";
-import { classifyGroundShape, groundSlopeArt, type GroundNeighbourhood } from "../src/index.js";
+import { classifyGroundShape, groundSlopeArt, SLOPE_VOID, type GroundNeighbourhood } from "../src/index.js";
 
-const VOID = -99;
+const VOID = SLOPE_VOID; // ADR-529: was -99; -99 is real ground now
 const nb = (h: number, edge: [number, number, number, number] = [h, h, h, h], diag: [number, number, number, number] = [h, h, h, h]): GroundNeighbourhood => ({ h, edge, diag });
 
 describe("ADR-409 ground-shape classification", () => {

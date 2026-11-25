@@ -14,7 +14,8 @@ it("ADR-296: doubles each supported side; near/far interest has identical bounde
 });
 it("ADR-297/411: every height, including flowed water, round-trips the chunk codec (v2 i16 heights)", () => {
   const c=new Chunk(0,0);
-  for(let level=-300;level<=326;level++) {
+  // ADR-529: land and flow water share the absolute ±100 cap, so one loop round-trips both ranges.
+  for(let level=-100;level<=100;level++) {
     c.set(0,0,1); c.setHeight(0,0,flowWaterRaw(level));
     const b=decodeChunk(encodeChunk(c)).chunk;
     expect(terrainLevel(1,b.getHeight(0,0))).toBe(level);

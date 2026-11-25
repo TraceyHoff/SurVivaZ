@@ -32,7 +32,13 @@ export function worldPreviewSvg(p: WorldPreview): string {
   for (let y = 0; y < PREVIEW.height; y++) for (let x = 0; x < PREVIEW.width; x++) {
     const i = y * PREVIEW.width + x, h = level(i), tile = p.tiles[i]!;
     const slope = h - level(y * PREVIEW.width + Math.max(0, x - 1)) + h - level(Math.max(0, y - 1) * PREVIEW.width + x);
-    const light = tile === 1 || tile === 8 ? 1 : Math.max(.48, Math.min(1.42, .86 + h * .018 - slope * .065));
+    // ADR-530: relief light rescaled for the [-100, 100] range. The old height term (h x 0.018)
+    // saturated at h >= 31 (light pinned at the 1.42 clamp, so all high ground washed out white);
+    // h x 0.0038 puts a 100-level peak at 1.24 and a -100 floor at exactly the 0.48 floor, so the
+    // height term alone never pins. The slope term is rescaled likewise (0.065 -> 0.008): 12-tile
+    // preview steps are steeper on the new relief, and at 0.015 ~8% of land pixels still pinned
+    // at a clamp; at 0.008 it is ~2%.
+    const light = tile === 1 || tile === 8 ? 1 : Math.max(.48, Math.min(1.42, .86 + h * .0038 - slope * .008));
     const color = (palette[tile] ?? palette[3]!).map(c => Math.round(Math.min(255, c * light))).join(",");
     let path = paths.get(color); if (!path) paths.set(color, (path = [])); path.push(`M${x} ${y}h1v1h-1z`);
   }

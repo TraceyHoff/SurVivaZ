@@ -19,7 +19,7 @@ import { SEASON_GROUND_GLSL } from "./season.js";
 import { terrainDropEdges, DROP_EDGE_GLSL } from "./dropEdges.js";
 import { TERRAIN_TILE_TABLE_GLSL, TERRAIN_TILE_VERTEX_COUNT } from "./terrainTileTriangulation.js";
 import { createProgram, GLSL_COMMON, type FrameStats, type Program } from "./gl/util.js";
-import { WATERFALL_MIN_DROP } from "./tilemap.js";
+import { WATERFALL_MIN_DROP, NO_TILE_HEIGHT } from "./tilemap.js";
 import { planWaterfallArt, waterfallArtResident, isWaterfallSheetAt, VIEW_PLUS_X, VIEW_PLUS_Y, WATERFALL_OVERLAY_MODE } from "./waterfallTiles.js";
 import type { AtlasManager } from "./assets/atlasManager.js";
 import type { Rect } from "./camera.js";
@@ -277,7 +277,7 @@ export class TileTerrain {
     const tg = this.tGrid ??= new Uint16Array(TW * TW);
     for (let j = 0; j < TW; j++) for (let i = 0; i < TW; i++) tg[j * TW + i] = map.getTile(tx0 + i, ty0 + j);
     const tileAt = (X: number, Y: number): number => { const x = wx(X, Y) - tx0, y = wy(X, Y) - ty0; return x >= 0 && y >= 0 && x < TW && y < TW ? tg[y * TW + x]! : map.getTile(x + tx0, y + ty0); };
-    const hRaw = (x: number, y: number): number => { const ch = map.getChunk(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE)); if (!ch) return -99; const i = (((y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE) * CHUNK_SIZE + (((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE); return ch.tiles[i] === 0 ? -99 : renderTileHeight(ch.tiles[i]!, ch.height[i]!) - (isWaterTile(ch.tiles[i]!) ? 0.25 : 0); };
+    const hRaw = (x: number, y: number): number => { const ch = map.getChunk(Math.floor(x / CHUNK_SIZE), Math.floor(y / CHUNK_SIZE)); if (!ch) return NO_TILE_HEIGHT; const i = (((y % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE) * CHUNK_SIZE + (((x % CHUNK_SIZE) + CHUNK_SIZE) % CHUNK_SIZE); return ch.tiles[i] === 0 ? NO_TILE_HEIGHT : renderTileHeight(ch.tiles[i]!, ch.height[i]!) - (isWaterTile(ch.tiles[i]!) ? 0.25 : 0); };
     // ADR-506: every tile reads 8 neighbour heights; precompute the chunk + 1-tile ring once (world space, (S+2)^2)
     // instead of a chunk lookup + height decode per read. Same values as hRaw; reads outside the ring fall back to it.
     const HP = CHUNK_SIZE + 2, hx0 = c.cx * CHUNK_SIZE - 1, hy0 = c.cy * CHUNK_SIZE - 1;
@@ -306,12 +306,12 @@ export class TileTerrain {
       // the skirt is suppressed, so the animated mesh falls face shows in full (32 px for a 2-level
       // drop); a 1-level ledge keeps its skirt (it covers the 1-level mesh face, as before), and a
       // missing neighbour keeps its skirt too (the mesh face there runs to the void, not a falls).
-      const dropX = pu > -99 ? z - pu : 0, dropY = pv > -99 ? z - pv : 0;
+      const dropX = pu > NO_TILE_HEIGHT ? z - pu : 0, dropY = pv > NO_TILE_HEIGHT ? z - pv : 0;
       // ADR-389: when Art's sheets are resident, also suppress the skirt on 1-level cascade
       // faces so sheet_1 shows; without art, those ledges keep the ADR-386 skirt. Ordinary
       // 1-level stream steps are not cascade faces, so their skirts stay.
-      const hideX = water && pu > -99 && (dropX >= WATERFALL_MIN_DROP || (wfArt && isWaterfallSheetAt(map, tx, ty, dirX)));
-      const hideY = water && pv > -99 && (dropY >= WATERFALL_MIN_DROP || (wfArt && isWaterfallSheetAt(map, tx, ty, dirY)));
+      const hideX = water && pu > NO_TILE_HEIGHT && (dropX >= WATERFALL_MIN_DROP || (wfArt && isWaterfallSheetAt(map, tx, ty, dirX)));
+      const hideY = water && pv > NO_TILE_HEIGHT && (dropY >= WATERFALL_MIN_DROP || (wfArt && isWaterfallSheetAt(map, tx, ty, dirY)));
       const slopeU = !!shape && shape.slopeSides.includes(0), slopeV = !!shape && shape.slopeSides.includes(2);
       const mask = (pu < z && !hideX && !slopeU ? 1 : 0) | (pv < z && !hideY && !slopeV ? 2 : 0) | (shape?.cornerMask ?? 0);
       if (art && g) { // ADR-246: gt_ layers (base, edges by priority, shore/bank | water or ice, leaves)

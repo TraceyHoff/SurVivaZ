@@ -25,7 +25,7 @@ export const TileSection = { Full: 0, Hit: 1, Delta: 2, Leave: 3 } as const;
 export const TileCtl = { Evict: 0, Nack: 1 } as const;
 
 interface Blob { bytes: Uint8Array; bits: number }
-/** Zigzag for signed values (ADR-411): heights are i16 (-300..326, plus the 1000+ flow-water code), so a plain
+/** Zigzag for signed values (ADR-411): heights are i16 (-100..100, plus the 1000+ flow-water code), so a plain
  * varuint would see a negative as a huge u32. Zigzag keeps small magnitudes small on the wire. */
 const zigzag = (v: number): number => ((v << 1) ^ (v >> 31)) >>> 0;
 const unzigzag = (v: number): number => (v >>> 1) ^ -(v & 1);

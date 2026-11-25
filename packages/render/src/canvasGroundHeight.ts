@@ -132,7 +132,7 @@ export function drawC2DGroundCell(g: CanvasRenderingContext2D, geom: C2DGroundGe
 
 /**
  * ADR-414: gt-block height clamp (levels). A baked block canvas grows by the block's height range, so
- * shovel extremes (levels -300..326) are clamped to +/-32 levels (512 px each way) — worldgen relief
+ * shovel extremes (levels -100..100) are clamped to +/-32 levels (512 px each way) — worldgen relief
  * (<= ~26 levels) is never clamped, and an extreme pit / tower still reads as deep / high, just
  * compressed. Heights are clamped monotonically, so distinct heights stay distinct and faces still
  * meet the neighbour tops exactly.

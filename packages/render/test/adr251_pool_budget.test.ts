@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { SLOPE_VOID } from "@engine/world";
 import { AtlasManager, STREAM_FLOOR_SLOTS, VISIBLE_PIN_RE, WEAR_BUDGET_SHARE, WEAR_FLOOR_SLOTS } from "../src/assets/atlasManager.js";
 
 /** ADR-251: pool rebalancing (furniture / vehicles / ground stay full res inside the VRAM budget) + slot bleed. */
@@ -52,7 +53,7 @@ describe("ADR-251 ground follow-ups", () => {
     expect(groundSideLevels(3, 1, 2)).toEqual([{ level: 0, mask: 3 }, { level: 1, mask: 1 }]);
     expect(groundSideLevels(2, 2, 0)).toEqual([{ level: 0, mask: 2 }, { level: 1, mask: 2 }]);
     expect(groundSideLevels(1, 0.75, 1)).toEqual([]); // water inset (0.25) is not a cliff
-    expect(groundSideLevels(1, -99, -99)).toEqual([]); // void: the mesh skirt handles it
+    expect(groundSideLevels(1, SLOPE_VOID, SLOPE_VOID)).toEqual([]); // void: the mesh skirt handles it
     expect(groundSideLevels(40, 0, 40).length).toBe(GROUND_SIDE_MAX_LEVELS);
     expect(groundSideKey("grass", 0, 0)).toBe("gt_side_grass"); expect(groundSideKey("grass", 1, 2)).toBe("gt_side_grass_low_fall"); expect(groundSideKey("dirt", 2, 0)).toBe("gt_side_dirt_winter");
   });

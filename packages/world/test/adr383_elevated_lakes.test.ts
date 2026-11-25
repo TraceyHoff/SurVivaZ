@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  ProceduralGenerator, CHUNK_SIZE, HEIGHT_MAX, WATER_FEATURE_RADIUS, REGION_SIZE,
+  ProceduralGenerator, CHUNK_SIZE, HEIGHT_MAX, HEIGHT_MIN, WATER_FEATURE_RADIUS, REGION_SIZE,
   waterFeatureLayout, waterFeatureAt, elevatedLakeAt, elevatedLakeDist,
   flowWaterRaw, renderTileHeight, terrainLevel, waterDepthAt, WaterDepth, isWaterId,
   surveyWaterFeatures, sampleWorldPreview, computeSpawnPoints,
@@ -244,7 +244,7 @@ describe("ADR-383 preview", () => {
       const p = sampleWorldPreview(seed);
       for (let i = 0; i < p.tiles.length; i++) {
         const level = terrainLevel(p.tiles[i]!, p.heights[i]!);
-        expect(level).toBeGreaterThanOrEqual(0);
+        expect(level).toBeGreaterThanOrEqual(HEIGHT_MIN); // ADR-530: generated ground reaches -100
         expect(level).toBeLessThanOrEqual(HEIGHT_MAX);
       }
     }

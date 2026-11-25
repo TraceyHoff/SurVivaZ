@@ -81,7 +81,7 @@ describe("tile replication", () => {
     const x = await setup(1, 0);
     x.step(4);
     const c = x.tiles.getChunkByKey("1,1")!;
-    const vals = [-300, -1, 0, 26, 326, flowWaterRaw(-300), flowWaterRaw(326)];
+    const vals = [-100, -1, 0, 26, 100, flowWaterRaw(-100), flowWaterRaw(100)];
     for (let i = 0; i < 1024; i++) {
       const v = vals[i % vals.length]!;
       const lx = i % CHUNK_SIZE, ly = (i / CHUNK_SIZE) | 0;
@@ -91,7 +91,7 @@ describe("tile replication", () => {
     x.step(6);
     expect(x.diff(0).bad).toBe(0);
     const got = x.cs[0]!.tiles.tiles.getChunkByKey("1,1")!;
-    expect(got.getHeight(0, 0)).toBe(-300); expect(got.getHeight(4, 0)).toBe(326);
-    expect(got.getHeight(5, 0)).toBe(flowWaterRaw(-300)); expect(got.getHeight(6, 0)).toBe(flowWaterRaw(326));
+    expect(got.getHeight(0, 0)).toBe(-100); expect(got.getHeight(4, 0)).toBe(100);
+    expect(got.getHeight(5, 0)).toBe(flowWaterRaw(-100)); expect(got.getHeight(6, 0)).toBe(flowWaterRaw(100));
   });
 });

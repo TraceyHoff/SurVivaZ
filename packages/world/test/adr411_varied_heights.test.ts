@@ -1,7 +1,7 @@
-// ADR-411: varied terrain heights (worldgen reaches HEIGHT_MAX) + dig/raise 300 storage
+// ADR-411: varied terrain heights (worldgen reaches HEIGHT_MAX) + dig/raise 100 storage (ADR-529: was 300)
 // (chunk codec v2 i16 heights, v2 flow-water encoding, TerrainEdit dig i16).
 import { describe, expect, it } from "vitest";
-import { Chunk, CHUNK_AREA, CHUNK_MAGIC, ProceduralGenerator, HEIGHT_MAX, computeSpawnPoints, flowWaterRaw, terrainLevel, renderTileHeight, isFlowWater, encodeChunk, decodeChunk, FLOW_WATER_LEVEL_MIN, FLOW_WATER_LEVEL_MAX, FLOW_WATER_OFFSET_V2 } from "../src/index.js";
+import { Chunk, CHUNK_AREA, CHUNK_MAGIC, ProceduralGenerator, HEIGHT_MAX, HEIGHT_MIN, computeSpawnPoints, flowWaterRaw, terrainLevel, renderTileHeight, isFlowWater, encodeChunk, decodeChunk, FLOW_WATER_LEVEL_MIN, FLOW_WATER_LEVEL_MAX, FLOW_WATER_OFFSET_V2 } from "../src/index.js";
 
 const SEEDS = [1, 42, 1234, 424242, 9001];
 
@@ -12,10 +12,10 @@ describe("ADR-411 varied terrain height", () => {
     // Step 4 samples ~65k tiles/seed — plenty: ~6% of wilderness tiles sit at the max.
     for (let y = -512; y <= 512; y += 4) for (let x = -512; x <= 512; x += 4) {
       const h = g.heightAt(x, y);
-      expect(h).toBeGreaterThanOrEqual(0); expect(h).toBeLessThanOrEqual(HEIGHT_MAX);
+      expect(h).toBeGreaterThanOrEqual(HEIGHT_MIN); expect(h).toBeLessThanOrEqual(HEIGHT_MAX);
       if (h < min) min = h; if (h > max) max = h;
     }
-    expect(min).toBe(0); expect(max).toBe(HEIGHT_MAX); // 26: plateau 3 x relief 8 + detail 2
+    expect(min).toBeLessThanOrEqual(-95); expect(max).toBeGreaterThanOrEqual(95); // ADR-530: [-100, 100]
   });
 
   it.each([1, 1234, 424242])("seed %i: flat buildable areas near spawn still place (faces <= 3 on every spawn patch)", (seed) => {
@@ -27,8 +27,8 @@ describe("ADR-411 varied terrain height", () => {
     }
   });
 
-  it("HEIGHT_MAX is 26: plateau 3 x relief 8 + detail 2, gentle near spawn (relief 2 within 160 tiles)", () => {
-    expect(HEIGHT_MAX).toBe(26);
+  it("HEIGHT_MAX is 100 and HEIGHT_MIN is -100: plateau 3 x relief 2 + detail 1, gentle near spawn (relief 2 within 160 tiles)", () => {
+    expect(HEIGHT_MAX).toBe(100); expect(HEIGHT_MIN).toBe(-100);
     // Water features off: the pure height field (lake bowls raise their own rims on top of it).
     const g = new ProceduralGenerator({ seed: 7, waterFeatures: false, elevatedLakes: false });
     for (let y = -160; y <= 160; y += 7) for (let x = -160; x <= 160; x += 7) {
@@ -40,9 +40,9 @@ describe("ADR-411 varied terrain height", () => {
 });
 
 describe("ADR-411 flow-water encoding at the new extremes", () => {
-  it("flowed water round-trips -300..326 through the v2 code (raw = level + 1000)", () => {
-    expect(FLOW_WATER_LEVEL_MIN).toBe(-300); expect(FLOW_WATER_LEVEL_MAX).toBe(326);
-    for (const level of [-300, -100, -1, 0, 1, 26, 300, 326]) {
+  it("flowed water round-trips -100..100 through the v2 code (raw = level + 1000)", () => {
+    expect(FLOW_WATER_LEVEL_MIN).toBe(-100); expect(FLOW_WATER_LEVEL_MAX).toBe(100);
+    for (const level of [-100, -99, -1, 0, 1, 26, 100]) {
       const raw = flowWaterRaw(level);
       expect(raw).toBe(level + FLOW_WATER_OFFSET_V2);
       expect(isFlowWater(1, raw)).toBe(true);
@@ -61,17 +61,17 @@ describe("ADR-411 flow-water encoding at the new extremes", () => {
     expect(isFlowWater(1, 50)).toBe(true); expect(isFlowWater(1, -71)).toBe(true); expect(isFlowWater(1, -70)).toBe(false);
   });
 
-  it("chunk heights are i16 and land + flow water at -300/326 round-trip the v2 codec", () => {
+  it("chunk heights are i16 and land + flow water at -100/100 round-trip the v2 codec", () => {
     expect(new Chunk(0, 0).height).toBeInstanceOf(Int16Array);
     const c = new Chunk(0, 0);
-    c.set(0, 0, 1); c.setHeight(0, 0, flowWaterRaw(-300));
-    c.set(1, 0, 1); c.setHeight(1, 0, flowWaterRaw(326));
-    c.set(2, 0, 3); c.setHeight(2, 0, -300);
-    c.set(3, 0, 3); c.setHeight(3, 0, 326);
+    c.set(0, 0, 1); c.setHeight(0, 0, flowWaterRaw(-100));
+    c.set(1, 0, 1); c.setHeight(1, 0, flowWaterRaw(100));
+    c.set(2, 0, 3); c.setHeight(2, 0, -100);
+    c.set(3, 0, 3); c.setHeight(3, 0, 100);
     const back = decodeChunk(encodeChunk(c)).chunk;
-    expect(terrainLevel(1, back.getHeight(0, 0))).toBe(-300); expect(renderTileHeight(1, back.getHeight(0, 0))).toBe(-300);
-    expect(terrainLevel(1, back.getHeight(1, 0))).toBe(326); expect(renderTileHeight(1, back.getHeight(1, 0))).toBe(326);
-    expect(back.getHeight(2, 0)).toBe(-300); expect(back.getHeight(3, 0)).toBe(326);
+    expect(terrainLevel(1, back.getHeight(0, 0))).toBe(-100); expect(renderTileHeight(1, back.getHeight(0, 0))).toBe(-100);
+    expect(terrainLevel(1, back.getHeight(1, 0))).toBe(100); expect(renderTileHeight(1, back.getHeight(1, 0))).toBe(100);
+    expect(back.getHeight(2, 0)).toBe(-100); expect(back.getHeight(3, 0)).toBe(100);
   });
 });
 

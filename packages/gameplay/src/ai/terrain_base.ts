@@ -131,7 +131,7 @@ export function planTerrainBase(world: World, self: Entity, b: { x: number; y: n
   }
   if (Math.max(...hs) - Math.min(...hs) > 1) return undefined;
   const height = kind === "pad" ? Math.max(...hs) + 2 : Math.min(...hs) - 3;
-  if (height < LEVEL_MIN || height > LEVEL_MAX) return undefined; // ADR-411: -300..326 (was a stale -27..44)
+  if (height < LEVEL_MIN || height > LEVEL_MAX) return undefined; // ADR-411/529: -100..100 (was a stale -27..44)
   const quarry: TerrainBasePlan["quarry"] = [];
   for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) { const tx = x - 4 + dx, ty = y + 2 + dy; quarry.push({ x: tx, y: ty, bottom: t.heightAt(tx, ty) - 3 }); }
   return { x, y, kind, height, quarry };
