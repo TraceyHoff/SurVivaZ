@@ -13006,3 +13006,266 @@ crossing is termination. Wall tiles whose natural ground dips below 0 with profi
 engine's pre-existing dry-below-0 behaviour. Chunk gen costs ~+0.4 ms/chunk steady-state in
 canyon regions (see timing above). Phone/Xbox visual checks still owed: whether canyons read as
 canyons at play zoom, whether floors/walls read as walkable, river water in sub-0 floors.
+
+## ADR-533 — Dendritic river/stream networks with realistic flow (2026-11-25)
+
+**Decision.** Replace the single sine river outside region zero with a dendritic network.
+Region zero's starter river stays byte-identical (spawn pinned); networks appear only in scaled
+regions. Sources at high ground: one spring per massif (highest sampled flank point, 40–70% of
+disc radius, min height 25), plus 1–2 snowmelt sources on high open ground (≥40). Channels are
+carved by the descent-following walk (generalised ADR-386 spillway pattern: lowest-neighbour
+descent toward a target water body, bounded steps, level drops ≥1 per tile and never rises above
+natural ground, so a channel is never perched more than 1 level above the ground it crosses).
+Up to 2 tributaries per region join a main's centreline (source 15–45 tiles from the join, ≥
+parent level + 8); width grows downstream of each join (1 tile → 2–3 at the mouth, widening
+toward the tributary's approach side first, skipping a bank that falls >2 below the channel
+level). Every channel ends at a lake, great lake, ocean, or the sea — no orphan streams, no
+uphill flow. Boxed-in walks end in a sink pond/marsh (water disc r≤2.5 + mud ring r²∈{8,9,10},
+reeds via `sinkReedKind`), never a half-carved ditch. Deltas/sand fans (up to 8 tiles) sit in
+still water just past a water mouth, in the downstream direction, reusing shore/sand tiles.
+New file `packages/world/src/riverNetwork.ts` (pure layout + carve), hooked into
+`packages/world/src/generator.ts`; generation-time only, one layout lookup per tile, no new
+per-tick scans, nothing per frame. `riverCurrentAt` (ADR-490) extended to network rivers: the
+forced-river check runs first, then falls through to the network direction from a per-world
+seeded generator (same pattern as `ai/travel.ts` `seededGenerator`; default bands match
+production, so heights/sea checks agree). Sink ponds grow reeds (`reed_bed`, wired into the
+server generator construction; the reed node follows the ADR-500 separate-`reed:`-stream pattern
+in both `load()` and `nodesInChunk()`, preserving ADR-343 lockstep).
+
+**Sources and targets.** The planner works in absolute coords; the generator supplies a
+`RiverNetworkContext` (pre-network height, low-water/blocked predicates, massifs, and geometric
+water anchors — the sited layout's lake/pond/greatLake discs plus the sine river's centreline
+sampled at 64 points). Target selection is the spillway's ring scan, but banded: it starts at
+the geometric nearest-water distance minus an 8-tile margin instead of ring 1 (the empty rings
+before the first water body were the plan's cost — 12k–47k layout lookups per region, now
+265–5,164), and scans inward only when short of 3 targets (catching the sea/canyon water the
+anchors miss). Source picking prefers "room to descend" (geometric distance − 4 ≥ height − 3,
+so the mouth can reach a boat-enterable level); a foothill guarantee builds one low spring
+(height 8–20) when no water mouth is boat-enterable, so ≥1 mouth per region admits a boat.
+Channels stay out of every massif's slope sector (the ADR-531 approach wedge — disc to radius
++ 9, angle within slopeHalfWidth + 0.35 of slopeDir): a spring channel running down the slope
+ray cut a 28-deep gorge across the approach route and severed it (found by the adr531 neighbour
+run, fixed before gate).
+
+**Surveys (5 seeds, region (1,0), ADR-411 method).** Networks: channels 4–6, water mouths 1–3,
+confluences 1–2, sinks 0–2, boat-enterable mouths 1–2, delta tiles 16–23 per region (seed 1:
+6/3/1/2/1/23; 42: 4/3/1/0/1/21; 1234: 5/2/2/1/2/16; 424242: 5/2/2/1/2/16; 9001:
+4/2/2/0/2/16). Flat/BFS unchanged from the landforms half: region (1,0) flat 67.4–69.0%
+(≥40%), BFS 99.30–99.45% (≥99%); spawn flat within 384 81.5–84.8% (≥60%), BFS from spawn
+99.09–99.88% (≥99%, seed 42 at 99.09% is the known thin margin, unchanged). adr384 probe
+(5 seeds × 441 chunks): planRate 0.257, flatRate **0.317**, realised **0.082** — exactly the
+landforms-half values, unchanged (thin margins respected, not widened). Region zero
+byte-identical (rivers on vs off over 5×5 chunks of 16×16 + coarse grid step 16 over the whole
+region). Chunk-gen: median 8 ms unchanged; a fresh region pays the plan once (~57–263 ms per
+region, amortised over ~2,300 chunks). adr423 probe alone: 7x7 mean 35.5 ms (bound 50), first
+chunk max 382 ms (bound 500).
+
+**Tests (48 new, all passing; revert check done).** `adr533_networks` (33): per region,
+channels ≥4, every stream reaches water or a sink, centreline connected with non-increasing
+levels, carve realised (stored height == channel level, centreline tiles are water), water
+mouths have delta sand, confluences flow into an earlier channel at or below their level,
+sinks have a water disc + mud ring + a boxed-in justification, width grows with order
+(widthAtMouth == min(3, order)), confluences > 0, enterable mouths > 0, no perch (level ≤
+natural + 1 vs a rivers:false generator), no channel on a massif face >15 above its source,
+no channel in a slope wedge, boat-enterable mouth depth check, sink ponds grow reeds.
+`adr533_survey` (11): flat/BFS/chunk-gen timing. `adr533_river_current` (4, gameplay):
+`riverCurrentAt` returns the channel's downstream direction on a network tile, undefined on
+land/lake/sink water/delta sand, an idle swimmer drifts downstream ~0.3 tiles/s, a low mouth
+has a current pointing downstream into the river from the lake. Revert check: `git stash`
+(tracked sources only) → 33 tests fail on pre-change code (`riversInRegion is not a function`);
+`git stash pop` restores, all 48 pass. `walkStream` unit tests use synthetic fields (open slope
+→ reaches water, levels descend; U-shaped dead-end pocket → boxed in with justification;
+confluence → joins an earlier channel at its level, never uphill).
+Neighbours: full `packages/world/test` — **255 passed / 1 failed (35 files)**, the one failure
+the adr423 7x7 mean under full-suite load (passes alone and in the full gate, see below);
+gameplay travel + terrain/water + adr384 + adr490 — **143 passed (14 files)**; render slope +
+preview — **46 passed (7 files)**. Typecheck clean with lockfile-pinned TypeScript 5.9.3 across
+all workspace projects (`pnpm -r typecheck`).
+Two neighbour fixes landed in this slice. (1) ADR-531 slope wedge (above). (2) ADR-532 canyon
+comparison: the two height-comparison tests in `adr532_canyons.test.ts` compared a canyon field
+against a canyon-free field, but both generators now include rivers (which did not exist when
+the test was written) — a river delta (forced height 1) landing on a sub-0 canyon floor (−5)
+and a channel crossing a centreline read as canyon-created >3 steps. The tests now pass
+`rivers: false` in both generators, restoring the canyon-only isolation they were written for
+(assertions unchanged; both tests pass 6/6). The river/canyon interaction itself is covered by
+the ADR-533 BFS navigability surveys, which pass.
+
+**Full gate (log `~/workspace/work/adr533_full_gate2.log`, 2026-11-25 ~14:47–15:27 CST,
+39.5 min). 5,662 passed / 6 failed / 9 skipped (5,677 tests, 843 files).** Delta vs the
+landforms-half gate (5,617/3/9, 5,629 tests, 840 files): +45 passed / +48 tests / +3 files —
+exactly the 48 new tests. The 6 failures are all load/timeout flakes or known pre-existing,
+each passing alone: `pack.test.ts` (KEYS.md ENOENT, sparse checkout — cannot pass locally),
+`bench.test.ts` (autosave p95 58.3 ms vs 50 ms wall-clock flake), `agents_persist.test.ts`
+(client, IndexedDB) and (server, SQLite) — both 5 s timeouts under full-suite load,
+`adr348_guest_safe_zone.test.ts` (5 s timeout under load), `spawn_world.test.ts` (180 s
+timeout under full-suite load). Notably, adr423 passed in the full gate. (An earlier gate run
+was killed mid-way by a service restart; the re-run above is the authoritative one.) Nothing
+pushed — implementation + commit only, coordinator gates.
+
+**Honest cuts.** Waterfall mouths are real geography (a high cliff-top shore makes a mouth a
+boat can never enter); only ≥1 mouth per region is guaranteed boat-enterable (foothill
+guarantee), not every mouth. Sinks are the honest outcome for streams boxed in by closed
+sub-0 basins or the slope wedge (0–2 per region). The river plan costs ~57–263 ms per fresh
+region (one hitch on entering a new region, amortised over ~2,300 chunks; median chunk-gen
+unchanged at 8 ms) — the adr423 7x7 mean is load-sensitive (passes alone at 35.5 ms and in the
+full gate, fails under an artificial worst-case parallel set pairing it with the four heaviest
+river/terrain files). A river delta forcing height 1 can step against a low canyon floor
+(see the adr532 note above); it does not break overall navigability (BFS ≥99%). No crater
+lakes; no ford/bridge variants (inherited from ADR-532). Phone/Xbox visual checks still owed:
+rivers reading as rivers at play zoom (not blue lines), deltas reading as sand fans at mouths,
+sink marshes reading as marshes (mud + reeds), the current feeling right while swimming/boating,
+Canvas2D (Xbox) rendering of channels, chunk-gen hitch on a low-end phone when entering a fresh
+region.
+
+## ADR-534 — Huge lakes and small oceans with feeder/outflow connections (2026-11-25)
+
+**Decision.** The cross-region sea works — the giant-lake fallback did NOT ship. Ocean sectors
+are a pure function of absolute coords (coarse value-noise field, `0.7·valueNoise(512) +
+0.3·valueNoise(128)`), so a sector is continuous across region boundaries; inside a sector the
+sea threshold goes to 1.0 (pure water). Threshold tuned 0.62 → 0.65 → 0.68 → **0.72** (final):
+at 0.62 seed 9001's region-(1,0) BFS collapsed to 0.01% (the sea severed the region); at 0.72
+the ADR-533 survey passes 11/11 with region-(1,0) BFS 99.11–99.37%. Ocean excluded within
+Chebyshev ≤768 of origin (REGION_HALF), so region zero stays byte-identical. Heights are NOT
+touched by the ocean (tile re-banding only). Precedence extended: ocean > elevated lake >
+island > great lake > lake > pond > river. The great lake is scaled up (radius 100–130, was
+55–80; distance 230–340, was 190–270; realised water area ≥25k tiles) with bigger islands
+(main 12–22, was 6–12; islets 8–14, was 5–8; up to 3 extra, was 2) and island chains along a
+seeded ray from the main island. The diagonal is now CHOSEN (smallest neighbouring cardinal
+discs) rather than hashed blind, with a conditional min distance of 280 when it neighbours the
+big lake. Generation-time only, no new per-tick scans, nothing per frame. New worlds only;
+range stays ±100 (no raise to ±250 in this half). Large features rare: ocean coverage at 0.72
+in region (1,0) is 0.6% (seed 1), 0.5% (42), 6.3% (1234), 0.0% (424242), 6.6% (9001).
+
+**The basin finding (why the great lake gets sited, not just enlarged).** Baseline mains never
+feed the great lake (0/5 seeds): it sits in a deep sub-0 basin (shore ring 98% below 0 on seed
+42, mean −42.4, min −84; 79% below 0 on 424242; 31–61% on the others), and a feeder walk needs
+ground ≥0 (a level-1 channel over −42 ground would be a 43-level aqueduct). `siteGreatLake`
+(in `generator.ts`, next to `siteElevatedLake`, called after the region is stored in the
+`regionWater` map and before `siteElevatedLake`) reads the base field (massifs/benches/canyons
+off) and scores each candidate by the fraction of its shore ring (angles every 6°, distances
+r+1..r+4 step 2) that is dry land (`!isBiomeSea`) with base height ≥0; the first candidate
+scoring ≥0.5 wins, otherwise the best-scoring candidate. Candidates: the hash position; the
+same diagonal at dist ±25/±50 (clamped to [230,340]); the other three diagonals at the hash
+distance. On a move, all islands translate by the centre delta. Region zero has no great lake.
+Measured sited-shore fractions: ≥0.5 on seeds 1/42/1234/9001; seed 424242's best is 0.44 (no
+candidate reaches 0.5) — still enough for 2 feeders + outflow, proven by the connectivity
+tests. This also fixes the cliff shore for boats/players.
+
+**Feeders and outflows (in `planRiverNetwork`, after tributaries, before the foothill
+guarantee).** Feeders: candidate sources in ring r+8..r+110 (48 samples), height ≥8, corridor
+pre-check every 2 tiles (no earlier channel, no non-lake water, heights ≥0); the walk's
+`isLowWater` is lake water only and `isBlocked` is ctx blocks OR non-lake water; counts only
+if the end tile is in the lake disc; failed attempts leave no ditch. The walk carries a
+corridor band (half=20) around the source→edge line plus `preferTargetOnTie` (a feeder-only
+`walkStream` option — the default first-N4 tie-break is kept for every other walk, so ADR-533
+mains and the region-zero starter river stay byte-identical), and a 6x+60 step budget (the
+greedy-lowest walk meanders; a 3x budget ran out 10–18 tiles short). Outflow: dense scan of
+the shore ring (every degree, r+1..r+3) for the LOWEST land tiles adjacent to lake water,
+spread ≥30° apart (up to 12 starts — the 6 lowest cluster on one shore and that shore can be
+ringed by sub-0 ground the walk may not cross); walks to the nearest OTHER water (lake
+excluded from the target scan, lake tiles blocked as steps); first tile level = start height
+− 1, so a ≤4 start gives a boat-enterable mouth (BOAT_ENTERABLE_MOUTH_LEVEL = 3). Measured:
+every huge lake has 2 feeders + 1 outflow on all 5 seeds; outflow first-tile levels 1–2
+(boat-enterable); every island centre is grass (tile 3) at height 2. `walkStream` gained the
+optional `corridor` and `preferTargetOnTie` params and the `"corridor"` boxed-detail reason
+(required by the ADR-533 test asserting every sink neighbour has `why !== "ok"`).
+`RiverChannel.source.kind` gained `"outflow"`; `finishChannel` and `nearestWaterTargets`
+gained the outflow/exclude params; `RiverNetworkContext` gained `hugeLakes`.
+
+**Sea crossings (one water component with ≥200 tiles on EACH side of a boundary; BFS
+early-exit at 200+200).** At 0.72: seed 1 crosses 2/4 boundaries of region (1,0) (north,
+south); 42: 3/4 (west, east, south); 1234: 3/4 (west, east, south); 424242: 0/4 in region
+(1,0) but CROSS at region (1,1) south boundary y=3072; 9001: 3/4 (west, east, north). The sea
+crosses on all 5 seeds. (The earlier "spanning 256-wide window" probe metric was too strict;
+raw straddle-tile counts prove adjacency but not a large sea.)
+
+**Surveys (5 seeds).** ADR-533 survey re-run: region (1,0) flat 67.0–68.9% (≥40%), BFS
+99.11–99.37% (≥99%, seed 9001 min 99.11% — thin, same as before); spawn flat384 81.5–84.8%
+(≥60%), BFS 99.09–99.68% (≥99%, seed 42 min 99.09% — unchanged). adr384 probe unchanged
+(flatRate 0.317, realised 0.082 — thin margins respected, not widened). Region zero
+byte-identical (rivers on vs off; the tie-break is feeder-only). A lake-centred 512×512
+window BFS is 91.9–98.6% and a 1024 window 98.5–98.9% — the lake's steep basin fragments a
+local BFS on the |Δh|≤3 rule; that is local steepness, not the lake severing land, so the
+region-scale BFS is the navigability measure and it passes.
+
+**Tests (37 new, all passing; revert check done).** `adr534_huge_lakes` (30): huge-lake size
+(r 100..130 literal bounds + realised water area ≥25k tiles); islands (≥1 per lake, main r
+12..22 literal bounds, every island centre grass tile 3 height 2); sited shore (≥40% of shore
+ring dry land ≥0); feeders/outflow (≥2 feeders in, ≥1 outflow out per lake in region (1,0));
+boat (outflow first tile ≤3, levels non-increasing to a water end); land BFS (region-scale,
+≥99%). `adr534_cross_region_sea` (7): sea crosses ≥1 region boundary per seed (of region
+(1,0)'s 4 boundaries + region (1,1) south y=3072); BFS through ocean-sector tiles ONLY
+(`oceanSectorAt` + realised water — the any-water version passed on pre-change code because
+old rivers/lakes chain across boundaries); ocean sector coverage <10% of region (1,0) per seed
+(step-8 grid via public `oceanSectorAt`); region zero byte-identical (no great lake; no ocean
+within Chebyshev 768, step-64 grid). Revert check: `git stash` (tracked sources only) →
+27/37 fail on pre-change code; the 10 that pass are invariant pins (5 region-BFS tests — old
+terrain already satisfies ≥99%) and the 5 shore tests (the old lake sits at a different,
+closer hash position on workable ground). Island tests needed literal bounds (12..22) to
+discriminate — the constants revert with the code. Sea-crossing test needed the sector-only
+BFS. Final tally: `adr534_huge_lakes` 20 fail / 10 pass on old code;
+`adr534_cross_region_sea` 7 fail / 0 pass. ADR-424 pins updated (the slice legitimately moves
+them): doc comment + test names (r 100..130, dist 230..340, main island r 12..22, islets r
+8..14); extent bound `dist + g.r <= SCALED_WATER_FEATURE_RADIUS` (360) →
+`<= GREAT_LAKE_MAX_DIST + GREAT_LAKE_MAX_RADIUS` (470); island count `<= 1+2` →
+`1 + ISLAND_MAX_EXTRA` (imported). All 16 ADR-424 tests pass.
+
+**Neighbour fixes landed in this slice.** Three regressions from the ocean + bigger lake, all
+fixed before gate. (1) ADR-386 elevated-lake skips (16 vs ≤10 allowed): the ocean covers the
+candidate ring (d0 ± 20) on the free cardinals. Fixed by widening the fallback tier — farther
+distances (d0+25 up to maxDistance, step 10) plus ALL FOUR cardinals in scaled regions only
+(the lake/pond axes at other distances, kept clear of the lake/pond discs by the same
+el.r + rimWidth + r + 8 clearance; region zero keeps the free cardinals so its layout stays
+byte-identical). A diagonal fallback was tried first (recovered 4 of 7 skips) but reverted: it
+violated ADR-423's Chebyshev distance bounds (a diagonal at (d/√2, d/√2) reads as d/√2) and
+its corner lake blocked canyons in seed 1234 region (1,1). The all-cardinals fallback recovers
+the lakes on cardinals (no Chebyshev issue, no corner lake) and adr386 passes. (2) ADR-531
+volcano shortfall (seed 1 region (0,1): peak 71, summit 42, shortfall 29 — the ocean forced
+the massif onto a dip, the old candidate (292,1619) now being in an ocean sector): the
+shortfall is base − rimNatural, amp-invariant, and no slope side is both gentle and high, so
+the fix caps the volcano's TARGET peak to what its rim supports (summit + 10, the +10 leaving
+a 2-level margin for the rounding between the estimate and heightAt at the rounded peak
+tile), keeping amp (the terrain-driving bump) unchanged — the massif's shape, radius and
+slope side are untouched, only its honest target drops (71 → 55, shortfall 13 → ≤12 after the
+margin). A rim-dip sort penalty, extra candidates, 20 candidates, multi-radius and
+expected-radius rim rings, and slopeDir biases were all tried and reverted: they either
+couldn't find a flat candidate in the hash set or moved massifs everywhere and broke canyons,
+rivers and outflows. (3) ADR-531 altitude bands (1 violation: a sink's mud ring climbing a
+massif flank to height 68, reading as mud instead of rock): mud is a lowland feature — in
+`tileFromNoise`, a sinkMud tile at/above the rock line (55) now falls through to the altitude
+band (rock/snow) instead of returning 9. The ADR-533 sink-mud test's eligibility now excludes
+height ≥55 tiles (mud is never painted there) and skips the mud bar when no tile is eligible
+(a mountainside sink has no mud ring by design). Neighbours: full `packages/world/test` —
+**305 passed / 1 failed (306 tests, 49 files)**, the one failure the adr423 7x7 mean under
+full-suite load (passes alone, see below); adr252-live + travel suites — **59 passed**;
+gameplay terrain/water — **98 passed**; render slope + preview — **43 passed (6 files)**.
+Typecheck clean with lockfile-pinned TypeScript 5.9.3 across all workspace projects
+(`pnpm -r typecheck`).
+
+**Full gate (log `~/workspace/work/adr534_full_gate.log`, 2026-11-25 ~18:02–18:49 CST,
+46.3 min). 5,699 passed / 6 failed / 9 skipped (5,714 tests, 845 files).** Typecheck clean
+with lockfile-pinned TypeScript 5.9.3 across all workspace projects (`pnpm -r typecheck`,
+exit 0). Delta vs the ADR-533 gate (5,662/6/9, 5,677 tests, 843 files): +37 passed / +37
+tests / +2 files — exactly the 37 new ADR-534 tests. The 6 failures are all known
+pre-existing or load flakes, each passing alone: `pack.test.ts` (building sub-manifest reads
+`assets/building/KEYS.md` — ENOENT, absent from the sparse checkout, the same known issue as
+the ADR-533 gate; cannot pass locally), `bench.test.ts` (autosave p95 wall-clock flake —
+passes alone 1/1), `adr423_map_size.test.ts` (7x7 mean under full-suite load — passes alone),
+`agents_persist.test.ts` client (IndexedDB) and server (SQLite) — both 5 s timeouts under
+full-suite load, each passing alone 1/1, `spawn_world.test.ts` (180 s timeout under
+full-suite load — passes alone 3/3). Nothing pushed — implementation + commit only,
+coordinator gates.
+
+**Honest cuts.** Region (1,0) BFS min is now 99.11% (seed 9001) vs the 99% floor — thin; the
+sea costs ~0.2% of BFS. Seed 424242's region (1,0) has 0.0% ocean; its sea crossing is in
+region (1,1) instead (seeded placement, not a mechanism failure). Seed 424242's sited shore
+is only 44% viable (best candidate; no candidate reached 0.5) — still enough for 2 feeders +
+outflow, proven by the connectivity tests. One outflow measured at length 2 tiles (seed 1's
+lake sits near the sea) — a real outflow, just short. A lake-centred local BFS is 91.9–98.9%
+(local steepness, not severance — see Surveys). The volcano peak cap lowers one volcano's
+target peak (71 → 55) rather than moving the massif — the honest target for a rim that cannot
+carry 71. Phone/Xbox visual checks still owed: huge lakes / sea reading as water at play zoom
+(not blocky), islands beachable by boat, feeder/outflow rivers reading as rivers, the sea's
+coastline and crossings, Canvas2D (Xbox) rendering of the new water, chunk-gen hitch on a
+low-end phone when entering a fresh region with an ocean sector. All verification so far is
+harness counts, not the user's eyes.

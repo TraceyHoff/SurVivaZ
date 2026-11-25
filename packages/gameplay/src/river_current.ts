@@ -21,10 +21,20 @@
  * water tile, because callers also gate on `waterDepth`).
  */
 import { fnv1a, type World } from "@engine/core";
-import { REGION_FEATURE_SCALE, REGION_HALF, REGION_SIZE, waterFeatureAt, waterFeatureLayout, type WaterFeatureLayout } from "@engine/world";
+import { REGION_FEATURE_SCALE, REGION_HALF, REGION_SIZE, waterFeatureAt, waterFeatureLayout, ProceduralGenerator, type WaterFeatureLayout } from "@engine/world";
 
 /** Per-world memo of region feature layouts (the generator's own cap-16 pattern). */
 const layoutCache = new WeakMap<World, Map<string, WaterFeatureLayout>>();
+/** ADR-533: per-world seeded generator for the network-river lookup (the travel.ts pattern:
+ *  `new ProceduralGenerator({ seed })` with the default bands is the same generator the server
+ *  builds its chunks from, so its network layout is the generated one. Memoised per world; the
+ *  network itself is memoised per region inside the generator, so the first river query in a
+ *  region pays the one-time planning cost and later ticks pay a bbox + map lookup. */
+const genCache = new WeakMap<World, ProceduralGenerator>();
+const seededGenerator = (world: World): ProceduralGenerator => {
+  let g = genCache.get(world); if (!g) genCache.set(world, (g = new ProceduralGenerator({ seed: world.seed })));
+  return g;
+};
 const layoutFor = (world: World, rx: number, ry: number): WaterFeatureLayout => {
   let m = layoutCache.get(world);
   if (!m) layoutCache.set(world, (m = new Map()));
@@ -67,19 +77,27 @@ export function regionLayoutFor(world: World, tx: number, ty: number): { layout:
  * tile is not one. The direction is the meander derivative at the entity's own `u` (region-local
  * CONTINUOUS position, not the tile), so it is smooth as the entity moves and swings with the
  * meander (up to ~38° off the river's base angle).
+ *
+ * ADR-533: network rivers push too — a network channel tile's downstream direction comes from
+ * the generator's network layout (the channel record stores the walk direction per tile, so
+ * the current follows the channel's bends and points at the mouth). Still water (sink ponds)
+ * and delta sand have no current. The forced-river check runs first (cheap: a cached layout +
+ * ~30 flops); the network lookup is a bbox + map lookup once the region's network is planned.
  */
 export function riverCurrentAt(world: World, x: number, y: number): { x: number; y: number } | undefined {
   const tx = Math.floor(x), ty = Math.floor(y);
   const { layout, lx, ly, seed, rx, ry } = regionLayoutFor(world, tx, ty);
-  if (waterFeatureAt(seed, lx, ly, layout) !== "river") return undefined;
-  // dx/du = cos(a) - sin(a)*(amp/period)*cos(u/period + phase),
-  // dy/du = sin(a) + cos(a)*(amp/period)*cos(u/period + phase). +u is downstream by convention.
-  const r = layout.river;
-  const cx = x - rx * REGION_SIZE, cy = y - ry * REGION_SIZE;
-  const u = cx * Math.cos(r.angle) + cy * Math.sin(r.angle);
-  const slope = (r.amp / r.period) * Math.cos(u / r.period + r.phase);
-  const dx = Math.cos(r.angle) - Math.sin(r.angle) * slope;
-  const dy = Math.sin(r.angle) + Math.cos(r.angle) * slope;
-  const len = Math.hypot(dx, dy) || 1;
-  return { x: dx / len, y: dy / len };
+  if (waterFeatureAt(seed, lx, ly, layout) === "river") {
+    // dx/du = cos(a) - sin(a)*(amp/period)*cos(u/period + phase),
+    // dy/du = sin(a) + cos(a)*(amp/period)*cos(u/period + phase). +u is downstream by convention.
+    const r = layout.river;
+    const cx = x - rx * REGION_SIZE, cy = y - ry * REGION_SIZE;
+    const u = cx * Math.cos(r.angle) + cy * Math.sin(r.angle);
+    const slope = (r.amp / r.period) * Math.cos(u / r.period + r.phase);
+    const dx = Math.cos(r.angle) - Math.sin(r.angle) * slope;
+    const dy = Math.sin(r.angle) + Math.cos(r.angle) * slope;
+    const len = Math.hypot(dx, dy) || 1;
+    return { x: dx / len, y: dy / len };
+  }
+  return seededGenerator(world).networkCurrentAt(tx, ty);
 }

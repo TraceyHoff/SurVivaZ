@@ -17,12 +17,14 @@
  * ADR-424: very large lakes (great lakes) with islands, seeded, in scaled regions only. Region zero
  * keeps the ADR-255/423 starter layout exactly (no great lake at scale 1), so spawn is untouched.
  * A scaled region gets one great lake on a diagonal — with >= 1 island guaranteed inside it (plus
- * 0..2 extra islets). A diagonal is the only placement geometrically clear of every cardinal-centred
- * feature: the elevated lake's siting can relocate onto any free cardinal, so a fourth-cardinal
- * great lake would collide with it and cost far-region siting rate; at 45 degrees the closest an
- * elevated centre can come is ~166 tiles, past elevated r + rim + great r. An island is land inside
- * the lake disc: the inverse of a lake, so it needs its own precedence slot (island beats greatLake,
- * loses to elevatedLake) and its own ground in the generator.
+ * 0..3 extra islets, ADR-534: the first islets form an island chain along one seeded ray).
+ * ADR-534 grows the lake (r 100..130, dist 230..340) and chooses the diagonal by neighbour size.
+ * A diagonal is the only placement geometrically clear of every cardinal-centred feature: the
+ * elevated lake's siting can relocate onto any free cardinal, so a fourth-cardinal great lake
+ * would collide with it and cost far-region siting rate; at 45 degrees the closest an
+ * elevated centre can come is ~186 tiles, past elevated r + rim + great r. An island is land
+ * inside the lake disc: the inverse of a lake, so it needs its own precedence slot (island
+ * beats greatLake, loses to elevatedLake) and its own ground in the generator.
  */
 import { hash2 } from "./noise.js";
 
@@ -46,14 +48,19 @@ const GREAT_SALT = 0x677274; // "grt"
 const ISLAND_SALT = 0x69736c; // "isl"
 
 /** ADR-424: great-lake knobs (scaled regions only — region zero has no great lake, scale 1).
- *  dist 190..270 + radius 55..80 keeps the max extent (350) inside SCALED_WATER_FEATURE_RADIUS
- *  (360) and far inside the 1536-tile region (half 768). The lake sits on a diagonal (see
- *  waterFeatureLayout), so it cannot overlap the lake (144..249, r 36..51), pond, or elevated
- *  lake (252..312, r 18..30) on their cardinals — closest approach ~166 tiles, past the radii sums. */
-export const GREAT_LAKE_MIN_DIST = 190;
-export const GREAT_LAKE_MAX_DIST = 270;
-export const GREAT_LAKE_MIN_RADIUS = 55;
-export const GREAT_LAKE_MAX_RADIUS = 80;
+ *  ADR-534: the lake grows into a HUGE lake — radius 100..130 (was 55..80), dist 230..340
+ *  (was 190..270). The old 360 feature window no longer bounds it: max extent 340+130 = 470,
+ *  still far inside the 1536-tile region (half 768). The diagonal is chosen to keep the discs
+ *  disjoint (see waterFeatureLayout): the closest a neighbouring cardinal disc can come is
+ *  ~163 tiles (great at min dist, neighbour at the 45-degree closest approach), so a lake
+ *  neighbour (r <= 51) needs the great lake pushed out (dist >= 280) while a pond (r <= 12)
+ *  or elevated (r <= 30) neighbour is clear at dist >= 230. The lake sits on a diagonal, so
+ *  it cannot overlap the lake (144..249, r 36..51), pond, or elevated lake (252..312, r 18..30)
+ *  on their cardinals — closest approach ~163 tiles, past the radii sums at the chosen dist. */
+export const GREAT_LAKE_MIN_DIST = 230;
+export const GREAT_LAKE_MAX_DIST = 340;
+export const GREAT_LAKE_MIN_RADIUS = 100;
+export const GREAT_LAKE_MAX_RADIUS = 130;
 /** ADR-424: water ring (tiles) guaranteed between an island's edge and the great lake's edge, so
  *  every island is fully surrounded by water (never a peninsula) and a boat finds deep water
  *  beyond the 2-tile shallow band (SHALLOW_RADIUS) before it beaches on the sand. */
@@ -61,12 +68,15 @@ export const ISLAND_WATER_GAP = 4;
 /** ADR-424: smallest island radius. A 1-tile island is all shore; r >= 5 leaves a grass core
  *  past the 1-tile sand beach ring and the 2-tile shallow band, so the island reads as land. */
 export const ISLAND_MIN_RADIUS = 5;
-/** ADR-424: main island radius 6..12; extra islets 5..8, 0..2 of them per great lake. */
-export const ISLAND_MAIN_MIN_RADIUS = 6;
-export const ISLAND_MAIN_MAX_RADIUS = 12;
-export const ISLAND_ISLET_MIN_RADIUS = 5;
-export const ISLAND_ISLET_MAX_RADIUS = 8;
-export const ISLAND_MAX_EXTRA = 2;
+/** ADR-534: islands scale up with the huge lake — main island radius 12..22 (was 6..12), extra
+ *  islets 8..14 (was 5..8), up to 3 of them (was 2). The first islets are placed as an island
+ *  CHAIN along one seeded ray from the main island where they fit; the rest fall back to the
+ *  golden-angle spread. Bigger grass cores, still beach ring + climbable 1–2 heights (ADR-424). */
+export const ISLAND_MAIN_MIN_RADIUS = 12;
+export const ISLAND_MAIN_MAX_RADIUS = 22;
+export const ISLAND_ISLET_MIN_RADIUS = 8;
+export const ISLAND_ISLET_MAX_RADIUS = 14;
+export const ISLAND_MAX_EXTRA = 3;
 
 /** ADR-383: elevated-lake knobs (ProceduralOptions.elevatedLakes overrides these; `false` disables the feature).
  *  level: water surface above the flat ADR-182 sea level (4..7 — well under HEIGHT_MAX, so the rim stays a hill,
@@ -158,16 +168,35 @@ export function waterFeatureLayout(seed: number, elevated: ElevatedLakeOptions =
   // lake onto — a relocated disc there would swallow the great lake's islands, since precedence
   // puts elevatedLake above island, and rejecting those candidates cut the far-region siting rate
   // from ~92% to ~72%). A diagonal is geometrically clear of every cardinal-centred disc: the
-  // closest an elevated centre (231..312 out) can come to a great-lake centre (190..270 out at
-  // 45 degrees) is ~166 tiles, past elevated r 30 + rim 12 + great r 80 = 122 — so no siting
+  // closest an elevated centre (231..312 out) can come to a great-lake centre (230..340 out at
+  // 45 degrees) is ~186 tiles, past elevated r 30 + rim 12 + great r 130 = 172 — so no siting
   // change is needed at all, and no island can ever sit inside an elevated disc. Region zero
   // (scale 1) has none: the starter layout is pinned byte-identical, spawn included (spawn
   // patches are diagonal, but only in region zero, where there is no great lake).
+  // ADR-534: the lake grows (r 100..130, dist 230..340) and the diagonal is now CHOSEN, not
+  // hashed blind: each diagonal neighbours the two cardinals at ±45° to it, and the pick is
+  // the diagonal whose neighbouring discs are smallest (free cardinal = 0, pond <= 12,
+  // elevated <= 30, lake <= 51). A diagonal neighbouring the big lake disc is pushed out
+  // (dist >= 280: closest approach ~198 > 130 + 51 + 2); the other diagonals sit at >= 230.
+  // The ADR-386 siting clearance (generator.ts) additionally keeps a relocated elevated disc
+  // off the great lake, so the ADR-424 siting invariant holds at the new size.
   let greatLake: WaterFeatureLayout["greatLake"];
   if (scale > 1) {
+    const cardRadius = new Map<string, number>([
+      [`${cardinals[lakePick]![0]},${cardinals[lakePick]![1]}`, lakeR],
+      [`${cardinals[pondPick]![0]},${cardinals[pondPick]![1]}`, pondR],
+      [`${cardinals[elevatedPick]![0]},${cardinals[elevatedPick]![1]}`, elevatedR],
+    ]);
     const diagonals: readonly (readonly [number, number])[] = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
-    const [gdx, gdy] = diagonals[Math.floor(hash2(s ^ GREAT_SALT, 3, 0) * 4) % 4]!;
-    const greatDist = GREAT_LAKE_MIN_DIST + Math.floor(hash2(s ^ GREAT_SALT, 1, 0) * (GREAT_LAKE_MAX_DIST - GREAT_LAKE_MIN_DIST + 1));
+    const scored = diagonals.map((d) => ({
+      d,
+      score: Math.max(cardRadius.get(`${d[0]},0`) ?? 0, cardRadius.get(`0,${d[1]}`) ?? 0),
+    }));
+    const bestScore = Math.min(...scored.map((x) => x.score));
+    const best = scored.filter((x) => x.score === bestScore);
+    const [gdx, gdy] = best[Math.floor(hash2(s ^ GREAT_SALT, 3, 0) * best.length) % best.length]!.d;
+    const distMin = bestScore > 40 ? 280 : GREAT_LAKE_MIN_DIST;
+    const greatDist = distMin + Math.floor(hash2(s ^ GREAT_SALT, 1, 0) * (GREAT_LAKE_MAX_DIST - distMin + 1));
     const greatR = GREAT_LAKE_MIN_RADIUS + Math.floor(hash2(s ^ GREAT_SALT, 2, 0) * (GREAT_LAKE_MAX_RADIUS - GREAT_LAKE_MIN_RADIUS + 1));
     const gx = Math.round(gdx * greatDist * Math.SQRT1_2) + 0.5, gy = Math.round(gdy * greatDist * Math.SQRT1_2) + 0.5;
     const islands: { x: number; y: number; r: number }[] = [];
@@ -186,9 +215,25 @@ export function waterFeatureLayout(seed: number, elevated: ElevatedLakeOptions =
     };
     const mainR = ISLAND_MAIN_MIN_RADIUS + Math.floor(hash2(s ^ ISLAND_SALT, 1, 0) * (ISLAND_MAIN_MAX_RADIUS - ISLAND_MAIN_MIN_RADIUS + 1));
     for (let attempt = 0; attempt < 24 && islands.length === 0; attempt++) placeIsland(mainR, ISLAND_SALT, attempt);
-    const extra = Math.floor(hash2(s ^ ISLAND_SALT, 5, 0) * (ISLAND_MAX_EXTRA + 1)); // 0..2 islets
+    // ADR-534: island chain — the first extra islets step out from the main island along one
+    // seeded ray (spacing = the two radii + the water gap + 6), where they fit inside the
+    // lake; an islet that doesn't fit on the ray falls back to the golden-angle spread.
+    const chainDir = hash2(s ^ ISLAND_SALT, 9, 0) * Math.PI * 2;
+    let chainD = 0;
+    const placeChainIslet = (r: number): boolean => {
+      const main = islands[0]!;
+      const d = chainD + main.r + r + ISLAND_WATER_GAP + 6;
+      const x = main.x + Math.cos(chainDir) * d, y = main.y + Math.sin(chainDir) * d;
+      if (Math.hypot(x - gx, y - gy) + r + ISLAND_WATER_GAP > greatR) return false;
+      for (const o of islands) if (Math.hypot(x - o.x, y - o.y) < r + o.r + ISLAND_WATER_GAP) return false;
+      islands.push({ x: Math.round(x) + 0.5, y: Math.round(y) + 0.5, r });
+      chainD = d;
+      return true;
+    };
+    const extra = Math.floor(hash2(s ^ ISLAND_SALT, 5, 0) * (ISLAND_MAX_EXTRA + 1)); // 0..3 islets
     for (let n = 0; n < extra; n++) {
       const r = ISLAND_ISLET_MIN_RADIUS + Math.floor(hash2(s ^ ISLAND_SALT, 6 + n, 0) * (ISLAND_ISLET_MAX_RADIUS - ISLAND_ISLET_MIN_RADIUS + 1));
+      if (placeChainIslet(r)) continue;
       for (let attempt = 0; attempt < 12; attempt++) if (placeIsland(r, ISLAND_SALT ^ (0x100 + n), attempt)) break;
     }
     greatLake = { x: gx, y: gy, r: greatR, islands };

@@ -170,7 +170,9 @@ export function createGameServer(o: GameServerOptions): GameServer {
   // ADR-500: sunken caches — the generator scatters them on deep water only (its own rng stream, so the
   // land-node distribution is unchanged). The kind + chance come from the gameplay defs (resources.json /
   // worldgen.json); without them the pass is off.
-  const generator = new ProceduralGenerator({ seed, bands: worldgenBands(defs), sunkenCacheKind: defs.resourceId("sunken_cache"), sunkenCacheChance: defs.worldgen.sunkenCacheChance });
+  // ADR-533: sink-pond reeds — the generator scatters reed beds on sink-mud tiles only (its own rng
+  // stream, same pattern). The kind comes from the gameplay defs; without it the pass is off.
+  const generator = new ProceduralGenerator({ seed, bands: worldgenBands(defs), sunkenCacheKind: defs.resourceId("sunken_cache"), sunkenCacheChance: defs.worldgen.sunkenCacheChance, sinkReedKind: defs.resourceId("reed_bed") });
   // Four far-apart starter-biome spawn points, deterministic per seed (ADR-106).
   setSpawnPoints(world, o.spawnPoints?.length ? o.spawnPoints : computeSpawnPoints(generator));
   // ADR-325: AI humans spawn over world-wide seeded points (built lazily on the first bot spawn); explicit spawnPoints

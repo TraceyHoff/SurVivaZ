@@ -154,8 +154,12 @@ describe("ADR-532 canyon layout", () => {
     const freeBySeed = new Map<number, ProceduralGenerator>();
     let maxReal = 0, maxMouth = 0, preExisting = 0;
     for (const { seed, c } of all) {
-      let g = bySeed.get(seed); if (!g) bySeed.set(seed, (g = new ProceduralGenerator({ seed })));
-      let free = freeBySeed.get(seed); if (!free) freeBySeed.set(seed, (free = new ProceduralGenerator({ seed, canyons: false })));
+      // Rivers off in BOTH fields: this test isolates the canyon (a river channel or delta
+      // crossing the floor is a separate feature — ADR-533 — whose forced heights would
+      // read as canyon-created steps in the comparison, although the canyon itself grades
+      // <=1/tile). The river/canyon interaction is covered by the ADR-533 BFS surveys.
+      let g = bySeed.get(seed); if (!g) bySeed.set(seed, (g = new ProceduralGenerator({ seed, rivers: false })));
+      let free = freeBySeed.get(seed); if (!free) freeBySeed.set(seed, (free = new ProceduralGenerator({ seed, canyons: false, rivers: false })));
       // Realised centreline walk: min(ground, floor) — where the ground dips below the
       // floor the walk follows the dip at the natural gradient (<=3); a straight-line sample
       // can straddle a bench edge diagonally, so the bound is walkability (3), not the
@@ -250,8 +254,10 @@ describe("ADR-532 canyon layout", () => {
     const freeBySeed = new Map<number, ProceduralGenerator>();
     let checked = 0, preExisting = 0;
     for (const { seed, c } of allCanyons()) {
-      let g = bySeed.get(seed); if (!g) bySeed.set(seed, (g = new ProceduralGenerator({ seed })));
-      let free = freeBySeed.get(seed); if (!free) freeBySeed.set(seed, (free = new ProceduralGenerator({ seed, canyons: false })));
+      // Rivers off in BOTH fields — see the floor-walk test above: this comparison isolates
+      // the canyon, and a river channel/delta would read as a canyon-created step.
+      let g = bySeed.get(seed); if (!g) bySeed.set(seed, (g = new ProceduralGenerator({ seed, rivers: false })));
+      let free = freeBySeed.get(seed); if (!free) freeBySeed.set(seed, (free = new ProceduralGenerator({ seed, canyons: false, rivers: false })));
       for (const frac of [0.25, 0.5, 0.75]) {
         const t = Math.round(c.length * frac);
         const p = canyonCentreAt(c, t);

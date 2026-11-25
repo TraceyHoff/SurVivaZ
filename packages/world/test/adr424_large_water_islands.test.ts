@@ -5,12 +5,13 @@ import {
   surveyWaterFeatures, isWaterId, islandAt, greatLakeDist, WaterDepth, waterDepthAt,
   GREAT_LAKE_MIN_DIST, GREAT_LAKE_MAX_DIST, GREAT_LAKE_MIN_RADIUS, GREAT_LAKE_MAX_RADIUS,
   ISLAND_WATER_GAP, ISLAND_MIN_RADIUS, ISLAND_MAIN_MIN_RADIUS, ISLAND_MAIN_MAX_RADIUS,
+  ISLAND_MAX_EXTRA,
 } from "../src/index.js";
 
 /** ADR-424: very large lakes (great lakes) with islands, seeded, in scaled regions only.
  *  Region zero keeps the ADR-255/423 starter layout exactly — no great lake there, spawn untouched.
- *  A scaled region gets one great lake (r 55..80, dist 190..270, on a diagonal) with
- *  >= 1 island guaranteed inside it (main island r 6..12, plus 0..2 islets r 5..8), each island
+ *  A scaled region gets one great lake (r 100..130, dist 230..340, on a diagonal) with
+ *  >= 1 island guaranteed inside it (main island r 12..22, plus 0..3 islets r 8..14), each island
  *  ringed by >= ISLAND_WATER_GAP tiles of water so it is never a peninsula. Island ground is
  *  sand beach (tile 2, height 1) around grass (tile 3, height 2) — buildable land a boat can
  *  beach beside: deep water past the 2-tile shallow band, shallows, then sand. */
@@ -28,7 +29,7 @@ describe("ADR-424 great lakes: layout numbers", () => {
     for (const seed of SEEDS) expect(waterFeatureLayout(seed).greatLake).toBeUndefined();
   });
 
-  it("every scaled region has exactly one great lake, r 55..80 at dist 190..270, extent inside 360", () => {
+  it("every scaled region has exactly one great lake, r 100..130 at dist 230..340, extent inside 470", () => {
     for (const seed of SEEDS) {
       const L = scaledLayout(seed);
       const g = L.greatLake!;
@@ -38,7 +39,10 @@ describe("ADR-424 great lakes: layout numbers", () => {
       const dist = Math.hypot(g.x, g.y);
       expect(dist).toBeGreaterThanOrEqual(GREAT_LAKE_MIN_DIST);
       expect(dist).toBeLessThanOrEqual(GREAT_LAKE_MAX_DIST + 1);
-      expect(dist + g.r).toBeLessThanOrEqual(SCALED_WATER_FEATURE_RADIUS);
+      // ADR-534: the lake is sited (not just hashed), so its extent is the sited distance
+      // plus its radius — up to GREAT_LAKE_MAX_DIST + GREAT_LAKE_MAX_RADIUS (470), past the
+      // old SCALED_WATER_FEATURE_RADIUS (360) the ADR-424 layout used.
+      expect(dist + g.r).toBeLessThanOrEqual(GREAT_LAKE_MAX_DIST + GREAT_LAKE_MAX_RADIUS);
       // Diagonal placement (ADR-424): |x| ~= |y|, both well off the axes — and geometrically
       // clear of the lake, pond and elevated lake on their cardinals (centre distance past the
       // radii sums). That clearance, not a cardinal rule, is what keeps the discs disjoint.
@@ -70,11 +74,11 @@ describe("ADR-424 great lakes: layout numbers", () => {
 });
 
 describe("ADR-424 islands: placement guarantees", () => {
-  it(">= 1 island per great lake, main island r 6..12, every island r >= 5", () => {
+  it(">= 1 island per great lake, main island r 12..22, every island r >= 8", () => {
     for (const seed of SEEDS) {
       const g = scaledLayout(seed).greatLake!;
       expect(g.islands.length).toBeGreaterThanOrEqual(1);
-      expect(g.islands.length).toBeLessThanOrEqual(1 + 2);
+      expect(g.islands.length).toBeLessThanOrEqual(1 + ISLAND_MAX_EXTRA);
       expect(g.islands[0]!.r).toBeGreaterThanOrEqual(ISLAND_MAIN_MIN_RADIUS);
       expect(g.islands[0]!.r).toBeLessThanOrEqual(ISLAND_MAIN_MAX_RADIUS);
       for (const isl of g.islands) {

@@ -5,6 +5,7 @@ export * from "./spatialIndex.js";
 export * from "./membership.js";
 export * from "./generator.js";
 export * from "./waterFeatures.js";
+export * from "./riverNetwork.js";
 export * from "./spawnPoints.js";
 export * from "./chunkManager.js";
 export * from "./chunkCodec.js";
