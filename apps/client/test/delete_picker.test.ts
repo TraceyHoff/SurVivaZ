@@ -32,17 +32,19 @@ describe("Delete progress picker", () => {
   test("character + bots only keeps the worlds; everything wipes all incl. identity", async () => {
     const factory = new IDBFactory(); localStorage.clear();
     await seed(factory, localDbName("1"), ["aa"], 2); await seed(factory, hostDbName("1"), ["bb"], 0);
+    await seed(factory, localDbName("2"), ["zz"], 1); await seed(factory, hostDbName("2"), ["yy"], 0); // ADR-526: a second slot
     localStorage.setItem("engine-settings", "{}"); localStorage.setItem("engine.account.1", "tok"); localStorage.setItem("engine.account.2", "other");
     const r = await deleteLocalProgress({ slot: "1", factory, kinds: new Set(["character", "bots"]) });
     expect(r.ok).toBe(true);
     expect(await counts(factory, localDbName("1"))).toEqual({ players: 0, bots: 0, chunks: 1 });
     expect((await counts(factory, hostDbName("1"))).players).toBe(0);
+    expect((await counts(factory, localDbName("2"))).players).toBe(1); // per-category delete is slot-scoped
     expect(localStorage.getItem("engine-settings")).toBe("{}");
     expect((await deleteLocalProgress({ slot: "1", factory, kinds: new Set() })).ok).toBe(false);
     const all = await deleteLocalProgress({ slot: "1", factory, kinds: new Set(), everything: true, blockedMs: 500 });
     expect(all.ok).toBe(true); expect(await names(factory)).toEqual([]);
     expect(localStorage.getItem("engine-settings")).toBeNull(); expect(localStorage.getItem("engine.account.1")).toBeNull();
-    expect(localStorage.getItem("engine.account.2")).toBe("other"); // other slot untouched
+    expect(localStorage.getItem("engine.account.2")).toBeNull(); // ADR-526: everything wipes ALL slots now
   });
 });
 

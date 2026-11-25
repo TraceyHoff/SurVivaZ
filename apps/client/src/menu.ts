@@ -435,7 +435,7 @@ export class BootUI {
         const note = document.createElement("p"); note.className = "hint-note"; note.textContent = "Dedicated-server progress isn't stored on this device: delete it in-game from Settings → Delete my progress while connected to that server.";
         const boxes = new Map<LocalSaveKind, HTMLInputElement>();
         const all = document.createElement("input"); all.type = "checkbox"; all.dataset["save"] = "everything";
-        const allL = document.createElement("label"); allL.append(all, " Delete everything (also forgets this device's player identity)");
+        const allL = document.createElement("label"); allL.append(all, " Delete everything (all player slots and all game data on this device — a fresh start)");
         all.addEventListener("change", () => { for (const b of boxes.values()) b.checked = all.checked; c.refresh(); });
         // Sticky footer (always visible while the picker scrolls): Back + Hold to delete.
         const footer = document.createElement("div"); footer.dataset["role"] = "sticky-footer"; footer.className = "sticky-footer";
@@ -443,8 +443,10 @@ export class BootUI {
         const c = deleteConfirm({ message: "Pick what to delete above. This can't be undone.", settingsOption: false, onCancel: main, actions: footer, canConfirm: picked,
           onConfirm: async () => {
             const kinds = new Set([...boxes].filter(([, b]) => b.checked).map(([k]) => k));
-            const r = await deleteLocalProgress({ slot, kinds, everything: all.checked }); if (!r.ok) throw new Error(r.message);
-            setTimeout(() => { if (this.root.dataset["boot"] === "menu") saves(); }, 1500); // refresh the list
+            const everything = all.checked;
+            const r = await deleteLocalProgress({ slot, kinds, everything }); if (!r.ok) throw new Error(r.message);
+            // ADR-526: after a true fresh start the tab holds stale in-memory state — reload to a fresh menu.
+            setTimeout(() => { if (everything) location.reload(); else if (this.root.dataset["boot"] === "menu") saves(); }, 1500);
             return r.message;
           } });
         c.el.style.maxHeight = "none"; c.el.style.overflow = "visible"; // the panel scrolls, not a nested box

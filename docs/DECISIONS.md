@@ -13269,3 +13269,66 @@ carry 71. Phone/Xbox visual checks still owed: huge lakes / sea reading as water
 coastline and crossings, Canvas2D (Xbox) rendering of the new water, chunk-gen hitch on a
 low-end phone when entering a fresh region with an ocean sector. All verification so far is
 harness counts, not the user's eyes.
+
+## ADR-526 — Fresh-start delete: "Delete everything" wipes ALL game data on the device (2026-11-25)
+
+**Ask.** Deleting saved games should delete ALL game data + browser cached data, for a true fresh start
+(user, 2026-11-24). The old "Delete everything" was slot-scoped and leaky: it wiped only the current
+`?player=` slot's worlds, and its key sweep (`/^engine\.(account|name|server|lastPlayed\.[a-z]+)\./` +
+ends-with-`.slot`) missed `engine-server-url` (dash, not dot), `survivaz.errorlog.v1`, `survivaz.fx.v1`,
+`charArt`, tutorial progress, and every other slot's DBs and keys.
+
+**Change (`apps/client/src/delete-progress.ts`, `apps/client/src/menu.ts`).** The `everything` path in
+`deleteLocalProgress` is now a true fresh start, in order: (1) `listGameSlots` discovers every slot with
+data — from `indexedDB.databases()` names (`engine-local-*` / `engine-p2p-host-*`) plus slots parsed
+from storage keys (`engine.lastPlayed.<mode>.<slot>`, `survivaz.character.<ck>.<slot>`,
+`survivaz-tutorial-<slot>`, `engine.account|name|server.<slot>`) when `databases()` is unavailable;
+(2) `wipeAllGameDatabases` deletes every slot's singleplayer + hosted DBs (a blocked DB in another tab
+aborts before any keys are touched, same message as before); (3) `sweepGameStorage` removes every
+game-owned localStorage key — `isGameStorageKey`: `charArt`, or `engine.` / `engine-` / `survivaz.` /
+`survivaz-` prefixes — which covers the server URL, settings, error log, FX/audio settings, charArt,
+tutorial progress and the fullscreen tip for all slots; (4) the same sweep runs on sessionStorage
+(`survivaz.glLevel` / `glReloads`, `survivaz.editchar`, `engine-menu-page`, `engine-p2p-notice`).
+Unrelated keys on the origin survive in both stores — never `localStorage.clear()`. The main-menu
+checkbox now reads "Delete everything (all player slots and all game data on this device — a fresh
+start)", and after a successful everything-delete the menu reloads the page to a fresh menu (the tab
+holds stale in-memory state otherwise). The hold-to-delete confirmation is unchanged (1500 ms, all
+inputs). The per-category path is untouched and still slot-scoped; the in-game "Delete save"
+(`wipeSingleplayerSave`) is deliberately still scoped to the current slot's world — it deletes one
+save, not the device.
+
+**Honest limit (corrected 2026-11-25 during the game-only scope check).** No service worker / PWA exists, so
+there is no SW-controlled offline cache — but Cache Storage IS used: ADR-307 keeps a versioned asset cache
+(`survivaz-art-<version>`) for art/audio, self-evicting old versions on deploy. It is deliberately left
+alone by Delete everything: it holds immutable deploy assets, not player data, and wiping it would only
+force a large re-download with no fresh-start benefit. "Delete everything" wipes everything the game
+stored about the player (all slots' worlds, all game storage keys, all game session keys); a web page
+still cannot clear the browser's HTTP cache, so a stale cached bundle can be served until the browser
+refreshes it. The game-only scope was verified by grepping every storage use in the repo: every
+localStorage/sessionStorage key the game writes matches `charArt` or the `engine.` / `engine-` /
+`survivaz.` / `survivaz-` prefixes (`engine.account.<slot>` is the ClientSession token,
+`survivaz.render.quality` / `deviceTier` the render settings, `survivaz-tutorial-<slot>` the tutorial),
+and no non-game key on the origin uses those prefixes — unrelated keys survive the sweep (pinned by
+test). The only other IndexedDB names are `engine-sandbox` (dev-only) and the never-called
+`engine-local-world` default, which the `engine-local-` prefix would catch anyway.
+
+**Verification.** New `apps/client/test/adr526_fresh_start.test.ts` (4 tests): everything wipes a
+second slot's worlds + keys, the server URL, error-log / FX / audio / charArt / tutorial keys and game
+session keys while unrelated keys survive; a settings-only delete still leaves the other slot, the
+server URL and the other slot's keys untouched; the second slot is still found when `databases()` is
+unavailable; `isGameStorageKey` pins the namespaces. 3 of the 4 fail on the pre-change code (plus the
+updated `delete_picker.test.ts` assertion that `engine.account.2` is now wiped — the old "other slot
+untouched" assertion was the leak being fixed). The `engine-sandbox` dev DB is out of scope (dev-only,
+`?dev=sandbox`). Phone check still owed: Delete everything on the phone, then confirm a fresh menu
+with no saves, no remembered server URL and no character offered.
+
+**Gate.** Full gate (log `~/workspace/work/adr526_full_gate.log`, 2026-11-25 ~19:13–19:47 CST, 33.4 min):
+**5,706 passed / 3 failed / 9 skipped (5,718 tests, 846 files)**, typecheck clean with pinned TS 5.9.3
+across all 11 projects, no test file failed to load. Delta vs the ADR-534 gate (5,699/6/9, 5,714 tests,
+845 files): +7 passed / +4 tests / +1 file — exactly the 4 new ADR-526 tests. The 3 failures are all
+known pre-existing/load flakes, each adjudicated: `pack.test.ts` (KEYS.md ENOENT, sparse checkout —
+fails alone identically, cannot pass locally), `bench.test.ts` (autosave p95 60.5 ms vs 50 ms
+wall-clock flake — passes alone 1/1 on re-run; the file has zero references to delete code),
+`agents_persist.test.ts` client (5 s timeout under full-suite load — passes alone 1/1). New tests
+re-run by the coordinator on the final tree: 4/4. Gate verdict: GREEN (modulo the 3 known failures).
+Nothing pushed — push decision is the parent's.

@@ -96,6 +96,59 @@ export interface WipeResult { ok: boolean; message: string; deleted: string[] }
 export const localDbName = (slot: string): string => `engine-local-${slot}`;
 export const hostDbName = (slot: string): string => `engine-p2p-host-${slot}`;
 
+// ---- ADR-526 fresh start: "Delete everything" must mean everything ----
+
+/** localStorage / sessionStorage keys owned by the game. Anything else on the origin is left alone — never localStorage.clear(). */
+export function isGameStorageKey(key: string): boolean {
+  return key === "charArt" || key.startsWith("engine.") || key.startsWith("engine-") || key.startsWith("survivaz.") || key.startsWith("survivaz-");
+}
+
+/** Removes every game-owned key from a storage (localStorage or sessionStorage). Returns what was removed; unrelated keys survive. */
+export function sweepGameStorage(store: Pick<Storage, "key" | "length" | "removeItem">): string[] {
+  const gone: string[] = [];
+  for (let i = 0; i < store.length; i++) { const k = store.key(i); if (k && isGameStorageKey(k)) gone.push(k); }
+  for (const k of gone) store.removeItem(k);
+  return gone;
+}
+
+/** ?player slots with data on this device: from IndexedDB names, plus slots named in storage keys (fallback when databases() is unavailable). */
+export async function listGameSlots(env: { slot: string; factory?: Factory; storage?: Pick<Storage, "key" | "length"> }): Promise<string[]> {
+  const slots = new Set([env.slot]);
+  const f = env.factory ?? indexedDB;
+  try {
+    for (const d of (await f.databases?.()) ?? []) {
+      if (!d.name) continue;
+      for (const p of ["engine-local-", "engine-p2p-host-"] as const) if (d.name.startsWith(p)) slots.add(d.name.slice(p.length));
+    }
+  } catch { /* databases() unsupported — fall through to key parsing */ }
+  const st = env.storage ?? localStorage;
+  for (let i = 0; i < st.length; i++) {
+    const k = st.key(i); if (!k) continue;
+    const m = /^engine\.lastPlayed\.[a-z]+\.(.+)$/.exec(k) ?? /^survivaz\.character\.[a-z]+\.(.+)$/.exec(k) ?? /^survivaz-tutorial-(.+)$/.exec(k) ?? /^engine\.(?:account|name|server)\.(.+)$/.exec(k);
+    if (m?.[1]) slots.add(m[1]);
+  }
+  return [...slots];
+}
+
+/** Deletes every engine-local-* / engine-p2p-host-* database on this device (all ?player slots). */
+export async function wipeAllGameDatabases(o: { slots: string[]; factory?: Factory; blockedMs?: number }): Promise<WipeResult> {
+  const deleted: string[] = [];
+  const dbOpts = { ...(o.factory ? { factory: o.factory } : {}), ...(o.blockedMs !== undefined ? { blockedMs: o.blockedMs } : {}) };
+  for (const slot of o.slots) {
+    for (const name of [localDbName(slot), hostDbName(slot)]) {
+      const r = await wipe(name, dbOpts);
+      if (!r.ok) return { ...r, deleted };
+      deleted.push(...r.deleted);
+    }
+  }
+  return { ok: true, deleted, message: "" };
+}
+
+const sessionStore = (env: LocalSaveEnv): Pick<Storage, "key" | "length" | "removeItem"> | undefined => {
+  if (env.session) return env.session;
+  try { return globalThis.sessionStorage ?? undefined; } catch { return undefined; }
+};
+
 async function wipe(base: string, o: { factory?: Factory; blockedMs?: number; close?: () => Promise<void> | void }): Promise<WipeResult> {
   const factory = o.factory ?? indexedDB;
   await o.close?.(); // our own connection first (local server + store), else the delete is blocked by this tab
@@ -137,7 +190,7 @@ export const AGENT_RECORDS_NS = "agents";
 export const lastPlayedKey = (mode: "singleplayer" | "hosted", slot: string): string => `engine.lastPlayed.${mode}.${slot}`;
 type StoreLike = { playerTokens(): string[]; listRecords(ns: string): { id: string; bytes: Uint8Array }[]; count(t: "chunks" | "players" | "records"): number;
   write(b: { deletePlayers?: string[]; deleteRecords?: { ns: string; id: string }[] }): Promise<void>; close(): Promise<void> };
-export interface LocalSaveEnv { slot: string; factory?: Factory; storage?: Pick<Storage, "getItem" | "removeItem" | "key" | "length">; openStore?: (name: string) => Promise<StoreLike>; now?: () => number }
+export interface LocalSaveEnv { slot: string; factory?: Factory; storage?: Pick<Storage, "getItem" | "removeItem" | "key" | "length">; /** Defaults to this tab's sessionStorage (guarded — private mode may throw). */ session?: Pick<Storage, "key" | "length" | "removeItem">; openStore?: (name: string) => Promise<StoreLike>; now?: () => number }
 const defaultOpen = async (name: string, factory: Factory): Promise<StoreLike> => {
   const { IndexedDbWorldStore } = await import("@engine/persist");
   return IndexedDbWorldStore.open(name, { factory: factory as never });
@@ -175,13 +228,24 @@ export async function listLocalSaves(env: LocalSaveEnv): Promise<LocalSave[]> {
 
 /**
  * Deletes the chosen categories. A whole world (singleplayer / hosted) is deleted as a database; "character" and
- * "bots" alone delete just those rows inside the worlds that are kept. `everything` also forgets this slot's account
- * token, name, server URL and last-played stamps (a new identity everywhere, including dedicated servers).
+ * "bots" alone delete just those rows inside the worlds that are kept. `everything` (ADR-526) is a true fresh start:
+ * every ?player slot's worlds, every game localStorage key (all slots, server URL, error log, FX/audio settings,
+ * charArt, tutorial progress) and every game sessionStorage key — then the caller reloads to the menu.
  */
 export async function deleteLocalProgress(env: LocalSaveEnv & { kinds: ReadonlySet<LocalSaveKind>; everything?: boolean; blockedMs?: number }): Promise<WipeResult> {
-  const k = env.everything ? new Set<LocalSaveKind>(["singleplayer", "hosted", "character", "bots", "settings"]) : env.kinds;
+  const st = env.storage ?? localStorage;
+  if (env.everything) {
+    const slots = await listGameSlots(env);
+    const dbOpts = { ...(env.factory ? { factory: env.factory } : {}), ...(env.blockedMs !== undefined ? { blockedMs: env.blockedMs } : {}) };
+    const r = await wipeAllGameDatabases({ slots, ...dbOpts });
+    if (!r.ok) return r;
+    sweepGameStorage(st);
+    const session = sessionStore(env); if (session) sweepGameStorage(session);
+    return { ok: true, deleted: r.deleted, message: `Deleted everything: all saves, settings and game data on this device (${slots.length} player slot${slots.length === 1 ? "" : "s"}). The next start is a fresh game.` };
+  }
+  const k = env.kinds;
   if (!k.size) return { ok: false, deleted: [], message: "Pick at least one thing to delete." };
-  const st = env.storage ?? localStorage; const deleted: string[] = []; const done: string[] = [];
+  const deleted: string[] = []; const done: string[] = [];
   const dbOpts = { ...(env.factory ? { factory: env.factory } : {}), ...(env.blockedMs !== undefined ? { blockedMs: env.blockedMs } : {}) };
   for (const [kind, name, mode] of [["singleplayer", localDbName(env.slot), "singleplayer"], ["hosted", hostDbName(env.slot), "hosted"]] as const) {
     if (k.has(kind)) {
@@ -199,9 +263,5 @@ export async function deleteLocalProgress(env: LocalSaveEnv & { kinds: ReadonlyS
   if (k.has("character") && !(k.has("singleplayer") && k.has("hosted"))) done.push("characters");
   if (k.has("bots") && !k.has("singleplayer")) done.push("bot memories");
   if (k.has("settings")) { for (const key of SETTINGS_KEYS) st.removeItem(key); done.push("settings"); }
-  if (env.everything) {
-    const mine: string[] = []; for (let i = 0; i < st.length; i++) { const key = st.key(i); if (key && /^engine\.(account|name|server|lastPlayed\.[a-z]+)\./.test(key) && key.endsWith(`.${env.slot}`)) mine.push(key); }
-    for (const key of mine) st.removeItem(key); done.push("account token");
-  }
   return { ok: true, deleted, message: `Deleted: ${done.join(", ")}.` };
 }
