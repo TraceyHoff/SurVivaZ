@@ -15316,3 +15316,177 @@ pass reads the same mirror + tiler, and ADR-562 proves the two passes agree to t
 column); the runtime centre is the PLAYER's tile (stand close — the 12-tile radius is
 generous for a house); pieces whose def is unknown to the client defs are skipped;
 heights for non-resident chunks fall back to the centre tile's height.
+
+## ADR-567: Flow-water codec collision fixed decode-side — v2 raws only (SurVivaZ)
+
+Bug fix (user ruling R1, decode-side; prep `waterfall-prep.md` §0/§1/§7). The giant
+"waterfall wall" in the user's 2026-11-26 screenshot was not a designed fall: since
+ADR-530 widened generated water beds to −100..+100, the ADR-297 legacy branches in
+`packages/world/src/waterDepth.ts` (`isFlowWater`: any water tile with stored raw
+>= 50 or <= −71 counts as shovel-flowed water) misread ordinary deep natural water as
+flowed water. A sea bed at −71 decoded to a phantom surface of +75, +50..+79 beds
+decoded sunken (raw − 80), and gameplay (swim/standing via `terrainLevel`), flow
+sources (`waterSurfaceAt`), storm-flood seeding and winter ice all read the same
+phantom decode — deep-basin natural water was also unfreezable, because `frozen.ts`
+refuses to freeze flow water.
+
+**The fix (one shared decode, no stored data changed).** `isFlowWater(id, raw)` is
+now `isWaterId(id) && raw >= FLOW_WATER_MIN_RAW_V2` (900): only ADR-411 v2 raws
+(900..1100, `flowWaterRaw(level) = level + 1000`) count as flow water, and
+`flowLevel` is just `raw − 1000`. Natural water raws across the full legal bed range
+(−100..+100) decode as natural water: `renderTileHeight` 0, `terrainLevel` = raw.
+Genuine flowed water — spillway, network channels, elevated lakes, player-dug flow —
+has been stored v2 since ADR-411 and decodes exactly as before. No generator, chunk
+format or encoding change, so every existing world heals on next chunk load,
+including the user's current one. Every reader was checked against the corrected
+decode: both renderers (mesh `tileHeight`, instanced tiles, Canvas2D) read
+`renderTileHeight`; gameplay heights read `terrainLevel`; flow sources and flood
+seeding read the true surface 0 for natural water; ice can now freeze deep-basin
+natural water while genuine v2 flow water still never freezes.
+
+**Accepted regression (verbatim, per ruling R1):** water flowed under the legacy v1
+encoding in saves predating ADR-411 becomes indistinguishable from natural water and
+renders flat; current builds have written v2 since ADR-411.
+
+**Scan (prep §1 method, real `ProceduralGenerator.sampleAt`, full 1536×1536 regions,
+directed water→neighbour faces, drop = water surface − 0.25 − neighbour surface).**
+Seed 42 region (0,1): faces with drop >= 15: 31,263 → 22,141; faces with drop >= 100:
+2,039 → 0; max drop 147.75 → 99.75; natural water tiles misdecoded as flow: 148,838 →
+0 (of 800,637 natural water tiles, every one now renders at surface 0). Seed 9001
+region (1,0): faces >= 15: 25,065 → 21,841; faces >= 140: 2,288 → 0; max drop 149.75
+→ 99.75; misdecoded natural tiles 58,999 → 0. The phantom class (surfaces +48..+75
+and −30..−1, faces >= 100) is eliminated. The residual >= 15 faces are genuine
+terrain faces of the ADR-182 flat-surface encoding: surface-0 water beside dry land
+far below sea level (deep basin benches, canyon floors), bounded by the terrain
+range itself (max 99.75 = surface 0 to land at −100) — they are not codec artefacts
+and predate ADR-530 in kind; the prep's hope that the scan's max would collapse to
+spillway/mouth scale does not hold for faces to dry deep land, and is recorded here
+as the honest residual rather than hidden.
+
+**Tests.** New `packages/world/test/adr567_flow_codec.test.ts` (5 tests): the full
+natural raw range for both water ids; the screenshot case (bed −71 → surface 0);
+beds +50..+79 no longer sunken; v2 raws 900..1100 preserved; a bounded worldgen
+sweep (seed 42, 512×512 of region (0,1)) asserting no natural water tile decodes as
+flow, with non-vacuity pins that the sweep covers beds <= −71 and >= 50. Verified
+RED on the pre-fix tree (4/5 fail at the phantom cases; the v2-preservation pin
+passes both ways, as it should). Deliberate re-pins of legacy-decode assertions:
+`packages/world/test/adr411_varied_heights.test.ts` (the "legacy ADR-297 bytes"
+test and the v1-blob test now assert the ADR-567 ruling — stored bytes unchanged,
+decode changed) and `packages/render/test/adr529_void_sentinels.test.ts` (the two
+legacy `terrainLevel` assertions). The flow-behaviour suites themselves
+(task36/adr411 dig-raise/adr467 floods/adr450 ice) are green unchanged in behaviour.
+Affected suites run: 20 files, 193 tests, all pass; typecheck clean (lockfile TS
+5.9.3) for world, render and gameplay. The permanent worldgen guard survey is
+ADR-568, landing next in this batch.
+
+## ADR-568: Permanent guard — worldgen water-decode survey (SurVivaZ)
+
+Test-only slice (batch: ADR-567 fix, ADR-568 guard, ADR-569 falls-envelope cap). This is the
+test ADR-530 needed: it productises the waterfall-prep §1 scan over the real
+`ProceduralGenerator` (`packages/world/test/adr568_water_decode_guard.test.ts`), so the
+flow-codec collision class — natural water decoded as flowed water — can never return
+silently, including when the queued ±250 height raise widens generated beds again. It
+supersedes the compact sweep inside ADR-567's test (seed 42, 512×512 of region (0,1) —
+that region is surveyed in full here); ADR-567's unit pins are untouched.
+
+**Scope.** Seeds 42 and 9001 × regions (0,1) and (1,0): full 1536×1536 regions plus a
+1-tile ring, `sampleAt` per tile (9,437,184 tiles), directed water→neighbour faces over
+the 4-neighbourhood (drop = water surface − 0.25 render inset − neighbour surface).
+Measured runtime ~40 s for the file, in the ADR-386 sweep class.
+
+**Invariants (about the decode, not about small drops).** Tiles are classified by their
+stored encoding — natural iff raw < `FLOW_WATER_MIN_RAW_V2` (900) — never by the decode
+under test, so a broken decode cannot exempt its own victims. (1) No natural water tile
+decodes as flow water. (2) Every natural water tile renders at exactly
+`WATER_SURFACE_HEIGHT` (0) and its `terrainLevel` equals its stored bed, which must lie
+within [`HEIGHT_MIN`, `HEIGHT_MAX`]. (3) No face out of a natural water tile drops more
+than the legal terrain range permits from a true surface: the bound is derived, not
+hard-coded — `WATER_SURFACE_HEIGHT − 0.25 − HEIGHT_MIN` = 99.75 at ±100, re-deriving
+automatically at ±250. Faces out of v2-coded flow water (spillway, network channels,
+elevated lakes — the designed falls) are exempt by construction, identified by their
+stored v2 encoding; their own decode is pinned instead (`terrainLevel` = raw − 1000).
+Genuine faces up to the bound remain and are expected: surface-0 water beside dry land
+at −100 in deep basins / canyon floors (the ADR-567 residual). (4) Non-vacuity: the
+survey asserts bulk coverage of the exact bands the retired ADR-297 legacy branches
+misread — natural beds ≤ −71 and ≥ +50 must each exceed 10,000 tiles, natural water
+500,000, v2 flow water 100, faces 1,000,000 — so the guard cannot pass vacuously if
+worldgen changes.
+
+**Measured (post-fix).** Natural water 1,902,253 tiles (beds ≤ −71: 100,192; beds ≥ +50:
+206,300); v2 flow water 13,577; faces checked 7,609,012 (86,984 with drop ≥ 15, all
+genuine flat-surface faces); max drop 99.75 in every region, exactly the bound. Zero
+decode violations. Seed 42 region (0,1) natural-water count 800,637 matches ADR-567's
+scan exactly.
+
+**Verified RED pre-fix.** With `waterDepth.ts` temporarily restored from the pre-ADR-567
+tree (0cd89e0d), all 5 tests fail: natural water decoded as flow, phantom surfaces
+(bed 54 → surface −26; bed −71 band → +48..+75), and max face drops 147.75–149.75 against
+the 99.75 bound. With the ADR-567 decode restored, all 5 pass. An earlier draft of this
+survey classified tiles via `isFlowWater` itself and passed vacuously pre-fix except on
+the non-vacuity pin; the raw-encoding classification above is the fix for that, and is
+why the classification rule is stated here.
+
+## ADR-569: Falls envelope enforced — art capped at 8 levels, quiet face below (SurVivaZ)
+
+Render-only slice (batch: ADR-567 fix, ADR-568 guard, ADR-569 falls-envelope cap; user
+ruling R2). The design envelope `WATERFALL_ART_MAX_DROP = 8` was declared by ADR-389 but
+never enforced anywhere in `src`: on a face far above 8 levels both renderers stacked the
+2-level sheet sprite from the top down (~73 instances for a 146-level drop, per tile
+column), and the mesh fallback's procedural streaks (`sin(vZ * 9.0 + …)` over the
+interpolated drop) strobed across ~200 band periods. ADR-567 removed the phantom faces
+that made this catastrophic, but legitimate tall faces remain — designed high network
+mouths (ADR-533), player-dug cliff channels (a breach into a deep channel can make a
+genuine ~70-level fall) — and they must render sanely.
+
+**Cap mechanics (art path).** `waterfallFallPlacements` in
+`packages/render/src/waterfallTiles.ts` now stacks sheets for at most
+`WATERFALL_ART_MAX_DROP` levels from the top (`remaining` is clamped to the envelope
+before the existing sheet_2 + sheet_1 stacking runs, unchanged). That planner is the
+single source both renderers consume — WebGL instancing in `terrainTiles.ts` and
+Canvas2D's `drawWaterfallArt` both take `planWaterfallArt` verbatim — so the cap lands
+identically in both, with no per-frame cost growth (instance counts only fall). The
+constant itself now lives in `tilemap.ts` (the mesh builder needs it too);
+`waterfallTiles.ts` re-exports it, so existing imports are untouched.
+
+**Pool-anchor decision.** The lip and pool overlays were checked against the capped
+stack: neither is anchored relative to the stacked sheets. The lip anchors at the top of
+the face (`seg.topZ`, the source surface) and the pool anchors at `seg.botZ` — the
+destination water's surface, i.e. the BOTTOM of the face where the water lands. That is
+the physically sensible anchor and it was already the behaviour, so no anchor change was
+needed; ADR-569's tests pin the pool at the destination surface for drops up to 100.
+
+**Cap mechanics (fallback path).** The mesh fragment shader has no per-face drop/top
+varying (the vertex format is a packed 16-byte pos+colour record), so the clamp is
+applied where the face is emitted: `TilemapRenderer.build` splits a waterfall face
+taller than the envelope into two quads sharing the split edge — the top 8 levels keep
+the waterfall flag (6..9; the streak band formula is byte-unchanged and its phase now
+spans at most the envelope, exactly the within-envelope case), and the remainder gets a
+new quiet-waterfall flag (the same normal + 8 = 10..13). The vertex shader shades quiet
+flags with their cliff normal and remaps them to `vFlags` 7; the fragment shader treats
+7 exactly like 6 (no season-ground tint, no wet/puddle overlay) except that streaks are
+gated to flag 6 only — so below the envelope the face reads as the quiet mesh face, the
+same quiet under-layer the art-resident path already shows. `cliffShade` maps quiet
+flags to their normal's shade, identically to waterfall flags.
+
+**Within-envelope rendering is unchanged.** Drops of 2..8 emit the exact single mesh
+quad and the exact sheet placements they did before (pinned literally at drops 2 and 8,
+including the ADR-386 spillway's 2-level fall and ADR-533 mouths ≤ 8); the 1-level
+cascade step is untouched. No existing test was re-pinned: the one collision — ADR-389's
+pin on the shader text `if (uWaterfallArt < 0.5)` — was preserved by nesting the flag-6
+streak gate inside that branch instead of rewriting the condition.
+
+**Tests.** New `packages/render/test/adr569_waterfall_envelope.test.ts` (18 tests):
+placement pins at drops 1, 2, 8 (exact pre-fix arrays), 9, 70, 100 (capped, identical to
+the drop-8 stack; sheet_1-only stacking also bounded); plan pins (sheet counts bounded,
+lip at the top, pool at the bottom) at drops 2, 8, 9, 70, 100; renderer agreement at the
+same drops across the real WebGL instanced builder (`TileTerrain.build` instance rows),
+the real Canvas2D `drawWaterfallArt` (drawImage counts) and the plan; mesh-geometry pins
+(drop 8 = one waterfall quad spanning the face; drops 9/70/100 = one waterfall quad over
+the top 8 levels + one quiet quad below, sharing the split edge, no gap); quiet-flag
+shade and shader-text pins. Instance counts at a tall drop: 35 sheets → 4 (drop 70),
+50 → 4 (drop 100), per tile column. **Verified RED pre-fix:** with the two source files
+stashed, 9/18 fail (every over-envelope pin) and 9/18 pass — the passing set is exactly
+the within-envelope behaviour-preservation pins, as designed. Neighbours green:
+adr386, adr389, adr415, adr253, task35, adr414, adr529, adr182, adr184, adr567, adr568
+(12 files / 89 tests with the new file). Render typecheck clean (pinned TS 5.9.3).
+Full gate NOT run (coordinator runs it). Nothing pushed.

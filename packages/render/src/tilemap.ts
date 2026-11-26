@@ -38,13 +38,21 @@ export const WATERFALL_PX = 6, WATERFALL_PY = 7, WATERFALL_NX = 8, WATERFALL_NY 
 /** A cliff face reads as a waterfall when the water above it drops this many levels (a 1-level step
  *  is an ordinary stream ledge; the ADR-386 spillway's falls drop is exactly 2). */
 export const WATERFALL_MIN_DROP = 2;
+/** ADR-569: the falls art envelope — sheets / procedural streaks cover at most this many levels
+ *  from the top of a face (declared by ADR-389 in waterfallTiles.ts, which re-exports it; the
+ *  mesh builder here enforces it too). A taller face's remainder is a quiet face (flags 10..13). */
+export const WATERFALL_ART_MAX_DROP = 8;
+/** ADR-569: quiet-waterfall face flags: the same four normals offset by 8 — a waterfall face's
+ *  below-envelope remainder. Shaded like a waterfall face, but the fragment shader gives it no
+ *  procedural streaks (and no season / wet overlay tint, exactly like flag 6..9 faces). */
+export const WATERFALL_QUIET_PX = 10, WATERFALL_QUIET_PY = 11, WATERFALL_QUIET_NX = 12, WATERFALL_QUIET_NY = 13;
 /** ADR-254: dim shade for cliff faces turned away from the camera (was 0 / collapsed). Keeps far-side ledges readable. */
 export const CLIFF_HIDDEN_SHADE = 0.28;
 /** Cliff face shade by its normal in view space: +u (screen lower-right) 0.62, +v (screen lower-left) 0.8,
  *  else ADR-254 CLIFF_HIDDEN_SHADE (far-side silhouette instead of collapsing the face). Waterfall
  *  faces (6..9) share their cliff normal's shade (flag - 4). */
 export function cliffShade(flag: number, view: number): number {
-  const f = flag >= WATERFALL_PX ? flag - 4 : flag;
+  const f = flag >= WATERFALL_QUIET_PX ? flag - 8 : flag >= WATERFALL_PX ? flag - 4 : flag;
   const n = [[1, 0], [0, 1], [-1, 0], [0, -1]][f - CLIFF_PX]; if (!n) return 0;
   const k = view & 3, c = VIEW_COS[k]!, s = VIEW_SIN[k]!; const u = c * n[0]! - s * n[1]!, v = s * n[0]! + c * n[1]!;
   return u > 0.5 ? 0.62 : v > 0.5 ? 0.8 : CLIFF_HIDDEN_SHADE;
@@ -87,11 +95,11 @@ void main() {
   float key = w.x + w.y + aPos.z * uZFactor;
   int fl = int(aColor.a * 255.0 + 0.5); vColor = aColor.rgb; vWorld = aPos.xy; vZ = aPos.z;
   if (fl >= 2) { // ADR-253/254 cliff face: shade by view-space normal; far faces keep a dim silhouette (no collapse)
-    int nf = fl >= 6 ? fl - 4 : fl; // ADR-386: waterfall faces (6..9) share the cliff normals (2..5)
+    int nf = fl >= 10 ? fl - 8 : fl >= 6 ? fl - 4 : fl; // ADR-386/569: waterfall (6..9) and quiet-waterfall (10..13) faces share the cliff normals (2..5)
     vec2 n = nf == 2 ? vec2(1, 0) : nf == 3 ? vec2(0, 1) : nf == 4 ? vec2(-1, 0) : vec2(0, -1);
     vec2 nv = vec2(uRot.x * n.x - uRot.y * n.y, uRot.y * n.x + uRot.x * n.y);
     float sh = nv.x > 0.5 ? 0.62 : nv.y > 0.5 ? 0.8 : 0.28; // 0.28 = CLIFF_HIDDEN_SHADE
-    vColor *= sh; fl = fl >= 6 ? 6 : 2;
+    vColor *= sh; fl = fl >= 10 ? 7 : fl >= 6 ? 6 : 2; // ADR-569: quiet faces reach the fragment shader as 7
   }
   gl_Position = vec4(isoToClip(iso), keyToNdc(key), 1.0);
   vFlags = fl;
@@ -110,16 +118,21 @@ float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 *
 ${SEASON_GROUND_GLSL}
 void main() {
   vec3 c = vColor;
-  if (vFlags == 6) {
+  if (vFlags == 6 || vFlags == 7) {
     // ADR-386: waterfall face — bright streaks scrolling DOWNWARD unless Art's frames are
     // resident (ADR-389 uWaterfallArt): then this mesh face is a quiet under-layer and the
     // gt_waterfall sheets / lip / pool carry the motion.
+    // ADR-569: flag 7 is a quiet-waterfall face (the below-envelope remainder of a tall fall,
+    // split off at build time) — it never gets streaks, so banding cannot strobe over a long
+    // drop; flag 6 spans at most WATERFALL_ART_MAX_DROP levels, so its band phase is bounded.
     if (uWaterfallArt < 0.5) {
-      float along = vWorld.x + vWorld.y;
-      float streak = vnoise(vec2(along * 2.0, vZ * 1.5 + uTime * 1.0));
-      float band = 0.5 + 0.5 * sin(vZ * 9.0 + uTime * 6.0 + along * 2.0);
-      c *= 0.85 + 0.3 * streak * band;
-      c += step(0.8, streak) * step(0.5, band) * 0.2;
+      if (vFlags == 6) {
+        float along = vWorld.x + vWorld.y;
+        float streak = vnoise(vec2(along * 2.0, vZ * 1.5 + uTime * 1.0));
+        float band = 0.5 + 0.5 * sin(vZ * 9.0 + uTime * 6.0 + along * 2.0);
+        c *= 0.85 + 0.3 * streak * band;
+        c += step(0.8, streak) * step(0.5, band) * 0.2;
+      }
     }
   } else if (vFlags == 1) {
     // animated water: two travelling wave bands + sparkle
@@ -134,8 +147,8 @@ void main() {
     float n = h21(floor(vWorld * 8.0));
     c *= 0.92 + 0.16 * n;
   }
-  if (vFlags != 1 && vFlags != 6) c = seasonGround(c, vWorld, uSeason); // ADR-239
-  if (vFlags != 1 && vFlags != 6) {
+  if (vFlags != 1 && vFlags != 6 && vFlags != 7) c = seasonGround(c, vWorld, uSeason); // ADR-239 (ADR-569: quiet faces treated like waterfall faces)
+  if (vFlags != 1 && vFlags != 6 && vFlags != 7) {
     // surface overlays (procedural fallback for the 64x32 overlay tiles): wet ground, puddles, snow cover
     float m = vnoise(vWorld * 0.9) * 0.65 + vnoise(vWorld * 3.1 + 11.0) * 0.35;
     if (uWet > 0.001) {
@@ -261,14 +274,27 @@ export class TilemapRenderer {
         const s = cliffEdgeSpan(shape, zt, shapeAt(nx, ny), nH, edge);
         return s.emitted ? s : undefined;
       };
+      // ADR-569: a waterfall face taller than the art envelope is emitted as TWO quads — the top
+      // WATERFALL_ART_MAX_DROP levels keep the waterfall flag (6..9, streaks / art under-layer),
+      // the remainder gets the quiet flag (normal + 8 = 10..13). Within-envelope faces emit the
+      // exact single quad they always did. p is [topA, topB, botB, botA] around the face.
+      const face = (p: number[][], normalFlag: number, nLow: number): void => {
+        const f = cliffFlagFor(water === 1, normalFlag, zt, nLow);
+        if (f === normalFlag + 4 && zt - nLow > WATERFALL_ART_MAX_DROP) {
+          const mA: number[] = [p[0]![0]!, p[0]![1]!, p[0]![2]! - WATERFALL_ART_MAX_DROP];
+          const mB: number[] = [p[1]![0]!, p[1]![1]!, p[1]![2]! - WATERFALL_ART_MAX_DROP];
+          quad([p[0]!, p[1]!, mB, mA], side[0], side[1], side[2], f);
+          quad([mA, mB, p[2]!, p[3]!], side[0], side[1], side[2], normalFlag + 8);
+        } else quad(p, side[0], side[1], side[2], f);
+      };
       const spx = span(0, bx, x + 1, y);
-      if (spx) quad([[x + 1, y, spx.top[0]], [x + 1, y + 1, spx.top[1]], [x + 1, y + 1, spx.bottom[1]], [x + 1, y, spx.bottom[0]]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PX, zt, bx));
+      if (spx) face([[x + 1, y, spx.top[0]], [x + 1, y + 1, spx.top[1]], [x + 1, y + 1, spx.bottom[1]], [x + 1, y, spx.bottom[0]]], CLIFF_PX, bx);
       const spy = span(2, by, x, y + 1);
-      if (spy) quad([[x, y + 1, spy.top[1]], [x + 1, y + 1, spy.top[0]], [x + 1, y + 1, spy.bottom[0]], [x, y + 1, spy.bottom[1]]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_PY, zt, by));
+      if (spy) face([[x, y + 1, spy.top[1]], [x + 1, y + 1, spy.top[0]], [x + 1, y + 1, spy.bottom[0]], [x, y + 1, spy.bottom[1]]], CLIFF_PY, by);
       const snx = span(1, bnx, x - 1, y);
-      if (snx) quad([[x, y + 1, snx.top[1]], [x, y, snx.top[0]], [x, y, snx.bottom[0]], [x, y + 1, snx.bottom[1]]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NX, zt, bnx));
+      if (snx) face([[x, y + 1, snx.top[1]], [x, y, snx.top[0]], [x, y, snx.bottom[0]], [x, y + 1, snx.bottom[1]]], CLIFF_NX, bnx);
       const sny = span(3, bny, x, y - 1);
-      if (sny) quad([[x + 1, y, sny.top[1]], [x, y, sny.top[0]], [x, y, sny.bottom[0]], [x + 1, y, sny.bottom[1]]], side[0], side[1], side[2], cliffFlagFor(water === 1, CLIFF_NY, zt, bny));
+      if (sny) face([[x + 1, y, sny.top[1]], [x, y, sny.top[0]], [x, y, sny.bottom[0]], [x + 1, y, sny.bottom[1]]], CLIFF_NY, bny);
     }
     const n = verts.length / 3;
     const buf = new ArrayBuffer(n * 16); const f = new Float32Array(buf); const u8 = new Uint8Array(buf);

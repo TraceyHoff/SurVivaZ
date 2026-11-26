@@ -14,7 +14,9 @@
  */
 import { type TileMap } from "@engine/world";
 import { isWaterTile } from "./ids.js";
-import { NO_TILE_HEIGHT, WATERFALL_MIN_DROP, tileHeight } from "./tilemap.js";
+import { NO_TILE_HEIGHT, WATERFALL_ART_MAX_DROP, WATERFALL_MIN_DROP, tileHeight } from "./tilemap.js";
+
+export { WATERFALL_ART_MAX_DROP };
 
 /** World-space flow directions, same suffixes as ADR-386 cliff / waterfall flags. */
 export const WATERFALL_DIRS = ["px", "py", "nx", "ny"] as const;
@@ -29,7 +31,6 @@ export const packedWaterfallDir = (dir: WaterfallDir): { keyDir: "px" | "nx"; fl
 
 /** Mask bit 8: flip the instance on X (py/ny). Bits 1 and 2 stay the camera-facing skirt bits. */
 export const WATERFALL_FLIP_X = 8;
-export const WATERFALL_ART_MAX_DROP = 8;
 export const WATERFALL_ANIM = "idle";
 /** Authored loop Art shipped (the renderer uses whatever the manifest actually has). */
 export const WATERFALL_EXPECT_FRAMES = 6;
@@ -118,12 +119,16 @@ export interface WaterfallFallSlice { z: number; key: string; flipX: boolean }
 /**
  * Stack Art's 2-level sheet, then the 1-level sheet for any remainder. Do not stretch a sheet
  * (docs/ART_KEYS_WATERFALL.md). Taller than 2: sheet_2 + sheet_1 as needed.
+ * ADR-569: the stack is capped at WATERFALL_ART_MAX_DROP levels from the top — this planner is
+ * the single source both renderers consume (WebGL instancing in terrainTiles.ts, Canvas2D's
+ * drawWaterfallArt), so the cap lands identically in both. Below the capped sheets the face is
+ * the quiet mesh face. Drops within the envelope stack exactly as before.
  */
 export function waterfallFallPlacements(seg: WaterfallSeg, has: (key: string) => boolean): WaterfallFallSlice[] {
   const { keyDir, flipX } = packedWaterfallDir(seg.dir);
   const k2 = `gt_waterfall_sheet_2_${keyDir}`, k1 = `gt_waterfall_sheet_1_${keyDir}`;
   const out: WaterfallFallSlice[] = [];
-  let remaining = Math.max(1, Math.round(seg.drop));
+  let remaining = Math.min(Math.max(1, Math.round(seg.drop)), WATERFALL_ART_MAX_DROP);
   let z = seg.topZ;
   while (remaining > 0) {
     if (remaining >= 2 && has(k2)) { out.push({ z, key: k2, flipX }); z -= 2; remaining -= 2; continue; }
@@ -241,6 +246,9 @@ export function planWaterfallArt(
       }
     } else {
       const key = pickWaterfallArt(has, seg); if (!key) continue;
+      // ADR-569: lip anchors at the top (seg.topZ) and the pool at the BOTTOM of the face
+      // (seg.botZ = the destination water's surface, where the water lands) — neither is
+      // relative to the capped sheet stack, so over-envelope falls keep both anchors.
       out.push({ role: seg.role, dir: seg.dir, key, x, y, z: seg.role === "pool" ? seg.botZ : seg.topZ, mask: flipBit, mode: WATERFALL_OVERLAY_MODE, flipX });
     }
   }

@@ -119,8 +119,10 @@ describe("ADR-529 void sentinels", () => {
     }
     expect(flowWaterRaw(101)).toBe(1100); expect(flowWaterRaw(-101)).toBe(900);
     expect(terrainLevel(1, 1100)).toBe(100); expect(terrainLevel(1, 900)).toBe(-100);
-    // legacy ADR-297 bytes still decode (old saves keep their water levels)
-    expect(terrainLevel(1, -99)).toBe(-31); expect(terrainLevel(1, -71)).toBe(75);
+    // ADR-567 re-pin: legacy ADR-297 bytes no longer decode as flow water — they are natural beds now
+    // (pre-fix this asserted -99 -> -31 and -71 -> 75 via the retired legacy branches).
+    expect(terrainLevel(1, -99)).toBe(-99); expect(terrainLevel(1, -71)).toBe(-71);
+    expect(renderTileHeight(1, -99)).toBe(0); expect(renderTileHeight(1, -71)).toBe(0);
   });
 
   it("codec: land and flow water at -100..100 round-trip the chunk codec and agree at the shared cap", () => {

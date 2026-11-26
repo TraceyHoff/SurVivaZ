@@ -30,20 +30,16 @@ export function waterDepthAt(tileAt: (tx: number, ty: number) => number, tx: num
 export const WATER_SURFACE_HEIGHT = 0;
 /**
  * ADR-263 (Task 36): water that flowed into a shovel-dug channel keeps its own surface level instead of the flat
- * ADR-182 lake surface. Legacy levels use `level + FLOW_WATER_OFFSET` (raw >= FLOW_WATER_MIN_RAW);
- * ADR-297 adds negative-byte codes below. Generated water is 0..12, so natural lakes still draw flat.
+ * ADR-182 lake surface. ADR-567: ONLY the ADR-411 v2 code (raw = level + 1000) counts as flow water — the
+ * ADR-297 legacy branches (raw >= 50 / raw <= -71) are retired; see the note at `isFlowWater`.
  */
 export const FLOW_WATER_OFFSET = 80, FLOW_WATER_MIN_RAW = 50;
-/** ADR-297: retain legacy 50..127 encoding (-30..47), use unused negative bytes for the
- * added -60..-31 and 48..75 levels. Natural generated water is nonnegative (0..12).
- * No chunk format migration, wider arrays, or extra per-column layers. */
 /** ADR-411: absolute terrain levels now span -300..326 (generated ground 0..26, shovel ±300), which no byte
  * encoding can hold. ADR-529: the range is now -100..100 (absolute bounds — the flow-water cap now equals
  * the land ceiling); the v2 code is unchanged, only its range narrows to raw 900..1100. Flowed water at those levels uses a v2 code:
  * raw = level + FLOW_WATER_OFFSET_V2 (700..1326 at ±300; 900..1100 now), stored in the chunk's i16 height
  * array. Natural water is still 0..12 and land is stored directly, so the v2 code is unambiguous — and a
- * v1 chunk's legacy bytes still decode via the old branches below (checked after the v2 branch, since a v2
- * raw >= 1000 also satisfies the legacy >= 50 test). */
+ * ADR-567: the legacy branches are retired — only this v2 code decodes as flow water (see `isFlowWater`). */
 export const FLOW_WATER_OFFSET_V2 = 1000;
 /** ADR-411: flow-water level range — the same absolute bounds as gameplay's TERRAIN (see terrain_depth.ts);
  * kept here because the world package cannot import gameplay. The gameplay ADR-411 test asserts they agree.
@@ -53,14 +49,19 @@ export const FLOW_WATER_LEVEL_MIN = -100, FLOW_WATER_LEVEL_MAX = 100;
  * so this threshold separates them — the offset itself (1000) would misread deep v2 water as legacy.
  * ADR-529: smallest v2 raw is now 900 (level -100 + 1000); v2 raws are 900..1100. */
 export const FLOW_WATER_MIN_RAW_V2 = FLOW_WATER_OFFSET_V2 + FLOW_WATER_LEVEL_MIN;
-export function isFlowWater(id: number, raw: number): boolean { return isWaterId(id) && (raw >= FLOW_WATER_MIN_RAW || raw <= -71); }
+/** ADR-567: v2 raws ONLY. The ADR-297 legacy branches read any water tile with raw >= 50 or <= -71 as flowed
+ * water, safe only while natural water beds were 0..12; ADR-530 widened generated beds to -100..100, so deep
+ * natural water decoded to phantom surfaces (bed -71 -> surface +75) — the waterfall-wall bug. Natural water
+ * stores its bed directly across the full legal range and must never decode as flow. Accepted regression:
+ * water flowed under the legacy v1 encoding in saves predating ADR-411 is now indistinguishable from natural
+ * water and renders flat; current builds have written v2 since ADR-411. */
+export function isFlowWater(id: number, raw: number): boolean { return isWaterId(id) && raw >= FLOW_WATER_MIN_RAW_V2; }
 export function flowWaterRaw(level: number): number {
   const n = Math.max(FLOW_WATER_LEVEL_MIN, Math.min(FLOW_WATER_LEVEL_MAX, Math.round(level)));
   return n + FLOW_WATER_OFFSET_V2;
 }
 function flowLevel(raw: number): number {
-  if (raw >= FLOW_WATER_MIN_RAW_V2) return raw - FLOW_WATER_OFFSET_V2; // ADR-411 v2 code (also matches the legacy >= 50 test, so it must come first)
-  return raw >= FLOW_WATER_MIN_RAW ? raw - FLOW_WATER_OFFSET : raw <= -99 ? raw + 68 : raw + 146;
+  return raw - FLOW_WATER_OFFSET_V2; // ADR-411 v2 code; ADR-567: the only flow encoding (legacy branches retired)
 }
 /** Terrain level of a tile (decodes flowing water; natural water = its stored height). */
 export function terrainLevel(id: number, raw: number): number { return isFlowWater(id, raw) ? flowLevel(raw) : raw; }

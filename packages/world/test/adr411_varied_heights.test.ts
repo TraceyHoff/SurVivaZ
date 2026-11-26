@@ -54,11 +54,15 @@ describe("ADR-411 flow-water encoding at the new extremes", () => {
     expect(isFlowWater(1, 0)).toBe(false);
   });
 
-  it("legacy ADR-297 bytes still decode (old saves keep their water levels)", () => {
-    expect(terrainLevel(1, 50)).toBe(-30); expect(terrainLevel(1, 127)).toBe(47); // raw 50..127 -> -30..47
-    expect(terrainLevel(1, -99)).toBe(-31); expect(terrainLevel(1, -128)).toBe(-60); // raw -128..-99 -> -60..-31
-    expect(terrainLevel(1, -98)).toBe(48); expect(terrainLevel(1, -71)).toBe(75); // raw -98..-71 -> 48..75
-    expect(isFlowWater(1, 50)).toBe(true); expect(isFlowWater(1, -71)).toBe(true); expect(isFlowWater(1, -70)).toBe(false);
+  it("ADR-567 re-pin: legacy ADR-297 bytes now decode as natural water (legacy flow branches retired)", () => {
+    // Pre-ADR-567 this asserted the legacy decode (raw 50..127 -> -30..47, raw -128..-99 -> -60..-31,
+    // raw -98..-71 -> 48..75). ADR-530 widened natural beds to ±100, so those branches misread natural
+    // water as flowed water; ADR-567 retires them — only v2 raws are flow water now.
+    expect(terrainLevel(1, 50)).toBe(50); expect(terrainLevel(1, 127)).toBe(127);
+    expect(terrainLevel(1, -99)).toBe(-99); expect(terrainLevel(1, -128)).toBe(-128);
+    expect(terrainLevel(1, -98)).toBe(-98); expect(terrainLevel(1, -71)).toBe(-71);
+    expect(renderTileHeight(1, 50)).toBe(0); expect(renderTileHeight(1, -71)).toBe(0);
+    expect(isFlowWater(1, 50)).toBe(false); expect(isFlowWater(1, -71)).toBe(false); expect(isFlowWater(1, -70)).toBe(false);
   });
 
   it("chunk heights are i16 and land + flow water at -100/100 round-trip the v2 codec", () => {
@@ -90,13 +94,15 @@ function v1ChunkBytes(runs: [number, number][], heights: number[]): Uint8Array {
 }
 
 describe("ADR-411 chunk codec v1 backward compatibility", () => {
-  it("a v1 blob still decodes: u8 heights sign-extend, legacy flow bytes decode as before", () => {
-    // legacy flow raws: -60 -> -128 (0x80), 75 -> -71 (0xB9); land -5 -> 0xFB, land 26 -> 26
+  it("a v1 blob still decodes: u8 heights sign-extend; ADR-567: legacy flow bytes now read as natural water", () => {
+    // v1 stored heights survive the codec verbatim; only their DECODE changed in ADR-567 — the bytes that
+    // were legacy flow codes (-128 was level -60, -71 was level 75) are now indistinguishable from natural
+    // water beds and read flat (the accepted pre-ADR-411 regression, recorded in ADR-567).
     const heights = new Array<number>(CHUNK_AREA).fill(2);
     heights[0] = -128; heights[1] = -71; heights[2] = -5; heights[3] = 26;
     const back = decodeChunk(v1ChunkBytes([[2, 1], [CHUNK_AREA - 2, 3]], heights)).chunk;
-    expect(back.getHeight(0, 0)).toBe(-128); expect(terrainLevel(1, back.getHeight(0, 0))).toBe(-60);
-    expect(back.getHeight(1, 0)).toBe(-71); expect(renderTileHeight(1, back.getHeight(1, 0))).toBe(75);
+    expect(back.getHeight(0, 0)).toBe(-128); expect(terrainLevel(1, back.getHeight(0, 0))).toBe(-128);
+    expect(back.getHeight(1, 0)).toBe(-71); expect(renderTileHeight(1, back.getHeight(1, 0))).toBe(0);
     expect(back.getHeight(2, 0)).toBe(-5); expect(back.getHeight(3, 0)).toBe(26);
   });
 });
