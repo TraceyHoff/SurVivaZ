@@ -20,6 +20,8 @@
 // tints or reuses another sprite, and no sprite is reused for a different thing — a rod is a rod.
 import { ICON_DATA } from "./game-icons-data.js";
 import { Px, TASK34_DIR_VEC } from "./task34-art.js";
+import { type PaintedCacheEnv } from "./painted-cache.js";
+import { defaultAssemble, paintPaintedGroup, type PaintWorkerPool } from "./painted-core.js";
 import type { AtlasSource } from "@engine/render";
 
 /** The ICON_DATA key (and [data-icon] key) the painted rod icon is installed under. */
@@ -142,35 +144,20 @@ export function paintRodPixels(): { width: number; height: number; pixels: Uint8
   return { width: FRAME * 8, height: FRAME, pixels: px.data };
 }
 
-/** Rasterized pixels -> PNG blob URL (the task34/task256/task355 copy; undefined when no canvas exists). */
-async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray): Promise<string | undefined> {
-  try {
-    const data = new ImageData(new Uint8ClampedArray(pixels), w, h);
-    const OC = (globalThis as { OffscreenCanvas?: typeof OffscreenCanvas }).OffscreenCanvas;
-    if (OC) {
-      const cv = new OC(w, h); const ctx = cv.getContext("2d");
-      if (ctx) { ctx.putImageData(data, 0, 0); if (typeof cv.convertToBlob === "function") return URL.createObjectURL(await cv.convertToBlob({ type: "image/png" })); }
-    }
-    const doc = (globalThis as { document?: Document }).document;
-    if (doc) {
-      const cv = doc.createElement("canvas"); cv.width = w; cv.height = h; const ctx = cv.getContext("2d");
-      if (!ctx) return undefined;
-      ctx.putImageData(data, 0, 0);
-      return await new Promise<string | undefined>((res) => cv.toBlob((b) => res(b ? URL.createObjectURL(b) : undefined), "image/png"));
-    }
-  } catch { /* no canvas in this environment: the caller keeps the manifest's debug path */ }
-  return undefined;
-}
+/**
+ * ADR-550: content-hash input — the rasterizer + the rod cell painter's source.
+ */
+const ROD_SPEC = `${Px.toString()}|${paintRodCell.toString()}`;
+
+/** ADR-551: content-hash input (exported for `painted-core.ts` + `painted-parallel.ts`). */
+export const rodSpecs = (): Map<string, string> => new Map([[ROD_ATLAS_KEY, ROD_SPEC]]);
 
 /**
  * Atlas sources for the held-rod atlas (same { url, emissiveUrl } shape as sourcesFromManifest).
  * view.ts merges this over the manifest's debug path before setRegistry, so the registry's
  * held_fishing_rod sprite draws the painted pixels. Returns an empty map in a canvas-less environment.
  */
-export async function rodAtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  const a = paintRodPixels();
-  const url = await canvasToBlobURL(a.width, a.height, a.pixels);
-  if (url) out.set(ROD_ATLAS_KEY, { url, emissiveUrl: null });
-  return out;
+export async function rodAtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  // ADR-551: thin delegate to `painted-core.ts` (cache-first, groups in parallel, misses in a Worker).
+  return paintPaintedGroup({ name: "rod", specs: rodSpecs, paint: () => [{ key: ROD_ATLAS_KEY, ...paintRodPixels() }], assemble: defaultAssemble }, env, pool);
 }

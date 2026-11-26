@@ -7,6 +7,7 @@
  * so keyboard, touch and gamepad all delete the same way. Nothing is deleted on a single tap/click/A press.
  */
 import { gamepadKeyControl, navPad, padHeld } from "./pad-input.js";
+import { deletePaintedCache, type PaintedCaches } from "./painted-cache.js";
 export const HOLD_MS = 1500;
 /** localStorage keys reset only when the player opts in ("Also reset settings"). */
 export const SETTINGS_KEYS = ["engine-settings", "engine.input.bindings", "survivaz.render.quality"] as const;
@@ -190,7 +191,7 @@ export const AGENT_RECORDS_NS = "agents";
 export const lastPlayedKey = (mode: "singleplayer" | "hosted", slot: string): string => `engine.lastPlayed.${mode}.${slot}`;
 type StoreLike = { playerTokens(): string[]; listRecords(ns: string): { id: string; bytes: Uint8Array }[]; count(t: "chunks" | "players" | "records"): number;
   write(b: { deletePlayers?: string[]; deleteRecords?: { ns: string; id: string }[] }): Promise<void>; close(): Promise<void> };
-export interface LocalSaveEnv { slot: string; factory?: Factory; storage?: Pick<Storage, "getItem" | "removeItem" | "key" | "length">; /** Defaults to this tab's sessionStorage (guarded — private mode may throw). */ session?: Pick<Storage, "key" | "length" | "removeItem">; openStore?: (name: string) => Promise<StoreLike>; now?: () => number }
+export interface LocalSaveEnv { slot: string; factory?: Factory; storage?: Pick<Storage, "getItem" | "removeItem" | "key" | "length">; /** Defaults to this tab's sessionStorage (guarded — private mode may throw). */ session?: Pick<Storage, "key" | "length" | "removeItem">; openStore?: (name: string) => Promise<StoreLike>; now?: () => number; /** ADR-550: Cache Storage holding the painted-PNG cache (defaults to globalThis.caches); only "Delete everything" clears it. */ paintedCaches?: PaintedCaches | null }
 const defaultOpen = async (name: string, factory: Factory): Promise<StoreLike> => {
   const { IndexedDbWorldStore } = await import("@engine/persist");
   return IndexedDbWorldStore.open(name, { factory: factory as never });
@@ -241,6 +242,10 @@ export async function deleteLocalProgress(env: LocalSaveEnv & { kinds: ReadonlyS
     if (!r.ok) return r;
     sweepGameStorage(st);
     const session = sessionStore(env); if (session) sweepGameStorage(session);
+    // ADR-550: the painted-PNG cache is the game's own generated data, so "Delete everything"
+    // clears it too (best-effort — a Cache Storage failure never fails the wipe). Per-category
+    // deletes and in-game Delete-save stay slot-scoped and never touch it.
+    await deletePaintedCache({ caches: env.paintedCaches });
     return { ok: true, deleted: r.deleted, message: `Deleted everything: all saves, settings and game data on this device (${slots.length} player slot${slots.length === 1 ? "" : "s"}). The next start is a fresh game.` };
   }
   const k = env.kinds;

@@ -37,8 +37,8 @@ describe("ADR-220: paper-doll art stays exact and stable", () => {
     const a = am(128); const live = [pool("wear", 1)]; a.pools = live; const lv0 = a.layoutVersion; const gen0 = a.gen;
     let during: any = null;
     a.registry = {}; a.streamWearables = true; a.streamSheets = true; a.assets = { load: async () => ({}), release: () => {} };
-    a.fitBudget = async () => { during = { pools: a.pools, lv: a.layoutVersion, gen: a.gen, planning: a.planningRebuild }; };
-    a.pack = () => {}; a.planPool = () => {}; a.upload = () => {}; a.uploadTints = () => {}; a.frameTintRows = () => new Map();
+    a.fitBudget = async () => { during = { pools: a.pools, lv: a.layoutVersion, gen: a.gen, planning: a.planningRebuild }; return { search: 0, resizes: 0 }; };
+    a.pack = () => {}; a.planPool = () => {}; a.upload = () => ({ alloc: 0, copies: 0, mips: 0 }); a.uploadTints = () => {}; a.frameTintRows = () => new Map();
     a.limitProblem = () => null; a.resolveSway = a.resolveVariants = a.resolveRoofs = a.resolveHands = () => {};
     const reg = { atlases: new Map(), allSprites: () => [] };
     await a.rebuild(reg, new Map());

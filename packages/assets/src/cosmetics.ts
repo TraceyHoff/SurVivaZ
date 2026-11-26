@@ -76,8 +76,13 @@ export class CosmeticCatalog implements CosmeticCatalogLike {
 
 const KEY = /^[a-z0-9_]+$/; const COLOR = /^#[0-9a-fA-F]{6}$/;
 
-/** Validate + build the cosmetics catalog against a loaded AssetRegistry. Pushes issues; ids honor `lock`. */
-export function loadCosmetics(m: CosmeticsJson, reg: AssetRegistry, lock: Record<string, number> | undefined, issues: string[]): { catalog: CosmeticCatalog; lock: Record<string, number> } {
+/** Validate + build the cosmetics catalog against a loaded AssetRegistry. Pushes issues; ids honor `lock`.
+ * ADR-555: `allowMissingWearables` tolerates a boot catalog whose wear shards are not loaded yet — a
+ * bodyTypes.cosmeticDefaults entry (or a requiredSlots fill) naming a not-yet-loaded wearable is skipped
+ * instead of an issue, so the boot manifest (base shard only) still builds. Any other issue (unknown
+ * sprite art, bad slot, …) still fails: only the two missing-wearable sites are suppressed, and once
+ * every wear shard is merged no reference is missing, so the lazy path converges to the strict result. */
+export function loadCosmetics(m: CosmeticsJson, reg: AssetRegistry, lock: Record<string, number> | undefined, issues: string[], opts: { allowMissingWearables?: boolean } = {}): { catalog: CosmeticCatalog; lock: Record<string, number> } {
   const pal = (name: "skinTones" | "hairColors" | "clothingColors"): PaletteColor[] => {
     const list = m[name]; if (list === undefined) return [];
     if (!Array.isArray(list)) { issues.push(`${name} must be an array`); return []; }
@@ -254,7 +259,7 @@ export function loadCosmetics(m: CosmeticsJson, reg: AssetRegistry, lock: Record
       const q = `bodyTypes.${b}.cosmeticDefaults.${slot}`;
       if (!(WEARABLE_SLOTS as readonly string[]).includes(slot)) { issues.push(`${q}: unknown slot`); continue; }
       const id = typeof key === "string" ? ids.tryId(key) : undefined; const wd = id !== undefined ? parts.get(id) : undefined;
-      if (!wd) { issues.push(`${q}: unknown wearable "${key}"`); continue; }
+      if (!wd) { if (!opts.allowMissingWearables) issues.push(`${q}: unknown wearable "${key}"`); continue; }
       if (wd.slot !== slot) issues.push(`${q}: ${key} belongs to slot ${wd.slot}`);
       else if (!wd.bodies[b as BodyType]) issues.push(`${q}: ${key} has no ${b} art`);
       else ids2[slot as WearableSlot] = id!;
@@ -265,7 +270,7 @@ export function loadCosmetics(m: CosmeticsJson, reg: AssetRegistry, lock: Record
   if (!Array.isArray(requiredSlots)) issues.push("requiredSlots must be an array");
   else for (const r of requiredSlots) {
     if (!(WEARABLE_SLOTS as readonly string[]).includes(r)) { issues.push(`requiredSlots: unknown slot "${r}"`); continue; }
-    for (const b of Object.keys(bodies)) if (!bodies[b as BodyType]!.cosmeticDefaults?.[r]) issues.push(`requiredSlots: ${r} is required but bodyTypes.${b}.cosmeticDefaults.${r} is missing`);
+    for (const b of Object.keys(bodies)) if (!bodies[b as BodyType]!.cosmeticDefaults?.[r]) { if (!opts.allowMissingWearables) issues.push(`requiredSlots: ${r} is required but bodyTypes.${b}.cosmeticDefaults.${r} is missing`); }
   }
   return { catalog: new CosmeticCatalog(ids, parts, bodies, skinTones, hairColors, clothingColors, tintNeutral, Array.isArray(requiredSlots) ? requiredSlots : [], catFace), lock: outLock };
 }

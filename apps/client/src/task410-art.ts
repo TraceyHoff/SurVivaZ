@@ -21,6 +21,8 @@
 import type { AtlasSource } from "@engine/render";
 import { GROUND_PRIORITY, groundSlopeKey, type GroundMaterial } from "@engine/render";
 import { Px } from "./task34-art.js";
+import { type PaintedCacheEnv } from "./painted-cache.js";
+import { paintPaintedGroup, type PaintedGroupDef, type PaintWorkerPool } from "./painted-core.js";
 
 /** Atlas keys this module paints (also the fragment's atlas keys), one per season. */
 export const TASK410_ATLAS_KEYS = ["gt_slope_summer", "gt_slope_fall", "gt_slope_winter", "gt_slope_spring"] as const;
@@ -683,41 +685,54 @@ export function downsampleTask410Atlas(a: PaintedAtlas): PaintedAtlas {
   return { key: a.key, width: w, height: h, pixels: out };
 }
 
-/** Rasterized pixels -> PNG blob URL (OffscreenCanvas, else a document canvas; undefined when no canvas exists). */
-async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray): Promise<string | undefined> {
-  try {
-    // TS 5.9 (CI's pinned version) types ImageData's data as Uint8ClampedArray<ArrayBuffer>; our pixels are
-    // Uint8ClampedArray<ArrayBufferLike>, so copy into a fresh ArrayBuffer-backed array (once, at load).
-    const data = new ImageData(new Uint8ClampedArray(pixels), w, h);
-    const OC = (globalThis as { OffscreenCanvas?: typeof OffscreenCanvas }).OffscreenCanvas;
-    if (OC) {
-      const cv = new OC(w, h); const ctx = cv.getContext("2d");
-      if (ctx) { ctx.putImageData(data, 0, 0); if (typeof cv.convertToBlob === "function") return URL.createObjectURL(await cv.convertToBlob({ type: "image/png" })); }
-    }
-    const doc = (globalThis as { document?: Document }).document;
-    if (doc) {
-      const cv = doc.createElement("canvas"); cv.width = w; cv.height = h; const ctx = cv.getContext("2d");
-      if (!ctx) return undefined;
-      ctx.putImageData(data, 0, 0);
-      return await new Promise<string | undefined>((res) => cv.toBlob((b) => res(b ? URL.createObjectURL(b) : undefined), "image/png"));
-    }
-  } catch { /* no canvas in this environment: the caller keeps the manifest's debug path */ }
-  return undefined;
+/**
+ * ADR-550: content-hash input — the rasterizer + slope painter + tone-field source + the
+ * per-material palettes/seeds/tone counts + the downsampler (the 1x page depends on it).
+ * The 1x and @2x pages get different hashes (different pixels by construction).
+ */
+const TASK410_SPEC_BASE = `${Px.toString()}|${paintSlopeCell.toString()}|${getField.toString()}|${downsampleTask410Atlas.toString()}|${JSON.stringify(PAL)}|${JSON.stringify(SEED)}|${JSON.stringify(TONE_N)}`;
+export const task410Specs = (): Map<string, string> => {
+  const out = new Map<string, string>();
+  for (const k of TASK410_ATLAS_KEYS) { out.set(k, `${TASK410_SPEC_BASE}|1x`); out.set(`${k}@2x`, `${TASK410_SPEC_BASE}|2x`); }
+  return out;
+};
+
+/**
+ * ADR-551: paint variants — each season atlas is TWO variants: the 1x box
+ * downsample (the atlas key) and the @2x paint (key `<atlas>@2x`). Shared by
+ * the Worker-side registry (`painted-groups.ts`) and this module's delegate
+ * def, so the two paint paths can never drift apart.
+ */
+export function paintTask410Variants(): PaintedAtlas[] {
+  const out: PaintedAtlas[] = [];
+  for (const a of paintTask410Atlases()) {
+    out.push(downsampleTask410Atlas(a), { key: `${a.key}@2x`, width: a.width, height: a.height, pixels: a.pixels });
+  }
+  return out;
 }
+
+/** ADR-410 assembly: the 1x blob is the atlas URL, the @2x blob (if any) is its page. */
+const assembleTask410Sources: PaintedGroupDef["assemble"] = (_specKeys, urls) => {
+  const out = new Map<string, AtlasSource>();
+  for (const k of TASK410_ATLAS_KEYS) {
+    const one = urls.get(k);
+    if (!one) continue;
+    const src: AtlasSource = { url: one.url, emissiveUrl: null };
+    const two = urls.get(`${k}@2x`);
+    if (two) src.pages = [{ scale: 2, url: two.url }];
+    out.set(k, src);
+  }
+  return out;
+};
 
 /**
  * Atlas sources for the four slope atlases: the 2x paint as the scale-2 page, its box downsample as
  * the 1x image (same { url, emissiveUrl, pages } shape as sourcesFromManifest). view.ts merges these
  * over the manifest's placeholder paths before setRegistry, so the registry's slope sprites draw the
- * painted pixels. Returns only the atlases that converted (empty in a canvas-less environment).
+ * painted pixels. ADR-551: thin delegate to `painted-core.ts` (cache-first, groups in parallel,
+ * misses in a Worker) — the 1x/@2x variant split is `paintTask410Variants` above. Returns only the
+ * atlases that converted (empty in a canvas-less environment).
  */
-export async function task410AtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  for (const a of paintTask410Atlases()) {
-    const lo = downsampleTask410Atlas(a);
-    const url = await canvasToBlobURL(lo.width, lo.height, lo.pixels);
-    const url2x = await canvasToBlobURL(a.width, a.height, a.pixels);
-    if (url) out.set(a.key, { url, emissiveUrl: null, ...(url2x ? { pages: [{ scale: 2, url: url2x }] } : {}) });
-  }
-  return out;
+export async function task410AtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  return paintPaintedGroup({ name: "task410", specs: task410Specs, paint: paintTask410Variants, groupOf: (k) => k.replace(/@2x$/, ""), assemble: assembleTask410Sources }, env, pool);
 }

@@ -10,6 +10,13 @@ import type { ManifestJson } from "./manifest.js";
 export const MANIFEST_SHARD_MAX_BYTES = 20 * 1024 * 1024;
 export interface ManifestShardRef { category: string; file: string; bytes: number; sha: string }
 export interface ManifestShardIndex { version: 2; name?: string; shards: ManifestShardRef[] }
+/** ADR-555: the customization shard that boots with the game (bodyTypes, skinTones, hairColors — 528 KB
+ * parsed) and the nine wear shards that lazy-load later (35.6 MB of wear-sprite dirFrames between them).
+ * A wear shard's sprites only reference its own atlases plus the base shard's pose atlases, so the boot
+ * registry already carries every atlas a wear sprite's dirFrames can name. */
+export const BASE_SHARD_CATEGORY = "base";
+export const WEAR_SHARD_CATEGORIES: readonly string[] = ["hair", "hat", "top", "bottom", "shoes", "accessory", "face", "eyes", "hands"];
+export const isWearShardCategory = (category: string): boolean => (WEAR_SHARD_CATEGORIES as readonly string[]).includes(category);
 export class ShardMergeError extends Error {}
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
@@ -47,4 +54,21 @@ export async function resolveManifestShards(json: unknown, load: (file: string, 
     return { file: s.file, manifest: m as ManifestJson };
   }));
   return mergeShards(parts);
+}
+
+/**
+ * ADR-555: resolve a v2 shard index but fetch + merge only the `include` categories; the rest are
+ * returned as `deferred` refs for a later lazy load (loadWearShard). The boot call passes
+ * [BASE_SHARD_CATEGORY], so the 9 wear shards are never fetched or parsed at boot. A v1 manifest
+ * passes through with no deferred refs. `load` is only called for included shards.
+ */
+export async function resolveManifestShardsSplit(json: unknown, load: (file: string, ref: ManifestShardRef) => Promise<unknown>, include: readonly string[]): Promise<{ manifest: ManifestJson; deferred: ManifestShardRef[] }> {
+  if (!isShardIndex(json)) return { manifest: json as ManifestJson, deferred: [] };
+  const wanted = new Set(include);
+  const deferred = json.shards.filter((s) => !wanted.has(s.category));
+  const parts = await Promise.all(json.shards.filter((s) => wanted.has(s.category)).map(async (s) => {
+    const m = await load(s.file, s); if (m === undefined || m === null) throw new Error(`manifest shard missing: ${s.file}`);
+    return { file: s.file, manifest: m as ManifestJson };
+  }));
+  return { manifest: mergeShards(parts), deferred };
 }

@@ -11,6 +11,8 @@
 // counts, distinct signatures), not by eye.
 import type { AtlasSource } from "@engine/render";
 import { Px } from "./task34-art.js";
+import { type PaintedCacheEnv } from "./painted-cache.js";
+import { defaultAssemble, paintPaintedGroup, type PaintWorkerPool } from "./painted-core.js";
 
 /** Atlas keys this module paints (also the fragment's atlas keys). */
 export const TASK420_ATLAS_KEYS = ["decor_dock", "decor_shipyard"] as const;
@@ -178,27 +180,11 @@ export function paintTask420Atlases(): PaintedAtlas[] {
   return out;
 }
 
-/** Rasterized pixels -> PNG blob URL (OffscreenCanvas, else a document canvas; undefined when no canvas exists). */
-async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray): Promise<string | undefined> {
-  try {
-    // TS 5.9 (CI's pinned version) types ImageData's data as Uint8ClampedArray<ArrayBuffer>; our pixels are
-    // Uint8ClampedArray<ArrayBufferLike>, so copy into a fresh ArrayBuffer-backed array (once, at load).
-    const data = new ImageData(new Uint8ClampedArray(pixels), w, h);
-    const OC = (globalThis as { OffscreenCanvas?: typeof OffscreenCanvas }).OffscreenCanvas;
-    if (OC) {
-      const cv = new OC(w, h); const ctx = cv.getContext("2d");
-      if (ctx) { ctx.putImageData(data, 0, 0); if (typeof cv.convertToBlob === "function") return URL.createObjectURL(await cv.convertToBlob({ type: "image/png" })); }
-    }
-    const doc = (globalThis as { document?: Document }).document;
-    if (doc) {
-      const cv = doc.createElement("canvas"); cv.width = w; cv.height = h; const ctx = cv.getContext("2d");
-      if (!ctx) return undefined;
-      ctx.putImageData(data, 0, 0);
-      return await new Promise<string | undefined>((res) => cv.toBlob((b) => res(b ? URL.createObjectURL(b) : undefined), "image/png"));
-    }
-  } catch { /* no canvas in this environment: the caller keeps the manifest's debug path */ }
-  return undefined;
-}
+/**
+ * ADR-550: content-hash input — the rasterizer + dock/shipyard cell painters' source.
+ */
+const TASK420_SPEC = `${Px.toString()}|${paintDockCell.toString()}|${paintShipyardCell.toString()}`;
+export const task420Specs = (): Map<string, string> => new Map(TASK420_ATLAS_KEYS.map((k) => [k, TASK420_SPEC]));
 
 /**
  * Atlas sources for the two generated atlases (same { url, emissiveUrl } shape as sourcesFromManifest).
@@ -206,13 +192,9 @@ async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray):
  * declares the atlases, so the registry's dock / shipyard sprites draw the painted pixels. Returns only
  * the atlases that converted (empty in a canvas-less environment).
  */
-export async function task420AtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  for (const a of paintTask420Atlases()) {
-    const url = await canvasToBlobURL(a.width, a.height, a.pixels);
-    if (url) out.set(a.key, { url, emissiveUrl: null });
-  }
-  return out;
+export async function task420AtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  // ADR-551: thin delegate to `painted-core.ts` (cache-first, groups in parallel, misses in a Worker).
+  return paintPaintedGroup({ name: "task420", specs: task420Specs, paint: paintTask420Atlases, assemble: defaultAssemble }, env, pool);
 }
 
 // ---- build-menu icons ---------------------------------------------------------------

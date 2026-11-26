@@ -27,7 +27,7 @@ import { reportRenderError } from "../report.js";
  *   numeric ids), so ECS data is untouched. Old images are released (ref-counted) after the swap.
  */
 import { isV2BodyKey, isV2WearKey } from "../character/charArt.js";
-import { AnimState as CoreAnimState, ANIM_STATE_NAMES } from "@engine/core";
+import { AnimState as CoreAnimState, ANIM_STATE_NAMES, type BodyType } from "@engine/core";
 import { FRAME_ANIM } from "../frame-select.js";
 import { AssetRegistry, type Animation, type Atlas, type DirFrameRect, type FrameRef } from "@engine/assets";
 import { STATUS_TINTS, TINT_MODE_INDEX, type StatusTint, type StatusTintName } from "../style.js";
@@ -158,6 +158,28 @@ export function bodyAtlasKeys(registry: AssetRegistry): Set<string> {
   for (const s of registry.allSprites()) if (isBodyAtlasKey(s.atlas.key) || isV2BodyKey(s.key)) ids.add(s.id); // ADR-240: v2 body sheets
   try { for (const b of ["male", "female"]) { const x = cat?.bodySprite?.(b); if (x) ids.add(x.sprite); } } catch { /* catalog shape differs: key rule only */ }
   for (const s of registry.allSprites()) if (ids.has(s.id)) { out.add(s.atlas.key); for (const a of s.animList) for (const d of a.dirFrames ?? []) out.add(d.atlas.key); }
+  for (const k of out) if (isV2StreamSheet(k)) out.delete(k); // ADR-244 (b)
+  for (const k of out) if (isLazyDollPageKey(k)) out.delete(k); // ride / crouch body pages stream (wear pool), never eager
+  return out;
+}
+/** ADR-553: the body pages one body type draws from — its body sprite's atlas plus every dirFrames
+ *  page of that sprite's anims (swim/punch/block live on the same sheet or a shared block page),
+ *  with the same exclusions as bodyAtlasKeys(). The shared `cz_block_body_0` page is reachable
+ *  from both sexes' sprites, so it is in both sets (either local player blocks with it). Under
+ *  ?charArt=v2s the catalog returns the v2 body sprite, so its v2 sheet is reached the same way;
+ *  registries without a cosmetics catalog fall back to the `body_<type>` sprite by key. */
+export function bodyPagesForBodyType(registry: AssetRegistry, bodyType: string): Set<string> {
+  const out = new Set<string>();
+  const cat = registry.cosmetics as unknown as { bodySprite?: (b: string) => { sprite: number } | undefined } | undefined;
+  let id: number | undefined;
+  try { id = cat?.bodySprite?.(bodyType)?.sprite; } catch { id = undefined; }
+  if (id === undefined) for (const s of registry.allSprites()) if (s.key === `body_${bodyType}`) { id = s.id; break; }
+  if (id === undefined) return out;
+  let s: ReturnType<AssetRegistry["sprite"]> | undefined;
+  try { s = registry.sprite(id); } catch { return out; }
+  if (!s) return out;
+  out.add(s.atlas.key);
+  for (const a of s.animList) for (const d of a.dirFrames ?? []) out.add(d.atlas.key);
   for (const k of out) if (isV2StreamSheet(k)) out.delete(k); // ADR-244 (b)
   for (const k of out) if (isLazyDollPageKey(k)) out.delete(k); // ride / crouch body pages stream (wear pool), never eager
   return out;
@@ -399,6 +421,10 @@ const resizeCache = new WeakMap<object, Map<string, Promise<ImageLike>>>();
 let resizeChain: Promise<unknown> = Promise.resolve(); let sliceStart = -1; let pendingJobs = 0;
 /** stats for tests / diag: resizes actually run, cache hits, frame yields */
 export const resizeStats = { runs: 0, hits: 0, yields: 0 };
+/** ADR-554: stats for tests / diag: pack() MaxRects executions actually run vs memo hits (same
+ *  pattern as resizeStats). A fitBudget run that repeats identical (h, c, pin) packings across its
+ *  reserve tries and the idle-demotion loop should show hits > 0 and runs well under invocations. */
+export const packStats = { runs: 0, hits: 0 };
 const now = (): number => (typeof performance !== "undefined" ? performance.now() : Date.now());
 const nextFrame = (): Promise<void> => new Promise<void>((r) => { if (typeof requestAnimationFrame === "function") requestAnimationFrame(() => setTimeout(r, 0)); else setTimeout(r, 0); });
 let yieldImpl = nextFrame; let sliceClock = now;
@@ -462,11 +488,25 @@ async function fitToPage(img: ImageLike, w: number, h: number): Promise<ImageLik
   return resizeImage(img, w, h, "pixelated");
 }
 
+/** ADR-548: fetch vs decode split for the resident atlas load (diag only). defaultImageLoader is the
+ *  only path that both fetches and decodes, so the split is accumulated here per call (summed
+ *  durations — concurrent loads overlap, see rebuildTimings) and snapshotted around each rebuild's
+ *  load phase. Page-ins after boot keep accumulating; rebuild takes a delta, so they never pollute it. */
+export const imageLoadStats = { fetchMs: 0, decodeMs: 0, loads: 0 };
+export function resetImageLoadStats(): void { imageLoadStats.fetchMs = 0; imageLoadStats.decodeMs = 0; imageLoadStats.loads = 0; }
+
 export async function defaultImageLoader(url: string): Promise<ImageLike> {
   return withAssetSlot(async () => {
+    const f0 = now();
     const res = await assetFetch(url);
     if (!res.ok) throw new Error(`image fetch failed ${res.status}: ${url}`);
-    return createImageBitmap(await res.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    const blob = await res.blob();
+    const fetchMs = now() - f0;
+    const d0 = now();
+    const bmp = await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    const decodeMs = now() - d0;
+    imageLoadStats.fetchMs += fetchMs; imageLoadStats.decodeMs += decodeMs; imageLoadStats.loads++;
+    return bmp;
   });
 }
 
@@ -570,6 +610,20 @@ export class AtlasManager {
   private atlases: AtlasRT[] = [];
   private atlasById = new Map<number, AtlasRT>();
   private sprites: (SpriteRT | undefined)[] = [];
+  /** ADR-554: sprite-table cache across rebuilds with an unchanged registry. buildSpriteTables is
+   *  pure given (registry, list) and SpriteRT is scale-independent (no scale/UV — UVs are computed
+   *  in writeFrames from a.scale at upload), so the tables survive a re-tier / preset-change /
+   *  context-restore rebuild unchanged. Keyed on registry identity + the ordered atlas-id list
+   *  (atlasIdx is a position in list, so order matters, not just the set). frameTintRows is NOT
+   *  cached here: its keys are at.base + f and bases move with every repack. */
+  private spriteTablesCache: { registry: AssetRegistry; ids: number[]; sprites: (SpriteRT | undefined)[] } | null = null;
+  private cachedSpriteTables(registry: AssetRegistry, list: AtlasRT[]): (SpriteRT | undefined)[] {
+    const c = this.spriteTablesCache;
+    if (c && c.registry === registry && c.ids.length === list.length && c.ids.every((id, i) => id === list[i]!.id)) return c.sprites;
+    const sprites = buildSpriteTables(registry, list);
+    this.spriteTablesCache = { registry, ids: list.map((a) => a.id), sprites };
+    return sprites;
+  }
   private held: [string, string][] = []; // (kind,url) pairs held in AssetManager
   private themes = new Map<string, Record<string, AtlasSource>>();
   private baseSources = new Map<string, AtlasSource>();
@@ -591,6 +645,16 @@ export class AtlasManager {
   private pools: Pool[] = [];
   /** bodyAtlasKeys() of the current registry (body pool membership + scale rule). */
   private bodyPageKeys = new Set<string>();
+  /** ADR-553: body type of the local player, once the client knows the appearance (stored character /
+   *  creator — main.ts calls setLocalBodyType before enterWorld). The boot rebuild runs before any
+   *  appearance exists, so unset means no body page is eager there; the ADR-544 drain pages the
+   *  first-view bodies in before the overlay lifts instead. Survives rebuilds (a re-tier rebuild
+   *  re-applies the same eager set). */
+  private localBodyType: BodyType | undefined;
+  /** ADR-553: body-pool pages the last rebuild paged in eagerly (the local type's set that landed
+   *  state 2). This is what rebuildTimings.bodyPages / vramStats.bodyPages report — ADR-548's
+   *  count of *all* body pages now lives only in bodyPageKeys (pool membership, not residency). */
+  private eagerBodyPages = 0;
   /** Stream Art vehicle sheets per vehicle (refcounted by VehicleView through retainSprite/releaseSprite). */
   streamVehicles = true;
   /** Stream building_t1..t4 per tier present nearby (refcounted by IsoRenderer's BuildingTierStreamer). */
@@ -639,8 +703,25 @@ export class AtlasManager {
   /** How fitBudget met the budget (diag): pool reserve actually kept, hot atlases demoted to cold. */
   fitInfo: { reserveMB: number; reserveWantedMB: number; demoted: number; /** ADR-237: sheets kept x1 while the hot tier is halved */ pinned?: string[]; /** ADR-512: keep / pool 1x floor (MB) */ keepMB?: number; floorMB?: number } = { reserveMB: 0, reserveWantedMB: 0, demoted: 0 };
   /** ADR-380: ms per phase of the last rebuild (diag: the ?diag=1 boot sub-phases). Undefined until a rebuild
-   *  completes; IsoView.create reads it right after the initial setRegistry. */
-  rebuildTimings: { fetchDecode: number; fitBudget: number; halveSide: number; layout: number; upload: number; tables: number; bodies: number; restore: number } | undefined = undefined;
+   *  completes; IsoView.create reads it right after the initial setRegistry.
+   *  ADR-548 sub-splits (all additive — the parent fields keep their old meaning):
+   *  - fetchDecodeFetch / fetchDecodeDecode: summed per-call durations inside defaultImageLoader
+   *    (fetch = assetFetch + blob(), decode = createImageBitmap) plus fitToPage resizes on the decode
+   *    side. Loads run concurrently (cap 8), so the sum is work apportioned, not wall time: it is
+   *    >= fetchDecode, and the trim/repack residue stays in fetchDecode only. Zero when a custom
+   *    imageLoader is used (the split lives in defaultImageLoader).
+   *  - uploadAlloc / uploadCopies / uploadMips: texStorage3D time / residual (texSubImage3D copies +
+   *    the frame-table upload that stages them) / generateMipmap time per array; they sum to `upload`
+   *    (the OOM-retry scaleList/layout between re-uploads stays under `upload` only, as before).
+   *  - fitBudgetSearch / fitBudgetResizes: trial packings (pure CPU) vs the final scaleList resizes;
+   *    they sum to `fitBudget`.
+   *  - coldAtlasBytes (not ms): decoded RGBA bytes of cold-tier resident atlases at their fitted scale
+   *    — the byte share ADR-552 needs. bodyPages (not ms): ADR-553 — the body-pool pages the rebuild
+   *    paged in eagerly (the local type's set that landed state 2; 0 when no local body type is set
+   *    yet). Both are also on vramStats. */
+  rebuildTimings: { fetchDecode: number; fitBudget: number; halveSide: number; layout: number; upload: number; tables: number; bodies: number; restore: number;
+    fetchDecodeFetch: number; fetchDecodeDecode: number; uploadAlloc: number; uploadCopies: number; uploadMips: number;
+    fitBudgetSearch: number; fitBudgetResizes: number; coldAtlasBytes: number; bodyPages: number } | undefined = undefined;
   /** Override the hot/cold budget tier per atlas key (default defaultAtlasTier). */
   atlasTier?: (key: string, info: { bodies: boolean; wearShare: number }) => AtlasTier;
   /** Atlas keys used recently (renderer marks them); always treated hot at the next rebuild. */
@@ -849,10 +930,13 @@ export class AtlasManager {
   }
 
   private async rebuild(registry: AssetRegistry, sources: Map<string, AtlasSource>): Promise<void> {
+    this.packMemo.clear(); // ADR-554: pack placements are memoised per rebuild only
     // ADR-380: per-phase ms for the ?diag=1 boot split (fetchDecode = fetch + decode + fitToPage of the resident
     // set; layout = pack/plan + the sort/rect/classify planning around the rescale steps; tables = the sprite
     // runtime tables + tint rows + resolve* passes). Cleared here so a failed rebuild leaves no stale split.
-    const ph = { fetchDecode: 0, fitBudget: 0, halveSide: 0, layout: 0, upload: 0, tables: 0, bodies: 0, restore: 0 };
+    const ph = { fetchDecode: 0, fitBudget: 0, halveSide: 0, layout: 0, upload: 0, tables: 0, bodies: 0, restore: 0,
+      fetchDecodeFetch: 0, fetchDecodeDecode: 0, uploadAlloc: 0, uploadCopies: 0, uploadMips: 0,
+      fitBudgetSearch: 0, fitBudgetResizes: 0, coldAtlasBytes: 0, bodyPages: 0 };
     this.rebuildTimings = undefined;
     const prevHeld = this.held; const held: [string, string][] = [];
     // seamless rebuild (re-tier / zoom): remember the lazy pages resident now (local player, nearby characters, visible
@@ -875,6 +959,8 @@ export class AtlasManager {
     // ADR-512: explicit dirFrames rects are in the sheet's own px, so those sheets are never trim-repacked
     const dirRectAtlases = new Set<string>(); for (const sp of registry.allSprites()) for (const an of sp.animList) for (const d of an.dirFrames ?? []) if (d.rect) dirRectAtlases.add(d.atlas.key);
     const ldT0 = now();
+    // ADR-548: fetch/decode delta over exactly this rebuild's loads (imageLoadStats is module-global).
+    const fdStats0 = { ...imageLoadStats }; let fitToPageMs = 0;
     await Promise.all([...registry.atlases.values()].map(async (a) => {
       const src = sources.get(a.key); if (!src) throw new Error(`no image source for atlas "${a.key}"`);
       if (lazyKeys.has(a.key) || vehKeys.has(a.key) || legacy.has(a.key) || retired.has(a.key) || bldKeys.has(a.key) || bodyKeys.has(a.key) || streamKeys.has(a.key)) {
@@ -893,8 +979,11 @@ export class AtlasManager {
       const masks: AtlasRT["masks"] = {}; const maskUrls: AtlasRT["maskUrls"] = {};
       for (const m of ["sheen", "sway", "tintmask"] as const) { const [im, u] = await firstOf(src.masks?.[m]); if (im && u) { masks[m] = im; maskUrls[m] = u; } }
       // masks (and the 1x emissive page) are resized to the chosen page so they line up under the same UVs
+      // ADR-548: fitToPage is decode-side work (createImageBitmap resize) — timed into fetchDecodeDecode.
+      const fitT0 = now();
       if (emis) emis = await fitToPage(emis, img.width, img.height);
       for (const m of Object.keys(masks) as MaskName[]) { const f = await fitToPage(masks[m]!, img.width, img.height); if (f) masks[m] = f; else { delete masks[m]; delete maskUrls[m]; } }
+      fitToPageMs += now() - fitT0;
       // ADR-512: base building / vehicle grid sheets are column-trimmed losslessly (same texels, same rows), see trimAtlas.ts
       let trim: TrimFrame[] | undefined;
       if (this.trimAtlases && TRIM_ATLAS_RE.test(a.key) && !src.rects && scale === 1 && !masks.sheen && !masks.sway && !dirRectAtlases.has(a.key)) {
@@ -904,6 +993,8 @@ export class AtlasManager {
       list.push({ key: a.key, id: a.id, source: src, img, emis, scale, masks, maskUrls, base: 0, count: src.rects ? src.rects.length : a.columns * a.rows, fw: a.frameW, fh: a.frameH, cols: a.columns, layer: 0, px: 0, py: 0, ...(trim ? { trim } : {}) });
     }));
     ph.fetchDecode += now() - ldT0;
+    ph.fetchDecodeFetch += imageLoadStats.fetchMs - fdStats0.fetchMs;
+    ph.fetchDecodeDecode += imageLoadStats.decodeMs - fdStats0.decodeMs + fitToPageMs;
     const layT0 = now();
     list.sort((a, b) => a.id - b.id); lazyList.sort((a, b) => a.id - b.id);
     addDirFrameRects(registry, [...list, ...lazyList]);
@@ -978,7 +1069,7 @@ export class AtlasManager {
     const bldHold = groups.reduce((t, g, i) => t + (g.cls === "veh" ? visHold[i]! : g.cls === "stream" ? this.poolReserveBytes(g.lazy, Math.min(g.minSlots, STREAM_FLOOR_SLOTS), list, 1) : 0), 0);
     ph.layout += now() - layT0; // sort + rect tables + pool-group planning, before the rescale steps
     this.registryForTier = registry;
-        const fbT0 = now(); await this.fitBudget(list, reserve, keep, keepVis + wearFloor); ph.fitBudget += now() - fbT0;
+        const fbT0 = now(); const fb = await this.fitBudget(list, reserve, keep, keepVis + wearFloor); ph.fitBudget += now() - fbT0; ph.fitBudgetSearch += fb.search; ph.fitBudgetResizes += fb.resizes;
     const hsT0 = now(); this.sideScale = (await halveSide(list, this.sideShift)) ? 1 / (1 << this.sideShift) : 1; ph.halveSide += now() - hsT0;
     const layT1 = now();
     const layout = (): void => { this.pack(list); this.pools = []; groups.forEach((g, i) => this.planPool(g.lazy, g.minSlots, list, g.cls, g.cap, g.share, g.cls === "wear" ? visHold.slice(i + 1).reduce((t, b) => t + b, 0) : g.cls === "bld" ? bldHold : 0)); let b = this.totalFrames; for (const a of lazyList) { a.base = b; b += a.count; } this.totalFrames = b; };
@@ -993,35 +1084,48 @@ export class AtlasManager {
     // recomputed per upload call, each doing a list.find per tinted sprite). Timed under `tables`, not `upload`.
     const tintT0 = now(); const tintRows = this.frameTintRows(registry, all); ph.tables += now() - tintT0;
     const upT0 = now();
-    this.upload(list, tintRows, all);
+    const up = this.upload(list, tintRows, all);
+    ph.uploadAlloc += up.alloc; ph.uploadCopies += up.copies; ph.uploadMips += up.mips;
     const lim = this.limitProblem(); if (lim) { this.uploadErrors.push(lim); console.error("[render] " + lim); this.onError?.({ kind: "limits", message: lim }); }
     while ((this.oomFlag || this.gl.getError() === this.gl.OUT_OF_MEMORY) && this.downscale > MIN_ATLAS_DOWNSCALE) {
       this.oomFlag = false;
       // the driver refused the arrays: halve again and re-upload (once per step)
       const msg = `atlas upload out of GPU memory at ${this.gpuMB()} MB (downscale ${this.downscale}); retrying at ${this.downscale / 2}`;
       console.warn("[render] " + msg); this.onError?.({ kind: "oom", message: msg });
-      await scaleList(list, 0.5); this.downscale /= 2; this.coldDownscale = Math.max(MIN_ATLAS_DOWNSCALE / 2, this.coldDownscale / 2); layout(); this.upload(list, tintRows, all);
+      await scaleList(list, 0.5); this.downscale /= 2; this.coldDownscale = Math.max(MIN_ATLAS_DOWNSCALE / 2, this.coldDownscale / 2); layout(); const up2 = this.upload(list, tintRows, all);
+      ph.uploadAlloc += up2.alloc; ph.uploadCopies += up2.copies; ph.uploadMips += up2.mips;
     }
     if (this.oomFlag) { this.oomFlag = false; const msg = `atlas arrays still out of GPU memory at the minimum downscale x${this.downscale}`; this.uploadErrors.push(msg); this.onFault?.("atlas", msg); }
     ph.upload += now() - upT0;
     list.push(...lazyList);
     // sprite runtime tables (ADR-380: buildSpriteTables — Map lookups, byte-identical to the old list.find loop)
+    // ADR-554: cached across rebuilds with an unchanged registry (same object + same atlas-id list)
     const tbT0 = now();
-    const sprites = buildSpriteTables(registry, list);
+    const sprites = this.cachedSpriteTables(registry, list);
     this.usedMark = new Uint8Array(list.length); this.crispMark = []; this.atlases = list; this.atlasById = new Map(list.map((a) => [a.id, a])); this.sprites = sprites; this.registry = registry; this.headGroup.clear(); this.resolveSway(); this.resolveVariants(); this.resolveRoofs(); this.resolveEnclosures(); this.resolveHands();
     this.uploadTints();
     this.maskPixels.clear();
     ph.tables += now() - tbT0;
-    // body pages: resident from the first frame (prio 0: no budget refusal; one slot each, so never evicted)
-    const g0 = this.gen; const bodies = list.filter((a) => a.lazy && this.poolOfA(a)?.cls === "body");
+    // ADR-553: body pages — only the local player's set is resident from the first frame (prio 0: no
+    // budget refusal; one slot each, so never evicted). The rest defer to prio-0-on-first-draw
+    // (pageReady, sprites.ts) or the ADR-544 drain, which pages first-view bodies in before the
+    // overlay lifts. Unset local type (boot: no appearance exists yet) = none eager.
+    const g0 = this.gen; const localBodyKeys = this.localBodyType ? bodyPagesForBodyType(registry, this.localBodyType) : new Set<string>();
+    const bodies = list.filter((a) => a.lazy && this.poolOfA(a)?.cls === "body" && localBodyKeys.has(a.key));
     const bdT0 = now();
     await Promise.all(bodies.map(async (a) => { a.lazy!.prio = 0; a.lazy!.state = 1; try { await this.pageIn(a, g0); } catch (e) { reportRenderError(`body page-in ${a.key}`, e, true); } if ((a.lazy!.state as number) !== 2) { a.lazy!.state = 0; const m = `body page ${a.key} not resident`; if (this.uploadErrors.length < 32) this.uploadErrors.push(m); } }));
     ph.bodies += now() - bdT0;
+    // ADR-553: bodyPages is the eager count at this rebuild (landed state 2), not the pool size.
+    this.eagerBodyPages = bodies.filter((a) => a.lazy!.state === 2).length;
+    ph.bodyPages = this.eagerBodyPages;
     // previously resident pages (closest first) back in before drawing resumes: no undressed / missing-art frames
     const back = list.filter((a) => a.lazy && a.lazy.state === 0 && wasResident.has(a.key) && this.poolOfA(a)).sort((x, y) => wasResident.get(x.key)! - wasResident.get(y.key)!);
     const rsT0 = now();
     await Promise.all(back.map(async (a) => { const pr = wasResident.get(a.key)!; a.lazy!.prio = pr; if (!this.poolOn(this.poolOfA(a)!, pr)) return; a.lazy!.state = 1; try { await this.pageIn(a, g0); } catch { /* re-requested by pageReady */ } if ((a.lazy!.state as number) !== 2) a.lazy!.state = 0; }));
     ph.restore += now() - rsT0;
+    // ADR-548: cold-atlas bytes (not ms — see rebuildTimings). bodyPages was set by the eager
+    // body step above (ADR-553: landed eager pages, not the pool size).
+    ph.coldAtlasBytes = this.coldAtlasBytes();
     this.held = held; this.version++;
     for (const [k, u] of prevHeld) this.assets.release(k, u);
     this.rebuildTimings = { ...ph };
@@ -1209,7 +1313,8 @@ export class AtlasManager {
    * (rare variants, distant LODs, one-shot fx, unreferenced) are shrunk first. Tries (hot, cold) best-first: hot 1 with cold
    * 1..MIN, then hot 0.5 with cold 0.5..MIN, ... Atlases larger than a layer are always shrunk.
    */
-  private async fitBudget(list: AtlasRT[], reserveBytes = 0, keepBytes = 0, floorBytes = 0): Promise<void> {
+  private async fitBudget(list: AtlasRT[], reserveBytes = 0, keepBytes = 0, floorBytes = 0): Promise<{ search: number; resizes: number }> {
+    const s0 = now(); // ADR-548: trial packings are the search; the final scaleList resizes are timed separately
     const S = this.layerSize; const full = this.textureBudgetMB * 1048576;
     this.classify(list);
     for (const a of list) if (a.cold && ((VISIBLE_PIN_RE.test(a.key) && this.groundPinOk(a.key)) || BASE_PIN_RE.test(a.key))) a.cold = false; // ADR-251: furniture / drawn-season gt never go cold (they are what the camera sits on)
@@ -1327,7 +1432,10 @@ export class AtlasManager {
       const nc = list.filter((a) => a.cold).length;
       console.warn(`[render] atlas arrays over the ${this.textureBudgetMB} MB GPU budget at full res: hot x${h} (${list.length - nc} atlases), cold x${c} (${nc}) (~${Math.round(this.estimate(list) / 1048576)} MB)`);
     }
+    const searchMs = now() - s0; // every trial packing + the final pack, before any image is resized
+    const r0 = now();
     await Promise.all(list.map((a, i) => { const k = scaleOf(i, h, c); return k < 1 ? scaleList([a], k) : undefined; }));
+    return { search: searchMs, resizes: now() - r0 };
   }
   /** Tier every resident atlas (see defaultAtlasTier / atlasTier / recentlyUsed). */
   private classify(list: AtlasRT[]): void {
@@ -1350,6 +1458,15 @@ export class AtlasManager {
     return { hot: r.filter((a) => !a.cold).map((a) => a.key), cold: r.filter((a) => a.cold).map((a) => a.key), hotScale: this.downscale, coldScale: this.coldDownscale };
   }
 
+  /** ADR-548: decoded RGBA bytes of the cold-tier resident atlases at their fitted scale (img is the
+   *  rescaled image after fitBudget, so this is the GPU-side byte share deferral would save — the
+   *  count ADR-552 needs; the count itself is vramStats.coldAtlases / tiers.cold.length). */
+  coldAtlasBytes(): number {
+    let bytes = 0;
+    for (const a of this.atlases) if (a.cold && a.img) bytes += a.img.width * a.img.height * 4;
+    return bytes;
+  }
+
   /** Layer count the old shelf packer needs for `list` (budget planning only: tier scales and pool sizes are chosen
    *  against it, so the tighter MaxRects placement lowers the total instead of being refilled with more/larger pages). */
   private shelfLayers(list: AtlasRT[]): number {
@@ -1367,6 +1484,13 @@ export class AtlasManager {
   }
   /** Resident layers the budget planner charges for (shelf count of the last pack; >= the real MaxRects count). */
   private planLayers = 0; private packedLayers = 0;
+  /** ADR-554: memoised pack() placements for one rebuild. pack is pure given (layerSize, per-atlas
+   *  id/dims/side/count in list order): fitBudget re-packs identical dims across its 4 reserve tries
+   *  and the idle-demotion loop, and the final pack repeats a trial packing. The key is built from
+   *  the ACTUAL inputs, so a resize that silently fails to shrink an image still misses (its dims
+   *  differ) and packs for real. Cleared at the start of each rebuild so entries never cross one;
+   *  capped (clear-and-refill) so direct fitBudget callers cannot grow it without bound. */
+  private packMemo = new Map<string, { layers: number; planLayers: number; totalFrames: number; at: { layer: number; x: number; y: number; base: number }[] }>();
   /** ADR-251: season whose gt_<season>_p* pages are pinned at 1x (TileTerrain sets the drawn one; the others may halve). */
   groundPinSeason: "summer" | "fall" | "winter" | "spring" = "summer";
   private groundPinOk(key: string): boolean { const m = /^gt_(summer|fall|winter|spring)_/.exec(key); return !m || m[1] === this.groundPinSeason; }
@@ -1406,12 +1530,25 @@ export class AtlasManager {
    * are packed first (ADR-510: the side arrays then hold only those layers, see sideWindow).
    */
   private pack(list: AtlasRT[]): void {
+    // ADR-554: memoise on the actual pack inputs (layerSize + per-atlas id/dims/side/count in list
+    // order). A hit restores the identical placement (layer/px/py/base per atlas) and the identical
+    // layer counts, so fits1/fitsPacked read the same planEstimate/residentBytes as a real pack
+    // and fitBudget chooses the identical (h, c, pin, pinnedKeys). Trial priority is untouched.
+    const side = (a: AtlasRT) => !!(a.emis || a.masks.sheen || a.masks.sway || a.masks.tintmask);
+    const key = `${this.layerSize}|${list.map((a) => `${a.id}:${a.img!.width}x${a.img!.height}:${side(a) ? 1 : 0}:${a.count}`).join(",")}`;
+    const hit = this.packMemo.get(key);
+    if (hit) {
+      packStats.hits++;
+      list.forEach((a, i) => { const r = hit.at[i]!; a.layer = r.layer; a.px = r.x; a.py = r.y; a.base = r.base; });
+      this.layers = Math.max(1, hit.layers); this.packedLayers = this.layers; this.planLayers = hit.planLayers; this.totalFrames = hit.totalFrames;
+      return;
+    }
+    packStats.runs++;
     const bySize = (a: AtlasRT, b: AtlasRT) => Math.max(b.img!.width, b.img!.height) - Math.max(a.img!.width, a.img!.height) || b.img!.width * b.img!.height - a.img!.width * a.img!.height || a.id - b.id;
     let best = this.maxRects([...list].sort(bySize));
     // ADR-510: atlases that sample a side array (emissive / sheen / sway / tint mask) are placed first, so those arrays
     // only store the few leading layers they live in (sideWindow) instead of one side layer per colour layer. Kept only
     // when it packs into no more layers than the plain largest-first order.
-    const side = (a: AtlasRT) => !!(a.emis || a.masks.sheen || a.masks.sway || a.masks.tintmask);
     if (list.some(side) && list.some((a) => !side(a))) {
       const two = this.maxRects([...list.filter(side).sort(bySize), ...list.filter((a) => !side(a)).sort(bySize)]);
       if (two.layers <= best.layers) best = two;
@@ -1421,6 +1558,8 @@ export class AtlasManager {
     this.planLayers = Math.max(this.layers, list.length ? this.shelfLayers(list) : 1);
     let base = 0; for (const a of list) { a.base = base; base += a.count; }
     this.totalFrames = base;
+    if (this.packMemo.size >= 512) this.packMemo.clear();
+    this.packMemo.set(key, { layers: this.layers, planLayers: this.planLayers, totalFrames: this.totalFrames, at: list.map((a) => ({ layer: a.layer, x: a.px, y: a.py, base: a.base })) });
   }
 
   /** frame entry -> tint row (sprites with SpriteDef.tints get their own row; 0 = globals). */
@@ -1495,9 +1634,15 @@ export class AtlasManager {
     return null;
   }
 
-  private upload(list: AtlasRT[], tintRows: Map<number, number> = new Map(), all: AtlasRT[] = list): void {
-    this.tintRowMap = tintRows;
+  /** ADR-548: returns the upload split — alloc (texStorage3D time), mips (generateMipmap time per
+   *  array), copies (the residual: every texSubImage3D copy plus the frame-table upload that stages
+   *  them — planOwn/planSideWindows/writeFrames are sub-ms CPU next to the copies, so they ride in
+   *  the residual rather than getting a fourth bucket). The three sum to this call's wall time. */
+  private upload(list: AtlasRT[], tintRows: Map<number, number> = new Map(), all: AtlasRT[] = list): { alloc: number; copies: number; mips: number } {
     const gl = this.gl;
+    const upT0 = now(); let allocMs = 0, mipsMs = 0;
+    const mip = (): void => { const m0 = now(); gl.generateMipmap(gl.TEXTURE_2D_ARRAY); mipsMs += now() - m0; };
+    this.tintRowMap = tintRows;
     // side arrays (emissive/masks) at half size: images were halved in halveSide(); offsets shift with them
     const sub = (im: ImageLike, a: AtlasRT, win: SideWindow) => { const x = a.px >> this.sideShift, y = a.py >> this.sideShift, H = this.layerSize >> this.sideShift;
       const w = Math.min(im.width, H - x), h = Math.min(im.height, H - y); if (w <= 0 || h <= 0) return;
@@ -1516,7 +1661,7 @@ export class AtlasManager {
       const t = gl.createTexture()!; gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
       const S = side ? Math.max(1, this.layerSize >> this.sideShift) : this.layerSize;
       const levels = Math.floor(Math.log2(S)) + 1; const n = nLayers ?? (side ? this.layers : colourLayers);
-      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, levels, gl.RGBA8, S, S, n); if (!side) this.texLevels = levels; alloc += n * rgbaBytes(S, S, true);
+      { const a0 = now(); gl.texStorage3D(gl.TEXTURE_2D_ARRAY, levels, gl.RGBA8, S, S, n); allocMs += now() - a0; } if (!side) this.texLevels = levels; alloc += n * rgbaBytes(S, S, true);
       const err = gl.getError(); if (err !== gl.NO_ERROR) { this.uploadErrors.push(`texStorage3D ${S}x${S}x${this.layers} levels ${levels}: 0x${err.toString(16)}`); if (err === gl.OUT_OF_MEMORY) this.oomFlag = true; }
       setLevelRange(gl, gl.TEXTURE_2D_ARRAY, levels, this.magNearest);
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -1531,7 +1676,7 @@ export class AtlasManager {
     this.tex = mk();
     if (own) {
       const o = own.own!; const t = gl.createTexture()!; gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
-      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, o.levels, o.fmt ?? gl.RGBA8, this.layerSize, this.layerSize, ownLayers); alloc += ownLayers * this.ownLayerBytes(o);
+      { const a0 = now(); gl.texStorage3D(gl.TEXTURE_2D_ARRAY, o.levels, o.fmt ?? gl.RGBA8, this.layerSize, this.layerSize, ownLayers); allocMs += now() - a0; } alloc += ownLayers * this.ownLayerBytes(o);
       const err = gl.getError(); if (err !== gl.NO_ERROR) { this.uploadErrors.push(`pool texStorage3D ${o.fmt ?? "RGBA8"} x${ownLayers}: 0x${err.toString(16)}`); if (err === gl.OUT_OF_MEMORY) this.oomFlag = true; }
       setLevelRange(gl, gl.TEXTURE_2D_ARRAY, o.levels, this.magNearest);
       gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -1539,24 +1684,24 @@ export class AtlasManager {
     } else { for (const p of this.pools) delete p.own; this.poolTex = dummyArray(gl); this.poolFirst = 1 << 20; }
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.tex);
     for (const a of list) gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, a.px, a.py, a.layer, a.img!.width, a.img!.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, a.img as TexImageSource);
-    gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+    mip();
     this.hasEmissive = list.some((a) => a.emis) || this.pools.some((p) => p.emis);
     this.emisTex = this.hasEmissive && sw.emis.count ? mk(true, sw.emis.count) : dummyArray(gl); // emissive is gated by a frame flag: no array when unused
     for (const a of list) if (a.emis) sub(a.emis, a, sw.emis);
-    if (this.hasEmissive && sw.emis.count) gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+    if (this.hasEmissive && sw.emis.count) mip();
     // mask arrays: the window's layers only when some atlas / pool has that mask, else a 1x1 dummy (never sampled: flag bit unset)
     const maskArray = (m: MaskName): WebGLTexture => {
       const win = sw[m === "tintmask" ? "tint" : m];
       if (!win.count) {
         const t = gl.createTexture()!; gl.bindTexture(gl.TEXTURE_2D_ARRAY, t);
-        gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, 1, 1, 1);
+        { const a0 = now(); gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, 1, 1, 1); allocMs += now() - a0; }
         gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, 0, 1, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
         setLevelRange(gl, gl.TEXTURE_2D_ARRAY, 1);
         return t;
       }
       const t = mk(true, win.count);
       for (const a of list) { const im = a.masks[m]; if (im) sub(im, a, win); }
-      gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+      mip();
       return t;
     };
     this.sheenTex = maskArray("sheen"); this.swayTex = maskArray("sway"); this.tintMaskTex = maskArray("tintmask");
@@ -1577,6 +1722,7 @@ export class AtlasManager {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, TABLE_W * 2, rows, 0, gl.RGBA, gl.FLOAT, data);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     this.frameTex = ft;
+    return { alloc: allocMs, copies: Math.max(0, now() - upT0 - allocMs - mipsMs), mips: mipsMs };
   }
 
   /** Frame-table rows of one atlas at its packed position (or zeroed when `clear`: a streamed page that is not resident). */
@@ -1643,6 +1789,20 @@ export class AtlasManager {
   /** ADR-545: force the boosted page-in rates (loading overlay up). Warm-up windows set this themselves;
    *  embedders may set it while any loading screen covers the world. Cleared when the overlay lifts. */
   setLoadingBoost(on: boolean): void { this.loadingBoost = on; }
+  /** ADR-553: record the local player's body type and page its body pages in now (prio 0) when a
+   *  registry is already loaded; before setRegistry it only records the type for the rebuild's
+   *  eager step. The client calls this once the appearance is known (stored character / creator,
+   *  before enterWorld) so the first frame is dressed; a later call (edit character) pages the new
+   *  type's pages in and leaves the old type's pages resident (body-pool pages never evict). Never
+   *  throws: a failed page-in stays state 0 and is re-requested by pageReady on first draw. */
+  async setLocalBodyType(bodyType: BodyType | undefined): Promise<void> {
+    this.localBodyType = bodyType;
+    if (!bodyType || !this.registry) return;
+    const g0 = this.gen;
+    const keys = bodyPagesForBodyType(this.registry, bodyType);
+    const pages = this.atlases.filter((a) => a.lazy && this.poolOfA(a)?.cls === "body" && keys.has(a.key) && a.lazy.state === 0);
+    await Promise.all(pages.map(async (a) => { a.lazy!.prio = 0; a.lazy!.state = 1; try { await this.pageIn(a, g0); } catch (e) { reportRenderError(`local body page-in ${a.key}`, e, true); } if ((a.lazy!.state as number) !== 2) a.lazy!.state = 0; }));
+  }
   /** ADR-545: feed the last rendered frame's CPU ms (IsoRenderer.stats.cpuMs — once-loaded 5.0 ms on the user's
    *  phone). At or below PAGE_IN_FRAME_BUDGET_MS the boosted rates apply; above it, the base 2. Ignores
    *  non-finite / negative input, so a bad reading never changes the rate. */
@@ -1793,7 +1953,13 @@ export class AtlasManager {
       if (!a) { skipped++; continue; }
       if (!a.lazy) { alreadyResident++; continue; } // resident atlases are already on the GPU
       if (a.lazy.state === 2) { alreadyResident++; continue; }
-      if (want.length >= maxPages) { skipped++; continue; }
+      // ADR-553: body-pool pages have a dedicated slot each (never evicted, never competing for
+      // stream-pool slots), so the stream-pool page budget must not squeeze out a first-view
+      // character's body — the ADR-544 drain is what dresses bots/AI humans before the overlay
+      // lifts. (this.pools is undefined on the ADR-370 prototype fakes: the guard keeps them on
+      // the old counted behaviour.)
+      const isBodyPage = this.pools?.[a.lazy.pool]?.cls === "body";
+      if (!isBodyPage && want.length >= maxPages) { skipped++; continue; }
       want.push(a);
     }
     for (const a of want) this.request(a, WARMUP_PRIO);
@@ -1838,8 +2004,8 @@ export class AtlasManager {
   pageKey(spriteId: number): string | null { return this.lazyOf(spriteId)?.key ?? null; }
   /** Streamed wearable atlases resident / known. */
   isStreamed(spriteId: number): boolean { return !!this.lazyOf(spriteId); }
-  get vramStats(): VramStats & { pools: { cls: PoolClass; scale: number; slots: number; layers: number; resident: number; slotMB: number; /** ADR-251: approx. MB of the pool's layers (compressed own array or RGBA8 + side arrays) */ mb: number }[]; poolScale: number; layerSize: number; downscale: number; coldDownscale: number; hotAtlases: number; coldAtlases: number } {
-    return { ...this.vram.stats(), poolScale: this.pools[0]?.k ?? 0, pools: this.pools.map((p) => ({ cls: p.cls, scale: p.k, slots: p.lru.capacity, layers: p.layers, resident: p.lru.size, slotMB: +(p.slotBytes / 1048576).toFixed(1), mb: this.poolMB(p) })), layerSize: this.layerSize, downscale: this.downscale, coldDownscale: this.coldDownscale, hotAtlases: this.tiers.hot.length, coldAtlases: this.tiers.cold.length };
+  get vramStats(): VramStats & { pools: { cls: PoolClass; scale: number; slots: number; layers: number; resident: number; slotMB: number; /** ADR-251: approx. MB of the pool's layers (compressed own array or RGBA8 + side arrays) */ mb: number }[]; poolScale: number; layerSize: number; downscale: number; coldDownscale: number; hotAtlases: number; coldAtlases: number; /** ADR-548: cold-tier resident bytes at fitted scale (see coldAtlasBytes). ADR-553: bodyPages is the last rebuild's eager body-page count, not the pool size. */ coldAtlasBytes: number; bodyPages: number } {
+    return { ...this.vram.stats(), poolScale: this.pools[0]?.k ?? 0, pools: this.pools.map((p) => ({ cls: p.cls, scale: p.k, slots: p.lru.capacity, layers: p.layers, resident: p.lru.size, slotMB: +(p.slotBytes / 1048576).toFixed(1), mb: this.poolMB(p) })), layerSize: this.layerSize, downscale: this.downscale, coldDownscale: this.coldDownscale, hotAtlases: this.tiers.hot.length, coldAtlases: this.tiers.cold.length, coldAtlasBytes: this.coldAtlasBytes(), bodyPages: this.eagerBodyPages };
   }
   private request(a: AtlasRT, prio = Infinity): void {
     if (this.ctxLost) return;

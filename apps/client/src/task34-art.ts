@@ -8,6 +8,8 @@
 // as the primary art: the bee/owl draw their dedicated painted art; sprite_fallbacks.json maps animal_bee /
 // animal_owl to animal_crow only as an ADR-485 safety net, used if the painted art is ever missing).
 import type { AtlasSource } from "@engine/render";
+import { type PaintedCacheEnv } from "./painted-cache.js";
+import { defaultAssemble, paintPaintedGroup, type PaintWorkerPool } from "./painted-core.js";
 
 /** Atlas keys this module paints (also the fragment's atlas keys). */
 export const TASK34_ATLAS_KEYS = ["pets_bee", "pets_owl", "decor_apiary"] as const;
@@ -283,39 +285,22 @@ export function paintTask34Atlases(): PaintedAtlas[] {
   ];
 }
 
-/** Rasterized pixels -> PNG blob URL (OffscreenCanvas, else a document canvas; undefined when no canvas exists). */
-async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray): Promise<string | undefined> {
-  try {
-    // TS 5.9 (CI's pinned version) types ImageData's data as Uint8ClampedArray<ArrayBuffer>; our pixels are
-    // Uint8ClampedArray<ArrayBufferLike>, so copy into a fresh ArrayBuffer-backed array (once, at load).
-    const data = new ImageData(new Uint8ClampedArray(pixels), w, h);
-    const OC = (globalThis as { OffscreenCanvas?: typeof OffscreenCanvas }).OffscreenCanvas;
-    if (OC) {
-      const cv = new OC(w, h); const ctx = cv.getContext("2d");
-      if (ctx) { ctx.putImageData(data, 0, 0); if (typeof cv.convertToBlob === "function") return URL.createObjectURL(await cv.convertToBlob({ type: "image/png" })); }
-    }
-    const doc = (globalThis as { document?: Document }).document;
-    if (doc) {
-      const cv = doc.createElement("canvas"); cv.width = w; cv.height = h; const ctx = cv.getContext("2d");
-      if (!ctx) return undefined;
-      ctx.putImageData(data, 0, 0);
-      return await new Promise<string | undefined>((res) => cv.toBlob((b) => res(b ? URL.createObjectURL(b) : undefined), "image/png"));
-    }
-  } catch { /* no canvas in this environment: the caller keeps the manifest's debug path */ }
-  return undefined;
-}
+/**
+ * ADR-550: content-hash input — the rasterizer + cell painters' source (their literal
+ * palettes count), shared by all three atlases; a painter change repaints all three once.
+ */
+const TASK34_SPEC = `${Px.toString()}|${paintBeeCell.toString()}|${paintOwlCell.toString()}|${paintApiaryCell.toString()}`;
+export const task34Specs = (): Map<string, string> => new Map(TASK34_ATLAS_KEYS.map((k) => [k, TASK34_SPEC]));
 
 /**
  * Atlas sources for the three generated atlases (same { url, emissiveUrl } shape as sourcesFromManifest; the
  * vehicles debug pack does the same). view.ts merges these over the manifest's debug/*.png paths before
- * setRegistry, so the registry's bee / owl / apiary sprites draw the painted pixels. Returns only the atlases
- * that converted (empty in a canvas-less environment).
+ * setRegistry, so the registry's bee / owl / apiary sprites draw the painted pixels. ADR-550: cache-first —
+ * a warm boot returns the cached PNGs without painting. ADR-551: the cache-first + paint + encode work
+ * lives in `painted-core.ts` (cache-first + parallel encode; the groups run concurrently via `painted-parallel.ts`, misses paint in a Worker pool); this is a
+ * thin delegate so the group and the standalone entry stay the same implementation. Returns only the
+ * atlases that converted (empty in a canvas-less environment).
  */
-export async function task34AtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  for (const a of paintTask34Atlases()) {
-    const url = await canvasToBlobURL(a.width, a.height, a.pixels);
-    if (url) out.set(a.key, { url, emissiveUrl: null });
-  }
-  return out;
+export async function task34AtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  return paintPaintedGroup({ name: "task34", specs: task34Specs, paint: paintTask34Atlases, assemble: defaultAssemble }, env, pool);
 }

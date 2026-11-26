@@ -54,7 +54,7 @@ describe("atlas rebuild holds the last frame instead of drawing missing art", ()
     // drive only the tail of rebuild: the residency restore runs after the swap
     const reg = { atlases: new Map([["hair", { key: "hair", id: 1, columns: 1, rows: 1, frameW: 8, frameH: 8, residency: "stream" }], ["far", { key: "far", id: 2, columns: 1, rows: 1, frameW: 8, frameH: 8, residency: "stream" }]]), allSprites: () => [] };
     a.streamWearables = true; a.streamSheets = true; a.assets = { load: async () => ({}), release: () => {} };
-    a.fitBudget = async () => {}; a.pack = () => {}; a.planPool = () => {}; a.upload = () => {}; a.uploadTints = () => {}; a.frameTintRows = () => new Map();
+    a.fitBudget = async () => ({ search: 0, resizes: 0 }); a.pack = () => {}; a.planPool = () => {}; a.upload = () => ({ alloc: 0, copies: 0, mips: 0 }); a.uploadTints = () => {}; a.frameTintRows = () => new Map();
     a.limitProblem = () => null; a.resolveSway = a.resolveVariants = a.resolveRoofs = a.resolveHands = () => {}; a.gl.getError = () => 0;
     let err: unknown; try { await a.rebuild(reg, new Map([["hair", { url: "hair.png" }], ["far", { url: "far.png" }]])); } catch (e) { err = e; }
     expect(err).toBeUndefined(); expect(paged).toEqual(["hair"]); expect(settlingDuringPageIn).toBe(true);

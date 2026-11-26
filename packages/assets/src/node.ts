@@ -41,11 +41,12 @@ export function readArtJson(rel: string, dirs: Readonly<Record<string, string>> 
  * nature/... + ids.lock) built from disk, so a dedicated server has the same cosmetics catalog (and hash) as the client.
  * The v2 character sample (CHAR_ART_V2_FRAGMENT) is sprites only and does not change cosmetics; pass it in `list` if needed.
  */
-export async function loadMergedPackManifest(opts: { list?: readonly ManifestFragmentRef[]; dirs?: Readonly<Record<string, string>> } = {}): ReturnType<typeof loadMergedManifestWith> {
+export async function loadMergedPackManifest(opts: { list?: readonly ManifestFragmentRef[]; dirs?: Readonly<Record<string, string>>; /** ADR-555: boot without the wear shards (see loadMergedManifestWith). */ excludeWearShards?: boolean } = {}): ReturnType<typeof loadMergedManifestWith> {
   const dirs = opts.dirs ?? ART_DIRS;
   return loadMergedManifestWith(opts.list ?? MANIFEST_INDEX, {
     artUrl: ART_URL,
     get: async (url) => (url.startsWith(ART_URL) ? readArtJson(decodeURIComponent(url.slice(ART_URL.length)), dirs) : undefined),
+    ...(opts.excludeWearShards ? { excludeWearShards: true } : {}),
   });
 }
 /** The placeholder test fixture. */

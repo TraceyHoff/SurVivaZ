@@ -46,7 +46,7 @@ import { stanceMode, StanceMode, liftableNear, bedNear } from "@engine/gameplay"
  *             ?offline=1 (skip the menu: singleplayer), ?menu=0 (skip the menu: legacy connect overlay), ?bots=N,
  *             ?ice=<JSON RTCIceServer[]> (P2P STUN/TURN override, also VITE_ICE_SERVERS), ?renderer=debug, ?time=0..24 / ?weather=clear|rain|storm|snow|fog|overcast|heat|blizzard|windy &intensity=0..1, ?season=summer|fall|winter|0..3 (view-only overrides), ?hud=0.
  */
-import { cosmeticsHashes, createGameLoop, World, PlayerId, Transform, PrevTransform, lerp, entityIndex, InputState, type FixedLoop, type Entity } from "@engine/core";
+import { BODY_TYPES, cosmeticsHashes, createGameLoop, World, PlayerId, Transform, PrevTransform, lerp, entityIndex, InputState, type FixedLoop, type Entity } from "@engine/core";
 import { TileMap, worldToScreen, screenToWorld, DEFAULT_ISO, ProceduralGenerator, computeSpawnPoints } from "@engine/world";
 import { InputSystem, AimResolver, DEFAULT_ACTIONS, DEFAULT_CONTEXTS, DEFAULT_PROFILES, DEFAULT_TOUCH_LAYOUTS } from "@engine/input";
 import { attachBrowserInput } from "@engine/input/browser";
@@ -451,7 +451,7 @@ function useWorld(w: World): void { world = w; loop = createGameLoop(w, { render
 async function runCreatorShot(shot: NonNullable<typeof creatorShot>): Promise<void> {
   const w = window as { __creatorReady?: unknown }; const t0 = performance.now(); let stage = "art";
   const timer = setTimeout(() => { if (!w.__creatorReady) w.__creatorReady = { ok: false, error: "timeout", seed: shot.seed, facing: shot.facing, stage, ms: Math.round(performance.now() - t0), hidden: document.visibilityState }; }, shot.timeoutMs);
-  await isoReady; stage = "catalog"; const catalog = iso?.registry.cosmetics?.size ? iso.registry.cosmetics : undefined;
+  await isoReady; stage = "catalog"; await iso?.ensureWearShards(); const catalog = iso?.registry.cosmetics?.size ? iso.registry.cosmetics : undefined;
   if (!catalog) { clearTimeout(timer); w.__creatorReady = { ok: false, seed: shot.seed, error: "customization pack not loaded" }; return; }
   const appearance = creatorShotLook(catalog, shot.seed, shot.body); stage = "creator";
   void showCharacterCreator({ root: uiRoot(), catalog, initial: { v: 1, name: `Survivor ${shot.seed}`, appearance }, title: "Create your character", pads: () => [],
@@ -464,7 +464,7 @@ async function ensureCharacter(kind: CharacterSaveKind): Promise<StoredCharacter
   const stored = loadCharacter(kind, SLOT); let edit = params.get("editchar") === "1";
   try { if (sessionStorage.getItem(EDIT_CHAR_KEY)) { edit = true; sessionStorage.removeItem(EDIT_CHAR_KEY); } } catch { /* private mode */ }
   if (stored && !edit) return stored;
-  await isoReady; const catalog = iso?.registry.cosmetics?.size ? iso.registry.cosmetics : undefined;
+  await isoReady; await iso?.ensureWearShards(); const catalog = iso?.registry.cosmetics?.size ? iso.registry.cosmetics : undefined;
   const seed: StoredCharacter | undefined = stored ?? (session.savedName ? { v: 1, name: session.savedName, appearance: undefined as never } : undefined);
   const c = await showCharacterCreator({ root: uiRoot(), catalog, initial: seed?.appearance ? seed : undefined, preview: iso && catalog ? { registry: iso.registry, sources: iso.renderer.atlas.sources, mode: previewModeFromQuery(params) } : undefined, artBase: `${import.meta.env.BASE_URL}art/ui/creator/` });
   if (c) saveCharacter(kind, SLOT, c); return c;
@@ -679,11 +679,17 @@ if (creatorShot) {
     // whatever the timed phases do not cover — it must stay >= 0, so a clock-skew negative is dropped, never shown.
     if (iso?.bootPhases?.length) {
       let sub = 0;
-      for (const p of iso.bootPhases) { loadCost.recordSub("boot", p.name, p.ms); sub += p.ms; }
+      // ADR-548: parent-marked entries (painted.<group>, registry.* splits) are parts of a phase
+      // already counted — render them, but keep them out of the "other" residual.
+      for (const p of iso.bootPhases) { loadCost.recordSub("boot", p.name, p.ms); if (!p.parent) sub += p.ms; }
       const other = Math.round(bootMs - sub);
       if (other > 0) loadCost.recordSub("boot", "other", other);
     }
     if (iso?.warmupResult) { const w = iso.warmupResult; loadCost.note(`boot warm-up: ${w.resident}/${w.requested + w.alreadyResident} first-view pages resident in ${w.ms}ms${w.timedOut ? ` (timed out, ${w.stillPending} pending)` : ""}`); }
+    // ADR-548: cold-atlas bytes + body-page count (registry note, not ms) and the painted PNG total
+    // (blob.size sum) — both ride the same ?diag=1 + __survivazLoadCost() path as the warm-up note.
+    if (iso?.registryNote) loadCost.note(iso.registryNote);
+    if (iso?.paintedAtlasBytes?.length) { const total = iso.paintedAtlasBytes.reduce((s, a) => s + a.bytes, 0); loadCost.note(`painted PNG: ${(total / 1048576).toFixed(1)} MB in ${iso.paintedAtlasBytes.length} atlases`); }
     loadProgress.complete(); await boot.finish("Ready");
     let notice: string | undefined, page: string | null = null;
     try { notice = sessionStorage.getItem(P2P_NOTICE_KEY) ?? undefined; sessionStorage.removeItem(P2P_NOTICE_KEY); page = sessionStorage.getItem(MENU_PAGE_KEY); sessionStorage.removeItem(MENU_PAGE_KEY); } catch { /* ignore */ }
@@ -710,6 +716,15 @@ if (creatorShot) {
     const before = loadCharacter(kind, SLOT); tutorialNewGame = !before; activeChar = await ensureCharacter(kind);
     if (!activeChar) { backToMenu(""); return; }
     lookEdited = !before || JSON.stringify(before) !== JSON.stringify(activeChar);
+    // ADR-553: the boot rebuild pages in no body sheet eagerly (no appearance exists yet), so
+    // tell the atlas the local player's body type now that it is known — its pages land before
+    // enterWorld, and the first frame is dressed. A missing appearance (remote restore with no
+    // stored character) leaves the type unset; the ADR-544 drain pages the first-view bodies in
+    // before the overlay lifts instead.
+    if (activeChar.appearance && iso) {
+      const bt = BODY_TYPES[activeChar.appearance.bodyType];
+      if (bt) await iso.renderer.atlas.setLocalBodyType(bt);
+    }
     startMenus();
     await enterWorld(async () => {
       if (choice.kind === "singleplayer") await startSingleplayer(choice.seed);

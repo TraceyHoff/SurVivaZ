@@ -26,6 +26,8 @@
 // tiers read as one family at game scale.
 import type { AtlasSource } from "@engine/render";
 import { Px } from "./task34-art.js";
+import { type PaintedCacheEnv } from "./painted-cache.js";
+import { defaultAssemble, paintPaintedGroup, type PaintWorkerPool } from "./painted-core.js";
 
 /** Atlas keys this module paints (also the fragment's atlas keys). */
 export const TASK421_ATLAS_KEYS = ["veh_art_raft", "veh_art_canoe", "veh_art_rowboat"] as const;
@@ -419,27 +421,19 @@ export function paintTask479Atlases(): PaintedAtlas[] {
   return [{ key: `veh_art_${SAILBOAT_ID}`, width: f.w * BOAT_ATLAS_COLS, height: f.h * BOAT_ATLAS_ROWS, pixels: px.data }];
 }
 
-/** Rasterized pixels -> PNG blob URL (OffscreenCanvas, else a document canvas; undefined when no canvas exists). */
-async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray): Promise<string | undefined> {
-  try {
-    // TS 5.9 (CI's pinned version) types ImageData's data as Uint8ClampedArray<ArrayBuffer>; our pixels are
-    // Uint8ClampedArray<ArrayBufferLike>, so copy into a fresh ArrayBuffer-backed array (once, at load).
-    const data = new ImageData(new Uint8ClampedArray(pixels), w, h);
-    const OC = (globalThis as { OffscreenCanvas?: typeof OffscreenCanvas }).OffscreenCanvas;
-    if (OC) {
-      const cv = new OC(w, h); const ctx = cv.getContext("2d");
-      if (ctx) { ctx.putImageData(data, 0, 0); if (typeof cv.convertToBlob === "function") return URL.createObjectURL(await cv.convertToBlob({ type: "image/png" })); }
-    }
-    const doc = (globalThis as { document?: Document }).document;
-    if (doc) {
-      const cv = doc.createElement("canvas"); cv.width = w; cv.height = h; const ctx = cv.getContext("2d");
-      if (!ctx) return undefined;
-      ctx.putImageData(data, 0, 0);
-      return await new Promise<string | undefined>((res) => cv.toBlob((b) => res(b ? URL.createObjectURL(b) : undefined), "image/png"));
-    }
-  } catch { /* no canvas in this environment: the caller keeps the manifest's debug path */ }
-  return undefined;
-}
+/**
+ * ADR-550: content-hash input per boat atlas — the rasterizer + the boat cell painter source
+ * + that boat's art def; one changed def byte repaints only that boat. One spec map per
+ * painter group: a group looks up only its own atlases (a miss in another group must not
+ * force this group to repaint).
+ */
+const boatSpec = (def: unknown): string => `${Px.toString()}|${paintBoatCell.toString()}|${JSON.stringify(def)}`;
+export const task421Specs = (): Map<string, string> =>
+  new Map(BOAT_IDS.map((id) => [`veh_art_${id}`, boatSpec(BOAT_ART[id])]));
+export const task422Specs = (): Map<string, string> =>
+  new Map(MOTORBOAT_IDS.map((id) => [`veh_art_${id}`, boatSpec(MOTORBOAT_ART[id])]));
+export const task479Specs = (): Map<string, string> =>
+  new Map([["veh_art_sailboat", boatSpec(SAILBOAT_ART)]]);
 
 /**
  * Atlas sources for the three generated atlases (same { url, emissiveUrl } shape as sourcesFromManifest).
@@ -447,39 +441,27 @@ async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray):
  * sprites draw the painted pixels. Returns only the atlases that converted (empty in a canvas-less
  * environment).
  */
-export async function task421AtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  for (const a of paintTask421Atlases()) {
-    const url = await canvasToBlobURL(a.width, a.height, a.pixels);
-    if (url) out.set(a.key, { url, emissiveUrl: null });
-  }
-  return out;
+export async function task421AtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  // ADR-551: thin delegate to `painted-core.ts` (cache-first, groups in parallel, misses in a Worker).
+  return paintPaintedGroup({ name: "task421", specs: task421Specs, paint: paintTask421Atlases, assemble: defaultAssemble }, env, pool);
 }
 
 /**
  * Atlas sources for the three tier-2 motorboat atlases (ADR-422). Same shape as task421AtlasSources;
  * view.ts merges these over the pack/task422 fragment's debug paths before setRegistry.
  */
-export async function task422AtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  for (const a of paintTask422Atlases()) {
-    const url = await canvasToBlobURL(a.width, a.height, a.pixels);
-    if (url) out.set(a.key, { url, emissiveUrl: null });
-  }
-  return out;
+export async function task422AtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  // ADR-551: thin delegate to `painted-core.ts` (cache-first, groups in parallel, misses in a Worker).
+  return paintPaintedGroup({ name: "task422", specs: task422Specs, paint: paintTask422Atlases, assemble: defaultAssemble }, env, pool);
 }
 
 /**
  * Atlas sources for the ADR-479 sailboat atlas. Same shape as task422AtlasSources; view.ts merges
  * these over the pack/task479 fragment's debug path before setRegistry.
  */
-export async function task479AtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  for (const a of paintTask479Atlases()) {
-    const url = await canvasToBlobURL(a.width, a.height, a.pixels);
-    if (url) out.set(a.key, { url, emissiveUrl: null });
-  }
-  return out;
+export async function task479AtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  // ADR-551: thin delegate to `painted-core.ts` (cache-first, groups in parallel, misses in a Worker).
+  return paintPaintedGroup({ name: "task479", specs: task479Specs, paint: paintTask479Atlases, assemble: defaultAssemble }, env, pool);
 }
 
 // ---- menu icons (ADR-357 pattern) -------------------------------------------------------

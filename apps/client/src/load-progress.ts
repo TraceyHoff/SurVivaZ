@@ -86,6 +86,24 @@ export function zombiePose(timeSec: number, moving: boolean, reducedMotion: bool
   return { frame, bob: -Math.abs(Math.sin(timeSec * Math.PI * 2 / 0.4286)) * 3 };
 }
 
+/** ADR-548: one boot-phase entry, optionally marked as a part of another phase (see partitionPhase). */
+export interface PhaseEntry { name: string; ms: number; parent?: string }
+
+/**
+ * ADR-548: split one boot phase into per-group entries that sum to the parent (diag only — the
+ * painting / registry work itself is unchanged; this only labels the time). Every entry carries
+ * `parent`, so main.ts can render the split in the `?diag=1` bracket without double-counting the
+ * parent in the "other" residual. The leftover — work between groups (paper-doll loop, watcher
+ * setup) — lands in `<parent>.other` when positive; each group ms is rounded, so a negative
+ * leftover (≤1 ms per group of rounding) is dropped rather than shown as a negative phase.
+ */
+export function partitionPhase(parent: string, parentMs: number, groups: { name: string; ms: number }[]): PhaseEntry[] {
+  const out: PhaseEntry[] = groups.map((g) => ({ name: g.name, ms: g.ms, parent }));
+  const rest = parentMs - groups.reduce((s, g) => s + g.ms, 0);
+  if (rest > 0) out.push({ name: `${parent}.other`, ms: rest, parent });
+  return out;
+}
+
 /**
  * ADR-370: client cost breakdown — sequential load phases plus free-form notes (warm-up
  * sub-timings), so the blurry-start cost is visible in ?diag=1 and on window.__survivazLoadCost.

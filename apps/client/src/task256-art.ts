@@ -6,6 +6,8 @@
  */
 import type { AtlasSource } from "@engine/render";
 import { Px } from "./task34-art.js";
+import { type PaintedCacheEnv } from "./painted-cache.js";
+import { defaultAssemble, paintPaintedGroup, type PaintWorkerPool } from "./painted-core.js";
 
 export const TASK256_ATLAS_KEYS = ["crops_task256"] as const;
 
@@ -115,30 +117,13 @@ export function paintTask256Atlases(): PaintedAtlas[] {
   return [{ key: "crops_task256", width: 512, height: 256, pixels: px.data }];
 }
 
-async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray): Promise<string | undefined> {
-  try {
-    const data = new ImageData(new Uint8ClampedArray(pixels), w, h);
-    const OC = (globalThis as { OffscreenCanvas?: typeof OffscreenCanvas }).OffscreenCanvas;
-    if (OC) {
-      const cv = new OC(w, h); const ctx = cv.getContext("2d");
-      if (ctx) { ctx.putImageData(data, 0, 0); if (typeof cv.convertToBlob === "function") return URL.createObjectURL(await cv.convertToBlob({ type: "image/png" })); }
-    }
-    const doc = (globalThis as { document?: Document }).document;
-    if (doc) {
-      const cv = doc.createElement("canvas"); cv.width = w; cv.height = h; const ctx = cv.getContext("2d");
-      if (!ctx) return undefined;
-      ctx.putImageData(data, 0, 0);
-      return await new Promise<string | undefined>((res) => cv.toBlob((b) => res(b ? URL.createObjectURL(b) : undefined), "image/png"));
-    }
-  } catch { /* no canvas */ }
-  return undefined;
-}
+/**
+ * ADR-550: content-hash input — the rasterizer + crop painters' source (literal colours count).
+ */
+const TASK256_SPEC = `${Px.toString()}|${paintLettuce.toString()}|${paintHay.toString()}|${paintHayItem.toString()}|${paintHaySeeds.toString()}|${JSON.stringify(Task256Frame)}`;
+export const task256Specs = (): Map<string, string> => new Map(TASK256_ATLAS_KEYS.map((k) => [k, TASK256_SPEC]));
 
-export async function task256AtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  for (const a of paintTask256Atlases()) {
-    const url = await canvasToBlobURL(a.width, a.height, a.pixels);
-    if (url) out.set(a.key, { url, emissiveUrl: null });
-  }
-  return out;
+/** ADR-551: thin delegate to `painted-core.ts` (cache-first, groups in parallel, misses in a Worker). */
+export async function task256AtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  return paintPaintedGroup({ name: "task256", specs: task256Specs, paint: paintTask256Atlases, assemble: defaultAssemble }, env, pool);
 }

@@ -17,6 +17,8 @@
 // safe no-op (returns an empty map) when no canvas exists. A future binary art pass should ship a
 // real footprint atlas and remove footprintAtlasSources().
 import { Px, TASK34_DIR_VEC } from "./task34-art.js";
+import { type PaintedCacheEnv } from "./painted-cache.js";
+import { defaultAssemble, paintPaintedGroup, type PaintWorkerPool } from "./painted-core.js";
 import type { AtlasSource } from "@engine/render";
 
 /** The atlas key (fragment + painter agree) and the sprite key the renderer resolves. */
@@ -83,46 +85,28 @@ export function paintTrackPixels(): { width: number; height: number; pixels: Uin
   return { width: FRAME * 8, height: FRAME, pixels: px.data };
 }
 
-/** Rasterized pixels -> PNG blob URL (the task34/task256/task355 copy; undefined when no canvas exists). */
-async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray): Promise<string | undefined> {
-  try {
-    // TS 5.9 (CI's pinned version) types ImageData's data as Uint8ClampedArray<ArrayBuffer>; our pixels are
-    // Uint8ClampedArray<ArrayBufferLike>, so copy into a fresh ArrayBuffer-backed array (once, at load).
-    const data = new ImageData(new Uint8ClampedArray(pixels), w, h);
-    const OC = (globalThis as { OffscreenCanvas?: typeof OffscreenCanvas }).OffscreenCanvas;
-    if (OC) {
-      const cv = new OC(w, h); const ctx = cv.getContext("2d");
-      if (ctx) { ctx.putImageData(data, 0, 0); if (typeof cv.convertToBlob === "function") return URL.createObjectURL(await cv.convertToBlob({ type: "image/png" })); }
-    }
-    const doc = (globalThis as { document?: Document }).document;
-    if (doc) {
-      const cv = doc.createElement("canvas"); cv.width = w; cv.height = h; const ctx = cv.getContext("2d");
-      if (!ctx) return undefined;
-      ctx.putImageData(data, 0, 0);
-      return await new Promise<string | undefined>((res) => cv.toBlob((b) => res(b ? URL.createObjectURL(b) : undefined), "image/png"));
-    }
-  } catch { /* no canvas in this environment: the caller keeps the manifest's debug path */ }
-  return undefined;
-}
+/**
+ * ADR-550: content-hash inputs — the rasterizer + the decal cell painter's source.
+ */
+const FOOTPRINT_SPEC = `${Px.toString()}|${paintFootprintCell.toString()}`;
+const TRACK_SPEC = `${Px.toString()}|${paintTrackCell.toString()}`;
+
+/** ADR-551: content-hash inputs (exported for `painted-core.ts` + `painted-parallel.ts`). */
+export const footprintSpecs = (): Map<string, string> => new Map([[FOOTPRINT_ATLAS_KEY, FOOTPRINT_SPEC]]);
+export const trackSpecs = (): Map<string, string> => new Map([[TRACK_ATLAS_KEY, TRACK_SPEC]]);
 
 /**
  * Atlas sources for the footprint atlas (same { url, emissiveUrl } shape as sourcesFromManifest).
  * view.ts merges this over the manifest's debug path before setRegistry, so the registry's footprint
  * sprite draws the painted pixels. Returns an empty map in a canvas-less environment.
  */
-export async function footprintAtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  const a = paintFootprintPixels();
-  const url = await canvasToBlobURL(a.width, a.height, a.pixels);
-  if (url) out.set(FOOTPRINT_ATLAS_KEY, { url, emissiveUrl: null });
-  return out;
+export async function footprintAtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  // ADR-551: thin delegate to `painted-core.ts` (cache-first, groups in parallel, misses in a Worker).
+  return paintPaintedGroup({ name: "footprint", specs: footprintSpecs, paint: () => [{ key: FOOTPRINT_ATLAS_KEY, ...paintFootprintPixels() }], assemble: defaultAssemble }, env, pool);
 }
 
 /** ADR-501: atlas sources for the animal-track atlas (same contract as footprintAtlasSources). */
-export async function trackAtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  const a = paintTrackPixels();
-  const url = await canvasToBlobURL(a.width, a.height, a.pixels);
-  if (url) out.set(TRACK_ATLAS_KEY, { url, emissiveUrl: null });
-  return out;
+export async function trackAtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  // ADR-551: thin delegate to `painted-core.ts` (cache-first, groups in parallel, misses in a Worker).
+  return paintPaintedGroup({ name: "track", specs: trackSpecs, paint: () => [{ key: TRACK_ATLAS_KEY, ...paintTrackPixels() }], assemble: defaultAssemble }, env, pool);
 }

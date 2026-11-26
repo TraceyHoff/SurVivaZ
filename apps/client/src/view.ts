@@ -24,8 +24,8 @@ import { clanPieceTint, clanPieceTintPair } from "./clan-tint.js";
 import { pieceVariantOpts } from "./piece-variant.js";
 import { DoorView, doorArt } from "./door-view.js";
 import { loadManifest, buildPieceVisual, quarterTurn, type AssetRegistry } from "@engine/assets";
-import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard, setResizeSlicing, type VfxSpawn } from "@engine/render";
-import { countFraction } from "./load-progress.js";
+import { BuildGhost, pieceArtRow, pieceRotFlags, ROT_NO_OCCLUDE, IsoRenderer, Canvas2DRenderer, chooseRenderer, Sprite, Shadow, LightSource, Occluder, SpriteAlpha, SpriteFlag, sourcesFromManifest, coreAppearanceBinding, CameraTargetGuard, setResizeSlicing, type AtlasSource, type VfxSpawn } from "@engine/render";
+import { countFraction, partitionPhase } from "./load-progress.js";
 import { isWarmupCandidate, warmupPageBudget, type WarmupResult } from "@engine/render";
 import { GrazedTiles } from "@engine/render";
 import { VehicleView, type RiderPlacement, type VehicleSnapshot, type VehicleRenderDef } from "@engine/render";
@@ -78,7 +78,7 @@ import { Burning, Driver, weaponClassOf, Stance, StanceMode, netIdEntity, bedSpo
 import { animChainFor, bedFit, type AnimChainCtx } from "@engine/render";
 import { floorToTerrainZ, worldToScreen } from "@engine/world";
 import { RaidFx, useRaidBurning, type RaidPiece } from "./raid-fx.js";
-import { MANIFEST_INDEX, withCharArtFragment, loadMergedManifestWith, type ManifestFragmentRef } from "./manifest-index.js";
+import { MANIFEST_INDEX, withCharArtFragment, loadMergedManifestWith, loadWearShard, type ManifestFragmentRef, type ManifestShardRef, type WearShardIO } from "./manifest-index.js";
 import { task34AtlasSources, TASK34_ATLAS_KEYS } from "./task34-art.js";
 import { task256AtlasSources, TASK256_ATLAS_KEYS } from "./task256-art.js";
 import { task355AtlasSources, installStoreMenuIcons, TASK355_ATLAS_KEYS } from "./task355-art.js";
@@ -89,6 +89,8 @@ import { task421AtlasSources, installBoatMenuIcons, TASK421_ATLAS_KEYS } from ".
 import { task422AtlasSources, installMotorboatMenuIcons, TASK422_ATLAS_KEYS } from "./task421-art.js";
 import { task479AtlasSources, installSailboatMenuIcons, TASK479_ATLAS_KEYS } from "./task421-art.js";
 import { task540AtlasSources, TASK540_ATLAS_KEYS } from "./task540-art.js"; // ADR-540: cougar + wolverine
+import { prunePaintedCache } from "./painted-cache.js"; // ADR-550: prune stale painted-PNG hashes after boot
+import { createPaintWorkerPool } from "./painted-parallel.js"; // ADR-551: paint the 13 groups in parallel / in Workers
 import { installGuideArt } from "./task364-art.js";
 import { installGuideMenuIcon } from "./guide-art.js";
 import { installWetWoodIcon } from "./wetwood-art.js"; // ADR-457: wet firewood's own icon
@@ -357,21 +359,31 @@ export class IsoView {
     for (const c of [VAnim, VPiece, VWet, VTemp, VFuel, VEquip, VOffHand, VBurn, VSlotDye]) this.view.register(c);
     useRaidBurning(renderer.burning, registry); // ADR-242: pvp_clan raid flames when served
     const cat = noCosmetics ? undefined : registry.cosmetics;
-    if (cat?.size) this.view.register(Appearance);
+    // ADR-555: the boot catalog exists but is empty until the wear shards lazy-load, so Appearance
+    // is registered (and the appearance binding installed) on the catalog's presence, not its size —
+    // resolveLayers already skips unknown wearables, so characters draw body-only until the shards
+    // land instead of losing their replicated Appearance entirely.
+    if (cat) this.view.register(Appearance);
     renderer.bindGameplay({ animState: VAnim, buildPiece: VPiece, wetness: VWet, bodyTemp: VTemp, lit: VFuel, burning: VBurn, pieceState: (e) => this.pieceStates.get(e), pieceSwing: (e, now) => this.doors.swing(e, now), pieceRoofFx: (e) => (e === this.ghost?.entity ? this.roofPreview?.fx : this.roofs.binding(e)), pieceRoofPlane: (x, y, l) => this.roofs.planeOver(x, y, l), pieceSwingSprite: (e) => this.doors.swingSprite(e), pieceScale: (e) => this.pieceScales.get(e), pieceLit: (e) => this.pieceLit.get(e), pieceTints: (e) => this.pieceTintPairs.get(e), litPieces: () => this.litHearths,
       carriedSprite: (e) => this.carriedOf.get(e), bedFit: (e) => this.bedOf.get(e)?.fit, riderClip: (e) => this.riderClipOf.get(e), riderWindow: (e) => this.riderWinOf.get(e), // ADR-244 carry socket / bed fit
       hitFlash: (e) => this.hitPoseOf.get(e)?.flash ?? 0, hitTilt: (e) => this.hitPoseOf.get(e)?.tilt ?? 0,
       animRate: (e, st) => (st === 1 && this.characters.has(e) ? this.walkRate : undefined),
       animChain: (e, st, elapsed) => ((st === 3 || st >= 13) && this.characters.has(e) ? animChainFor(st, this.animCtx(e, elapsed)) : undefined), // ADR-241
       equipment: VEquip, heldSprite: (item) => this.heldSpriteOf(item), heldDye: (e, slot) => { const a = this.view.getArray(e as Entity, VSlotDye, "colors"); const c = a?.[slot] ?? 0; return c !== 0 ? c : undefined; }, offHand: VOffHand, offHandSprite: (item) => this.offHandSpriteOf(item),
-      ...(cat?.size ? { appearance: { ...coreAppearanceBinding(cat), override: (_w: unknown, ve: number) => { const g = this.gearOf.get(ve) ?? null; return this.charArtOn(ve) ? { salt: (g?.salt ?? 0) + 7919, parts: g?.parts ?? [] } : g; }, mapLayers: <L extends { sprite: number; slot: string; layerName?: string }>(ve: number, ls: readonly L[]): L[] => this.charArtLayers(ve, ls) } } : {}) });
+      ...(cat ? { appearance: { ...coreAppearanceBinding(cat), override: (_w: unknown, ve: number) => { const g = this.gearOf.get(ve) ?? null; return this.charArtOn(ve) ? { salt: (g?.salt ?? 0) + 7919, parts: g?.parts ?? [] } : g; }, mapLayers: <L extends { sprite: number; slot: string; layerName?: string }>(ve: number, ls: readonly L[]): L[] => this.charArtLayers(ve, ls) } } : {}) });
   }
   /** ADR-370: boot warm-up result (first-view page-ins), read by main.ts for the load-cost breakdown. */
   warmupResult: WarmupResult | undefined;
   /** ADR-380: ms per boot sub-phase inside IsoView.create (renderer / manifest / painted / registry.* / warmup /
    *  variants / lighting), read by main.ts into the ?diag=1 load-cost breakdown. The registry step is split by
-   *  atlas.rebuildTimings; without it (Canvas2D) the whole setRegistry call is one "registry" phase. */
-  bootPhases: { name: string; ms: number }[] = [];
+   *  atlas.rebuildTimings; without it (Canvas2D) the whole setRegistry call is one "registry" phase.
+   *  ADR-548: entries with `parent` are parts of the named phase (painted.<group>, registry.* splits) —
+   *  main.ts renders them but keeps them out of the "other" residual, so they never double-count. */
+  bootPhases: { name: string; ms: number; parent?: string }[] = [];
+  /** ADR-548: painted PNG bytes per atlas (blob.size), read by main.ts for the ?diag=1 load-cost note. */
+  paintedAtlasBytes: { key: string; bytes: number }[] = [];
+  /** ADR-548: cold-atlas bytes + body-page count note (not ms — see IsoView.create), read by main.ts. */
+  registryNote: string | undefined;
   /** ADR-240: `charArt` setting (?charArt= / localStorage): v1 (default), v2s = local player only, v2s-all = every character. */
   charArt: CharArt = parseCharArt(new URLSearchParams(globalThis.location?.search ?? "").get("charArt"), (() => { try { return globalThis.localStorage?.getItem("charArt"); } catch { return null; } })());
   private charArtMapper?: CharArtMapper;
@@ -458,11 +470,54 @@ export class IsoView {
   private netRef: World | null = null;
   get appearanceEnabled(): boolean { return this.view.isRegistered(Appearance); }
 
+  /** ADR-555: wear shards excluded from the boot manifest, in index order; empty once loaded. */
+  deferredWearShards: ManifestShardRef[] = [];
+  private wearIO: WearShardIO | undefined;
+  private wearArtPackBase = "";
+  private wearLoad: Promise<void> | undefined;
+  private wearDisabled = false;
+  /**
+   * ADR-555: lazy-load every deferred wear shard into the boot registry (in place — sprite ids are
+   * stable via ids.lock.json, so entities already holding wearable ids keep working), extend the
+   * atlas sources with the merged wear atlases (painted blob sources already in the map are never
+   * overwritten; paper-doll pages stay 1x-only as at boot), and rebuild the atlas registry so the
+   * wear pages can stream. Idempotent and in-flight-guarded: concurrent triggers share one load,
+   * and a failed shard stays deferred for a later retry. Called before the character creator opens
+   * (main.ts) and when a replicated look first names a wearable the boot catalog does not know.
+   * The rebuild is a one-off menu/entry cost, not a boot cost — it never runs before first paint.
+   */
+  async ensureWearShards(): Promise<void> {
+    if (this.wearDisabled || !this.deferredWearShards.length) return;
+    if (!this.wearLoad) {
+      this.wearLoad = (async () => {
+        const io = this.wearIO; if (!io) return;
+        const cats = this.deferredWearShards.map((s) => s.category);
+        await Promise.all(cats.map((c) => loadWearShard(this.registry, c, io)));
+        this.deferredWearShards = [];
+        const sources = new Map(this.renderer.atlas.sources);
+        for (const [k, src] of sourcesFromManifest(this.registry, `${this.wearArtPackBase}manifest.json`, {}, { probeSiblings: false })) {
+          if (sources.has(k)) continue;
+          if (/(^|\/)customization\//.test(this.registry.atlases.get(k)?.image ?? "")) delete src.pages;
+          sources.set(k, src);
+        }
+        setResizeSlicing(false);
+        try { await this.renderer.atlas.setRegistry(this.registry, sources); } finally { setResizeSlicing(true); }
+      })().catch((e) => {
+        // Keep the shards that did not land deferred so a later trigger retries only those.
+        const loaded = this.registry.wearMerge?.loaded ?? [];
+        this.deferredWearShards = this.deferredWearShards.filter((s) => !loaded.includes(s.category));
+        this.wearLoad = undefined;
+        console.warn("[view] wear shards failed to load", e);
+      });
+    }
+    await this.wearLoad;
+  }
+
   static async create(canvas: HTMLCanvasElement, base: string, ov: ViewOverrides = {}, onStage: (stage: string, f: number, label?: string) => void = () => {}): Promise<IsoView> {
     // ADR-380: split the boot load-cost bucket into sub-phases (cheap performance.now() marks, no allocations per
     // frame — this runs once at boot; the split is what Tracey's next ?diag=1 shows, so the 28.5 s boot can be cut
     // where it actually costs instead of by guessing).
-    const phases: { name: string; ms: number }[] = [];
+    const phases: { name: string; ms: number; parent?: string }[] = [];
     const phase = (name: string, t0: number): void => { phases.push({ name, ms: Math.round(performance.now() - t0) }); };
     let t0 = performance.now();
     onStage("renderer", 0);
@@ -484,37 +539,64 @@ export class IsoView {
     phase("renderer", t0); t0 = performance.now();
     onStage("manifest", 0);
     const packBase = `${base}art/pack/`;
-    const { registry } = await loadMergedManifest(`${base}art/`);
+    const { registry, deferredWearShards, wearIO } = await loadMergedManifest(`${base}art/`);
     onStage("atlases", 0);
     const sources = sourcesFromManifest(registry, packBase + "manifest.json", {}, { probeSiblings: false });
     phase("manifest", t0); t0 = performance.now();
-    // Task 34: generated bee / owl / apiary atlases — paint them and point their sources at blob URLs (the
-    // fragment's debug/*.png paths are never fetched). Only for atlases the merged registry actually has.
-    for (const [k, src] of await task34AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-257: unique wild lettuce / hay atlases (wheat already has nature_crops art).
-    for (const [k, src] of await task256AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-356: dedicated ore / log / stick / crop / stone store atlases (fill states live in the fragment).
-    for (const [k, src] of await task355AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-361: dedicated drawn-vehicle + harness atlases (world sprites keyed by def id, harness overlays).
-    for (const [k, src] of await task361AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-410: sloped-ground tilesets (ramps/wedges per material x season, 1x + @2x pages painted at runtime).
-    for (const [k, src] of await task410AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-420: dedicated dock / shipyard atlases (world sprites keyed dec_dock / dec_shipyard).
-    for (const [k, src] of await task420AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-421: dedicated tier-1 boat atlases (world sprites keyed by def id, like ADR-361).
-    for (const [k, src] of await task421AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-422: dedicated tier-2 motorboat atlases (world sprites keyed by def id, like ADR-421).
-    for (const [k, src] of await task422AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-479: dedicated sailboat atlas (world sprite keyed by def id, like ADR-421/422).
-    for (const [k, src] of await task479AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-540: dedicated cougar + wolverine atlases (animal sprites animal_cougar / animal_wolverine).
-    for (const [k, src] of await task540AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-455: dedicated footprint atlas (one boot print, 8 facings — the ground decal for snow/mud).
-    for (const [k, src] of await footprintAtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-501: dedicated animal-track atlas (two small iso-aligned ovals, 8 facings — the ground decal animals leave).
-    for (const [k, src] of await trackAtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
-    // ADR-493: dedicated held-rod atlas (a rod at the grip, 8 facings — the held sprite for the fishing rod).
-    for (const [k, src] of await rodAtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-548: time one painter group + record its PNG bytes (diag only — same painters,
+    // same sources). blob.size comes from fetching the in-memory blob: URL (no network, no
+    // copy); a source with several blob URLs (task410: 1x + @2x pages) sums them. A fetch
+    // that fails (no fetch in this environment) leaves the size unknown; the timing still
+    // stands. ADR-551: the groups run concurrently, so a group's ms is its own
+    // start-to-finish wall time and groups may overlap; start order is still the
+    // listed order below.
+    const paintedGroups: { name: string; ms: number }[] = [];
+    const paintedAtlasBytes: { key: string; bytes: number }[] = [];
+    const paintGroup = async (name: string, run: () => Promise<Map<string, AtlasSource>>): Promise<void> => {
+      const g0 = performance.now();
+      const out = await run();
+      for (const [k, src] of out) if (registry.atlases.has(k)) sources.set(k, src);
+      for (const [k, src] of out) {
+        let bytes = 0, seen = false;
+        for (const u of [src.url, src.emissiveUrl, ...(src.pages ?? []).map((p) => p.url)]) {
+          if (!u || !u.startsWith("blob:")) continue;
+          try { bytes += (await (await fetch(u)).blob()).size; seen = true; } catch { /* size unknown */ }
+        }
+        if (seen) paintedAtlasBytes.push({ key: k, bytes });
+      }
+      paintedGroups.push({ name: `painted.${name}`, ms: Math.round(performance.now() - g0) });
+    };
+    // ADR-551: the 13 painter groups run CONCURRENTLY (one Promise.all), not one after another.
+    // Each group is still cache-first (ADR-550: a warm boot paints nothing anywhere); on a cold
+    // boot the misses paint in the Worker pool (2–4 paint-worker.ts threads, created lazily on
+    // the first miss, so a warm boot pays nothing for threads it never uses) and fall back to
+    // main-thread paint if no Worker exists or a worker fails. Per-group ms may therefore
+    // OVERLAP, so the group entries can sum past the painted parent — partitionPhase drops
+    // the (negative) residual instead of showing it, as ADR-548 already documents. The pool
+    // is terminated once the phase closes: painting is boot-only work.
+    const paintPool = createPaintWorkerPool();
+    try {
+      await Promise.all([
+        paintGroup("task34", () => task34AtlasSources({}, paintPool)),
+        paintGroup("task256", () => task256AtlasSources({}, paintPool)),
+        paintGroup("task355", () => task355AtlasSources({}, paintPool)),
+        paintGroup("task361", () => task361AtlasSources({}, paintPool)),
+        paintGroup("task410", () => task410AtlasSources({}, paintPool)),
+        paintGroup("task420", () => task420AtlasSources({}, paintPool)),
+        paintGroup("task421", () => task421AtlasSources({}, paintPool)),
+        paintGroup("task422", () => task422AtlasSources({}, paintPool)),
+        paintGroup("task479", () => task479AtlasSources({}, paintPool)),
+        paintGroup("task540", () => task540AtlasSources({}, paintPool)),
+        paintGroup("footprint", () => footprintAtlasSources({}, paintPool)),
+        paintGroup("track", () => trackAtlasSources({}, paintPool)),
+        paintGroup("rod", () => rodAtlasSources({}, paintPool)),
+      ]);
+    } finally {
+      paintPool?.terminate();
+    }
+    // ADR-548: the menu-icon paints below are one group (painted.icons) — ~31 small (128x128) icons, each
+    // re-painting a cell and doing a synchronous toDataURL("image/png") on the same thread.
+    const iconsT0 = performance.now();
     // ADR-357: the five store build-menu icons point at items_build frames 297–301, which are transparent
     // in the shipped atlas (no binary could ship through the snapshot route) — paint them at runtime from
     // the stores' own world art so the build menu shows them. Safe no-op without a canvas.
@@ -552,6 +634,7 @@ export class IsoView {
     // runtime from the fishing-rod-art painter and registered in ICON_DATA, so the inventory /
     // hotbar / toast / crafting icons for fishing_rod render it. Safe no-op without a canvas.
     installFishingRodIcon();
+    paintedGroups.push({ name: "painted.icons", ms: Math.round(performance.now() - iconsT0) });
     // Art's customization pack (~220 paper-doll atlases, 1008x960): the renderer packs every atlas into one 2048² texture
     // array, so these alone need ~1.7 GiB of VRAM ("Texture total allocation size is too large" -> every sprite black).
     // Until Render loads outfit layers on demand, keep them out unless the array fits (?cz=1 forces them in).
@@ -565,6 +648,7 @@ export class IsoView {
       for (const k of custom) { (registry.atlases as Map<string, unknown>).delete(k); sources.delete(k); }
       noCosmetics = true;
     }
+    // ADR-555: with ?cz=0 the wear shards stay out for good (their atlases were just deleted above).
     // ADR-118: count atlas/KTX2 image responses as they land (Resource Timing works for fetch and <img>); expected =
     // the eager atlases (paper-doll/streamed ones load on demand later), so the fraction stays honest and capped < 1.
     // Task 34 blob URLs carry no file extension, so the png-regex watcher never counts them; exclude them so the fraction stays honest.
@@ -575,11 +659,45 @@ export class IsoView {
     // per-6ms frame yields turn resize CPU into several seconds of wall time during boot); re-tiers keep slicing.
     // The registry split comes from atlas.rebuildTimings; without it (Canvas2D) the whole call is one phase.
     phase("painted", t0); t0 = performance.now();
+    // ADR-550: prune painted PNGs from retired painter hashes — bounded, async, never blocks
+    // boot (fire-and-forget; prunePaintedCache never throws). The keep-set is the keys this
+    // boot looked up or stored.
+    void prunePaintedCache();
+    // ADR-548: per-group split of the painted bracket (one entry per painter group + icons; the
+    // residual — paper-doll loop, watcher setup — lands in painted.other). The groups sum to the
+    // parent (up to ~1 ms of rounding per group); main.ts renders them via the parent marker.
+    for (const e of partitionPhase("painted", phases[phases.length - 1]!.ms, paintedGroups)) phases.push(e);
     setResizeSlicing(false);
     try { await renderer.atlas.setRegistry(registry, sources); } finally { setResizeSlicing(true); stopWatch(); }
     const rt = renderer.atlas?.rebuildTimings;
-    if (rt) for (const [k, label] of [["fetchDecode", "registry.fetch"], ["fitBudget", "registry.fitBudget"], ["halveSide", "registry.halveSide"], ["layout", "registry.layout"], ["upload", "registry.upload"], ["tables", "registry.tables"], ["bodies", "registry.bodies"], ["restore", "registry.restore"]] as const) phases.push({ name: label, ms: Math.round(rt[k]) });
-    else phases.push({ name: "registry", ms: Math.round(performance.now() - t0) });
+    let registryNote: string | undefined;
+    if (rt) {
+      // ADR-548: the rebuild sub-splits ride as parent-marked entries (parts of registry.fetch /
+      // registry.fitBudget / registry.upload — never double-counted; see partitionPhase/main.ts).
+      // Existing phase names/fields are intact — only sub-fields are added.
+      const rtPairs: { key: keyof typeof rt; label: string; parent?: string }[] = [
+        { key: "fetchDecode", label: "registry.fetch" },
+        { key: "fetchDecodeFetch", label: "registry.fetch.fetch", parent: "registry.fetch" },
+        { key: "fetchDecodeDecode", label: "registry.fetch.decode", parent: "registry.fetch" },
+        { key: "fitBudget", label: "registry.fitBudget" },
+        { key: "fitBudgetSearch", label: "registry.fitBudget.search", parent: "registry.fitBudget" },
+        { key: "fitBudgetResizes", label: "registry.fitBudget.resizes", parent: "registry.fitBudget" },
+        { key: "halveSide", label: "registry.halveSide" },
+        { key: "layout", label: "registry.layout" },
+        { key: "upload", label: "registry.upload" },
+        { key: "uploadAlloc", label: "registry.upload.alloc", parent: "registry.upload" },
+        { key: "uploadCopies", label: "registry.upload.copies", parent: "registry.upload" },
+        { key: "uploadMips", label: "registry.upload.mips", parent: "registry.upload" },
+        { key: "tables", label: "registry.tables" },
+        { key: "bodies", label: "registry.bodies" },
+        { key: "restore", label: "registry.restore" },
+      ];
+      for (const p of rtPairs) phases.push({ name: p.label, ms: Math.round(rt[p.key]), ...(p.parent ? { parent: p.parent } : {}) });
+      // ADR-548: cold-atlas bytes + body-page count are not ms, so they ride as a load-cost note
+      // (main.ts), not a sub-phase — the byte share ADR-552 needs and the count ADR-553 needs.
+      const vs = renderer.atlas?.vramStats;
+      registryNote = `registry: ${vs?.coldAtlases ?? 0} cold atlases (${(rt.coldAtlasBytes / 1048576).toFixed(1)} MB) · ${rt.bodyPages} body pages`;
+    } else phases.push({ name: "registry", ms: Math.round(performance.now() - t0) });
     t0 = performance.now();
     // ADR-370: warm-up window — page the visible-pin lazy sheets (furniture / buildings / openings /
     // defenses stream pages, in view at almost any spawn) in before the first paint, at near-player
@@ -609,7 +727,10 @@ export class IsoView {
     renderer.camera.zoom = DESKTOP_ZOOM; // main.ts attachZoom then sizes it per viewport (ADR-100)
     phase("lighting", t0);
     onStage("ready", 0);
-    const view = new IsoView(renderer, registry, ov, lights); view.base = base; view.warmupResult = warmupResult ?? undefined; view.bootPhases = phases; return view;
+    const view = new IsoView(renderer, registry, ov, lights); view.base = base; view.warmupResult = warmupResult ?? undefined; view.bootPhases = phases; view.paintedAtlasBytes = paintedAtlasBytes; view.registryNote = registryNote;
+    // ADR-555: the boot manifest excluded the wear shards — the view owns the lazy load from here.
+    view.deferredWearShards = deferredWearShards; view.wearIO = wearIO; view.wearArtPackBase = packBase; view.wearDisabled = noCosmetics;
+    return view;
   }
 
   private ghost: BuildGhost | undefined;
@@ -898,6 +1019,10 @@ export class IsoView {
         const a = dressed && !dressed.has(e) ? undefined : net.get(e, Appearance);
         if (!a && v.has(ve, Appearance)) v.remove(ve, Appearance); const va = a ? v.get(ve, Appearance) : undefined;
         if (a && (!va || va.version !== a.version)) { const init = { bodyType: a.bodyType, skinTone: a.skinTone, version: a.version, parts: [...a.parts], primary: [...a.primary], secondary: [...a.secondary] }; if (va) v.set(ve, Appearance, init); else v.add(ve, Appearance, init); }
+        // ADR-555: a replicated look naming a wearable the boot catalog does not know yet is the
+        // first wear-page request — load the wear shards (fire-and-forget; the character draws
+        // body-only until the load lands and the atlas rebuilds, then dresses on the next sync).
+        if (a && this.deferredWearShards.length && a.parts.some((id) => id !== 0 && !this.registry.cosmetics?.wearable(id))) void this.ensureWearShards();
       }
       if (net.isRegistered(Equipment) && net.has(e, Equipment)) { // ADR-135 held item + worn gear
         this.netRef = net; const eq = net.get(e, Equipment); const mh = eq?.mainHandItem ?? 0; const ms = eq?.mainHandSlot ?? 255;
@@ -1397,7 +1522,7 @@ interface Spec {
 /** Art's sfx_animal_<species> (2 variants, ogg); silently skipped if audio is unavailable or blocked before a user gesture. */
 
 /** `<art>/manifests.index.json` (written by vite.config.ts with only the served fragments) or MANIFEST_INDEX (manifest-index.ts). */
-async function loadMergedManifest(art: string): Promise<ReturnType<typeof loadManifest>> {
+async function loadMergedManifest(art: string): Promise<ReturnType<typeof loadManifest> & { deferredWearShards: ManifestShardRef[]; wearIO: WearShardIO }> {
   const get = async (u: string): Promise<unknown> => { try { const r = await assetFetch(u); return r.ok ? await r.json() : undefined; } catch { return undefined; } };
   let idx = (await get(art + "manifests.index.json")) as { fragments?: ManifestFragmentRef[]; gz?: boolean } | undefined;
   // ADR-406: the index is a single point of failure for the whole manifest load — if it 404s (a stale
@@ -1420,11 +1545,13 @@ async function loadMergedManifest(art: string): Promise<ReturnType<typeof loadMa
   const charArt = parseCharArt(new URLSearchParams(globalThis.location?.search ?? "").get("charArt"), (() => { try { return globalThis.localStorage?.getItem("charArt"); } catch { return null; } })());
   const list = withCharArtFragment(idx?.fragments?.length ? idx.fragments : MANIFEST_INDEX, charArt); // ADR-240: v2 sample only with charArt
   // ADR-248: shared with the dedicated server (@engine/assets loadMergedManifestWith); atlas paths become absolute per
-  // fragment, so sourcesFromManifest (pack base) loads each PNG from its one source
-  const { result, collisions, warnings } = await loadMergedManifestWith(list, { get: getManifest, getRequired: getManifestRequired, artUrl: new URL(art, location.href).href });
+  // fragment, so sourcesFromManifest (pack base) loads each PNG from its one source.
+  // ADR-555: the boot manifest excludes the wear shards (deferWear) — loadMergedManifestWith returns them as
+  // deferredWearShards for IsoView.ensureWearShards; ADR-549's parallel fragment fetch is unchanged.
+  const { result, collisions, warnings, deferredWearShards } = await loadMergedManifestWith(list, { get: getManifest, getRequired: getManifestRequired, artUrl: new URL(art, location.href).href, excludeWearShards: true });
   if (collisions.length) console.info(`[view] manifest: ${collisions.length} duplicate keys kept from the first fragment (${collisions.slice(0, 5).map((c) => `${c.section}.${c.key}`).join(", ")}...)`);
   for (const w of warnings) if (!/ defined in /.test(w)) console.warn(`[view] manifest: ${w}`);
-  return result;
+  return { ...result, deferredWearShards, wearIO: { get: getManifest, getRequired: getManifestRequired, artUrl: new URL(art, location.href).href, lock: result.lock } };
 }
 
 /** Daylight for the black-frame self-check; renderers without a `lighting` state (Canvas2D) count as night (check skipped). */

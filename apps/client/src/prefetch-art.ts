@@ -1,5 +1,5 @@
 /** ADR-307: start warming resident atlas images as soon as the page opens, in parallel with the main bundle. */
-import { assetFetch, assetJsonGz, collectPrefetchUrls, collectWarmupPrefetchUrls, setAssetCacheVersion, warmAssetCache } from "../../../packages/render/src/assets/asset-fetch.js";
+import { assetFetch, assetJsonGz, collectPrefetchUrls, collectShardManifestUrls, collectWarmupPrefetchUrls, setAssetCacheVersion, warmAssetCache, warmManifestGz } from "../../../packages/render/src/assets/asset-fetch.js";
 
 declare const __BUILD_HASH__: string | undefined;
 setAssetCacheVersion((typeof __BUILD_HASH__ !== "undefined" && __BUILD_HASH__) || "dev");
@@ -15,13 +15,18 @@ void (async () => {
     // ADR-394: same cached `.json.gz` read view.ts makes, so its manifest load joins this one / hits the cache
     const getManifest = idx?.gz ? (u: string): Promise<unknown> => assetJsonGz(u).catch(() => undefined) : get;
     const frags = idx?.fragments?.length ? idx.fragments : [{ url: "pack/manifest.json" }];
-    const urls: string[] = []; const warmUrls: string[] = [];
+    const urls: string[] = []; const warmUrls: string[] = []; const shardUrls: string[] = [];
     await Promise.all(frags.map(async (f) => {
       if (f.stream) return;
       const url = new URL(f.url, art).href;
       const m = await getManifest(url);
-      if (m) { urls.push(...collectPrefetchUrls(m, url)); warmUrls.push(...collectWarmupPrefetchUrls(m, url)); }
+      if (m) { urls.push(...collectPrefetchUrls(m, url)); warmUrls.push(...collectWarmupPrefetchUrls(m, url)); shardUrls.push(...collectShardManifestUrls(m, url)); }
     }));
+    // ADR-549: warm the customization shards + ids.lock (fetch + gunzip only, no JSON.parse) so view.ts's
+    // manifest load starts from Cache Storage hits. Gz builds only: the dev server serves plain JSON,
+    // where the shards are local and fast. Runs before the image warm — the manifest phase precedes
+    // registry.fetch in view.ts.
+    if (idx?.gz) await warmManifestGz([...shardUrls, `${art}pack/ids.lock.json`]);
     await warmAssetCache(urls);
     // ADR-370: after the resident set, warm the first-view stream sheets (visible-pin pages the boot
     // warm-up will page in) so their first page-in is a cache hit, not a network fetch + decode.

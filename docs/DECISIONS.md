@@ -14265,3 +14265,579 @@ faster on the user's phone still needs a cold-start playtest with `?diag=1`. The
 drain is deliberately kept, so server boot still pays the whole boot-area stamp
 synchronously before the first tick — that cost is load time, not frame time, and ADR-203
 depends on it.
+
+## ADR-548: Instrument the boot phases (diagnostic, no behaviour change) (SurVivaZ)
+
+**Context.** The phone's 2026-11-25 `?diag=1` cold start (prep §0) put boot at 31,946 ms of a
+35,935 ms load, but the buckets are too coarse to size any fix: one `painted` bracket (14,217 ms)
+covers 13 painter groups + ~31 menu icons with no paint-vs-PNG-encode split; one `fetchDecode`
+bucket (4,362 ms) cannot separate fetch from decode; `upload` (1,548 ms) cannot separate
+allocation from copies from mip generation; `fitBudget` (1,112 ms) cannot separate the trial
+packings from the image resizes; and nothing records the cold-atlas byte share or the body-page
+count that ADR-552/553 are sized by. Every later slice in this batch (ADR-549–556) is gated on
+the phone's split, so the instrumentation comes first and changes no behaviour: same painting,
+same fetches, same registry output (byte-identical boot outcome).
+
+**Design — painted (`apps/client/src/view.ts`, `apps/client/src/main.ts`,
+`apps/client/src/load-progress.ts`).** Each of the 13 `*AtlasSources()` calls in
+`IsoView.create` is timed through a local `paintGroup()` helper (same painters, same order,
+same sources) and the ~31 menu-icon installs are timed as one `painted.icons` group; the
+entries are built by the pure `partitionPhase()` helper (`load-progress.ts`), which appends a
+`painted.other` residual (paper-doll loop, watcher setup) so the groups sum to the `painted`
+parent (up to ~1 ms of rounding per group; a negative residual is dropped, never shown).
+Each entry carries `parent: "painted"`, and `main.ts` renders parent-marked entries in the
+`?diag=1` bracket but keeps them out of the `other` residual, so the split never double-counts.
+`paintGroup` also records `blob.size` per atlas (the blob: URLs the painters return are
+re-read — in-memory, no network, no copy; task410 sums its 1x + @2x pages) into
+`IsoView.paintedAtlasBytes`; `main.ts` adds a `painted PNG: X MB in N atlases` note to the
+same `LoadCostBreakdown` that `window.__survivazLoadCost()` formats, so the user's next
+cold-start screenshot shows the per-group split and the cache size ADR-550 needs.
+
+**Design — rebuild (`packages/render/src/assets/atlasManager.ts`).** `rebuildTimings` gains
+additive sub-fields (the eight parent fields keep their old meaning):
+- `fetchDecodeFetch` / `fetchDecodeDecode`: summed per-call durations inside
+`defaultImageLoader` (fetch = `assetFetch` + `blob()`, decode = `createImageBitmap`), tracked
+in the module-level `imageLoadStats` (with `resetImageLoadStats()`) and snapshotted as a delta
+around each rebuild's load phase, plus the `fitToPage` resizes on the decode side. Loads run
+concurrently (cap 8), so the sum apportions work, not wall time: it is >= `fetchDecode`, and
+the trim/repack residue stays in `fetchDecode` only. Zero when a custom imageLoader is used.
+- `uploadAlloc` / `uploadCopies` / `uploadMips`: `texStorage3D` time / residual
+(`texSubImage3D` copies + the frame-table upload that stages them) / `generateMipmap` time per
+array. `upload()` returns the split; the three sum to each upload call's wall time (the
+OOM-retry `scaleList`/layout between re-uploads stays under `upload` only, as before).
+- `fitBudgetSearch` / `fitBudgetResizes`: trial packings (pure CPU) vs the final `scaleList`
+resizes. `fitBudget()` returns the split; the two sum to `fitBudget`.
+- `coldAtlasBytes` / `bodyPages` (not ms): decoded RGBA bytes of cold-tier resident atlases at
+their fitted scale, and the `bodyAtlasKeys()` count — the byte share ADR-552 needs and the
+count ADR-553 needs. Both are also on `vramStats` (`coldAtlasBytes`, `bodyPages`).
+`view.ts` maps the six timing splits to parent-marked `registry.*` boot-phase entries
+(`registry.fetch.fetch`, `registry.fetch.decode`, `registry.fitBudget.search`,
+`registry.fitBudget.resizes`, `registry.upload.alloc`, `registry.upload.copies`,
+`registry.upload.mips`) and composes a `registry: N cold atlases (X MB) · M body pages` note
+from `rebuildTimings` + `vramStats` for the load-cost notes. Two neighbour tests stubbed the
+old void contract of the private `fitBudget`/`upload` (`seamless_retier.test.ts`,
+`adr220_char_fidelity.test.ts`); their stubs now return the zero split — the only test change
+outside the new files.
+
+**Measured (VM, indicative only — the phone re-measurement is still pending; the user runs a
+cold start with `?diag=1` after this lands live).** Paint-only per-group medians (3 reps, no
+PNG encode): task422 1,783 ms, task361 740 ms, task421 695 ms, task410 339 ms (paint +
+downsample), task479 282 ms, task540 121 ms, task355 40 ms, task34 36 ms, task420 10 ms,
+task256 2 ms, rod 1 ms, footprint 0.4 ms, track 0.1 ms — total 4,049 ms in 43 atlases;
+boats + vehicles + sailboat are 86% of VM paint (prep §1 said ~84%). Real `setRegistry` on
+the pack manifest (73 atlases, stub GL, 2 ms stub fetch + 2 ms stub decode): wall 249 ms,
+`fetchDecode` 9.6 ms wall (fetch 226 ms / decode 141 ms summed — the mock bypasses the cap-8
+slot, so the sums are inflated; the split ratio is the indicative part), `fitBudget` 191 ms
+(search 78 ms / resizes 113 ms — resizes dominate in the VM), `upload` 5.3 ms (alloc/mips
+~0 ms under the stub GL, copies 4.7 ms). Cold share at 1x: 4/53 resident atlases, 0.25 MB of
+3.31 MB decoded resident bytes (7.6% by bytes, 7.5% by count — the pack manifest is far
+smaller than the phone's 237 resident / 116 cold, so the phone's byte share is what sizes
+ADR-552, not this). Body pages: 1 in the fixture (the added `body_test` sheet).
+
+**Honest cuts.** (1) `IsoView.create` itself cannot run headlessly (canvas + GL), so the
+painted split is proven by the real `partitionPhase` helper + source pins on the wiring, not
+by running `create` — the phone screenshot is the real proof. (2) Fetch/decode is a summed
+per-call split, not a wall-clock split, by construction under concurrency. (3) `uploadCopies`
+is a residual (copies + frame-table upload + sub-ms planning CPU), not a pure
+`texSubImage3D` timer. (4) Phone re-measurement still owed: cold start with `?diag=1` after
+this lands live — that output gates ADR-550/551 ordering and ADR-552/553 sizing.
+
+Tests: `packages/render/test/adr548_rebuild_timings.test.ts` (2 tests — real `setRegistry`,
+sub-fields sum to parents, cold bytes + body pages present, `vramStats` carries them,
+`defaultImageLoader` accumulates fetch vs decode; both fail without the fix, verified via
+stash) and `apps/client/test/adr548_boot_phases.test.ts` (7 tests — `partitionPhase` sums,
+view/main wiring pins, load-cost rendering, VM per-group painter timings; 5 of 7 fail without
+the fix, verified via stash — the LoadCost rendering guard and the VM measurement pass either
+way by design). Neighbours: render suite 115 files passed / 2 skipped, 742 tests passed /
+2 skipped; client suite 235 files passed / 1 failed / 1 skipped, 1185 tests passed / 1 failed /
+4 skipped — the one failure is the known pre-existing `agents_persist` timeout under load
+(it passes alone, 1/1, and this slice touches no persistence code). Typecheck clean with
+pinned TS 5.9.3 for `packages/render` and `apps/client`. Nothing pushed.
+
+## ADR-549: Manifest fragments in parallel + prefetch expands the shard index (SurVivaZ)
+
+**Context.** The phone's 2026-11-25 `?diag=1` cold start put the `manifest` phase at 5,486 ms of a
+31,946 ms boot (prep §2): ~41 MB of JSON parsed from 36 requests, of which the 24 fragments were fetched
+one at a time in a sequential `for…await` loop — ~24 serialised mobile round-trips on a cold cache — while
+prefetch never expanded the customization shard index, so the 10 shards (2.08 MB gz / 35.6 MB parsed, 86%
+of the phase's bytes) were fetched only by `view.ts`. ADR-548's instrumentation is preserved untouched
+(the `manifest` phase bracket and `loadCost` surfacing keep working; no `view.ts` / `main.ts` /
+`load-progress.ts` change in this slice).
+
+**Design — parallel fragments (`packages/assets/src/manifest-index.ts`).** `loadMergedManifestWith`
+now fetches all fragments concurrently with a worker pool capped at `MANIFEST_LOAD_CONCURRENCY = 6`
+(matching the 6–8 range of `ASSET_FETCH_CONCURRENCY`); each slot records its result (or error) and the
+merge walks the slots in list order, so first-wins merge semantics, optional-fragment skipping, and
+first-error-in-list-order are unchanged from the sequential loop. Same URLs, same merge order, same bytes;
+shard expansion inside a slot is unchanged (v2 indexes still resolve their shards in parallel via
+`resolveManifestShards`). Expected saving: ~(N−1)×RTT of serialised latency — ~1–2.5 s off a cold-cache
+manifest phase at 50–150 ms mobile RTT over 24 fragments; ~0 on warm cache. ADR-248 manifest parity is
+the hard constraint and stays green (identical fragment lists, cosmetics size/hash, `registry.hash`).
+
+**Design — prefetch expands the shard index (`packages/render/src/assets/asset-fetch.ts`,
+`apps/client/src/prefetch-art.ts`).** New `collectShardManifestUrls(manifest, base)` expands a v2 shard
+index into its shard manifest urls (v1 → `[]`), and new `warmManifestGz(urls)` warms gzipped manifest
+files fetch-only: fetch `<url>.gz`, gunzip, store the decoded text in this deploy's Cache Storage — WITHOUT
+`JSON.parse`, so warming the 10 shards (35.6 MB parsed) during bundle load adds no main-thread parse work;
+`view.ts` still parses each shard exactly once, and a later `assetJsonGz` for the same url joins the
+in-flight read (`inflightText`) or hits the cache. Warming runs through the `withAssetSlot` cap (8) and is
+best-effort (a fetch/gunzip failure is swallowed; boot continues without a warm cache). `prefetch-art.ts`
+collects shard urls alongside the atlas/warmup urls and, on gz builds only, warms them plus
+`pack/ids.lock.json` before the resident-image warm — the manifest phase precedes `registry.fetch` in
+`view.ts`, so shards warm first. Dev builds skip it (the dev server serves plain JSON, where the shards
+are local and fast). Note on naming: the shard urls do not go through `collectPrefetchUrls` /
+`warmAssetCache` as first sketched — those warm image bytes via `assetFetch`, but a built dist ships shard
+JSON only as `.json.gz`, so the shards need the gz fetch-only path, not a plain-URL fetch.
+
+**Tests.** New tests 9/9, re-run after the fix; 6 of 9 fail without it (verified via stash of the three
+source files — the 3 passing either way are deliberate semantic-preservation pins: first-wins hash
+equality, first-error-in-list-order, shard expansion under the parallel loop).
+`packages/assets/test/adr549_manifest_parallel.test.ts` (4 tests — mock `get` recording max in-flight:
+≥6 concurrent fragment fetches, ≤ cap, fragments in list order; first-wins merge with the same
+`registry.hash` as a direct sequential `mergeManifests` + `loadManifest`; first error in list order when
+several required fragments fail; a v2 shard index still expands under the parallel loop).
+`packages/render/test/adr549_manifest_prefetch.test.ts` (4 tests — `collectShardManifestUrls` expands a v2
+index to its 10 shard urls, v1 → `[]`; `warmManifestGz` stores decoded text without parsing, proven by
+warming gzipped invalid JSON without throwing, and a second warm is a cache hit, not a refetch; a fetch
+failure is swallowed and the rest still warm; cold-cache simulation — the 10 shard `.gz` bytes + `ids.lock`
+are fetched by the prefetch path, then `assetJsonGz` for each reads from Cache Storage with zero further
+fetches).
+`apps/client/test/adr549_prefetch_shards.test.ts` (1 test — source pins: `prefetch-art.ts` calls
+`collectShardManifestUrls` + `warmManifestGz` for `pack/ids.lock.json` before `warmAssetCache(urls)`, gz
+builds only; the warm path itself is covered behaviourally in the render test, since `prefetch-art.ts`
+runs a top-level side-effect IIFE against `location` and is not importable headlessly).
+
+**Neighbours.** ADR-248 parity run explicitly: `adr248_server_manifest_parity` 2/2 and
+`adr248_dedicated_cosmetics` 4/4 pass (identical fragment lists, cosmetics size/hash, `registry.hash`).
+Existing `adr406_required_manifest_load` 4/4, `manifest_shards`, `adr307_asset_fetch`, `adr394_gzip_json`,
+`adr405_manifest_cache_recovery`, `adr406_manifest_stale_404` — 94/94 across the 9 files run together.
+ADR-548/load-cost neighbours (`adr548_boot_phases`, `adr370_load_cost`, `adr380_boot_load_cost`,
+`adr543_load_diagnostics`) 28/28 across 6 files with the parity files. Full `packages/assets` +
+`packages/render` suites: 150 files passed / 1 failed / 2 skipped, 1022 tests passed / 1 failed /
+2 skipped — the one failure is the known pre-existing `pack.test.ts` KEYS.md ENOENT (the file is absent
+from this sparse checkout; fails alone 1/56, unchanged — never edit `pack.test.ts`). Typecheck clean with
+pinned TS 5.9.3 for `packages/assets`, `packages/render`, and `apps/client`. Nothing pushed.
+
+**Honest cuts.** (1) The ~1–2.5 s saving is a prep estimate from mobile RTT, not a phone measurement —
+`view.ts` still parses the same 41 MB once, so the parse share of the 5,486 ms is untouched; the real
+split needs the user's cold start with `?diag=1` after ADR-548 lands live. (2) `JSON.parse` still happens
+inside each fragment's `get` (`assetJsonGz`), so up to 6 parses can overlap briefly on the main thread —
+the cap of 6 is the mitigation, per the prep. (3) A failure in one fragment no longer short-circuits the
+others: every fragment fetch still starts, and the first error in list order surfaces after all settle.
+(4) Prefetch warming is best-effort and gz-build-only; a cold cache with a failed shard warm behaves
+exactly as before (view.ts fetches the shard itself).
+
+## ADR-550: Painted PNG cache — the whole 14.2 s painted phase, on warm boots (SurVivaZ)
+
+**Context.** The phone's 2026-11-25 `?diag=1` cold start put `painted` at 14,217 ms of a 31,946 ms
+boot (prep §1): ~43 runtime-painted atlases (~1,016 cells, ~88 MB raw RGBA) drawn pixel-by-pixel in JS
+and PNG-encoded one by one, sequentially, before the menu ever appears. The PNG bytes are deterministic
+given the painter source + spec constants, so they can be cached instead of repainted.
+
+**What changed (all in `apps/client/src`, no `atlasManager.ts` touch).**
+- New `painted-cache.ts`: the single shared home for the cache. Bucket `survivaz-painted-v1` —
+  deliberately NOT `survivaz-art-<version>`: `asset-fetch.ts` deletes that whole bucket on every deploy,
+  which would wipe the cache exactly when the user needs it most (the cold-cache first load after a push).
+  Key `painted/<atlas-key>/<content-hash>`; the hash is a cyrb53 over the painter source (function bodies,
+  so literal palette constants count) + the spec data as JSON, per atlas, not per bundle.
+- All 13 painter groups wired cache-first through it (`task34/256/355/361/410/420/421` incl. 422/479,
+  `task540`, `footprints`, `fishing-rod`): batch lookup first — every atlas hit → the cached PNGs are
+  returned and the painters never run; any miss → paint once, encode, store. `task540` goes per species
+  through `paintedAtlasURL` (paint only on miss); the rest use the all-or-nothing batch lookup (a group
+  repaints as a whole when any of its atlases miss — the normal warm-boot case is all-hit). `task410`
+  caches its 1x page under the atlas key and its @2x page under `<key>@2x` (different pixels, different
+  hashes). The 11 duplicated `canvasToBlobURL` copies are gone — one shared `encodePaintedBlob` returns
+  the Blob (so callers can store it) instead of an object URL.
+- Spec inputs are honest per module: `task540` hashes `paintQuadrupedCell` source + the species spec
+  JSON (one cougar fur byte → new hash → only the cougar repaints); `task361/421` hash the cell painter +
+  that atlas's art-def JSON; `task355` hashes each store's own cell painter; `task410` hashes the slope
+  painter + tone-field source + PAL/SEED/TONE_N tables + the downsampler; the rest hash the rasterizer +
+  their cell painters' source. A painter change repaints once (correct — art changed).
+- Prune: `view.ts` calls `void prunePaintedCache()` fire-and-forget after the painted phase closes —
+  deletes `painted/*` entries not looked up or stored this boot, bounded to 64 deletions per boot,
+  async, never blocks boot, never throws. Entries outside the `painted/` prefix are left alone.
+- Fallback: every Cache Storage interaction is best-effort — unavailable, quota, or private mode falls
+  back to painting; boot never fails because of the cache.
+- ADR-548 preserved: a cached blob still comes back as a blob: URL, so `view.ts`'s `fetch(blob:)` blob.size
+  read (`paintedAtlasBytes`, `?diag=1` + `__survivazLoadCost()`) works unchanged for cached atlases.
+- ADR-526 (user ruling 2026-11-25): "Delete everything" also clears this cache — it is the game's own
+  generated data. `deleteLocalProgress`'s `everything` branch calls `deletePaintedCache` (best-effort,
+  never fails the wipe); per-category deletes and in-game Delete-save stay slot-scoped and never touch it.
+
+**Expected saving.** Essentially the whole 14.2 s painted phase on warm boots (cache read + blob-URL
+creation remain, milliseconds). First boot after a painter change still pays full price. Phone proof
+still owed: cold-start `?diag=1` + `__survivazLoadCost()` showing `painted` dropping, plus a play-zoom
+visual check that painted art is unchanged.
+
+**Tests (`apps/client/test/adr550_painted_cache.test.ts`, 10 new, 10/10 pass).** (a) First call paints and
+`put`s under `painted/pred_cougar/<hash>`; second call with the same hash returns the cached blob with
+paint-invocation count 0 and byte-identical bytes. (b) One spec byte (cougar fur 198 → 199) changes the
+hash → miss → repaint, old entry pruned. (c) Cache Storage throws / unavailable / put-quota → paints
+normally, boot succeeds. Prune bounded to 64/boot, foreign entries untouched. (d) Delete-everything
+deletes the `survivaz-painted-v1` bucket (other buckets kept); per-category delete leaves it alone.
+Fail-without-fix: wiring stashed → 3 fail (task540 integration, delete-everything, view pin); lookup
+disabled → (a) + task540 integration fail; constant hash → (b) + cougar-spec-hash fail; prune disabled →
+(b) prune part + prune-bounds fail. The (c) fallback tests pass with and without the cache by design
+(they prove boot never fails when Cache Storage is absent). Neighbours: 62 art tests pass
+(adr540/548/410/361/421/420/256/355/footprints/rod) + 19 delete/icon tests pass (adr526, delete_*,
+adr361 icons). Typecheck clean with pinned TS 5.9.3 for `apps/client`. Nothing pushed.
+
+**Honest cuts.** (1) Only the 43 atlas PNGs are cached — the ~31 menu icons (sync `toDataURL`) still
+paint every boot; small individually, left for a later slice. (2) Batch groups repaint as a whole on a
+partial miss (only `task540` skips paint per atlas); a single stale atlas in a group costs one repaint
+of that group. (3) The warm-boot saving is harness-proven (paint skipped, bytes identical), not yet
+phone-proven — the `painted` phase number on the user's next `?diag=1` is the real proof. (4) PNG byte
+size on the device is unmeasured in the VM (no canvas here); the per-atlas `blob.size` the ADR-548
+instrumentation now records on the phone is the measurement. (5) Cache Storage can be evicted by the
+browser under storage pressure — that just costs one repaint, never correctness.
+
+## ADR-551: Painters in parallel / in a Worker — pixel-identical (SurVivaZ)
+
+**Context.** The phone's 2026-11-25 `?diag=1` cold start put the `painted` phase at 14,217 ms
+of a 31,946 ms boot (prep §1): ~43 runtime-painted atlases drawn pixel-by-pixel in JS, then
+PNG-encoded one by one, with all 13 painter groups `await`ed strictly in sequence in
+`view.ts` and every atlas encoded sequentially inside its group. ADR-550 (warm boots) already
+removes the phase entirely via the painted-PNG cache; this slice is the cold-boot half —
+first boots, where the cache is cold and the painters actually run.
+
+**Design (`apps/client/src/painted-core.ts`, `painted-groups.ts`, `painted-parallel.ts`,
+`paint-worker.ts`; `view.ts` wiring).** One `Promise.all` over the 13 groups, a Worker pool
+for the paint, and parallel per-atlas encode — built on ADR-550, never weakening it:
+(1) Cache lookup FIRST, per variant, in parallel — a warm boot never paints anywhere
+(exactly as ADR-550 proved), and a partial hit now reuses the hit variants and only
+paints/encodes the misses (strictly better than the old all-or-nothing batch lookup,
+which repainted a whole group on one miss). (2) Paint the misses in a pool of 2–4
+`paint-worker.ts` threads (`createPaintWorkerPool`, lazy creation on the first miss so
+a warm boot pays nothing for threads it never uses; pool size clamps to
+`max(2, min(4, hardwareConcurrency - 2))`). The workers run the pure painters
+(`paintGroupVariants` — no DOM; `Px` instances are per-call and `task410-art.ts`'s
+`fieldCache`/`toneCache` live in the worker, one copy per thread) and transfer the
+pixel buffers back zero-copy; PNG encode stays on the main thread through the existing
+`OffscreenCanvas` path (see cuts). Any worker failure, 60 s timeout, or missing
+`Worker` falls back to painting that group on the main thread — boot never fails
+because a worker did; the pool is terminated once the painted phase closes.
+(3) Encode the missed variants in parallel (`Promise.all` over the async native PNG
+encode), then store the survivors to the ADR-550 cache, also in parallel. An atlas
+whose main variant failed to encode is dropped whole (task410: a missing 1x drops
+its @2x too — the old `if (!blob) continue`). All 13 `*AtlasSources` are thin
+delegates to the one orchestrator (`paintPaintedGroup`); `task410`'s 1x/@2x variant
+split is the shared `paintTask410Variants()` helper, so the worker path and the
+main-thread path can never drift apart. `view.ts` runs the 13 groups under one
+`Promise.all` with the pool created before the phase and terminated after it;
+ADR-548 instrumentation is untouched (per-group timing + `blob.size` read), except
+per-group ms may now overlap — the group entries can sum past the painted parent,
+and `partitionPhase` drops the (negative) residual, as ADR-548 already documents.
+The ADR-548 wiring pin was updated to the new form (same 13 groups, same start order).
+
+**Import-cycle lesson (found by the neighbours, not by review).** The first draft put
+the orchestrator in `painted-parallel.ts` (which imports the art modules) while the
+art modules delegated to it — and 7 neighbour suites then failed at collection with
+a TDZ error: `task256-art.ts`'s top-level spec const reads `Px` from `task34-art.ts`
+before that module has initialised when entry is via an art module. A lazy-defs
+variant of the same cycle failed identically. The fix is structural, not a
+reordering: the orchestrator lives in the leaf `painted-core.ts`, which imports
+only `painted-cache.ts`, and each def carries its own `paint` function (the
+module's own painter), so no art module ever imports a module that imports art
+modules. Do not reintroduce an art-module import into `painted-core.ts`.
+
+**Seasonal slopes: LEFT OUT (deliberate, per the user ruling).** No clean scheduling
+hook exists. Boot cannot know the season — `IsoView.create` runs before any net
+world exists, and the season is derived per-frame in `sync()` from the replicated
+tick/day count (`viewSeason`); there is no season-change event or callback
+anywhere, only the `?season=` override. Painting a deferred season mid-game
+would also need the same swap/rebuild the lazy-paint option was rejected for
+(`swapAtlas` triggers a full `rebuild()`), for ~360 ms VM / ~1 s+ phone of
+saving. All four seasons still paint at boot; a source-pin test in the new
+test file pins the omission (no season gating in the paint path) so a later
+worker does not silently half-ship it.
+
+**Tests (`apps/client/test/adr551_painters_parallel.test.ts`, 11 new; 11/11 pass).**
+(a) Structural: the 13 groups run concurrently through the orchestrator (fake-pool
+max in flight 4, the pool cap; the same groups awaited one by one max at 1), and
+per-atlas encodes overlap inside a group (task361: 16 atlases, max encode in
+flight 16). (b) Pixel-identity: SHA-256 of every variant's pixels via the worker
+path vs direct paint — identical for all 47 variants (43 atlases + 4 task410
+@2x pages); worker-path PNG bytes equal main-thread-path bytes for every atlas,
+key by key. (c) ADR-550 interaction: a warm boot never asks the pool to paint
+(0 new paints, 0 re-puts) and returns byte-identical sources; evicting one entry
+(`pred_cougar`) repaints only its group (exactly 1 new paint, 1 re-put); the
+canvas-less path still returns empty maps. Worker failure: error-reply workers,
+throwing construction, and a 60 s (50 ms in test) wedged-worker timeout all fall
+back to main-thread paint with identical bytes; no `Worker` at all paints on the
+main thread. Fail-without-fix (targeted revert of the two `Promise.all`s to
+sequential loops, on the final layout): the 2 concurrency tests + the encode
+test fail (2 failed on the "in flight" filter, 1 on "encodes overlap"); the
+other 8 pass by design (they pin behaviour, not parallelism). Neighbours:
+114/114 across 20 files — ADR-550 cache 10/10, ADR-548 7/7, ADR-410/540 art,
+task256/355 art, footprints/rod, load-progress/diagnostics/load-cost, and the
+361/420/421/422/479 art + registry + icon suites (41/41). Typecheck clean with
+pinned TS 5.9.3 for `apps/client`. Nothing pushed.
+
+**Honest cuts.** (1) The 50–70% cold-boot saving is the prep's estimate, NOT a
+measurement: this VM has no browser `Worker`, so the tests run the real worker
+handler through a fake worker in-process (same code, same bytes, no thread hop)
+— the real multi-core wall time is unproven until the user's cold start with
+`?diag=1` after this batch lands live. (2) PNG encode stays on the main thread:
+`OffscreenCanvas` in Workers is uneven on Safari, and encode is async native
+work that overlaps via `Promise.all`; only the CPU-bound paint (the ~84% share)
+moves off-thread. (3) The ~31 menu icons (sync `toDataURL`) still paint
+sequentially every boot, as under ADR-550. (4) `task540` lost its per-species
+granularity: a partial hit now repaints the group (both species paint in one
+`paintTask540Atlases()` call anyway, ~133 ms VM for the pair). (5) Harness-verified
+only — no phone/Xbox check yet; the `painted` phase number on the next cold
+start is the proof, plus a play-zoom visual check that painted art is unchanged.
+
+## ADR-553: Local-player body pages only eager; defer other body sheets (SurVivaZ)
+
+**Context.** The phone's 2026-11-25 `?diag=1` cold start put `registry.bodies` at 1,391 ms of a
+31,946 ms boot (prep §4): at rebuild, every body-pool page was paged in eagerly, prio 0, one slot
+each — both sexes, all facing/animation pages — before the menu ever appears, although only one
+body is ever the local player's. The prep (§7 ADR-553) sized the slice as "part of 1,391 ms;
+share unknown until ADR-548's body-page count". The count is now measured on the real merged
+manifest (pack + customization, probed 2026-11-26): **3 body pages total** — `body_male`,
+`body_female`, and the shared `cz_block_body_0` (both sexes block with it). Swim/punch live on the
+same sheet as the rest of that sex's anims, not on separate pages; ride/crouch pages already
+stream from the wear pool and were never eager. So the deferred set at boot is exactly **1 page**
+(the opposite-sex sheet), and the local set is 2 pages — the saving is ~1 of the 3 body page-ins,
+plausibly ~⅓ of the bodies phase if per-page cost is even, but the per-page split is unmeasured
+on the phone: the phone re-measurement after this batch lands is the real proof, as for ADR-548.
+User ruling (2026-11-25): a brief body-only fallback for bots/AI humans entering view is
+acceptable; the local player must never be undressed on the first frame.
+
+**Design — per-type pages (`packages/render/src/assets/atlasManager.ts`).** New exported pure
+helper `bodyPagesForBodyType(registry, bodyType)`: the pages one body type draws from — its body
+sprite's atlas plus every `dirFrames` page of that sprite's anims — with the same exclusions as
+`bodyAtlasKeys()` (v2 stream sheets, lazy ride/crouch doll pages). The catalog's
+`bodySprite(type)` is the source, so under `?charArt=v2s` the v2 body sprite's sheet is reached
+the same way; registries without a cosmetics catalog fall back to the `body_<type>` sprite by
+key. `bodyPagesForBodyType(male) = {body_male, cz_block_body_0}`,
+`bodyPagesForBodyType(female) = {body_female, cz_block_body_0}`; their union is exactly
+`bodyAtlasKeys()`.
+
+**Design — eager step.** `AtlasManager` gains `localBodyType` + `setLocalBodyType(type)` (before
+`setRegistry` it only records the type; after, it also pages that type's pages in now, prio 0,
+and never throws — a failed page-in stays state 0 and is re-requested by `pageReady` on first
+draw). The rebuild's eager body page-in filters to the local type's pages; with no local type set
+it pages in none. The boot rebuild runs before any appearance exists, so boot now pays for **0**
+body pages; the local set is paged in later, before the first frame (below). The `wasResident`
+restore step is unchanged, so a re-tier rebuild still brings back pages that were resident
+(a bot's body never undresses across a re-tier). No pool slots or `STREAM_BUDGET_SHARE` change:
+body pages keep one slot each in the existing body pool; deferred pages compete for nothing new.
+
+**Design — `bodyPages` meaning change (ADR-548).** `rebuildTimings.bodyPages` /
+`vramStats.bodyPages` now mean the body-pool pages the rebuild paged in eagerly and landed
+state 2 (2 with a local type set, 0 at boot before the appearance is known) — not the pool size.
+The all-pages count still lives in the private `bodyPageKeys` (pool membership, used by
+`poolScales` to recognise the body group). The ADR-548 test's `bodyPages >= 1` assertion is
+updated to `0` for its no-local-type fixture; its `vramStats` equality assertion is unchanged.
+The `?diag=1` registry note (`N body pages`, view.ts) renders the number unchanged.
+
+**Design — first frame dressed (`apps/client/src/main.ts`).** Once `ensureCharacter` returns a
+character (stored or just created), before `enterWorld`, the client awaits
+`atlas.setLocalBodyType(BODY_TYPES[appearance.bodyType])` — the local pages land before the
+world starts, so the first frame is dressed. A missing appearance (remote restore with no stored
+character) leaves the type unset; the drain below covers that path. The creator preview is
+unaffected: it already `prefetch()`es the preview appearance's sprites on its own renderer.
+
+**Design — drain (`warmupFirstView`, same file).** First-view body pages are now exempt from the
+stream-pool page cap (`warmupPageBudget`): the cap exists because stream pages share 12
+low-memory slots, but body pages have a dedicated slot each and never evict, so the cap must not
+squeeze out a first-view character's body. Body-pool pages still go through the same request /
+pump / boosted-6-per-frame path (ADR-545) and the same bounded wait inside the ADR-544 25 s
+shared cap. Deferred-set bound for the cap: at most 3 body pages exist in the real registry, so
+at most 3 body page-ins can ever land in the drain (1 in practice — the opposite-sex sheet, when
+a bot of that sex is in the first view); each is one fetch + decode + mip chain at up to
+6-way concurrency, measured at 48 ms wall for 1 body + 1 wear page in the VM harness (stubbed
+fetch/decode) — orders of magnitude inside 25 s. Deferred body pages are also requested on
+first draw at prio 0 by the existing `pageReady` path (sprites.ts), so a bot walking in later
+draws body-only fallback for at most the page-in latency, as ruled acceptable. `wear` pages are
+unchanged: a bot's clothes still stream as before — this slice dresses the body only.
+
+**Cuts / open items.** (1) The phone saving is unmeasured (see Context): ~⅓ of the 1,391 ms
+bodies phase is an even-split estimate, not a measurement; the user's cold-start `?diag=1` after
+this batch lands is the proof. (2) No client test pins the `main.ts` wiring (appearance →
+`setLocalBodyType` before `enterWorld`); it is covered by the render-side `setLocalBodyType`
+test plus typecheck — the phone check (first frame dressed on a fresh and a returning
+character) is still owed. (3) Remote sessions without a stored appearance never set
+`localBodyType`, so a re-tier rebuild there relies on the `wasResident` restore rather than the
+eager set — no visual difference in practice (the camera follows the player, so the local pages
+are always in `wasResident`). (4) Editing a character to the other sex pages the new type's
+pages in and leaves the old type's sheet resident (body-pool pages never evict); one stale page,
+no visual effect. (5) The `?charArt=v2s` v2 sheets are handled by the catalog path, but the v2
+sample only ships a male sheet, so the female-v2 split is untested.
+
+**Tests (`packages/render/test/adr553_local_body_pages.test.ts`, 7 new, 7/7 pass).** Real merged
+manifest, stub GL + stubbed fetch/decode, KTX2 target (astc caps + stub transcoder) so the body
+pool exists. (a) Per-type split + union + unknown type empty. (b) Rebuild with local male: only
+`body_male` + `cz_block_body_0` state 2, `body_female` state 0, `bodyPages` = 2 (bodies phase
+30.2 ms VM for the 2 pages). (c) Rebuild with no local type: all body pages state 0,
+`bodyPages` = 0. (d) `setLocalBodyType` after rebuild pages the local pages in. (e) Deferred
+page: `pageReady(female, 0)` returns false, then the page lands state 2. (f) First frame: the
+local male idle frame's frame-table row has a real UV span + pool layer, the deferred female
+idle row is all zeros (proves the check discriminates). (g) Drain: with `maxPages: 1` and the
+body key last in input order, the body page still lands alongside the first wear page (requested
+2, skipped 1) and `warmupDrain` reports drained — warmup 48 ms + drain 0 ms VM.
+Fail-without-fix (stash of the two source files): 8 failed / 1 passed across the new file +
+adr548 (the 1 pass is adr548's loader-stats test, untouched by this slice). Neighbours: full
+render suite 117 files passed / 2 skipped, 753 tests passed / 2 skipped; targeted client
+neighbours 45/45 (adr544 11, adr548_boot_phases 7, adr543 diagnostics, load_progress,
+adr380_boot_load_cost, boot). Typecheck clean with pinned TS 5.9.3 for `packages/render` and
+`apps/client`. Nothing pushed.
+
+## ADR-554: Registry rebuild cheapening — pure-function caches (SurVivaZ)
+
+**Context.** The phone's 2026-11-25 `?diag=1` cold start put `registry.fitBudget` at 1,112 ms
+and `registry.tables` at 609 ms of a 31,946 ms boot (prep §4). ADR-548 split `fitBudget` into
+search vs resizes: on this VM the search (trial packings, pure CPU MaxRects) is the smaller
+share — resizes dominate — so the fit saving is real but modest, and it is all in the search.
+The tables saving is ~0 ms at boot (first build, nothing to reuse) and ~600 ms on each later
+re-tier / preset-change / context-restore rebuild, where it also removes a mid-game hitch.
+Both changes are pure-function caches, so the output is identical by construction; trial
+priority is untouched (reordering it could change the chosen `(h, c)` and blur different
+atlases).
+
+**Design — (a) memoised `pack(dims)` in `fitBudget` (`packages/render/src/assets/atlasManager.ts`).**
+`pack` is pure given (layerSize, per-atlas id/dims/side/count in list order): MaxRects
+placement + shelf-layer count + base assignment. `fitBudget` re-packs identical dims across
+its 4 reserve tries at hot 1× (only the budget comparison differs) and across the
+idle-demotion loop (each demotion re-runs the whole `fits()` search), and its final pack
+repeats a trial packing. `pack()` now memoises on a key built from the ACTUAL inputs
+(`layerSize` + per-atlas `id:WxH:side:count`), restoring the identical placement
+(layer/px/py/base per atlas) and the identical layer counts (`layers`, `planLayers`,
+`totalFrames`), so `fits1`/`fitsPacked` read the same `planEstimate`/`residentBytes` as a
+real pack and the choice is unchanged. Because the key comes from the actual inputs, a
+resize that silently failed to shrink an image still misses (its dims differ) and packs for
+real. The memo is cleared at the start of each `rebuild()` (entries never cross one) and
+capped at 512 entries (clear-and-refill) so direct `fitBudget` callers cannot grow it without
+bound. New exported counter `packStats = { runs, hits }` (same pattern as `resizeStats`):
+`runs` counts real MaxRects executions, `hits` counts memo hits. ADR-548's
+`fitBudgetSearch`/`fitBudgetResizes` split fields are preserved untouched — search still
+times the trial packings, resizes still times the final `scaleList`.
+
+**Design — (b) sprite-table cache across rebuilds (same file).** `buildSpriteTables` is pure
+given (registry, list) and `SpriteRT` is scale-independent (atlas index, anchors, anims,
+`dirAt`/`dirF`, state anims, damage, building — no scale or UV; UVs are computed in
+`writeFrames` from `a.scale` at upload). `dirFrameIndex` reads only `a.extra` (set
+deterministically by `addDirFrameRects` from the same registry), never `a.base`, so the
+tables survive a repack unchanged. `rebuild()` now calls `cachedSpriteTables(registry,
+list)`, keyed on registry identity + the ordered atlas-id list (`atlasIdx` is a position in
+list, so order matters, not just the set): same registry object + same ids reuses the cached
+`SpriteRT` array (reference equality); any other registry object rebuilds. `frameTintRows`
+is deliberately NOT cached: its keys are `at.base + f` and bases move with every repack —
+it still runs on every rebuild. Nothing mutates `SpriteRT` entries after build (all
+`this.sprites` uses are reads), so sharing the array across rebuilds is safe.
+
+**Measured (this VM, real merged manifests).** (a) 128 MB WORLD scenario (77 resident
+atlases, ADR-438 harness): 190 pack invocations → 125 real packings + 65 memo hits (−34%
+of packings; fitBudget 75.6 ms → 60.5 ms wall in the harness, noisy). 256 MB KEEP scenario
+(85 MB reserve): 170 invocations → 117 runs + 53 hits (−31%). Identity proven by stash
+comparison (fix stashed, same scenario re-run): calls 190 = 190, `fitInfo`,
+downscale/coldDownscale (0.5/0.5 both scenarios), layers (5 / 7), `planLayers` (8 / 11),
+`totalFrames` 8796, demoted cold-key list, and the final pack's per-atlas placement all
+byte-identical. (b) Same-registry rebuild in the ADR-548 harness (pack manifest, stub GL):
+`tables` phase 90.2 ms → 1.8 ms; wall 122.1 ms → 38.3 ms. The phone's ~600 ms tables
+saving and the fitBudget search share still need the user's cold-start `?diag=1` after this
+batch lands live.
+
+**Tests (`packages/render/test/adr554_pack_memo.test.ts`, 2 new; `adr554_sprite_tables.test.ts`,
+1 new; 3/3 pass).** (a) Pins the measured numbers above (calls/runs/hits, scales, layers,
+`fitInfo`, cold keys, and the full final-pack placement string for the 128 MB scenario) —
+the placement pin is the memo-hit-restore proof, not just the choice proof. (b) Real
+`setRegistry` twice with the same registry object: second rebuild's `sprites` is the same
+array reference; a fresh registry object from the same manifest rebuilds (new reference,
+`toEqual` values). Fail-without-fix (stash of `atlasManager.ts` only): all 3 fail (the two
+(a) tests on the missing `packStats` export; the (b) test on reference inequality).
+Neighbours: 14 fit/pack/rebuild-adjacent files 89/89 pass (adr438, adr251, adr512, adr510,
+adr380_boot, adr548, retier_sliced, seamless_retier, adr449, adr520, full_resolution_preset,
+adr237, task17_zombie_crisp, adr545); full `packages/render` suite 119 files passed /
+2 skipped, 756 tests passed / 2 skipped. Typecheck clean with pinned TS 5.9.3 for
+`packages/render`. Nothing pushed.
+
+## ADR-555: Wear shards out of the boot manifest — wear-split, not pre-merge (SurVivaZ)
+
+**Context.** The phone's 2026-11-25 `?diag=1` cold start put `manifest` at 5,486 ms of a
+31,946 ms boot (prep §2): ~41 MB of JSON parsed from 36 requests, 35.6 MB (86%) of it
+wear-sprite `dirFrames` (378,656 entries) in the 10 customization shards. The prep ranked two
+mutually exclusive restructures (§2 option 2 wear-split vs option 4 pre-merged manifest) and
+left the choice to this slice.
+
+**Direction validation — wear-split, measured, not trusted.** ADR-548 instrumented the
+painted/registry phases, not the manifest parse, so this slice measured the parse directly on
+this VM (node `JSON.parse` on the on-disk shards): the 9 wear shards are 74.5 MB on disk /
+35.6 MB minified — **88% of parsed manifest bytes** — and **388 ms of 441 ms total parse time**,
+while the base shard + every other fragment parse in 53 ms. Parse dominates the manifest
+phase, and ADR-549 already took the parallel-fetch win a pre-merged manifest would subsume
+while pre-merge would re-bundle the wear shards back into boot. Wear-split it is.
+
+**Design — what loads at boot, what lazy-loads, how ids stay stable.**
+- Boot: `loadMergedManifestWith({ excludeWearShards: true })` (`packages/assets/src/manifest-index.ts`).
+  The customization v2 index merges only its `base` shard (bodyTypes, skinTones, hairColors —
+  528 KB parsed); the 9 wear shards are never fetched or parsed at boot and return as
+  `deferredWearShards`. The registry is built with `loadManifest({ deferWear: true })`, whose
+  cosmetics catalog tolerates the missing wearables (`loadCosmetics({ allowMissingWearables })`
+  suppresses only the two missing-wearable sites: cosmeticDefaults naming an unloaded wearable,
+  and the requiredSlots fill — every other issue still throws). Boot catalog: size 0 wearables,
+  18 skin tones / 20 hair colors / 26 clothing colors, both body sprites present.
+- Id stability comes from `pack/ids.lock.json` (169 KB minified / 39 KB gz, `manifest.ts:453`):
+  `StableIdRegistry.assign` honors the full lock regardless of call order, so a sprite merged
+  lazily gets exactly its full-merge id. Verified, not assumed: the boot registry's lock return
+  had to carry the wearables lock even with an empty catalog (a first-cut bug dropped it and
+  the converged cosmetics hash diverged — the test caught it). Atlas ids are append order and
+  may differ from the full merge; they are internal only and never go over the net.
+- Lazy load: `loadWearShard(registry, category, io)` fetches the customization index + that
+  shard, resolves its atlas image/page/mask paths exactly as `mergeManifests` would, and
+  `mergeWearShard` merges atlases/sprites in place (via the newly shared `buildAtlas` /
+  `buildSpriteDef`, extracted from `loadManifest` so lazy-built defs are byte-identical to
+  full-merge defs) and rebuilds the cosmetics catalog from base + all merged wearables. A wear
+  shard's sprites only reference its own atlases plus the base shard's pose atlases
+  (`cz_block_*` / `cz_crouch_*` / `cz_ride_*` / `cz_sleep_*`), which the boot registry already
+  carries — probed on the real shards before building. Once all nine are merged, sprite ids,
+  cosmetics size/hash (170 wearables) and `registry.hash` are identical to the full merge.
+- Client (`apps/client/src/view.ts`): `IsoView.create` boots on the split manifest and stores
+  the deferred refs + loader on the view; `IsoView.ensureWearShards()` loads all nine in
+  parallel (in-flight-guarded, idempotent; a failed shard stays deferred for retry), extends
+  the atlas sources with the merged wear atlases (painted blob sources never overwritten,
+  paper-doll pages stay 1x-only), and rebuilds the atlas registry. Triggers: `main.ts` awaits
+  it before the character creator opens (both `runCreatorShot` and `ensureCharacter`), and the
+  character sync fires it when a replicated look first names a wearable the boot catalog does
+  not know. Boot-time consumers already tolerate absence — `resolveLayers` / `validateAppearance`
+  skip or clamp unknown wearables (body-only until the shards land), `heldSpriteOf` /
+  `offHandSpriteOf` use `tryId`, `toolIconFrame` and the vehicle `sid` are try/catch — except
+  one hard gate this slice fixed: `IsoView` registered `Appearance` and installed the appearance
+  binding only when `cosmetics.size` was truthy, which would have dropped replicated Appearance
+  entirely on the size-0 boot catalog; both now key on the catalog's presence.
+- ADR-549 preserved: fragments still fetch in parallel under the split (cap 6); only the shard
+  expansion inside the customization slot narrows to `base`. Prefetch (ADR-549) is untouched —
+  it still warms the wear shards into Cache Storage during bundle load, so the lazy load later
+  hits the cache instead of the network. Dist: unchanged — wear shards still ship as the same
+  lazy files, nothing duplicated, no new files.
+
+**Tests (7 new, 7/7 pass; 7/7 fail without the fix — stashed source files only).**
+`packages/assets/test/adr555_wear_split.test.ts` (4): boot fetches no wear shard, deferred = the
+9 categories, every boot sprite id equals the full merge's, boot size = full − 428 wear sprites,
+boot hash deterministic across loads; `loadWearShard("top")` yields the full merge's ids (108
+sprites / 35 atlases / 28 wearables) and all nine converge (size, every sprite id, cosmetics
+170 + hash, `registry.hash`, wear atlas image paths); double-merge / `base` / unknown category /
+full-merge registry all throw; boot consumers resolve to body-only with no throw and converge
+to dressed layers after the merge. `apps/client/test/adr555_wear_split_parity.test.ts` (3):
+client boot manifest + lazy convergence to the dedicated server registry (ADR-248 parity
+extended — identical fragment lists, cosmetics size/hash, `registry.hash`); fragments still
+fetch ≥6-concurrent under the split; source pins for the `IsoView` boot exclusion, the creator
+triggers, and the Appearance-presence gate. Neighbours: full `packages/assets` suite 280/281
+(the 1 failure is the known pre-existing `pack.test.ts` KEYS.md ENOENT, fails alone, unchanged);
+render adr380/adr548/adr553/adr554/adr549/adr545 30/30; client adr248 2/2, adr549/adr548/adr543/
+load_progress/adr380 26/26, assets adr406/manifest_shards/adr549/cosmetics + client boot 72/72.
+Typecheck clean with pinned TS 5.9.3 for `packages/assets` and `apps/client`. Nothing pushed.
+
+**Honest cuts.** (1) The 5.5 s → ~1–1.5 s manifest saving is the prep's estimate from the parse
+share, not a phone measurement — the user's cold-start `?diag=1` after this batch lands is the
+proof. (2) The lazy load pays a one-off atlas rebuild in the menu (or on first dressed
+character in view) — menu/entry time, never boot time. (3) A player who never opens the
+creator and never meets a dressed character never loads the wear shards at all (catalog stays
+size 0; the cosmetics handshake hash is only sent once loaded, as before). (4) If a wear sprite
+key ever ships without a lock entry, incremental assign order (per-shard) could differ from the
+full merge's single sorted assign — the lock is regenerated from the manifest, so in practice
+every key is locked; the tests pin the locked case. (5) `loadWearShard` re-fetches the
+customization index per shard (9×, deduped by `assetJsonGz`'s in-flight cache). (6) Harness-
+verified only; phone playtest still owed (cold-start `?diag=1` manifest phase, creator opens
+with the full wardrobe, a dressed bot walking into view dresses without a hitch).

@@ -4,6 +4,7 @@
  */
 import { isWarmupCandidate } from "./warmup.js";
 import { gunzipText, isGzip } from "./gzip-json.js";
+import { isShardIndex } from "@engine/assets";
 
 export const ASSET_CACHE_PREFIX = "survivaz-art-";
 export const ASSET_FETCH_CONCURRENCY = 8;
@@ -235,6 +236,18 @@ export function collectPrefetchUrls(manifest: unknown, base: string): string[] {
 }
 
 /**
+ * ADR-549: expand a v2 shard index (the customization fragment) into its shard manifest urls, resolved against
+ * the index url — the 10 customization shards the manifest phase fetches only once `view.ts` expands the index.
+ * A v1 manifest has no shards, so this returns []. Shard urls are warmed through `warmManifestGz`, not
+ * `warmAssetCache`: a built dist ships them only as `.json.gz`, and warming must not `JSON.parse` them.
+ */
+export function collectShardManifestUrls(manifest: unknown, base: string): string[] {
+  if (!isShardIndex(manifest)) return [];
+  const root = base.endsWith("/") ? base : base.replace(/[^/]*$/, "");
+  return manifest.shards.map((s) => root + s.file.replace(/^\.\//, ""));
+}
+
+/**
  * ADR-370: Cache-warm the first-view stream sheets (visible-pin pages the boot warm-up will page
  * in: furniture / buildings / openings / defenses, including building tiers) so their first page-in
  * is a Cache Storage hit, not a network fetch + decode. Disjoint from collectPrefetchUrls: resident
@@ -262,4 +275,16 @@ export function collectWarmupPrefetchUrls(manifest: unknown, base: string): stri
 /** Download each URL into Cache Storage (body consumed so the transfer actually completes). */
 export async function warmAssetCache(urls: readonly string[]): Promise<void> {
   await Promise.all([...new Set(urls)].map((u) => withAssetSlot(async () => { const r = await assetFetch(u); if (r.ok) await r.arrayBuffer(); })));
+}
+
+/**
+ * ADR-549: fetch-only warm of gzipped manifest files (the customization shards + `ids.lock`): fetch `<url>.gz`,
+ * gunzip, and store the decoded text in this deploy's Cache Storage — WITHOUT `JSON.parse`. Warming the 10
+ * shards (35.6 MB parsed) must not add main-thread parse work; `view.ts` still parses each shard exactly once
+ * when it loads the manifest, and a later `assetJsonGz` for the same url joins the in-flight read
+ * (`inflightText`) or hits the cache, so the manifest phase starts warm. Best-effort: a fetch/gunzip failure
+ * is swallowed — boot continues without a warm cache.
+ */
+export async function warmManifestGz(urls: readonly string[]): Promise<void> {
+  await Promise.all([...new Set(urls)].map((u) => withAssetSlot(async () => { try { await readGzText(u); } catch { /* best-effort: boot continues without a warm cache */ } })));
 }

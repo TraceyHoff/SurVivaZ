@@ -1,4 +1,4 @@
-import { loadCosmetics, type CosmeticCatalog, type CosmeticsJson } from "./cosmetics.js";
+import { loadCosmetics, type CosmeticCatalog, type CosmeticsJson, type WearableJson } from "./cosmetics.js";
 import { fnv1a, StableIdRegistry, type World } from "@engine/core";
 
 export const MANIFEST_VERSION = 1;
@@ -190,6 +190,11 @@ const HEX = /^#[0-9a-fA-F]{6}$/;
 export const parseColor = (s: string): number => parseInt(s.slice(1), 16);
 export const emissivePath = (image: string): string => image.replace(/(\.[a-z]+)$/, "_emissive$1");
 
+/** ADR-555: state for a boot registry whose wear shards are merged in lazily. `base` is the boot manifest's
+ * cosmetics source (bodyTypes / palettes / requiredSlots / faceAnims); `wearables` accumulates every merged
+ * shard's wearables so the catalog is rebuilt from the same input the full merge would have had. */
+export interface WearMergeState { base: CosmeticsJson; wearables: WearableJson[]; loaded: string[] }
+
 /** Registry of all asset kinds with stable numeric ids (u16) per kind. */
 export class AssetRegistry {
   constructor(
@@ -197,6 +202,18 @@ export class AssetRegistry {
     readonly sounds = new Map<number, SoundDef>(), readonly vfx = new Map<number, VfxDef>(), readonly tintSets = new Map<number, TintSet>(),
     readonly palettes = new Map<number, Palette>(), readonly variants = new Map<number, Variant>(),
   ) {}
+  /** ADR-555: wear-merge state, set by loadManifest({ deferWear: true }); undefined for a full-merge registry. */
+  wearMerge: WearMergeState | undefined;
+  /** ADR-555: add one atlas built by buildAtlas (throws on a duplicate key); atlas ids are append order,
+   * which may differ from the full merge's — atlas ids are internal only (sprite ids and registry.hash
+   * are the stable, net-visible values and are unaffected). */
+  addAtlas(atlas: Atlas): void { if (this.atlases.has(atlas.key)) throw new Error(`duplicate atlas "${atlas.key}"`); this.atlases.set(atlas.key, atlas); }
+  /** ADR-555: add one sprite built by buildSpriteDef (throws on a duplicate key or id). */
+  addSprite(sprite: SpriteDef): void {
+    if ([...this.sprites.values()].some((s) => s.key === sprite.key)) throw new Error(`duplicate sprite "${sprite.key}"`);
+    if (this.sprites.has(sprite.id)) throw new Error(`duplicate sprite id ${sprite.id} ("${sprite.key}")`);
+    this.sprites.set(sprite.id, sprite);
+  }
   /** Combined hash over every id namespace (for the handshake). */
   get hash(): number { let h = 0x811c9dc5; for (const k of ID_KINDS) h = fnv1a(`${k}:${this.ids[k].hash};`, h); if (this.cosmetics?.size) h = fnv1a(`cosmetics:${this.cosmetics.hash};`, h); return h; }
   /** Character customization catalog (manifest wearables/bodyTypes/skinTones/hairColors/clothingColors); undefined if none. */
@@ -450,25 +467,10 @@ const keyedMeta = (m: Record<string, FrameMeta> | undefined): { frameMetaKeyed?:
   const e = Object.entries(m ?? {}).filter(([f]) => isKeyed(f)); return e.length ? { frameMetaKeyed: new Map(e.map(([f, fm]) => [f, cloneFm(fm)])) } : {};
 };
 
-export function loadManifest(json: unknown, opts: { lock?: IdLock | Record<string, number> } = {}): { registry: AssetRegistry; lock: Required<IdLock> & { wearables?: Record<string, number> }; warnings: string[] } {
-  const issues: string[] = []; let m = json as ManifestJson;
-  if (!m || typeof m !== "object") throw new ManifestError(["manifest is not an object"]);
-  if (m.version !== MANIFEST_VERSION) issues.push(`version must be ${MANIFEST_VERSION}`);
-  if (!Array.isArray(m.atlases)) issues.push("atlases must be an array");
-  if (!Array.isArray(m.sprites)) issues.push("sprites must be an array");
-  for (const k of ["sounds", "vfx", "tintSets", "palettes", "variantSets"] as const) if (m[k] !== undefined && !Array.isArray(m[k])) issues.push(`${k} must be an array`);
-  if (issues.length) throw new ManifestError(issues);
-  const warnings: string[] = [];
-  if (m.x_survival !== undefined) m = applyLegacySurvival(m, warnings);
-  const KEY = /^[a-z0-9_]+$/;
-  const uniq = (list: { key: string }[], what: string) => { const seen = new Set<string>(); list.forEach((x, i) => {
-    if (!KEY.test(x.key ?? "")) issues.push(`${what}[${i}](${x.key}): bad key`);
-    if (seen.has(x.key)) issues.push(`${what}[${i}](${x.key}): duplicate key`); seen.add(x.key); }); return seen; };
-
-  // atlases
-  const atlases = new Map<string, Atlas>(); uniq(m.atlases, "atlases");
-  m.atlases.forEach((a, i) => {
-    const p = `atlases[${i}](${a.key})`;
+/** Build one resolved Atlas from its JSON (shared by loadManifest and ADR-555 mergeWearShard, so a
+ * lazily merged wear atlas is byte-identical to one built by the full merge). `where` labels issues. */
+export function buildAtlas(a: AtlasJson, id: number, where: string, issues: string[]): Atlas {
+  const p = where;
     if (!a.image || !/\.(png|webp)$/.test(a.image)) issues.push(`${p}: image must be .png/.webp`);
     for (const f of ["frameW", "frameH", "columns", "rows"] as const) if (!(Number.isInteger(a[f]) && a[f] > 0)) issues.push(`${p}: ${f} must be a positive integer`);
     const nine = new Map<number, NineSlice>();
@@ -509,8 +511,50 @@ export function loadManifest(json: unknown, opts: { lock?: IdLock | Record<strin
       }
     }
     const { emissive: _e, nineSlice: _n, pages: _p, masks: _m, ...rest } = a;
-    atlases.set(a.key, { ...rest, id: atlases.size + 1, nineSlice: nine, pages, masks, ...(masks.emissive ? { emissiveImage: masks.emissive } : {}) });
-  });
+  return { ...rest, id, nineSlice: nine, pages, masks, ...(masks.emissive ? { emissiveImage: masks.emissive } : {}) };
+}
+
+/** Build one resolved SpriteDef from its JSON (shared by loadManifest and ADR-555 mergeWearShard).
+ * Callers must have assigned `s.key` (and any crackOverlay / stateVfx sprite keys) in `ids` first;
+ * dirFrames atlas keys must already exist in `atlases` (wear shards only reference their own atlases
+ * plus the base shard's pose atlases, which the boot manifest already carries). */
+export function buildSpriteDef(s: SpriteJson, atlases: Map<string, Atlas>, ids: Record<IdKind, StableIdRegistry>): SpriteDef {
+    const at = atlases.get(s.atlas)!; const animList: Animation[] = [];
+    Object.entries(s.animations).forEach(([name, a], i) => animList.push({ id: i, name, frames: a.frames, fps: a.fps, directions: a.directions ?? 1, dirStride: a.dirStride ?? at.columns, loop: a.loop ?? true, ...(a.rotations ? { rotations: a.rotations.map((r) => [...r]) } : {}), ...(a.frameMeta ? { frameMeta: cloneMeta(a.frameMeta), ...keyedMeta(a.frameMeta) } : {}), ...(a.dirFrames ? { dirFrames: a.dirFrames.map((d) => ({ atlas: atlases.get(d.atlas)!, frame: d.frame ?? 0, ...(d.rect ? { rect: { x: d.rect.x, y: d.rect.y, w: d.rect.w, h: d.rect.h } } : {}), anchor: { ...d.anchor } })) } : {}) }));
+    const id = ids.sprites.id(s.key);
+  return { id, key: s.key, category: s.category, atlas: at, anchor: s.anchor ?? { x: 0.5, y: 0.9 }, animations: new Map(animList.map((a) => [a.name, a])), animList,
+      ...(s.building ? { building: { piece: s.building.piece, footprint: { ...s.building.footprint }, layer: s.building.layer, frames: s.building.frames.map((r) => [...r]),
+        rotationArt: s.rotationArt ?? "mirror", stateNames: Object.keys(s.building.states ?? {}), states: Object.values(s.building.states ?? {}).map((rows) => rows.map((r) => [...r])),
+        ...(s.building.crackOverlay ? { crackOverlay: ids.sprites.id(s.building.crackOverlay) } : {}),
+        stateVfx: Object.fromEntries(Object.entries(s.building.stateVfx ?? {}).map(([st, l]) => [st, l.map((e) => ({ vfx: ids.vfx.id(e.vfx), attach: e.attach }))])) } } : {}),
+      ...(s.autotile ? { autotile: { neighbors: s.autotile.neighbors, ...(s.autotile.group ? { group: s.autotile.group } : {}), rules: s.autotile.rules.map((r) => ({ ...r })) } } : {}),
+      ...(s.sway ? { sway: { ...s.sway } } : {}),
+      ...(s.placeholder !== undefined ? { placeholder: s.placeholder } : {}),
+      ...((s.group ?? defaultGroupOf(s.key)) ? { group: s.group ?? defaultGroupOf(s.key)! } : {}),
+      ...(s.attach ? { attach: cloneAttach(s.attach) } : {}),
+      ...(s.frameMeta ? { frameMeta: cloneMeta(s.frameMeta), ...keyedMeta(s.frameMeta) } : {}),
+      ...(s.frameAttach ? { frameAttach: new Map(Object.entries(s.frameAttach).map(([f, am]) => [Number(f), cloneAttach(am)])) } : {}),
+      tints: Object.fromEntries(Object.entries(s.tints ?? {}).map(([n, t]) => [n, { color: parseColor(t.color), strength: t.strength, mode: t.mode ?? "multiply", saturation: t.saturation ?? 1 }])) };
+}
+
+export function loadManifest(json: unknown, opts: { lock?: IdLock | Record<string, number>; /** ADR-555: boot manifest without the wear shards — build a catalog that tolerates missing wearables and remember the cosmetics source so mergeWearShard can rebuild it. */ deferWear?: boolean } = {}): { registry: AssetRegistry; lock: Required<IdLock> & { wearables?: Record<string, number> }; warnings: string[] } {
+  const issues: string[] = []; let m = json as ManifestJson;
+  if (!m || typeof m !== "object") throw new ManifestError(["manifest is not an object"]);
+  if (m.version !== MANIFEST_VERSION) issues.push(`version must be ${MANIFEST_VERSION}`);
+  if (!Array.isArray(m.atlases)) issues.push("atlases must be an array");
+  if (!Array.isArray(m.sprites)) issues.push("sprites must be an array");
+  for (const k of ["sounds", "vfx", "tintSets", "palettes", "variantSets"] as const) if (m[k] !== undefined && !Array.isArray(m[k])) issues.push(`${k} must be an array`);
+  if (issues.length) throw new ManifestError(issues);
+  const warnings: string[] = [];
+  if (m.x_survival !== undefined) m = applyLegacySurvival(m, warnings);
+  const KEY = /^[a-z0-9_]+$/;
+  const uniq = (list: { key: string }[], what: string) => { const seen = new Set<string>(); list.forEach((x, i) => {
+    if (!KEY.test(x.key ?? "")) issues.push(`${what}[${i}](${x.key}): bad key`);
+    if (seen.has(x.key)) issues.push(`${what}[${i}](${x.key}): duplicate key`); seen.add(x.key); }); return seen; };
+
+  // atlases
+  const atlases = new Map<string, Atlas>(); uniq(m.atlases, "atlases");
+  m.atlases.forEach((a, i) => { atlases.set(a.key, buildAtlas(a, atlases.size + 1, `atlases[${i}](${a.key})`, issues)); });
 
   // sprites
   const spriteKeys = uniq(m.sprites, "sprites");
@@ -731,24 +775,7 @@ export function loadManifest(json: unknown, opts: { lock?: IdLock | Record<strin
   for (const k of ID_KINDS) lock[k] = ids[k].assign(keysOf[k], nsLock[k] ?? {});
 
   const sprites = new Map<number, SpriteDef>();
-  for (const s of m.sprites) {
-    const at = atlases.get(s.atlas)!; const animList: Animation[] = [];
-    Object.entries(s.animations).forEach(([name, a], i) => animList.push({ id: i, name, frames: a.frames, fps: a.fps, directions: a.directions ?? 1, dirStride: a.dirStride ?? at.columns, loop: a.loop ?? true, ...(a.rotations ? { rotations: a.rotations.map((r) => [...r]) } : {}), ...(a.frameMeta ? { frameMeta: cloneMeta(a.frameMeta), ...keyedMeta(a.frameMeta) } : {}), ...(a.dirFrames ? { dirFrames: a.dirFrames.map((d) => ({ atlas: atlases.get(d.atlas)!, frame: d.frame ?? 0, ...(d.rect ? { rect: { x: d.rect.x, y: d.rect.y, w: d.rect.w, h: d.rect.h } } : {}), anchor: { ...d.anchor } })) } : {}) }));
-    const id = ids.sprites.id(s.key);
-    sprites.set(id, { id, key: s.key, category: s.category, atlas: at, anchor: s.anchor ?? { x: 0.5, y: 0.9 }, animations: new Map(animList.map((a) => [a.name, a])), animList,
-      ...(s.building ? { building: { piece: s.building.piece, footprint: { ...s.building.footprint }, layer: s.building.layer, frames: s.building.frames.map((r) => [...r]),
-        rotationArt: s.rotationArt ?? "mirror", stateNames: Object.keys(s.building.states ?? {}), states: Object.values(s.building.states ?? {}).map((rows) => rows.map((r) => [...r])),
-        ...(s.building.crackOverlay ? { crackOverlay: ids.sprites.id(s.building.crackOverlay) } : {}),
-        stateVfx: Object.fromEntries(Object.entries(s.building.stateVfx ?? {}).map(([st, l]) => [st, l.map((e) => ({ vfx: ids.vfx.id(e.vfx), attach: e.attach }))])) } } : {}),
-      ...(s.autotile ? { autotile: { neighbors: s.autotile.neighbors, ...(s.autotile.group ? { group: s.autotile.group } : {}), rules: s.autotile.rules.map((r) => ({ ...r })) } } : {}),
-      ...(s.sway ? { sway: { ...s.sway } } : {}),
-      ...(s.placeholder !== undefined ? { placeholder: s.placeholder } : {}),
-      ...((s.group ?? defaultGroupOf(s.key)) ? { group: s.group ?? defaultGroupOf(s.key)! } : {}),
-      ...(s.attach ? { attach: cloneAttach(s.attach) } : {}),
-      ...(s.frameMeta ? { frameMeta: cloneMeta(s.frameMeta), ...keyedMeta(s.frameMeta) } : {}),
-      ...(s.frameAttach ? { frameAttach: new Map(Object.entries(s.frameAttach).map(([f, am]) => [Number(f), cloneAttach(am)])) } : {}),
-      tints: Object.fromEntries(Object.entries(s.tints ?? {}).map(([n, t]) => [n, { color: parseColor(t.color), strength: t.strength, mode: t.mode ?? "multiply", saturation: t.saturation ?? 1 }])) });
-  }
+  for (const s of m.sprites) { const id = ids.sprites.id(s.key); sprites.set(id, buildSpriteDef(s, atlases, ids)); }
   const soundMap = new Map<number, SoundDef>(sounds.map((s) => { const id = ids.sounds.id(s.key); return [id, { id, key: s.key, files: [...s.files], volume: s.volume ?? 1, pitchJitter: s.pitchJitter ?? 0, loop: !!s.loop, ...(typeof s.loop === "object" ? { loopPoints: { ...s.loop } } : {}), category: s.category }]; }));
   const vfxMap = new Map<number, VfxDef>(vfx.map((v) => { const id = ids.vfx.id(v.key); const sp = m.sprites.find((s) => s.key === v.sprite)!;
     return [id, { id, key: v.key, sprite: ids.sprites.id(v.sprite), anim: v.anim ?? Object.keys(sp.animations)[0]!, lifetime: v.lifetime, blend: v.blend ?? "normal", stretch: v.stretch ?? "none", stretchMax: v.stretchMax ?? 4, ...(v.particles ? { particles: v.particles } : {}) }]; }));
@@ -780,11 +807,77 @@ export function loadManifest(json: unknown, opts: { lock?: IdLock | Record<strin
   registry.clanPalettes = clanPals.map((c, index) => ({ index, key: c.key, primary: parseColor(c.primary), secondary: parseColor(c.secondary) }));
   if (m.wearables !== undefined || m.bodyTypes !== undefined || m.skinTones !== undefined || m.hairColors !== undefined || m.clothingColors !== undefined) {
     const ci: string[] = []; const wl = rawLock.wearables;
-    const c = loadCosmetics(m, registry, wl && typeof wl === "object" ? (wl as Record<string, number>) : undefined, ci);
+    const c = loadCosmetics(m, registry, wl && typeof wl === "object" ? (wl as Record<string, number>) : undefined, ci, opts.deferWear ? { allowMissingWearables: true } : {});
     if (ci.length) throw new ManifestError(ci);
-    registry.cosmetics = c.catalog; if (c.catalog.size) return { registry, lock: { ...lock, wearables: c.lock }, warnings };
+    registry.cosmetics = c.catalog;
+    if (opts.deferWear) {
+      const base: CosmeticsJson = {};
+      if (m.bodyTypes !== undefined) base.bodyTypes = m.bodyTypes;
+      if (m.skinTones !== undefined) base.skinTones = m.skinTones;
+      if (m.hairColors !== undefined) base.hairColors = m.hairColors;
+      if (m.clothingColors !== undefined) base.clothingColors = m.clothingColors;
+      if (m.tintNeutral !== undefined) base.tintNeutral = m.tintNeutral;
+      if (m.requiredSlots !== undefined) base.requiredSlots = m.requiredSlots;
+      if (m.faceAnims !== undefined) base.faceAnims = m.faceAnims;
+      registry.wearMerge = { base, wearables: [...(m.wearables ?? [])], loaded: [] };
+      // ADR-555: the boot catalog is empty (size 0), but the wearables lock must still ride along —
+      // loadCosmetics' assign() copies every locked key into the returned lock even for an empty
+      // wearables list, and loadWearShard needs that lock to give wearables their full-merge ids.
+      return { registry, lock: { ...lock, wearables: c.lock }, warnings };
+    }
+    if (c.catalog.size) return { registry, lock: { ...lock, wearables: c.lock }, warnings };
   }
   return { registry, lock, warnings };
+}
+
+/**
+ * ADR-555: merge one customization wear shard (one category: top, hair, …) into a boot registry built
+ * with loadManifest({ deferWear: true }), in place. Sprite ids come from the SAME ids.lock.json the
+ * full merge uses (StableIdRegistry.assign honors the lock regardless of call order), so a sprite's id
+ * is identical to the full merge's; the cosmetics catalog is rebuilt from base + all merged wearables,
+ * so once every shard is merged the registry (sprite ids, cosmetics size/hash, registry.hash) is
+ * identical to the full merge. Atlas ids are append order and may differ from the full merge — they
+ * are internal only and never go over the net. Throws on a duplicate atlas/sprite, on a shard that
+ * references an atlas the boot registry does not have (wear shards only reference their own atlases
+ * plus the base shard's pose atlases), or on a second merge of the same category. A shard carrying
+ * bodyTypes / palettes / sounds / vfx (i.e. not a wear shard) is rejected: merge only wear shards here.
+ */
+export function mergeWearShard(registry: AssetRegistry, shard: ManifestJson, opts: { lock?: IdLock | Record<string, number> | undefined; category: string }): { category: string; atlases: number; sprites: number; wearables: number; wearablesLock: Record<string, number> } {
+  const { category } = opts;
+  const state = registry.wearMerge;
+  if (!state) throw new Error(`mergeWearShard(${category}): registry was not built with loadManifest({ deferWear: true })`);
+  if (state.loaded.includes(category)) throw new Error(`mergeWearShard(${category}): shard already merged`);
+  if (shard.bodyTypes !== undefined || shard.skinTones !== undefined || shard.hairColors !== undefined || shard.clothingColors !== undefined) throw new Error(`mergeWearShard(${category}): shard carries cosmetics source (bodyTypes/palettes) — only wear shards merge here`);
+  if (shard.sounds !== undefined || shard.vfx !== undefined || shard.tintSets !== undefined || shard.palettes !== undefined || shard.variantSets !== undefined) throw new Error(`mergeWearShard(${category}): shard carries sounds/vfx/tints/palettes/variants — only wear shards merge here`);
+  const issues: string[] = [];
+  const rawLock = (opts.lock ?? {}) as Record<string, unknown>;
+  const nsLock: IdLock = ID_KINDS.some((k) => typeof rawLock[k] === "object") ? (rawLock as IdLock) : { sprites: rawLock as Record<string, number> };
+  const spriteLock = nsLock.sprites ?? {};
+  // Assign sprite ids from the full lock BEFORE building (buildSpriteDef resolves ids + dirFrames atlases).
+  const spriteKeys = (shard.sprites ?? []).map((s) => s.key);
+  registry.ids.sprites.assign(spriteKeys, spriteLock);
+  for (const a of shard.atlases ?? []) {
+    if (registry.atlases.has(a.key)) { issues.push(`mergeWearShard(${category}): duplicate atlas "${a.key}"`); continue; }
+    registry.addAtlas(buildAtlas(a, registry.atlases.size + 1, `wear:${category}.atlases.${a.key}`, issues));
+  }
+  for (const s of shard.sprites ?? []) {
+    if (s.building !== undefined || s.autotile !== undefined) { issues.push(`mergeWearShard(${category}): sprite "${s.key}" carries building/autotile data — only character wear sprites merge here`); continue; }
+    const missingDf = Object.values(s.animations ?? {}).flatMap((an) => an.dirFrames ?? []).map((d) => d.atlas).filter((k) => !registry.atlases.has(k));
+    if (!registry.atlases.has(s.atlas) || missingDf.length) { issues.push(`mergeWearShard(${category}): sprite "${s.key}" references missing atlas "${!registry.atlases.has(s.atlas) ? s.atlas : missingDf[0]}"`); continue; }
+    registry.addSprite(buildSpriteDef(s, registry.atlases, registry.ids));
+  }
+  if (issues.length) throw new ManifestError(issues);
+  state.wearables.push(...(shard.wearables ?? []));
+  state.loaded.push(category);
+  // Rebuild the catalog from base + every merged shard's wearables. Missing-wearable tolerance stays
+  // on: bodyTypes.cosmeticDefaults may still name a shard that has not merged yet; once all nine are
+  // in, no reference is missing and the catalog equals the full merge's (same lock, same input order).
+  const ci: string[] = [];
+  const wl = (rawLock as Record<string, unknown>).wearables;
+  const c = loadCosmetics({ ...state.base, wearables: state.wearables }, registry, wl && typeof wl === "object" ? (wl as Record<string, number>) : undefined, ci, { allowMissingWearables: true });
+  if (ci.length) throw new ManifestError(ci);
+  registry.cosmetics = c.catalog;
+  return { category, atlases: (shard.atlases ?? []).length, sprites: spriteKeys.length, wearables: (shard.wearables ?? []).length, wearablesLock: c.lock };
 }
 
 /** File IO for validateAssetFiles: exists + image pixel size (undefined if unreadable). Paths are manifest paths. */

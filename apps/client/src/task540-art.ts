@@ -26,6 +26,8 @@
 // signatures, per-cell bounds), not by eye.
 import type { AtlasSource } from "@engine/render";
 import { Px, TASK34_DIR_VEC } from "./task34-art.js";
+import { type PaintedCacheEnv } from "./painted-cache.js";
+import { defaultAssemble, paintPaintedGroup, type PaintWorkerPool } from "./painted-core.js";
 
 /** Atlas keys this module paints (also the fragment's atlas keys). */
 export const TASK540_ATLAS_KEYS = ["pred_cougar", "pred_wolverine"] as const;
@@ -232,61 +234,52 @@ export function paintQuadrupedCell(px: Px, ox: number, oy: number, dir: number, 
 /** Painted atlas (same shape as Task 34's PaintedAtlas). */
 export interface PaintedAtlas { key: string; width: number; height: number; pixels: Uint8ClampedArray }
 
+/** Paint one species' atlas (pure: no DOM, unit-testable). */
+export function paintTask540Atlas(spec: QuadrupedSpec): PaintedAtlas {
+  const px = new Px(PREDATOR_ATLAS_COLS * spec.cell, PREDATOR_ATLAS_ROWS * spec.cell);
+  const anims: PredatorAnim[] = ["idle", "walk", "attack", "death"];
+  for (const anim of anims) {
+    for (let d = 0; d < 8; d++) {
+      for (let f = 0; f < PREDATOR_FRAMES[anim]; f++) {
+        paintQuadrupedCell(px, f * spec.cell, (PREDATOR_ROWS[anim] + d) * spec.cell, d, f, anim, spec);
+      }
+    }
+  }
+  return { key: spec.key, width: px.w, height: px.h, pixels: px.data };
+}
+
 /**
  * Paint both ADR-540 atlases (pure: no DOM, unit-testable). Creature grid is 8 cols x 32 rows
  * of the species' cell: idle rows 0-7, walk rows 8-15, attack rows 16-23, death rows 24-31,
  * 4 / 4 / 2 / 2 frames per row. Matches the pack/task540 fragment layout exactly.
  */
 export function paintTask540Atlases(): [PaintedAtlas, PaintedAtlas] {
-  const out: PaintedAtlas[] = [];
-  for (const spec of [COUGAR_SPEC, WOLVERINE_SPEC]) {
-    const px = new Px(PREDATOR_ATLAS_COLS * spec.cell, PREDATOR_ATLAS_ROWS * spec.cell);
-    const anims: PredatorAnim[] = ["idle", "walk", "attack", "death"];
-    for (const anim of anims) {
-      for (let d = 0; d < 8; d++) {
-        for (let f = 0; f < PREDATOR_FRAMES[anim]; f++) {
-          paintQuadrupedCell(px, f * spec.cell, (PREDATOR_ROWS[anim] + d) * spec.cell, d, f, anim, spec);
-        }
-      }
-    }
-    out.push({ key: spec.key, width: px.w, height: px.h, pixels: px.data });
-  }
-  return out as [PaintedAtlas, PaintedAtlas];
+  return [paintTask540Atlas(COUGAR_SPEC), paintTask540Atlas(WOLVERINE_SPEC)];
 }
 
-/** Rasterized pixels -> PNG blob URL (OffscreenCanvas, else a document canvas; undefined when no canvas exists). */
-async function canvasToBlobURL(w: number, h: number, pixels: Uint8ClampedArray): Promise<string | undefined> {
-  try {
-    // TS 5.9 (CI's pinned version) types ImageData's data as Uint8ClampedArray<ArrayBuffer>; our pixels are
-    // Uint8ClampedArray<ArrayBufferLike>, so copy into a fresh ArrayBuffer-backed array (once, at load).
-    const data = new ImageData(new Uint8ClampedArray(pixels), w, h);
-    const OC = (globalThis as { OffscreenCanvas?: typeof OffscreenCanvas }).OffscreenCanvas;
-    if (OC) {
-      const cv = new OC(w, h); const ctx = cv.getContext("2d");
-      if (ctx) { ctx.putImageData(data, 0, 0); if (typeof cv.convertToBlob === "function") return URL.createObjectURL(await cv.convertToBlob({ type: "image/png" })); }
-    }
-    const doc = (globalThis as { document?: Document }).document;
-    if (doc) {
-      const cv = doc.createElement("canvas"); cv.width = w; cv.height = h; const ctx = cv.getContext("2d");
-      if (!ctx) return undefined;
-      ctx.putImageData(data, 0, 0);
-      return await new Promise<string | undefined>((res) => cv.toBlob((b) => res(b ? URL.createObjectURL(b) : undefined), "image/png"));
-    }
-  } catch { /* no canvas in this environment: the caller keeps the manifest's debug path */ }
-  return undefined;
-}
+/**
+ * ADR-550: content-hash input for one species — the rasterizer + rig source (literal
+ * constants count) + the species spec itself, so one changed spec byte (e.g. cougar fur
+ * colour) changes the hash and repaints just that species.
+ */
+const task540Spec = (spec: QuadrupedSpec): string =>
+  `${Px.toString()}|${paintQuadrupedCell.toString()}|${JSON.stringify(spec)}`;
+
+/** ADR-551: content-hash inputs per species atlas (exported for `painted-core.ts` + `painted-parallel.ts`). */
+export const task540Specs = (): Map<string, string> =>
+  new Map([COUGAR_SPEC, WOLVERINE_SPEC].map((s) => [s.key, task540Spec(s)]));
 
 /**
  * Atlas sources for the two painted atlases (same { url, emissiveUrl } shape as
  * sourcesFromManifest). view.ts merges these over the manifest's debug paths before
  * setRegistry, so the registry's cougar / wolverine sprites draw the painted pixels.
- * Returns only the atlases that converted (empty in a canvas-less environment).
+ * ADR-550: each atlas is cache-first (painted-cache.ts) — a warm boot returns the cached
+ * PNG without calling the painter at all. Returns only the atlases that converted
+ * (empty in a canvas-less environment).
  */
-export async function task540AtlasSources(): Promise<Map<string, AtlasSource>> {
-  const out = new Map<string, AtlasSource>();
-  for (const a of paintTask540Atlases()) {
-    const url = await canvasToBlobURL(a.width, a.height, a.pixels);
-    if (url) out.set(a.key, { url, emissiveUrl: null });
-  }
-  return out;
+export async function task540AtlasSources(env: PaintedCacheEnv = {}, pool?: PaintWorkerPool): Promise<Map<string, AtlasSource>> {
+  // ADR-551: thin delegate to `painted-core.ts` (cache-first, groups in parallel, misses in a Worker).
+  // (Was per-species `paintedAtlasURL` under ADR-550: a partial hit now repaints the group — both
+  // species paint in one `paintTask540Atlases()` call anyway, ~133 ms VM for the pair.)
+  return paintPaintedGroup({ name: "task540", specs: task540Specs, paint: paintTask540Atlases, assemble: defaultAssemble }, env, pool);
 }
