@@ -15079,3 +15079,240 @@ decode)/8 slot-work floor (≈14,700 ms), so there is no measurable prefetch-con
 for a two-class waiter queue to reclaim; ADR-557's instrumentation deliberately keeps
 slot-wait visible pool-wide, so contention would show up in `fetchDecodeWait` if it ever
 appears. Both numbers stay free for a future batch if the phone evidence changes.
+
+## ADR-562: Drawn-geometry roof coverage pin (SurVivaZ)
+
+Test-only foundation for the roof-gap batch (ADR-563/564/565); no production code changed.
+Ports the roof-gap prep harness (`~/workspace/work/roof-gap-prep.md`) into a permanent test,
+`apps/client/test/adr562_roof_coverage.test.ts`: a two-storey tier-1 house (foundation / walls /
+corners / doorway / window / floor z=5 / walls z=5 / roof_hip z=10) is placed as raw BuildPiece
+entities in a net world via `installGameplay(..., role:"client")`, the real
+`structureIndexSystem` runs (wood walls -> shk roof skin), `IsoView.render` builds the real view
+mirror, and drawn pixels are measured per screen column through BOTH renderer geometry passes —
+Canvas2D `gatherPieces` (image() forced ready, alpha >= 128, clip polygons applied) and WebGL2
+`SpriteBatch.prepare()` with a stub GL + stub AtlasManager returning the real registry frames
+(`registry.buildingFrame`), instances read back from the per-part static cache. Terrain reaches
+the mirror only via the ADR-523 per-local-tile `chunk.height` array pattern (`getTile: () => 9999`).
+The stub field list lives in one helper and the signature width is imported (`PIECE_SIG_N`).
+
+Measured on the current tree (both renderer passes agree EXACTLY on every number): the
+front-face / ADR-404 pair assertions PASS — pair per-column median overlap 9–10 px, worst
+ramp-end gap 2 px; straight front wall columns <= 3 px clear, 7 px only at the NE corner-post
+columns — and the pin FAILS at the three prep defects:
+
+1. **Corner notch (ADR-563).** Divergence from the prep's tier attribution: at tier 1 (shk
+   skin) the SW corner post is covered (worst clear 3 px); the prep's 51 px notch reproduces
+   EXACTLY at tier 2 (base skin) — 51 px clear x 1 column above the SW corner post, view 0,
+   both renderers.
+2. **Back-left face hole (ADR-564).** Bare columns (wall top is the topmost pixel, nothing
+   above for 300+ rows): 68 at 5x5, 85 at 6x6, 102 at 7x7 (view 0, W face; W in views 0/1,
+   E in views 2/3; 68 bare in every view at 5x5) — identical to the prep's bare counts.
+   (Per-face column totals differ from the prep's 184/230/276 because this port's face raster
+   counts the L-corner arm walls + posts in both adjacent faces: 215/247/279 per face.)
+3. **Terrace step (ADR-565).** Divergence in magnitude: a 1-level x-split step through the
+   footprint adds +1 bare column on the N face (1 vs flat 0; +1 for every x-split position
+   tried), where the prep reported +9. The pinned invariant is unchanged: a step inside the
+   footprint must add NO bare columns on any face.
+
+**Variant measurement (prep §2.4 step 1).** Hip 'lo' per-column bottom profiles, sprite-bound
+method: the v1/v2 (moss) sprites are PIXEL-IDENTICAL to variant 0 for the only shape that has
+variant art ('e', base + shk skins, all 4 rows: maxAbsDiff 0, 0 of ~70 columns differ); shapes
+o/i/p/h have NO variant art at all (`rfxSpriteKeys` falls back to the v0 key). Verdict: NO
+roof tile variant can produce the screenshot's broad ~25 px front-face band — a variant-only
+defect is ruled out, not just unlikely.
+
+Gate for the follow-up slices: ADR-563/564/565 must turn the failing assertions green WITHOUT
+moving the front-face pair identity (median overlap / max gap / front clear bands above).
+
+## ADR-563: Corner coverage for hip vertex posts (SurVivaZ)
+
+Fixes the ADR-562 corner notch (defect 1 of the roof-gap batch). One production change, in
+`RoofTiler.resolve` (`apps/client/src/roof-tiler.ts`): a band-0 hip vertex tile (shape `o` / `h` /
+`p`) on a **base-skin** region gains one overlay part — its own sprite, same row, drawn
+`HIP_CORNER_DROP_PX = 48` px below its seat (the "corner drop"). No new art, no seat change.
+
+**What was actually wrong (measured this slice, sprite-bound + ADR-562 harness).** The notch is
+not in the roof shapes: the hip `lo` sprites are pixel-identical across base/shk skins and tiers
+(every vertex shape's extreme tip column ends at dy +7). It is the **corner post art**: at tier 2
+(base skin, stone walls) the SW post's drawn frame (`bld_wall_corner_outer_t2`, rot 3) has its
+outer tip column (dx −16) chamfered — its topmost dash sits at dy −29 where the tier-1 wood frame
+reaches −78 and the neighbouring column (dx −15) reaches −78. The roof `o` part over that post
+ends its tip at dy +7, so exactly one screen column is left open between the roof tip and the
+post's dash: 51 px clear × 1 column (ADR-562, view 0 SW corner, both renderers agree). At tier 1
+the region takes the shk skin and the wood post art reaches the tip (worst clear 3 px) — which is
+why the drop is keyed on the region skin (`p.skin === undefined` = base): shk regions are
+byte-identical before/after this slice, every number unchanged.
+
+**Route taken: tiler coverage, not the clip.** The fallback clip route was evaluated and is
+geometrically incapable here: the post is already clipped at the seated plane (93 px; its peak is
+87–88), and the chamfered dash sits *below* the plane — trimming only removes pixels above a
+line, and any iso-slope (≤ 0.5) clip line that reached the dash (height 13–29 above the pivot at
+dx −16) would shave the post's arm (top ≈ 84 at dx −8) by tens of px on correct corners. No
+unshifted part can cover the column either: no roof sprite in either manifest has a pixel below
+dy +31 anywhere, and the extreme tip columns all end at dy +7, 47+ px short of the dash. The
+corner drop is the remaining coverage mechanism: the vertex part re-drawn 48 px lower lands its
+tip 3 px above the post's outer dash (51 → 3 px clear).
+
+**Numbers (ADR-562 pin, both renderer passes agree exactly).** Tier 2: SW corner post worst
+clear 51 → **3 px**; S face worst clear 51 → 3; W face worst clear 51 → 3 (bare count unchanged
+at 76 — that is ADR-564's hole, untouched). Tier 1: every number identical to ADR-562 (corner
+3 px, pair median 9, min overlap −2, max gap 2). The ADR-404 seat does not move: the tile's own
+part and every front `e` part keep their lift, and the pin's front-face test passes unchanged.
+One statistic does move, recorded plainly: at tier 2 the pin's *pair aggregate* (which pools
+every roof tile's pixels over the pair wall's columns) goes median overlap 10 → 24, min overlap
+−2 → 10, max gap 2 → 0, because the corner tile's dropped part now also covers the pair wall's
+leftmost columns. The pair part itself (tile (5,8)'s `e` over wall (5.5, 9)) is byte-identical;
+the pin's written pair assertions (median ≥ 5, min ≥ −3, max gap ≤ 3) pass with more margin, not
+less. No whole-sprite part can cover the tip column without crossing those columns (measured:
+the corner tile is the only tile reaching the notch column, and its sprite body spans the pair
+wall's leftmost 41 columns).
+
+**Storey-1 S-corner re-measure (prep §5, asked for by the batch): NOT closed by this fix —
+unchanged.** Measured with the ADR-562 harness against the storey-1 (z=0) SW post: tier 1 worst
+clear 30 px × 1 column ≥ 10 px (prep recorded 30 px × 2 columns; the second column is < 10 px in
+this port), tier 2 worst clear 56 px × 1 column, identical with and without the ADR-563 change.
+That gap is against the *floor deck* above the storey-1 post (a flat deck piece, not a roof
+tile), so it is outside the roof tiler's reach; it belongs with the ADR-564/565 coverage family
+or its own slice.
+
+**Gate:** ADR-562 corner test FAIL → PASS (both tiers, both renderers); back-face (ADR-564) and
+terrace (ADR-565) tests still fail exactly as before. Neighbouring suites green: adr397 (tiler +
+draw), adr404, adr432, adr433, adr523, adr398, adr400. Typecheck clean (lockfile TS 5.9.3).
+**Visual check still owed on the phone:** the corner drop is a real visual change at base-skin
+hip corners (the vertex panel re-drawn lower over the corner post) — harness numbers prove
+coverage, not looks; the batch's phone eyeball (already owed for ADR-564) must judge it. Cot
+form shares the hip geometry (posts clip, seat 13) but was not measured and is not changed here.
+
+## ADR-564: Back-face eave coverage for hip roofs (SurVivaZ)
+
+Fixes the ADR-562 back-left face hole (defect 2 of the roof-gap batch). One production change,
+in `RoofTiler.resolve` (`apps/client/src/roof-tiler.ts`): a band-0 hip `lo` tile on a side eave
+— shape `e` rows 1/3 (the W/E faces) or any `o` corner tile — gains one overlay part: its own
+sprite, same row, drawn `HIP_EAVE_RAISE_PX = 8` px above its seat (the "eave raise"). No new
+art, no seat change, no data change. User ruling Q2 route: tiler coverage, not wall-top
+clipping.
+
+**What was actually wrong (measured this slice, ADR-562 harness + per-piece attribution).**
+The hole is a silhouette deficit of at most 6 px, not a missing panel: in every bare column
+the topmost roof pixel is the eave tile's OWN part, sitting 1–6 px below the wall top (max
+deficit 6 over all 68 bare columns at 5×5). The `lo` part's top edge ramps off toward the tile
+ends; along the screen-back-left eave the neighbouring parts lean the other way, so the ramps
+compound and the wall rim stands proud of the roof line. Attribution across views 0–3: bare
+columns are topped only by band-0 `lo` tiles — `e` row 1 (×50–51) and `o` row 1 (×16–18) on
+the W face, `e` row 3 / `o` row 0 on the E face, plus 1 column each from `o` rows 2/3 — which
+is exactly the overlay set above. N/S eaves (`e` rows 0/2) never top a bare column on flat
+ground (their neighbours fill the ramps; N/S bare 0 in every view), so they are not raised.
+
+**Numbers (ADR-562 pin, both renderer passes agree exactly).** Back-left bare columns:
+68 → **0** (5×5), 85 → **0** (6×6), 102 → **0** (7×7), view 0 W face; the hole's rotation
+across views 0–3 is likewise 68 → **0** in every view (W in views 0/1, E in views 2/3). The
+base-skin (tier 2) W face also goes 76 → **0** (ADR-563 had left it untouched). **The
+front-face seat identity does not move:** the ADR-404 pair at tier 1 is byte-identical —
+46 columns, median overlap 9, min overlap −2, max gap 2, before and after — because the raise
+is an added part above the seat; no part's bottom edge, lift or seat changes, and the pair's
+own tile (`e` row 0) gets no overlay. Front faces at tier 1 are unchanged (S worst clear 3 px,
+E worst clear 7 px); the tier-2 pair aggregate is also unchanged from ADR-563 (median 24,
+min 10, max gap 0 — the raised overlay adds pixels only above existing bottoms).
+
+**ADR-565 does NOT fold into this slice.** After this fix the pin's terrace case still fails
+by exactly the pre-fix margin on the step side: terrace N face 1 bare column vs flat 0 (the
+W face terrace hole, 68 bare, IS closed by this mechanism). Measured attribution for that
+column: it is topped by an `e` row 2 (N-face) tile at a deficit of **10 px** — an N/S eave
+tile, outside this slice's side-eave set, at a deficit larger than any flat-ground column
+(6 px). It needs its own slice (ADR-565).
+
+**Gate:** ADR-562 back-face tests (sizes + rotation) FAIL → PASS; front-face and corner tests
+stay PASS; terrace test still fails exactly as above (ADR-565's pin). Neighbouring suites
+green: adr397 (tiler + draw), adr404, adr432, adr433, adr523, adr398, adr400 (86 tests).
+Typecheck clean (lockfile TS 5.9.3).
+**Visual check still owed on the phone:** the eave raise re-draws every hip side-eave and
+corner panel 8 px higher — coverage is harness-proven, the look (a possibly visible second
+panel edge along the eave) is not; judge it with the batch's phone eyeball alongside
+ADR-563's corner drop. Cot form shares the hip geometry but was not measured and is not
+changed here; gab/gam/shd/flt eaves are likewise untouched.
+
+## ADR-565: Terrace-step eave coverage — extends ADR-564, does not fold into it (SurVivaZ)
+
+ADR-564's entry recorded the fold verdict up front: after the side-eave raise, the ADR-562
+terrace case still failed by its exact pre-fix margin (terrace N face 1 bare column vs flat
+0), so this is its own slice, as the batch plan allowed. One production change, in the same
+`RoofTiler.resolve` block as ADR-564: the eave raise now applies to **every** band-0 hip `lo`
+eave tile (shape `e` rows 0–3 plus the `o` corners ADR-564 already covered), and
+`HIP_EAVE_RAISE_PX` rises 8 → **12**.
+
+**Why this shape (measured).** The terrace bare column is topped by the step-side N eave's
+own `e` row 2 part at a deficit of **10 px** (ADR-562 harness attribution) — the ADR-564 ramp
+defect amplified by the 1-level step, on a face ADR-564 deliberately left unraised because
+flat-ground N/S eaves never top a bare column. The tiler cannot discriminate a stepped tile
+(picks carry no terrain), and a step can cross any face, so the mechanism is made uniform:
+all eave rows raised at the stepped size (10 px deficit + 2 px margin; the flat deficit is
+6 px). Anything narrower — an N/S-only second constant — would leave the identical defect
+standing on a y-split step through a W/E eave.
+
+**Numbers (ADR-562 pin, both renderer passes agree exactly).** Terrace case: N face bare
+1 → **0**, and terrace now matches flat on every face (flat faces all 0, per ADR-564). The
+whole pin is green for the first time: front, corner, back-face (sizes + rotation) and
+terrace tests all pass. **Nothing ADR-564 pinned moved:** the ADR-404 pair at tier 1 is
+still byte-identical (46 columns, median overlap 9, min −2, max gap 2), front-face worst
+clear bands are unchanged from the pre-batch baseline (S 3 px, E 7 px, N 7 px at tier 1 —
+the raised overlay adds pixels above wall tops only where the ramp left a deficit; where
+neighbours already covered, the topping pixels are unchanged), and the tier-2 pair
+aggregate is unchanged from ADR-563/564 (median 24, min 10, max gap 0).
+
+**Gate:** ADR-562 terrace test FAIL → PASS; all other ADR-562 tests stay PASS. Neighbouring
+suites green: adr397 (tiler + draw), adr404, adr432, adr433, adr523, adr398, adr400
+(86 tests), plus adr402 and adr511 (the other RoofTiler consumers, 11 tests). Typecheck
+clean (lockfile TS 5.9.3).
+**Visual check still owed on the phone:** the raise is now 12 px on every hip eave — judge
+the eave look (a possibly visible second panel edge) with the batch's phone eyeball,
+together with ADR-563's corner drop and ADR-564's raise. Cot/gab/gam/shd/flt eaves are
+untouched; a y-split terrace is covered by the same uniform mechanism but is not in the
+pin (only the x-split case is) — recorded as a harness gap, not a claim.
+
+## ADR-566: ?diag=1 structure dump for verbatim harness rebuilds (SurVivaZ)
+
+Diagnostic only (user ruling Q1: ship the dump with the roof-gap fixes). The original
+screenshot house is gone (the user restarted), so this dump's job is to capture ANY
+recurrence verbatim in the new game: pieces + terrain around the player, in a format the
+ADR-562 harness rebuilds exactly and re-measures.
+
+**Format (v1, plain text, defined in `apps/client/src/structure-dump.ts`).** Header lines
+`SURVIVAZ_STRUCTURE_DUMP 1`, `center <tileX> <tileY>`, `radius 12`, `view <0..3>`,
+`bounds <x0> <y0> <w> <h>`; then `heights` and w-wide comma-separated rows (y ascending) of
+the RAW `chunk.height` integers (signed terrain levels, exactly what the IsoView mirror
+consumes — not render heights); then `pieces <count>` and one
+`P <key> <x> <y> <z> <rot> <tier> <variant>` line per build piece whose tile falls in the
+25x25 square (x/y in world tile units, fractions kept; z = Transform z); then `end`.
+Serialization is a pure function (`collectStructureDump` / `serializeStructureDump` /
+`parseStructureDump` / `dumpHeightAt`); the diag wiring is thin on top. No gameplay path,
+no behaviour change when ?diag=1 is absent, no art, no manifest changes.
+
+**How the user triggers it (phone, ?diag=1).** Stand next to / inside the structure and
+tap the **[Dump structure]** button (bottom-left, diag-only). That logs the dump, copies
+it to the clipboard where the browser allows, and opens a selectable text block
+(`#diag-structure-text`) with the full dump — copy it and send it as-is. The same text is
+available in a console as `window.__survivazStructureDump()` (the ADR-370
+`__survivazLoadCost` pattern), and the diag overlay carries a reminder line.
+
+**How a developer feeds it to the harness.** `parseStructureDump(text)` returns pieces +
+height grid; place the pieces as raw BuildPiece entities (type via `defs.pieceId(key)`,
+rot/variant/tier from the dump), run `structureIndexSystem`, feed heights through the
+ADR-523 chunk pattern (`chunk.height[localY*CHUNK_SIZE+localX] = dumpHeightAt(...)`,
+falling back to the centre tile's height outside the square), render through IsoView and
+measure as ADR-562 does. `apps/client/test/adr566_structure_dump.test.ts` is a working
+example of exactly this round-trip.
+
+**Gate (round-trip, measured).** The ADR-562 two-storey house serialized, parsed and
+rebuilt re-measures IDENTICALLY to the original in the Canvas2D drawn-pixel pass: every
+face 215 columns, bare 0 on all faces, worst clear S 3 / E 7 / N 7 / W 3 px; corners
+(maxClear) 4,4 -> 0, 4,9 -> 3, 9,4 -> 7, 9,9 -> 0; ADR-404 pair 46 columns, median
+overlap 9, min -2, max gap 2 — the pin's own numbers. `parseStructureDump` throws on
+empty/stub text, so a serializer emitting nothing cannot pass. Diag wiring pinned in
+`adr566_diag.test.ts` (diag off installs nothing; diag on exposes the global + button).
+Neighbours green: adr562 pin 6/6, adr543 6/6, adr548 7/7, adr557 (render) 3/3. Typecheck
+clean (lockfile TS 5.9.3).
+**Honest cuts:** the round-trip gate measures the Canvas2D pass only (the pin's WebGL2
+pass reads the same mirror + tiler, and ADR-562 proves the two passes agree to the
+column); the runtime centre is the PLAYER's tile (stand close — the 12-tile radius is
+generous for a house); pieces whose def is unknown to the client defs are skipped;
+heights for non-resident chunks fall back to the centre tile's height.

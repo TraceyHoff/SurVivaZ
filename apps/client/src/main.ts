@@ -47,7 +47,8 @@ import { stanceMode, StanceMode, liftableNear, bedNear } from "@engine/gameplay"
  *             ?ice=<JSON RTCIceServer[]> (P2P STUN/TURN override, also VITE_ICE_SERVERS), ?renderer=debug, ?time=0..24 / ?weather=clear|rain|storm|snow|fog|overcast|heat|blizzard|windy &intensity=0..1, ?season=summer|fall|winter|0..3 (view-only overrides), ?hud=0.
  */
 import { BODY_TYPES, cosmeticsHashes, createGameLoop, World, PlayerId, Transform, PrevTransform, lerp, entityIndex, InputState, type FixedLoop, type Entity } from "@engine/core";
-import { TileMap, worldToScreen, screenToWorld, DEFAULT_ISO, ProceduralGenerator, computeSpawnPoints } from "@engine/world";
+import { TileMap, worldToScreen, screenToWorld, DEFAULT_ISO, ProceduralGenerator, computeSpawnPoints, CHUNK_SIZE, tileToChunk, tileToLocal } from "@engine/world";
+import { structureDumpText, type StructureDumpPiece } from "./structure-dump.js";
 import { InputSystem, AimResolver, DEFAULT_ACTIONS, DEFAULT_CONTEXTS, DEFAULT_PROFILES, DEFAULT_TOUCH_LAYOUTS } from "@engine/input";
 import { attachBrowserInput } from "@engine/input/browser";
 import { ClanRoster, ClanRosterMember, OnlinePlayer, VehicleStationOpenedEvt, PetEventEvt, WorkerEventEvt, MountEventEvt, gameplayNet, installDemoWorld, onGameplayRejected } from "@engine/server/protocol";
@@ -308,6 +309,22 @@ const session = new ClientSession({ storage: localStorage, slot: SLOT, sampleInp
 let world = new World({ seed: 1234 }); installDemoWorld(world, "client");
 installFullscreenRestore();
 const diag = startDiag({ renderer: () => iso?.renderer, entities: () => world.entityCount, tick: () => world.tick, player: () => session.player, loadCost: () => loadCost.format(), serverLocation: () => serverLocation,
+  // ADR-566: pieces + raw chunk.height terrain within 12 tiles of the player, for verbatim ADR-562 harness rebuilds.
+  structureDump: () => {
+    try {
+      const p = session.player; const pt = p !== undefined ? world.get(p, Transform) : undefined;
+      const tiles = session.client?.tiles.tiles;
+      if (!pt || !tiles || !world.isRegistered(BuildPiece)) return undefined;
+      const defs = gameplayDefs(world); const pieces: StructureDumpPiece[] = [];
+      for (const e of world.query([BuildPiece, Transform])) {
+        const t = world.get(e, Transform)!; const bp = world.get(e, BuildPiece)!;
+        const def = defs.pieces.get(bp.type); if (!def) continue;
+        pieces.push({ key: def.key, x: t.x, y: t.y, z: t.z, rot: bp.rot, tier: bp.tier, variant: bp.variant });
+      }
+      return structureDumpText({ center: { x: pt.x, y: pt.y }, view: iso?.renderer.camera.view ?? 0, pieces,
+        heightAt: (tx, ty) => { const c = tiles.getChunk(tileToChunk(tx), tileToChunk(ty)); return c ? c.height[tileToLocal(ty) * CHUNK_SIZE + tileToLocal(tx)] : undefined; } });
+    } catch { return undefined; }
+  },
   snapshot: () => session.client ? { received: session.client.latestTick >= 0, latestTick: session.client.latestTick, snapshots: session.client.stats.snapshots } : undefined,
   // ADR-254: ?seed= pins the preview (and a remote join); otherwise 1234 until the local server reports its seed.
   spawnPoints: (() => { let c: { seed: number; points: { x: number; y: number }[] } | undefined; return () => (c ??= (() => { const seed = Number(params.get("seed") ?? 1234); return { seed, points: computeSpawnPoints(new ProceduralGenerator({ seed })) }; })()); })() });

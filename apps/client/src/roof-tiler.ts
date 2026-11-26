@@ -58,6 +58,38 @@ export class RoofTiler {
     if (vis === undefined) return undefined;
     const seat = rfxSeat(p.form, this.cfg); // ADR-404: the roof rests on the wall tops
     const overlays: { vis: number; row: number; liftPx: number }[] = [];
+    // ADR-563: corner drop. A band-0 hip vertex tile (o / h / p) sits over a corner post; on a
+    // base-skin region the post art's outer tip column is chamfered (stone t2 frame: its top dash
+    // sits at -29 px where the wood frame's reaches -78), while the part's own tip ends at +7, so
+    // a 51 px x 1 column see-through notch opens above the post's outer column (ADR-562 pin, view
+    // 0 SW corner, both renderers). The same part dropped HIP_CORNER_DROP_PX lands its tip 3 px
+    // above that dash and closes the notch. The tile's own part and every front 'e' part keep
+    // their seat, so the ADR-404 front pair does not move. shk regions (log walls) get no drop:
+    // their post art already reaches the tip (worst clear 3 px, ADR-562). A clip cannot do this
+    // instead: the chamfered dash sits below every iso-slope clip line that keeps the post's arm.
+    if (p.form === "hip" && p.band === 0 && p.skin === undefined && (p.shape === "o" || p.shape === "h" || p.shape === "p")) {
+      overlays.push({ vis, row: p.row, liftPx: p.zoffPx + seat - HIP_CORNER_DROP_PX });
+    }
+    // ADR-564: eave raise. A band-0 hip 'lo' tile on a side eave (shape 'e' rows 1/3 = the W/E
+    // faces, and every 'o' corner tile) leaves the front ~19 columns of its wall with no roof
+    // pixel above the wall top: the part's top edge ramps off toward the tile ends and, along
+    // the screen-back-left eave, the neighbours lean the other way so the ramps compound — the
+    // wall rim stands proud of the roof silhouette by up to 6 px (ADR-562 pin: 68/85/102 bare
+    // columns at 5x5/6x6/7x7, both renderers; measured attribution: the bare columns' topmost
+    // roof pixel is the eave tile's own part, deficit 1-6 px). The same part re-drawn
+    // HIP_EAVE_RAISE_PX higher puts its top edge above the wall top in every one of those
+    // columns. The tile's own part keeps its seat, so the ADR-404 front pair and every part's
+    // bottom edge are byte-identical. Wall-top clipping was the rejected alternative (user
+    // ruling: tiler coverage, not clipping).
+    // ADR-565: the raise covers every eave row, not just the side rows, and is sized for a
+    // stepped eave: with a 1-level terrain step through the footprint, the step-side N eave's
+    // bare column is topped by an 'e' row 2 tile at a 10 px deficit (ADR-562 terrace case) —
+    // the same ramp, amplified by the step. A step can cross any face, so all 'e' rows get
+    // the raise at the stepped size; on flat ground rows 0/2 simply gain the same coverage
+    // their neighbours already gave them (their bare count was and stays 0).
+    if (p.form === "hip" && p.band === 0 && p.seg === "lo" && (p.shape === "o" || p.shape === "e")) {
+      overlays.push({ vis, row: p.row, liftPx: p.zoffPx + seat + HIP_EAVE_RAISE_PX });
+    }
     for (const o of p.overlays) {
       let ov: number | undefined;
       for (const k of rfxSpriteKeys(o.key, tier, p.skin, this.cfg)) { ov = this.sid(k); if (ov !== undefined) break; }
@@ -128,6 +160,12 @@ export class RoofTiler {
     return { pick, fx: this.resolve(pick, t.tier) };
   }
 }
+
+/** ADR-563: px a band-0 hip vertex part is re-drawn below its seat as the corner drop (see resolve). */
+const HIP_CORNER_DROP_PX = 48;
+
+/** ADR-564/565: px a band-0 hip eave part is re-drawn above its seat as the eave raise (see resolve). Sized for the stepped-eave deficit (10 px, ADR-565) over the flat one (6 px, ADR-564). */
+const HIP_EAVE_RAISE_PX = 12;
 
 const seatCell = (x: number, y: number): number => (x + 32768) * 65536 + (y + 32768);
 

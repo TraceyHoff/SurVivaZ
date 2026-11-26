@@ -12,7 +12,9 @@ export interface DiagSources { renderer(): IsoRenderer | undefined; entities(): 
   /** ADR-543: where the singleplayer server runs ("in Web Worker" / "in tab ...") — undefined before singleplayer starts. */
   serverLocation?(): string | undefined;
   /** World spawn points (ADR-106) and the seed they were computed for. */
-  spawnPoints?(): { seed: number; points: { x: number; y: number }[] } | undefined }
+  spawnPoints?(): { seed: number; points: { x: number; y: number }[] } | undefined;
+  /** ADR-566: structure dump text (pieces + terrain heights near the camera) on demand; undefined when no world is live. */
+  structureDump?(): string | undefined }
 let lastError = "";
 const hex = (r: number, g: number, b: number): string => "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
 
@@ -26,6 +28,29 @@ export function startDiag(src: DiagSources): { afterRender(): void } | undefined
   const el = document.createElement("pre"); el.id = "diag";
   el.style.cssText = "position:fixed;left:4px;top:4px;z-index:9999;margin:0;padding:6px 8px;max-width:min(96vw,560px);white-space:pre-wrap;font:11px/1.35 ui-monospace,monospace;color:#cfe;background:rgba(0,0,0,.72);border-radius:6px;pointer-events:none";
   mountUi(el);
+  // ADR-566: structure dump trigger. Same pattern as window.__survivazLoadCost (ADR-370): a global
+  // function returning the text + console.log, PLUS a tappable button that opens a copyable text
+  // block (a phone has no console). Diag-only; nothing here exists when ?diag=1 is absent.
+  if (src.structureDump) {
+    const produce = (): string | undefined => {
+      const text = src.structureDump?.();
+      if (text) { console.log(text); return text; }
+      console.log("structure dump: no live world / no player yet");
+      return undefined;
+    };
+    (globalThis as { __survivazStructureDump?: () => string | undefined }).__survivazStructureDump = produce;
+    const btn = document.createElement("button"); btn.id = "diag-structure-dump"; btn.textContent = "Dump structure";
+    btn.style.cssText = "position:fixed;left:4px;bottom:4px;z-index:9999;padding:8px 10px;font:12px ui-monospace,monospace;color:#cfe;background:rgba(0,0,0,.72);border:1px solid #cfe;border-radius:6px";
+    btn.addEventListener("click", () => {
+      const text = produce(); if (!text) return;
+      document.querySelector("#diag-structure-text")?.remove();
+      const ta = document.createElement("textarea"); ta.id = "diag-structure-text"; ta.value = text; ta.readOnly = true;
+      ta.style.cssText = "position:fixed;left:4px;top:44px;z-index:10000;width:min(94vw,560px);height:50vh;font:10px/1.3 ui-monospace,monospace;color:#cfe;background:rgba(0,0,0,.92);border-radius:6px";
+      mountUi(ta); ta.focus(); ta.select();
+      try { void navigator.clipboard?.writeText(text); } catch { /* the textarea is the copy path */ }
+    });
+    mountUi(btn);
+  }
   let t0 = performance.now(), k0 = src.tick(), rate = 0, pixel = "?", glErr = 0, want = true;
   setInterval(() => {
     const now = performance.now(), k = src.tick(); rate = ((k - k0) * 1000) / (now - t0); t0 = now; k0 = k; want = true;
@@ -61,6 +86,7 @@ export function startDiag(src: DiagSources): { afterRender(): void } | undefined
     L.push(`entities ${src.entities()} player ${src.player() !== undefined ? "yes" : "no"} snapshot ${s ? `${s.received ? "yes" : "NO"} tick ${s.latestTick} n=${s.snapshots}` : "no session"}`);
     L.push(`sim tick ${src.tick()} @ ${rate.toFixed(1)}/s`);
     const sp = src.spawnPoints?.(); if (sp) L.push(`spawns (seed ${sp.seed}) ${sp.points.map((p) => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join("  ")}`);
+    if (src.structureDump) L.push("structure dump: tap [Dump structure] (bottom-left) or __survivazStructureDump()");
     L.push(`last error: ${lastError || "none"}`);
     el.textContent = L.join("\n");
   }, 500);
