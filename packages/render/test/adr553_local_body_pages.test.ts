@@ -27,6 +27,14 @@ vi.mock("../src/assets/asset-fetch.js", () => ({
   }),
   assetBytes: async (_url: string) => new ArrayBuffer(8),
   withAssetSlot: (fn: () => Promise<unknown>) => fn(),
+  // ADR-559: atlasManager imports the decode slot + stats; identity stub, never updated.
+  withDecodeSlot: (fn: () => Promise<unknown>) => fn(),
+  decodeSlotStats: { inFlight: 0, peak: 0 },
+  resetDecodeSlotPeak: () => {},
+  // ADR-557: atlasManager imports the slot/source stats; the identity slot never updates them.
+  assetSlotStats: { waitMs: 0, waits: 0, inFlight: 0, peak: 0 },
+  assetSourceStats: { cacheHits: 0, networkFetches: 0 },
+  resetAssetSlotPeak: () => {},
   // ADR-553: the real predicate (ride / crouch doll pages stream, never eager) — the adr548
   // mock's `() => false` would let them into the eager set and break the per-type split.
   isLazyDollPageKey: (k: string) => /^cz_(ride|crouch)_/.test(k),

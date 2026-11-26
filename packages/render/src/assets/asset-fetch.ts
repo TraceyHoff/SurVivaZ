@@ -20,7 +20,29 @@ export function setAssetCacheVersion(v: string): Promise<void> { version = v || 
 export function setAssetFetchConcurrency(n: number): void { limit = Math.max(1, n | 0); }
 export function resetAssetFetchForTests(): void {
   version = "dev"; limit = ASSET_FETCH_CONCURRENCY; active = 0; waiters.length = 0; inflight.clear(); inflightText.clear();
+  assetSlotStats.waitMs = 0; assetSlotStats.waits = 0; assetSlotStats.inFlight = 0; assetSlotStats.peak = 0;
+  assetSourceStats.cacheHits = 0; assetSourceStats.networkFetches = 0;
+  decodeLimit = ASSET_DECODE_CONCURRENCY; decodeActive = 0; decodeWaiters.length = 0;
+  decodeSlotStats.inFlight = 0; decodeSlotStats.peak = 0;
 }
+
+/**
+ * ADR-557: slot-pool instrumentation (diag only — no behaviour change). `waitMs` is the summed time
+ * jobs spent queued for a slot before their work started (slot-WAIT, vs the fetch/decode slot-WORK
+ * ADR-548 already splits inside defaultImageLoader); `waits` counts jobs that queued at all;
+ * `inFlight` mirrors the live slot occupancy and `peak` is its high-water mark since the last
+ * resetAssetSlotPeak(). AtlasManager.rebuild snapshots deltas of these around its load phase.
+ */
+export const assetSlotStats = { waitMs: 0, waits: 0, inFlight: 0, peak: 0 };
+/** ADR-557: restart the peak window (peak := current occupancy); rebuild calls this at load start. */
+export function resetAssetSlotPeak(): void { assetSlotStats.peak = assetSlotStats.inFlight; }
+/**
+ * ADR-557: per-fetch source (diag only). doFetch is the one place that knows whether a response
+ * came from this deploy's Cache Storage or had to be fetched; blob:/data: URLs bypass doFetch and
+ * count as networkFetches (they are served by fetch(), never by Cache Storage).
+ */
+export const assetSourceStats = { cacheHits: 0, networkFetches: 0 };
+const nowMs = (): number => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
 async function dropOldAssetCaches(): Promise<void> {
   if (typeof caches === "undefined") return;
@@ -29,9 +51,41 @@ async function dropOldAssetCaches(): Promise<void> {
 }
 
 export async function withAssetSlot<T>(job: () => Promise<T>): Promise<T> {
-  if (active >= limit) await new Promise<void>((r) => waiters.push(r));
-  active++;
-  try { return await job(); } finally { active--; waiters.shift()?.(); }
+  const waitT0 = nowMs();
+  if (active >= limit) { assetSlotStats.waits++; await new Promise<void>((r) => waiters.push(r)); }
+  assetSlotStats.waitMs += nowMs() - waitT0;
+  active++; assetSlotStats.inFlight = active; if (active > assetSlotStats.peak) assetSlotStats.peak = active;
+  try { return await job(); } finally { active--; assetSlotStats.inFlight = active; waiters.shift()?.(); }
+}
+
+/**
+ * ADR-559: the decode pool — a SEPARATE semaphore from the fetch slots above. Since ADR-559 the
+ * asset slot covers fetch + blob() only; createImageBitmap decode runs under this cap instead, so
+ * decode CPU no longer occupies the 8 fetch lanes (the phone's registry.fetch wall was
+ * (summed fetch + summed decode) / 8 ≈ 14.7 s). The cap bounds how many decoded bitmaps can be
+ * in production at once: the largest atlas page is 2048x2048 RGBA = 16 MB, so 16 in flight is a
+ * 256 MB transient RAM worst case (typical pages are far smaller), alive only while the loading
+ * screen is up and freed at the rebuild swap — the 256 MB GPU/VRAM budget is untouched.
+ * 16 = 2x the fetch lanes: ADR-557 measured the 8-slot fetch pool saturated (peak 8, summed
+ * slot-wait >> 0), so the decode cap must never re-throttle the fetches it just freed; at 2x,
+ * a fetch lane finishing always finds decode headroom for its blob while earlier decodes run.
+ * Shared by every image decode path (defaultImageLoader page-ins + ADR-558's decodeImageBlob,
+ * scaled and full alike), so total concurrent decodes are bounded no matter the path.
+ */
+export const ASSET_DECODE_CONCURRENCY = 16;
+let decodeLimit = ASSET_DECODE_CONCURRENCY;
+let decodeActive = 0;
+const decodeWaiters: Array<() => void> = [];
+/** ADR-559: decode-pool instrumentation, same pattern as assetSlotStats (diag only). */
+export const decodeSlotStats = { inFlight: 0, peak: 0 };
+/** ADR-559: restart the decode peak window (peak := current occupancy); rebuild calls this at load start. */
+export function resetDecodeSlotPeak(): void { decodeSlotStats.peak = decodeSlotStats.inFlight; }
+export function setAssetDecodeConcurrency(n: number): void { decodeLimit = Math.max(1, n | 0); }
+
+export async function withDecodeSlot<T>(job: () => Promise<T>): Promise<T> {
+  if (decodeActive >= decodeLimit) { await new Promise<void>((r) => decodeWaiters.push(r)); }
+  decodeActive++; decodeSlotStats.inFlight = decodeActive; if (decodeActive > decodeSlotStats.peak) decodeSlotStats.peak = decodeActive;
+  try { return await job(); } finally { decodeActive--; decodeSlotStats.inFlight = decodeActive; decodeWaiters.shift()?.(); }
 }
 
 async function cacheStore(): Promise<Cache | null> {
@@ -47,17 +101,18 @@ export async function dropAssetCacheEntry(url: string): Promise<void> {
 
 async function doFetch(url: string, init?: RequestInit): Promise<Response> {
   const cache = await cacheStore();
-  try { const hit = cache ? await cache.match(url) : undefined; if (hit) return hit; } catch { /* ignore */ }
+  try { const hit = cache ? await cache.match(url) : undefined; if (hit) { assetSourceStats.cacheHits++; return hit; } } catch { /* ignore */ }
   let res: Response;
   try { res = await fetch(url, { cache: "force-cache", ...init }); if (!res.ok) throw new Error(String(res.status)); }
   catch { res = await fetch(url, init); }
+  assetSourceStats.networkFetches++;
   if (res.ok && cache) { try { await cache.put(url, res.clone()); } catch { /* quota / private mode */ } }
   return res;
 }
 
 /** Fetch `url`, preferring a same-deploy Cache Storage hit, then the HTTP cache, then the network. */
 export async function assetFetch(url: string, init?: RequestInit): Promise<Response> {
-  if (/^(blob|data):/i.test(url)) return fetch(url, init);
+  if (/^(blob|data):/i.test(url)) { assetSourceStats.networkFetches++; return fetch(url, init); }
   let p = inflight.get(url);
   if (!p) {
     p = doFetch(url, init);

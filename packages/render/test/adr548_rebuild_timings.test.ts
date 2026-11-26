@@ -14,15 +14,46 @@ import { PACK_DIR } from "@engine/assets/node";
  * measurable; the stub GL counts texStorage3D / texSubImage3D / generateMipmap calls so the
  * upload split can be cross-checked against the GL calls that produced it.
  */
-vi.mock("../src/assets/asset-fetch.js", () => ({
-  assetFetch: async (_url: string) => ({
-    ok: true, status: 200,
-    blob: async () => { await new Promise((r) => setTimeout(r, 2)); return new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }); },
-  }),
-  assetBytes: async (_url: string) => new ArrayBuffer(8),
-  withAssetSlot: (fn: () => Promise<unknown>) => fn(),
-  isLazyDollPageKey: (_k: string) => false,
-}));
+vi.mock("../src/assets/asset-fetch.js", () => {
+  // ADR-557: the mock slot is a real 8-wide semaphore (production limit) that maintains the same
+  // stats shape as the real withAssetSlot, so slot-wait / in-flight peak are measured, not faked.
+  // Every mock fetch counts as a network fetch (the mock has no Cache Storage).
+  const assetSlotStats = { waitMs: 0, waits: 0, inFlight: 0, peak: 0 };
+  const assetSourceStats = { cacheHits: 0, networkFetches: 0 };
+  let active = 0; const waiters: Array<() => void> = [];
+  // ADR-559: the mock decode slot is a real 16-wide semaphore (production cap) maintaining the
+  // same stats shape as the real withDecodeSlot, so the decode peak is measured, not faked.
+  const decodeSlotStats = { inFlight: 0, peak: 0 };
+  let dActive = 0; const dWaiters: Array<() => void> = [];
+  return {
+    assetFetch: async (_url: string) => {
+      assetSourceStats.networkFetches++;
+      return {
+        ok: true, status: 200,
+        blob: async () => { await new Promise((r) => setTimeout(r, 2)); return new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }); },
+      };
+    },
+    assetBytes: async (_url: string) => new ArrayBuffer(8),
+    withAssetSlot: async (fn: () => Promise<unknown>) => {
+      const t0 = performance.now();
+      if (active >= 8) { assetSlotStats.waits++; await new Promise<void>((r) => waiters.push(r)); }
+      assetSlotStats.waitMs += performance.now() - t0;
+      active++; assetSlotStats.inFlight = active; assetSlotStats.peak = Math.max(assetSlotStats.peak, active);
+      try { return await fn(); } finally { active--; assetSlotStats.inFlight = active; waiters.shift()?.(); }
+    },
+    withDecodeSlot: async (fn: () => Promise<unknown>) => {
+      if (dActive >= 16) { await new Promise<void>((r) => dWaiters.push(r)); }
+      dActive++; decodeSlotStats.inFlight = dActive; decodeSlotStats.peak = Math.max(decodeSlotStats.peak, dActive);
+      try { return await fn(); } finally { dActive--; decodeSlotStats.inFlight = dActive; dWaiters.shift()?.(); }
+    },
+    decodeSlotStats,
+    resetDecodeSlotPeak: () => { decodeSlotStats.peak = decodeSlotStats.inFlight; },
+    assetSlotStats,
+    assetSourceStats,
+    resetAssetSlotPeak: () => { assetSlotStats.peak = assetSlotStats.inFlight; },
+    isLazyDollPageKey: (_k: string) => false,
+  };
+});
 
 import { AtlasManager, defaultImageLoader, imageLoadStats, resetImageLoadStats, setResizeSlicing } from "../src/assets/atlasManager.js";
 
@@ -109,6 +140,20 @@ describe("ADR-548 rebuildTimings sub-splits (real setRegistry, stub GL)", () => 
     // work rather than wall time — it must cover the wall time, not equal it.
     expect(rt.fetchDecodeFetch).toBeGreaterThan(0); expect(rt.fetchDecodeDecode).toBeGreaterThan(0);
     expect(rt.fetchDecodeFetch + rt.fetchDecodeDecode).toBeGreaterThanOrEqual(rt.fetchDecode);
+    // ADR-557: slot-wait / load count / source split / in-flight peak + resize chain split.
+    console.log(`[adr557] loads ${rt.fetchDecodeLoads} (cache ${rt.fetchDecodeCacheHits} / network ${rt.fetchDecodeNetwork}) · slot wait ${rt.fetchDecodeWait.toFixed(1)}ms · slot peak ${rt.fetchDecodePeak} · resize chain wait ${rt.resizeChainWait.toFixed(1)}ms / run ${rt.resizeChainRun.toFixed(1)}ms`);
+    expect(rt.fetchDecodeLoads).toBeGreaterThan(0);
+    expect(rt.fetchDecodeCacheHits).toBe(0); // the mock has no Cache Storage — everything is network
+    expect(rt.fetchDecodeNetwork).toBe(rt.fetchDecodeLoads); // each mock load fetched exactly once and succeeded
+    expect(rt.fetchDecodeWait).toBeGreaterThan(0); // hundreds of ~4 ms loads through 8 slots must queue
+    expect(rt.fetchDecodePeak).toBeGreaterThan(1); expect(rt.fetchDecodePeak).toBeLessThanOrEqual(8);
+    // ADR-559: decodes ran under the separate decode cap (16), never on the fetch slots.
+    expect(rt.fetchDecodeDecodePeak).toBeGreaterThan(0); expect(rt.fetchDecodeDecodePeak).toBeLessThanOrEqual(16);
+    // wait + fetch + decode is the summed per-load lifecycle: it must cover the fetchDecode wall,
+    // exactly as ADR-548's fetch + decode alone did.
+    expect(rt.fetchDecodeWait + rt.fetchDecodeFetch + rt.fetchDecodeDecode).toBeGreaterThanOrEqual(rt.fetchDecode);
+    expect(rt.resizeChainRun).toBeGreaterThan(0); // the crushed budget ran real resizes through sliced()
+    expect(rt.resizeChainWait).toBeGreaterThanOrEqual(0);
     // Cold-atlas bytes + body-page count (ADR-552/553 sizing inputs). ADR-553: bodyPages is the
     // eager count at this rebuild — no local body type is set here (boot: no appearance exists
     // yet), so no body page is eager and the count is 0; the fixture's one body page is deferred
@@ -131,6 +176,22 @@ describe("ADR-548 rebuildTimings sub-splits (real setRegistry, stub GL)", () => 
     expect(cold1x).toBe(coldCount1x * 128 * 128 * 4);
     expect(Math.abs(rt1x.fitBudget - (rt1x.fitBudgetSearch + rt1x.fitBudgetResizes))).toBeLessThanOrEqual(25);
     expect(Math.abs(rt1x.upload - (rt1x.uploadAlloc + rt1x.uploadCopies + rt1x.uploadMips))).toBeLessThanOrEqual(25);
+  }, 60000);
+
+  it("ADR-557 fields are zero-filled when no defaultImageLoader loads run (custom imageLoader)", async () => {
+    vi.stubGlobal("createImageBitmap", async (_src: unknown, opts?: { resizeWidth?: number; resizeHeight?: number }) => ({ width: opts?.resizeWidth ?? 128, height: opts?.resizeHeight ?? 128, close: () => {} }));
+    const reg = packWithBody();
+    const { gl } = stubGl();
+    // A custom imageLoader bypasses defaultImageLoader (and withAssetSlot) entirely, and the
+    // generous budget runs no resizes — every ADR-557 field must read exactly 0, not undefined.
+    const am = new AtlasManager(gl, new AssetManager(), { textureBudgetMB: 256, layerSize: 256, imageLoader: async () => ({ width: 128, height: 128, close: () => {} }) as never }) as any;
+    const sources = new Map([...reg.atlases.values()].map((a) => [a.key, { url: `atlases/${a.key}.png`, emissiveUrl: null }]));
+    await am.setRegistry(reg, sources);
+    const rt = am.rebuildTimings;
+    expect(rt).toBeDefined();
+    for (const k of ["fetchDecodeWait", "fetchDecodeLoads", "fetchDecodeCacheHits", "fetchDecodeNetwork", "fetchDecodePeak", "resizeChainWait", "resizeChainRun", "fetchDecodeDecodePeak"]) {
+      expect(rt[k], k).toBe(0);
+    }
   }, 60000);
 
   it("defaultImageLoader accumulates fetch vs decode in imageLoadStats (and reset clears it)", async () => {

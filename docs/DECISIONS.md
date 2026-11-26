@@ -14841,3 +14841,241 @@ every key is locked; the tests pin the locked case. (5) `loadWearShard` re-fetch
 customization index per shard (9×, deduped by `assetJsonGz`'s in-flight cache). (6) Harness-
 verified only; phone playtest still owed (cold-start `?diag=1` manifest phase, creator opens
 with the full wardrobe, a dressed bot walking into view dresses without a hitch).
+
+## ADR-557: Instrument the fetch window — slot-wait/fetch/decode split, cache-vs-network, resize chain-wait (SurVivaZ)
+
+**Context.** ADR-548 split `registry.fetch` into summed fetch vs decode counters, but the two
+phone `?diag=1` boots after ADR-548–555 left the decisive question open (follow-up #2 prep §1):
+the fetch wall ≈ (summed fetch + summed decode) / 8 ≈ 14.7 s on cold and warm boots alike,
+because the 8 asset slots are held across fetch+decode — yet the instrumentation could not
+separate slot-WAIT from slot-WORK, could not say whether a load was served from Cache Storage
+or the network, and could not split `fitBudget.resizes` (≈5,834 ms warm) into resize
+chain-WAIT vs RUN inside the ADR-190 `resizeChain`. ADR-559 (split the asset slot) and
+ADR-561 (prefetch priority) both size themselves from exactly these numbers, so this slice
+measures them. Diag-only: no behaviour change, no concurrency change, no load-order change.
+
+**Design.**
+- Slot stats (`packages/render/src/assets/asset-fetch.ts`): `assetSlotStats`
+  `{ waitMs, waits, inFlight, peak }`, maintained by `withAssetSlot` itself — wait is timed
+  from call to acquisition (only jobs that actually queue add to `waits`), `inFlight` mirrors
+  the live occupancy and `peak` is its high-water mark since `resetAssetSlotPeak()`.
+  `resetAssetFetchForTests` zeroes both new stat objects.
+- Source stats (same file): `assetSourceStats { cacheHits, networkFetches }`, counted in
+  `doFetch` — the one place that knows whether the response came from this deploy's Cache
+  Storage (`cache.match` hit) or had to be fetched. `blob:`/`data:` URLs bypass `doFetch` and
+  count as network (served by `fetch()`, never by Cache Storage). Deduped in-flight fetches
+  count once, at the shared fetch.
+- Resize chain split (`atlasManager.ts`): `resizeStats` gains `waitMs` / `runMs`; `sliced()`
+  timestamps enqueue vs run start, and run includes any ADR-190 slice yield the job takes
+  (the yield occupies the chain, so it is run-side by construction).
+- `rebuildTimings` gains seven additive fields (parents unchanged), snapshotted exactly like
+  ADR-548's deltas: `fetchDecodeWait` (summed slot-wait over the load phase),
+  `fetchDecodeLoads` (loads completing decode in the phase), `fetchDecodeCacheHits` /
+  `fetchDecodeNetwork` (source counts over the same window), `fetchDecodePeak` (slot
+  high-water during the phase; the peak window restarts at load start), and
+  `resizeChainWait` / `resizeChainRun` (whole-rebuild totals over every `sliced()` resize —
+  fitToPage, fitBudget, halveSide and OOM retries alike). wait + fetch + decode is the summed
+  per-load lifecycle and reconciles with ADR-548's summed fetch + decode plus the new field.
+  A failed optional load counts a source but no completed load, so cache + network >= loads
+  in general (equal when every load succeeds). The slot pool is shared with the prefetch
+  warmers, so wait/peak can include their jobs — that contention is itself an ADR-561 input.
+- `?diag=1` surface (`apps/client/src/view.ts`): `registry.fetch.wait` rides as a parent-marked
+  sub-phase of `registry.fetch` (never double-counted, ADR-548 pattern); the counts, peak and
+  resize chain split ride the registry note verbatim, like the cold-atlas/body counts.
+
+**VM measurements (harness, stub fetch/decode — shape, not phone numbers).** Real-pack rebuild
+(adr548 test, 8-slot mock): 53 loads, all network, summed slot-wait 2,268 ms against summed
+fetch 376 ms + decode 267 ms, slot peak 8 (saturated); resize chain wait 3,561 ms vs run
+138 ms (slicing disabled, so the wait is pure queue behind serial resizes — the chain, not
+the resize CPU, is what a boot-phase observer waits on). Real-module run (adr557 test,
+2 slots, 6 loads): 4 queued, wait 58.3 ms, fetch 32.2 ms, decode 12.8 ms, peak exactly 2.
+
+**Tests (5 new/extended re-run, all pass; 5/6 fail without the fix — source files stashed).**
+`packages/render/test/adr557_fetch_window.test.ts` (3, new): real asset-fetch + real
+defaultImageLoader — slot-wait/fetch/decode split with peak exactly at the slot limit and
+sources accounting for every load; a Cache Storage hit counts as cache with zero network
+calls; `sliced()` splits chain-wait from run (3 × 5 ms jobs: wait 17.2 ms / run 16.7 ms).
+`packages/render/test/adr548_rebuild_timings.test.ts` (extended): the mock slot is now a real
+8-wide semaphore maintaining the production stats shape; the rebuild test asserts the new
+fields (loads = network = 53, cache 0, wait > 0, peak in (1, 8], wait+fetch+decode >= wall,
+resize run > 0), and a new test pins all seven fields zero-filled when a custom imageLoader
+runs no defaultImageLoader loads. The adr553/adr554 mock factories gained inert stats stubs
+(their identity slot never updates them). Neighbours: adr549 + adr553 + adr554 (both files) +
+seamless_retier + retier_sliced + adr545 + adr307 — 39/39. Typecheck clean with pinned
+TS 5.9.3 for `packages/render` and `apps/client`. Nothing pushed.
+
+**Honest cuts.** (1) VM numbers are harness shape only — stub fetch/decode at 2 ms each; the
+phone's next `?diag=1` screenshot is the verdict, as with ADR-548. (2) Slot wait/peak are
+pool-wide: prefetch warmers share the 8 slots from page open, so a rebuild window can include
+their waits — deliberate (ADR-561 needs that contention visible), but it means
+`fetchDecodeWait` is an upper bound on resident-load-only wait. (3) Source counts dedupe:
+two loads of one URL share one counted fetch. (4) Resize run includes slice yields by
+construction; with slicing on (re-tiers) a yield inflates run, not wait — boot disables
+slicing, so boot numbers are clean. (5) No ADR-558/559/560/561 work in this slice — measure
+only, per the batch order.
+## ADR-558: Decode demoted atlases once at final scale (SurVivaZ)
+
+**Context.** The two phone `?diag=1` boots after ADR-548–555 (follow-up #2 prep §0/§2, R1+R3):
+every demoted resident atlas was paid for twice — a full-size decode in `registry.fetch`
+(summed decode 55,478 ms on the warm boot), then a separate serial resize in fitBudget's final
+`scaleList` pass (`fitBudget.resizes` 5,834 ms warm; hot ×0.5 / cold ×0.125 hit nearly all ~383
+resident atlases, colour + emissive + masks each, serialised through the ADR-190 `resizeChain`).
+ADR-557's instrumentation confirmed the search itself is cheap (278 ms, memoised by ADR-554):
+the removable cost is the double payment, not the demotion computation.
+
+**Design.** The resident load is restructured so the fit search runs on dimensions first and
+each demoted image is decoded ONCE, at its final size:
+- Dimensions without decode: `pngImageDims()` reads the PNG IHDR (bytes 16..24) from the blob
+  header for colour/emissive/masks. Verified in code before relying on it: the search reads only
+  `img.width/height` (`fitBudget`'s `dims()`/`cap()`, `pack()`'s memo key + `maxRects`, and the
+  pool-reserve estimates read side-image PRESENCE only), so provisional dims-only images are a
+  faithful search input.
+- `fitBudget` is split into `planFit()` (the search; records the per-atlas choice on `a.fitK`
+  plus the tier globals exactly as before) and `applyFitResizes()` (the legacy resize pass).
+  `fitBudget()` itself is unchanged as a composition of the two, so every direct caller and the
+  ADR-220/seamless stub contracts behave identically.
+- Decode at scale: `decodeImageBlob(blob, { w, h, q })` calls `createImageBitmap` with EXACTLY
+  the options `resizeImage` uses today — target dims `floor(full * k)` (resizeBy's formula),
+  `resizeQuality` "high" for colour/emissive and "pixelated" for masks (scaleList's qualities),
+  `premultiplyAlpha: "none"`, `colorSpaceConversion: "none"`. Same resize call, same options,
+  at decode time instead of after. Atlases decoded this way are marked `preScaled`; the resize
+  pass skips them — no double resize remains.
+- Fetch/decode split inside the resident load: blobs are fetched through `fetchImageBlob`
+  (asset slot held for the fetch only — holding 8 slots across the search would starve the
+  remaining fetches; the slot split for the page-in path remains ADR-559's slice), then decoded
+  through `decodeImageBlob` after the search. `imageLoadStats` keeps its ADR-548/557 meaning
+  (fetchMs at fetch, decodeMs + loads at decode); the decode wall is attributed to
+  `fetchDecode`, so `fitBudget = search + resizes` still sums exactly and `resizes` now covers
+  only the legacy remainder.
+- Exclusions keep today's path BY CONSTRUCTION (full decode → fitToPage at full size → fit
+  resize pass): trim-repacked atlases (`trimGridAtlas` needs real pixels at scale 1 — decoded,
+  fitToPage'd and trimmed during the load phase, so the search sees the trimmed dims it always
+  saw); any atlas whose final scale is 1; the `loadOpt` failure fallback (colour fetch failure
+  retries `src.url` at scale 1; a failed scaled decode falls through to a scale-1 decode);
+  pre-scaled `pickScale` pages (scale ≠ 1 — decode-at-scale applies only where today a scale-1
+  page is loaded and later resized; the KTX2 page path is untouched); side images whose native
+  size differs from the colour page or whose dims are unreadable (today they are fitToPage'd at
+  full size BEFORE the fit resize — a different resample sequence than one scaled decode, so
+  they are never approximated); atlases with an unreadable colour header (decoded during the
+  load phase so the search sees real dims). Masks verified same-size as the colour page land
+  exactly on the decoded colour size, preserving the fitToPage ordering with nothing to fit.
+  Custom `imageLoader` rebuilds (no blob to defer) keep the legacy load-then-resize flow
+  untouched.
+
+**Pixel identity (user ruling: hash proof alone, ADR-551 standard).** SHA-256 over decoded
+pixels, legacy route (full decode + `resizeImage`) vs new route (one scaled decode), across
+fixture atlases at hot ×0.5 and cold ×0.125 for colour, emissive and masks — all six
+bit-identical under the identical-options stub decoder (hashes in the adr558 test log). No
+class needed an approximation; nothing was traded for speed.
+
+**Tests (9 new, all pass; fail without the fix — see below).**
+`packages/render/test/adr558_decode_at_scale.test.ts`: `pngImageDims` (header dims; non-PNG /
+truncated → null); 6 pixel-hash identity cases (colour/emissive/mask × ×0.5/×0.125 — identical
+hashes, the new route making exactly one decode call with the target resize dims + quality);
+a real-pack rebuild at a crushed 2 MB budget (52 resident, 52 demoted, 46 preScaled with 46
+scaled decodes, exactly 6 full decodes + 6 resize runs for the trim exclusions, every preScaled
+atlas at `floor(128 * fitK)` with `scale == fitK`, fitBudget split still summing); a generous-
+budget rebuild (all fitK = 1 → zero scaled decodes, zero preScaled — the scale-1 exclusion).
+Neighbours: adr548 + adr557 + adr553 + adr554 (both) + seamless_retier + retier_sliced + adr545
+(37/37); ADR-248 parity (server manifest + dedicated cosmetics) and every direct fitBudget
+caller (adr220/237/251/438/449/510/512/518/520, full_resolution_preset, task17) green; full
+`packages/render` suite green. Typecheck clean with pinned TS 5.9.3.
+
+**Honest cuts.** (1) The phone saving (prep estimate boot −6 to −10 s) is NOT proven by this
+VM: the harness proves routing, counts and hash identity with a stub decoder whose resampling
+is a pure function of (pixels, dims, quality); a real browser's decode-time resize is the same
+`createImageBitmap` call with the same options the resize path already used — that identity of
+call is the production argument, and the user's next `?diag=1` screenshot (fitBudget.resizes
+collapsing, registry.fetch decode share falling) is the verdict, as with ADR-548/557.
+(2) Resident images on this path no longer ride the AssetManager's in-memory image cache:
+a re-tier re-fetches the blobs (Cache Storage hits via assetFetch) and re-decodes at the new
+final scale instead of reusing a full-size bitmap + memoised resize — cheaper per rebuild at
+demoted scales, but a 1x re-tier pays a fresh decode it did not before. (3) The blob fetch
+releases its asset slot before the decode (structural, see Design); ADR-559 still owns the
+page-in path's slot split and the decode in-flight cap. (4) Non-PNG resident art (none ships
+today) decodes during the load phase as before — no regression, no gain.
+
+## ADR-559: Split the asset slot — fetch holds the slot, decode runs under its own cap (SurVivaZ)
+
+**Context.** Follow-up #2 prep §1/§2 R2, measured by ADR-557: the 8 asset slots
+(`ASSET_FETCH_CONCURRENCY = 8`, unchanged) were held across fetch + `createImageBitmap`
+decode in `defaultImageLoader`, so the resident load wall was bounded below by
+(summed fetch + summed decode) / 8 ≈ 14.7 s on BOTH phone boots (cold 14,814 ms, warm
+15,819 ms), regardless of cache warmth — decode occupied the same 8 lanes as fetching.
+ADR-558 split the resident decode-at-scale path structurally (its blob fetch releases the
+slot before the fit search) but left its decodes re-acquiring an asset slot and added no
+decode bound, and the general loader path (streamed page-in and every other load) still
+held the slot across decode.
+
+**Design.** In `asset-fetch.ts`, a second semaphore beside the fetch pool:
+`withDecodeSlot` with `ASSET_DECODE_CONCURRENCY = 16` and ADR-557-style stats
+(`decodeSlotStats { inFlight, peak }`, `resetDecodeSlotPeak()`, `setAssetDecodeConcurrency()`
+for tests; `resetAssetFetchForTests` resets both pools). `defaultImageLoader` now acquires
+the asset slot for `assetFetch` + `blob()` only and releases it before decoding under
+`withDecodeSlot`; `decodeImageBlob` (ADR-558, scaled and full alike) runs under
+`withDecodeSlot` instead of `withAssetSlot`. The cap is therefore shared across ALL image
+decode paths — total concurrent decodes are bounded no matter which path produced them.
+The two pools never nest (fetch releases before decode acquires), so no deadlock is
+possible. ADR-548's `imageLoadStats` keeps its meaning (fetchMs = slot-side fetch + blob,
+decodeMs = the `createImageBitmap` call itself). `rebuildTimings` gains the additive
+`fetchDecodeDecodePeak` (decode-pool high-water over the load phase plus ADR-558's
+post-search decode phase; the peak window restarts at load start beside ADR-557's slot
+window), and the `?diag=1` registry note now reads `slot peak N, decode peak M`.
+`ASSET_FETCH_CONCURRENCY` stays 8; stream pool slots / budget share (ADR-545) untouched;
+ADR-558's routing, decode counts, `preScaled` and exclusions untouched; ADR-553/554/555
+behaviour untouched.
+
+**Cap value + memory justification.** 16. ADR-557's VM rebuild through the real modules
+showed the 8-slot fetch pool saturated (peak exactly 8, summed slot-wait 2,268 ms over 53
+loads — the pool is the feeder bottleneck), so the decode cap must never re-throttle the
+fetches the split frees: at 2× the fetch lanes, a lane finishing its fetch always finds
+decode headroom for its blob while earlier decodes are still running, and page-in bursts
+plus resident decodes share the same headroom. Memory bound: the largest atlas page is
+2048×2048 RGBA = 16,777,216 B = 16 MB, so 16 decodes in flight is a **256 MB transient RAM
+worst case** (typical pages are far smaller — a 1024² page is 4 MB, so 64 MB); the user
+ruled a bounded transient spike during the loading screen acceptable (2026-11-26). It is
+RAM only, alive while the loading screen is up and freed at the rebuild swap — the 256 MB
+GPU/VRAM budget is untouched, and completed bitmaps are the resident set itself, which
+exists under either design.
+
+**Tests (5 new, all pass; fail without the fix — see below).**
+`packages/render/test/adr559_slot_split.test.ts`, against the real modules: caps pinned
+(fetch 8, decode 16); a fake-loader timing test (fetch 2 ms, decode 80 ms, 16 loads) —
+wall lands under 0.75× the slot-bound prediction summed/8 (≈252 ms measured under load,
+wall ≈171 ms; ratio form so timer stretch inflates both shapes alike), fetch peak ≤ 8,
+decode peak > 8 and ≤ 16; slot occupancy is 0 while 8 slow decodes are in flight (the
+slot is provably released before decode); `decodeImageBlob` holds no fetch slot while
+decoding; 20 interleaved loads from both paths under a test cap of 4 saturate the decode
+peak at exactly 4 and never exceed it. Fail-without-fix (the 3 source files stashed):
+5/5 fail, plus adr548's two ADR-559-touched assertions fail on the missing field.
+Neighbours: adr548 + adr557 + adr553 + adr554 (both) + adr307 green; ADR-558's decode-count
+tests green with only an additive mock stub (its mock `asset-fetch` gains a real 16-wide
+decode semaphore, the ADR-557 mock pattern — adr548's mock likewise; adr553/adr554 mocks
+gain inert identity stubs). Full `packages/render` suite green; typecheck clean with
+pinned TS 5.9.3.
+
+**Honest cuts.** (1) The phone saving (prep estimate: fetch wall −4 to −7 s standalone,
+composing with ADR-558's decode shrink) is NOT proven by this VM — the harness proves the
+slot release, the cap, and the wall-shape change with stub timers; the user's next
+`?diag=1` screenshot (registry.fetch wall falling toward the fetch-only floor, decode peak
+≤ 16 in the registry note) is the verdict. (2) The cap bounds decodes IN FLIGHT, not blobs
+queued for decode: a resident rebuild can hold many fetched PNG blobs (compressed, small)
+waiting on the decode queue — that queue existed before as slot-waiters holding responses,
+so the shape is not new, but peak blob RAM is not separately metered. (3) Non-atlas
+`createImageBitmap` callers (IsoRenderer's image helper, SDF text pages, the character
+debug pack) never held an asset slot and are not under the decode cap — they are one-off
+loads, not the boot flood this slice bounds. (4) Resizes (`resizeImage` via the ADR-190
+sliced chain) are not decodes and stay serialised exactly as before.
+
+**ADR-560 / ADR-561 — evaluated on the ADR-557/558 data and SKIPPED (no code).**
+ADR-560 (parallel resizes at boot): after ADR-558, the resize remainder is only the
+exclusions that keep the legacy path — ADR-558's crushed-budget rebuild measured exactly
+6 full decodes + 6 resize runs (the trim atlases), and a generous-budget rebuild measures
+zero; the phone's other resize line, halveSide, was 341 ms. The total remainder is well
+under ~0.5 s on the phone, which does not justify weakening ADR-190's serial sliced chain
+(mid-game freeze protection). ADR-561 (prefetch priority queue): on both phone boots the
+registry.fetch wall (14,814 / 15,819 ms) already matches the (summed fetch + summed
+decode)/8 slot-work floor (≈14,700 ms), so there is no measurable prefetch-contention term
+for a two-class waiter queue to reclaim; ADR-557's instrumentation deliberately keeps
+slot-wait visible pool-wide, so contention would show up in `fetchDecodeWait` if it ever
+appears. Both numbers stay free for a future batch if the phone evidence changes.

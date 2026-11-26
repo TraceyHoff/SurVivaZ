@@ -679,6 +679,7 @@ export class IsoView {
         { key: "fetchDecode", label: "registry.fetch" },
         { key: "fetchDecodeFetch", label: "registry.fetch.fetch", parent: "registry.fetch" },
         { key: "fetchDecodeDecode", label: "registry.fetch.decode", parent: "registry.fetch" },
+        { key: "fetchDecodeWait", label: "registry.fetch.wait", parent: "registry.fetch" },
         { key: "fitBudget", label: "registry.fitBudget" },
         { key: "fitBudgetSearch", label: "registry.fitBudget.search", parent: "registry.fitBudget" },
         { key: "fitBudgetResizes", label: "registry.fitBudget.resizes", parent: "registry.fitBudget" },
@@ -696,7 +697,10 @@ export class IsoView {
       // ADR-548: cold-atlas bytes + body-page count are not ms, so they ride as a load-cost note
       // (main.ts), not a sub-phase — the byte share ADR-552 needs and the count ADR-553 needs.
       const vs = renderer.atlas?.vramStats;
-      registryNote = `registry: ${vs?.coldAtlases ?? 0} cold atlases (${(rt.coldAtlasBytes / 1048576).toFixed(1)} MB) · ${rt.bodyPages} body pages`;
+      registryNote = `registry: ${vs?.coldAtlases ?? 0} cold atlases (${(rt.coldAtlasBytes / 1048576).toFixed(1)} MB) · ${rt.bodyPages} body pages` +
+        // ADR-557: load/source counts + slot peak + resize chain split are not phases — they ride
+        // the note like the cold/body counts above (main.ts renders it verbatim).
+        ` · ${rt.fetchDecodeLoads} loads (cache ${rt.fetchDecodeCacheHits} / network ${rt.fetchDecodeNetwork}, slot peak ${rt.fetchDecodePeak}, decode peak ${rt.fetchDecodeDecodePeak}) · resize chain wait ${Math.round(rt.resizeChainWait)}ms / run ${Math.round(rt.resizeChainRun)}ms`;
     } else phases.push({ name: "registry", ms: Math.round(performance.now() - t0) });
     t0 = performance.now();
     // ADR-370: warm-up window — page the visible-pin lazy sheets (furniture / buildings / openings /

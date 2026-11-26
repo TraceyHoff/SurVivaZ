@@ -21,6 +21,14 @@ vi.mock("../src/assets/asset-fetch.js", () => ({
   }),
   assetBytes: async (_url: string) => new ArrayBuffer(8),
   withAssetSlot: (fn: () => Promise<unknown>) => fn(),
+  // ADR-559: atlasManager imports the decode slot + stats; identity stub, never updated.
+  withDecodeSlot: (fn: () => Promise<unknown>) => fn(),
+  decodeSlotStats: { inFlight: 0, peak: 0 },
+  resetDecodeSlotPeak: () => {},
+  // ADR-557: atlasManager imports the slot/source stats; the identity slot never updates them.
+  assetSlotStats: { waitMs: 0, waits: 0, inFlight: 0, peak: 0 },
+  assetSourceStats: { cacheHits: 0, networkFetches: 0 },
+  resetAssetSlotPeak: () => {},
   isLazyDollPageKey: (_k: string) => false,
 }));
 

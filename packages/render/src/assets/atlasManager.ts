@@ -36,7 +36,7 @@ import type { RectTable } from "./texturePacker.js";
 import { trimGridAtlas, type TrimFrame } from "./trimAtlas.js";
 import { PageLRU, PRIO_NEAR, VramAccountant, rgbaBytes, type VramStats } from "../gl/vram.js";
 import { blockBytes, GL_FORMAT, ktx2Target, loadKtx2, loadKtx2Rgba, type Ktx2Target } from "./ktx2.js";
-import { assetFetch, isLazyDollPageKey, withAssetSlot } from "./asset-fetch.js";
+import { assetFetch, assetSlotStats, assetSourceStats, decodeSlotStats, isLazyDollPageKey, resetAssetSlotPeak, resetDecodeSlotPeak, withAssetSlot, withDecodeSlot } from "./asset-fetch.js";
 import { WARMUP_MAX_PAGES, WARMUP_POLL_MS, WARMUP_PRIO, WARMUP_WINDOW_MS, isWarmupCandidate, sortWarmupKeys, warmupPageBudget, type WarmupResult } from "./warmup.js";
 import type { CompressedTextureSupport } from "../gl/capabilities.js";
 import { isEnclosurePieceKey, lCornerArmPiece, streamingFallbackKeys } from "../building/modular.js";
@@ -104,6 +104,8 @@ export interface AtlasRT { key: string; id: number; source: AtlasSource; img: Im
   /** streamed wearable page: not loaded at rebuild (see header); w1/h1 = 1x page size */ lazy?: { w1: number; h1: number; state: 0 | 1 | 2; pool: number; prio?: number };
   /** budget tier: cold art is downscaled before hot art (see fitBudget) */ cold?: boolean;
   /** ADR-512: trim-repacked grid atlas: per frame, its rect in the packed page and its offset inside the grid cell (1x px) */ trim?: TrimFrame[];
+  /** ADR-558: images were decoded ONCE at fitBudget's final scale (decode-at-scale); the fit resize pass skips this atlas. */ preScaled?: boolean;
+  /** ADR-558: the per-atlas scale planFit chose for this rebuild (1 = full res); set by planFit, read by the decode/resize step. */ fitK?: number;
   /** explicit dirFrames rects (deduped), frame-table entries n0.. after the grid/TexturePacker frames */ extra?: { n0: number; rects: DirFrameRect[]; byKey: Map<string, number>; /** ADR-190: same index by rect object (no string key per lookup) */ byRect: Map<DirFrameRect, number> } }
 /** One streaming pool (wearables, vehicles): own slot geometry, layers and LRU; all pools share the VRAM accountant. */
 /** ADR-220: pool classes holding paper-doll character art: always RGBA8 from the PNG, never ETC1S. */
@@ -419,8 +421,10 @@ export const RETIER_MIN_GAP_FRAMES = 1800;
 const RESIZE_CACHE_PER_SOURCE = 2;
 const resizeCache = new WeakMap<object, Map<string, Promise<ImageLike>>>();
 let resizeChain: Promise<unknown> = Promise.resolve(); let sliceStart = -1; let pendingJobs = 0;
-/** stats for tests / diag: resizes actually run, cache hits, frame yields */
-export const resizeStats = { runs: 0, hits: 0, yields: 0 };
+/** stats for tests / diag: resizes actually run, cache hits, frame yields.
+ *  ADR-557: waitMs / runMs split a sliced job's chain-WAIT (queued behind earlier resizes) from its
+ *  RUN time (the job itself, including any ADR-190 slice yield it takes) — diag only. */
+export const resizeStats = { runs: 0, hits: 0, yields: 0, waitMs: 0, runMs: 0 };
 /** ADR-554: stats for tests / diag: pack() MaxRects executions actually run vs memo hits (same
  *  pattern as resizeStats). A fitBudget run that repeats identical (h, c, pin) packings across its
  *  reserve tries and the idle-demotion loop should show hits > 0 and runs well under invocations. */
@@ -443,12 +447,15 @@ export function setResizeSlicing(on: boolean): void { slicingEnabled = on; slice
 /** Run `job` serialized behind earlier jobs; yields one frame first once the current slice spent RESIZE_SLICE_MS. */
 export function sliced<T>(job: () => Promise<T> | T): Promise<T> {
   pendingJobs++;
+  const enqueuedAt = now(); // ADR-557: chain-wait is measured from enqueue to run start
   const run = async (): Promise<T> => {
+    resizeStats.waitMs += now() - enqueuedAt;
+    const runT0 = now();
     try {
       if (sliceStart < 0) sliceStart = sliceClock();
       if (slicingEnabled && sliceClock() - sliceStart >= RESIZE_SLICE_MS) { resizeStats.yields++; await yieldImpl(); sliceStart = sliceClock(); }
       return await job();
-    } finally { if (--pendingJobs === 0) sliceStart = -1; }
+    } finally { resizeStats.runMs += now() - runT0; if (--pendingJobs === 0) sliceStart = -1; }
   };
   const p = resizeChain.then(run, run); resizeChain = p.catch(() => undefined); return p;
 }
@@ -496,17 +503,94 @@ export const imageLoadStats = { fetchMs: 0, decodeMs: 0, loads: 0 };
 export function resetImageLoadStats(): void { imageLoadStats.fetchMs = 0; imageLoadStats.decodeMs = 0; imageLoadStats.loads = 0; }
 
 export async function defaultImageLoader(url: string): Promise<ImageLike> {
+  // ADR-559: the asset slot covers the fetch + blob() ONLY; it is released before the decode,
+  // which runs under the separate decode cap (withDecodeSlot, ASSET_DECODE_CONCURRENCY) shared
+  // with decodeImageBlob. Before this split a slot was held for the whole fetch+decode, so the
+  // load wall was (summed fetch + summed decode) / 8 no matter how warm the cache was.
+  let fetchMs = 0;
+  const blob = await withAssetSlot(async () => {
+    const f0 = now();
+    const res = await assetFetch(url);
+    if (!res.ok) throw new Error(`image fetch failed ${res.status}: ${url}`);
+    const b = await res.blob();
+    fetchMs = now() - f0;
+    return b;
+  });
+  let decodeMs = 0;
+  const bmp = await withDecodeSlot(async () => {
+    const d0 = now();
+    const b = await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    decodeMs = now() - d0;
+    return b;
+  });
+  imageLoadStats.fetchMs += fetchMs; imageLoadStats.decodeMs += decodeMs; imageLoadStats.loads++;
+  return bmp as ImageLike;
+}
+
+/**
+ * ADR-558: decode-at-scale counters (diag / tests). `scaled` counts images decoded ONCE at their
+ * final fitted size via createImageBitmap resize options; `full` counts full-size decodes through
+ * the two helpers below (the legacy route for scale-1 / trim / fallback / mismatched-side atlases).
+ * defaultImageLoader itself is not counted here (it predates the split and is the page-in path).
+ */
+export const decodeScaleStats = { scaled: 0, full: 0 };
+export function resetDecodeScaleStats(): void { decodeScaleStats.scaled = 0; decodeScaleStats.full = 0; }
+
+/**
+ * ADR-558: page dimensions WITHOUT decoding: the PNG IHDR chunk (bytes 16..24 of the file) is the
+ * ground truth for page size — the fitBudget search only ever reads img.width/height (dims()/cap()/
+ * pack()), so it can run on these dims before any image is decoded. Null for a non-PNG blob (or a
+ * truncated header): the caller keeps that atlas on the legacy decode-full-first path, so its real
+ * decoded dims feed the search exactly as before.
+ */
+export async function pngImageDims(blob: Blob): Promise<{ width: number; height: number } | null> {
+  try {
+    const buf = await blob.slice(0, 33).arrayBuffer();
+    const b = new Uint8Array(buf);
+    if (b.length < 33) return null;
+    const SIG = [137, 80, 78, 71, 13, 10, 26, 10];
+    for (let i = 0; i < 8; i++) if (b[i] !== SIG[i]) return null;
+    if (b[12] !== 0x49 || b[13] !== 0x48 || b[14] !== 0x44 || b[15] !== 0x52) return null; // "IHDR"
+    const dv = new DataView(buf);
+    const width = dv.getUint32(16), height = dv.getUint32(20);
+    return width > 0 && height > 0 ? { width, height } : null;
+  } catch { return null; }
+}
+
+/** ADR-558: fetch one image's blob (fetch half of defaultImageLoader, same slot + stats split).
+ *  The slot is released before the decode: the fit search sits between fetch and decode, and
+ *  holding 8 slots across it would starve the remaining fetches. ADR-559 owns the same split
+ *  for the page-in path; here it is a structural requirement of decode-at-scale. */
+export async function fetchImageBlob(url: string): Promise<Blob> {
   return withAssetSlot(async () => {
     const f0 = now();
     const res = await assetFetch(url);
     if (!res.ok) throw new Error(`image fetch failed ${res.status}: ${url}`);
     const blob = await res.blob();
-    const fetchMs = now() - f0;
+    imageLoadStats.fetchMs += now() - f0;
+    return blob;
+  });
+}
+
+/**
+ * ADR-558: decode a fetched blob, optionally AT a final size. The scaled form passes EXACTLY the
+ * options resizeImage passes today ("high" colour/emissive, "pixelated" masks, premultiplyAlpha /
+ * colorSpaceConversion "none") — the same createImageBitmap resize call, made at decode time
+ * instead of after a full-size decode. That identity of call + options is the pixel-identity
+ * foundation (hash-proven in adr558 tests, the ADR-551 standard).
+ */
+export async function decodeImageBlob(blob: Blob, scale?: { w: number; h: number; q: "high" | "pixelated" }): Promise<ImageLike> {
+  // ADR-559: the decode runs under the shared decode cap, NOT an asset slot — ADR-558 already
+  // released the fetch slot before this point (fetchImageBlob), and re-acquiring one of the 8
+  // fetch lanes for the decode would put decode back on the fetch pool's critical path.
+  return withDecodeSlot(async () => {
     const d0 = now();
-    const bmp = await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
-    const decodeMs = now() - d0;
-    imageLoadStats.fetchMs += fetchMs; imageLoadStats.decodeMs += decodeMs; imageLoadStats.loads++;
-    return bmp;
+    const bmp = scale
+      ? await createImageBitmap(blob, { resizeWidth: scale.w, resizeHeight: scale.h, resizeQuality: scale.q, premultiplyAlpha: "none", colorSpaceConversion: "none" } as ImageBitmapOptions)
+      : await createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    imageLoadStats.decodeMs += now() - d0; imageLoadStats.loads++;
+    if (scale) decodeScaleStats.scaled++; else decodeScaleStats.full++;
+    return bmp as ImageLike;
   });
 }
 
@@ -714,14 +798,36 @@ export class AtlasManager {
    *    the frame-table upload that stages them) / generateMipmap time per array; they sum to `upload`
    *    (the OOM-retry scaleList/layout between re-uploads stays under `upload` only, as before).
    *  - fitBudgetSearch / fitBudgetResizes: trial packings (pure CPU) vs the final scaleList resizes;
+   *    ADR-558: on the decode-at-scale path the search runs on IHDR dims before decoding and the
+   *    demoted images arrive already at final size, so `resizes` covers only the legacy exclusions
+   *    (trim / scale-1-fallback / mismatched-side atlases) and the decode wall lands in fetchDecode.
    *    they sum to `fitBudget`.
    *  - coldAtlasBytes (not ms): decoded RGBA bytes of cold-tier resident atlases at their fitted scale
    *    — the byte share ADR-552 needs. bodyPages (not ms): ADR-553 — the body-pool pages the rebuild
    *    paged in eagerly (the local type's set that landed state 2; 0 when no local body type is set
-   *    yet). Both are also on vramStats. */
+   *    yet). Both are also on vramStats.
+   *  ADR-557 sub-splits (also additive, diag only):
+   *  - fetchDecodeWait: summed slot-WAIT inside withAssetSlot over the load phase (the queue time
+   *    ADR-548 could not separate from slot-WORK). wait + fetch + decode is the summed per-load
+   *    lifecycle, so it reconciles with fetchDecodeFetch + fetchDecodeDecode plus this field.
+   *    The slot pool is shared with the prefetch warmers, so waits/peak can include their jobs.
+   *  - fetchDecodeLoads / fetchDecodeCacheHits / fetchDecodeNetwork (counts, not ms): loads that
+   *    completed decode in the phase, and where their fetches were served from — Cache Storage vs
+   *    network (blob:/data: count as network). A failed optional load counts a source but no load,
+   *    so cache + network >= loads in general (equal when every load succeeds).
+   *  - fetchDecodePeak: high-water slot occupancy during the load phase — the in-flight peak
+   *    ADR-559 sizes its decode cap from.
+   *  - resizeChainWait / resizeChainRun: summed chain-wait vs run over every sliced() resize in
+   *    the whole rebuild (fitToPage / fitBudget / halveSide / OOM retries alike).
+   *  ADR-559 (additive, diag only):
+   *  - fetchDecodeDecodePeak: high-water DECODE-pool occupancy (withDecodeSlot, cap
+   *    ASSET_DECODE_CONCURRENCY = 16) over the load phase plus ADR-558's post-search decode
+   *    phase — the proof the split's cap held and how much decode parallelism the load used. */
   rebuildTimings: { fetchDecode: number; fitBudget: number; halveSide: number; layout: number; upload: number; tables: number; bodies: number; restore: number;
     fetchDecodeFetch: number; fetchDecodeDecode: number; uploadAlloc: number; uploadCopies: number; uploadMips: number;
-    fitBudgetSearch: number; fitBudgetResizes: number; coldAtlasBytes: number; bodyPages: number } | undefined = undefined;
+    fitBudgetSearch: number; fitBudgetResizes: number; coldAtlasBytes: number; bodyPages: number;
+    fetchDecodeWait: number; fetchDecodeLoads: number; fetchDecodeCacheHits: number; fetchDecodeNetwork: number; fetchDecodePeak: number;
+    resizeChainWait: number; resizeChainRun: number; fetchDecodeDecodePeak: number } | undefined = undefined;
   /** Override the hot/cold budget tier per atlas key (default defaultAtlasTier). */
   atlasTier?: (key: string, info: { bodies: boolean; wearShare: number }) => AtlasTier;
   /** Atlas keys used recently (renderer marks them); always treated hot at the next rebuild. */
@@ -936,8 +1042,12 @@ export class AtlasManager {
     // runtime tables + tint rows + resolve* passes). Cleared here so a failed rebuild leaves no stale split.
     const ph = { fetchDecode: 0, fitBudget: 0, halveSide: 0, layout: 0, upload: 0, tables: 0, bodies: 0, restore: 0,
       fetchDecodeFetch: 0, fetchDecodeDecode: 0, uploadAlloc: 0, uploadCopies: 0, uploadMips: 0,
-      fitBudgetSearch: 0, fitBudgetResizes: 0, coldAtlasBytes: 0, bodyPages: 0 };
+      fitBudgetSearch: 0, fitBudgetResizes: 0, coldAtlasBytes: 0, bodyPages: 0,
+      fetchDecodeWait: 0, fetchDecodeLoads: 0, fetchDecodeCacheHits: 0, fetchDecodeNetwork: 0, fetchDecodePeak: 0,
+      resizeChainWait: 0, resizeChainRun: 0, fetchDecodeDecodePeak: 0 };
     this.rebuildTimings = undefined;
+    // ADR-557: resize-chain totals cover the whole rebuild (snapshot here, read at the end).
+    const rzStats0 = { ...resizeStats };
     const prevHeld = this.held; const held: [string, string][] = [];
     // seamless rebuild (re-tier / zoom): remember the lazy pages resident now (local player, nearby characters, visible
     // stream/building art) so the new layout pages them back in before the renderer draws again (see `settling`)
@@ -961,6 +1071,23 @@ export class AtlasManager {
     const ldT0 = now();
     // ADR-548: fetch/decode delta over exactly this rebuild's loads (imageLoadStats is module-global).
     const fdStats0 = { ...imageLoadStats }; let fitToPageMs = 0;
+    // ADR-557: slot/source deltas over the same window; the peak window restarts here.
+    const slotStats0 = { ...assetSlotStats }; const srcStats0 = { ...assetSourceStats }; resetAssetSlotPeak(); resetDecodeSlotPeak(); // ADR-559: decode peak window restarts with the slot window
+    // ADR-558: decode-at-scale engages only on the production loader path. A custom imageLoader
+    // returns already-decoded images (there is no blob to defer), so those rebuilds keep the
+    // legacy load-then-resize flow below untouched, as do all direct fitBudget callers.
+    const atScalePath = this.loader === defaultImageLoader && typeof createImageBitmap === "function";
+    type BlobImg = { blob: Blob; dims: { width: number; height: number } | null };
+    type PendingAtlas = { rt: AtlasRT; colour: BlobImg; emis: BlobImg | null; masks: Partial<Record<MaskName, BlobImg>>; legacy: boolean; decoded: boolean };
+    const pending: PendingAtlas[] = [];
+    const fetchOpt = async (url: string | null | undefined): Promise<Blob | null> => {
+      if (!url) return null;
+      try { return await fetchImageBlob(url); } catch (e) { reportRenderError(`atlas optional layer ${url}`, e); return null; }
+    };
+    const firstBlobOf = async (c: string | string[] | undefined): Promise<[BlobImg | null, string | undefined]> => {
+      for (const u of c === undefined ? [] : Array.isArray(c) ? c : [c]) { const b = await fetchOpt(u); if (b) return [{ blob: b, dims: await pngImageDims(b) }, u]; }
+      return [null, undefined];
+    };
     await Promise.all([...registry.atlases.values()].map(async (a) => {
       const src = sources.get(a.key); if (!src) throw new Error(`no image source for atlas "${a.key}"`);
       if (lazyKeys.has(a.key) || vehKeys.has(a.key) || legacy.has(a.key) || retired.has(a.key) || bldKeys.has(a.key) || bodyKeys.has(a.key) || streamKeys.has(a.key)) {
@@ -970,6 +1097,62 @@ export class AtlasManager {
         // part in slot sizing (pool -1: pageReady refuses, nothing requests them)
         const pool = legacy.has(a.key) || retired.has(a.key) ? -1 : vehKeys.has(a.key) ? 1 : bldKeys.has(a.key) ? 2 : bodyKeys.has(a.key) ? 3 : streamKeys.has(a.key) ? 4 : 0;
         lazyList.push({ key: a.key, id: a.id, source: src, img: null, emis: null, scale: 1, masks: {}, maskUrls: {}, base: 0, count: src.rects ? src.rects.length : a.columns * a.rows, fw: a.frameW, fh: a.frameH, cols: a.columns, layer: -1, px: 0, py: 0, lazy: { w1, h1, state: 0, pool } });
+        return;
+      }
+      if (atScalePath) {
+        // ADR-558: fetch the blobs + IHDR dims only; the fit search runs on the dims and each
+        // demoted image is decoded ONCE at its final size (after planFit, below). Exclusions
+        // keep today's path by construction and are flagged `legacy` (or decoded early, for trim).
+        let scale = this.pickScale(a, src);
+        const pageUrl = scale === 1 ? src.url : src.pages!.find((p) => p.scale === scale)!.url;
+        let fallback = false;
+        const colourBlob = await fetchOpt(pageUrl);
+        if (!colourBlob && pageUrl === src.url) throw new Error(`image fetch failed: ${src.url}`);
+        if (!colourBlob) { scale = 1; fallback = true; }
+        const colour: BlobImg = colourBlob
+          ? { blob: colourBlob, dims: await pngImageDims(colourBlob) }
+          : { blob: await fetchImageBlob(src.url), dims: null }; // the loadOpt fallback retry at scale 1 (throws like load())
+        if (fallback) colour.dims = await pngImageDims(colour.blob);
+        const emisBlob = await fetchOpt(src.emissiveUrl);
+        const emis: BlobImg | null = emisBlob ? { blob: emisBlob, dims: await pngImageDims(emisBlob) } : null;
+        const maskBlobs: Partial<Record<MaskName, BlobImg>> = {}; const maskUrls: AtlasRT["maskUrls"] = {};
+        for (const m of ["sheen", "sway", "tintmask"] as const) { const [bi, u] = await firstBlobOf(src.masks?.[m]); if (bi && u) { maskBlobs[m] = bi; maskUrls[m] = u; } }
+        const rt: AtlasRT = { key: a.key, id: a.id, source: src, img: null, emis: null, scale, masks: {}, maskUrls, base: 0, count: src.rects ? src.rects.length : a.columns * a.rows, fw: a.frameW, fh: a.frameH, cols: a.columns, layer: 0, px: 0, py: 0 };
+        list.push(rt);
+        // Legacy exclusions: the scale-1 fallback retry; a pre-scaled pickScale page (scale !== 1
+        // — decode-at-scale applies only where today a scale-1 page is loaded and later resized;
+        // the KTX2 page path is separate and untouched); a side image whose native size differs
+        // from the colour page or whose dims are unreadable (today it is fitToPage'd at FULL size
+        // before the fit resize — a different resample sequence than one scaled decode).
+        const sideMismatch = (emis !== null && (emis.dims === null || colour.dims === null || emis.dims.width !== colour.dims.width || emis.dims.height !== colour.dims.height))
+          || (Object.values(maskBlobs) as BlobImg[]).some((s) => s.dims === null || colour.dims === null || s.dims.width !== colour.dims.width || s.dims.height !== colour.dims.height);
+        const trimEligible = this.trimAtlases && TRIM_ATLAS_RE.test(a.key) && !src.rects && scale === 1 && !maskBlobs.sheen && !maskBlobs.sway && !dirRectAtlases.has(a.key);
+        const p: PendingAtlas = { rt, colour, emis, masks: maskBlobs, legacy: fallback || scale !== 1 || sideMismatch, decoded: false };
+        pending.push(p);
+        if (trimEligible || !colour.dims) {
+          // Trim needs real pixels at scale 1, and an unreadable colour header needs the real
+          // decoded dims for the search: decode fully NOW, exactly as the legacy path does
+          // (fitToPage first, then the trim repack), so the search sees the same dims as always.
+          let img = await decodeImageBlob(colour.blob);
+          let em = emis ? await decodeImageBlob(emis.blob) : null;
+          const mk: AtlasRT["masks"] = {}; for (const m of Object.keys(maskBlobs) as MaskName[]) mk[m] = await decodeImageBlob(maskBlobs[m]!.blob);
+          const fitT0 = now();
+          if (em) em = await fitToPage(em, img.width, img.height);
+          for (const m of Object.keys(mk) as MaskName[]) { const f = await fitToPage(mk[m]!, img.width, img.height); if (f) mk[m] = f; else { delete mk[m]; delete maskUrls[m]; } }
+          fitToPageMs += now() - fitT0;
+          if (trimEligible) {
+            const t = trimGridAtlas(img, em, mk as Record<string, ImageLike>, a.columns, a.rows, a.frameW, a.frameH);
+            if (t) { img = t.img; em = t.emis; for (const m of Object.keys(mk) as MaskName[]) mk[m] = t.masks[m]!; rt.trim = t.plan.frames; }
+            p.legacy = true; // a trimmed page is resized by the fit pass if demoted, as today
+          }
+          rt.img = img; rt.emis = em; rt.masks = mk; p.decoded = true;
+          return;
+        }
+        // Provisional dims-only images: planFit/pack/dims read width/height + side presence only
+        // (verified in fitBudget/dims()/pack()); the real decodes happen after the search.
+        rt.img = { width: colour.dims.width, height: colour.dims.height } as ImageLike;
+        rt.emis = emis ? ({ width: colour.dims.width, height: colour.dims.height } as ImageLike) : null;
+        for (const m of Object.keys(maskBlobs) as MaskName[]) rt.masks[m] = { width: colour.dims.width, height: colour.dims.height } as ImageLike;
         return;
       }
       let scale = this.pickScale(a, src);
@@ -995,6 +1178,13 @@ export class AtlasManager {
     ph.fetchDecode += now() - ldT0;
     ph.fetchDecodeFetch += imageLoadStats.fetchMs - fdStats0.fetchMs;
     ph.fetchDecodeDecode += imageLoadStats.decodeMs - fdStats0.decodeMs + fitToPageMs;
+    // ADR-557: slot-wait + load/source counts + in-flight peak over the same window.
+    ph.fetchDecodeWait += assetSlotStats.waitMs - slotStats0.waitMs;
+    ph.fetchDecodeLoads += imageLoadStats.loads - fdStats0.loads;
+    ph.fetchDecodeCacheHits += assetSourceStats.cacheHits - srcStats0.cacheHits;
+    ph.fetchDecodeNetwork += assetSourceStats.networkFetches - srcStats0.networkFetches;
+    ph.fetchDecodePeak = Math.max(ph.fetchDecodePeak, assetSlotStats.peak);
+    ph.fetchDecodeDecodePeak = Math.max(ph.fetchDecodeDecodePeak, decodeSlotStats.peak); // ADR-559
     const layT0 = now();
     list.sort((a, b) => a.id - b.id); lazyList.sort((a, b) => a.id - b.id);
     addDirFrameRects(registry, [...list, ...lazyList]);
@@ -1069,7 +1259,51 @@ export class AtlasManager {
     const bldHold = groups.reduce((t, g, i) => t + (g.cls === "veh" ? visHold[i]! : g.cls === "stream" ? this.poolReserveBytes(g.lazy, Math.min(g.minSlots, STREAM_FLOOR_SLOTS), list, 1) : 0), 0);
     ph.layout += now() - layT0; // sort + rect tables + pool-group planning, before the rescale steps
     this.registryForTier = registry;
-        const fbT0 = now(); const fb = await this.fitBudget(list, reserve, keep, keepVis + wearFloor); ph.fitBudget += now() - fbT0; ph.fitBudgetSearch += fb.search; ph.fitBudgetResizes += fb.resizes;
+        const fbT0 = now();
+        if (pending.length) {
+          // ADR-558: search on dims first, decode each demoted image ONCE at its final scale,
+          // then the resize pass — which has nothing left to do for preScaled atlases.
+          const plan = this.planFit(list, reserve, keep, keepVis + wearFloor);
+          ph.fitBudgetSearch += plan.search;
+          const fdStats1 = { ...imageLoadStats }; const decT0 = now(); let fitToPageMs2 = 0;
+          await Promise.all(pending.map(async (p) => {
+            if (p.decoded) return; // trim / unreadable-header atlases were decoded in the load phase
+            const rt = p.rt; const k = rt.fitK ?? 1;
+            const decodeOpt = async (b: BlobImg, s?: { w: number; h: number; q: "high" | "pixelated" }): Promise<ImageLike | null> => {
+              try { return await decodeImageBlob(b.blob, s); } catch (e) { reportRenderError(`atlas optional layer ${rt.key}`, e); return null; }
+            };
+            if (!p.legacy && k < 1) {
+              // Decode at final scale: target dims are resizeBy's (floor(full * k)), qualities are
+              // scaleList's ("high" colour/emissive, "pixelated" masks). Masks were verified
+              // same-size as the colour page, so they land exactly on the decoded colour size —
+              // the fitToPage ordering is preserved with nothing left to fit.
+              const cw = Math.max(1, Math.floor(p.colour.dims!.width * k)), ch = Math.max(1, Math.floor(p.colour.dims!.height * k));
+              const img = await decodeOpt(p.colour, { w: cw, h: ch, q: "high" });
+              if (img) {
+                rt.img = img;
+                rt.emis = p.emis ? await decodeOpt(p.emis, { w: cw, h: ch, q: "high" }) : null;
+                for (const m of Object.keys(p.masks) as MaskName[]) { const im = await decodeOpt(p.masks[m]!, { w: cw, h: ch, q: "pixelated" }); if (im) rt.masks[m] = im; else { delete rt.masks[m]; delete rt.maskUrls[m]; } }
+                rt.scale *= k; rt.preScaled = true;
+                return;
+              }
+              // Scaled decode failed: fall through to the scale-1 retry (the loadOpt fallback rule).
+            }
+            const img = await decodeImageBlob(p.colour.blob); // colour is required: a failure fails the rebuild, as load() did
+            rt.img = img;
+            rt.emis = p.emis ? await decodeOpt(p.emis) : null;
+            for (const m of Object.keys(p.masks) as MaskName[]) { const im = await decodeOpt(p.masks[m]!); if (im) rt.masks[m] = im; else { delete rt.masks[m]; delete rt.maskUrls[m]; } }
+            const fitT0 = now();
+            if (rt.emis) rt.emis = await fitToPage(rt.emis, img.width, img.height);
+            for (const m of Object.keys(rt.masks) as MaskName[]) { const f = await fitToPage(rt.masks[m]!, img.width, img.height); if (f) rt.masks[m] = f; else { delete rt.masks[m]; delete rt.maskUrls[m]; } }
+            fitToPageMs2 += now() - fitT0;
+          }));
+          ph.fetchDecode += now() - decT0;
+          ph.fetchDecodeDecode += imageLoadStats.decodeMs - fdStats1.decodeMs + fitToPageMs2;
+          ph.fetchDecodeLoads += imageLoadStats.loads - fdStats1.loads;
+          ph.fetchDecodeDecodePeak = Math.max(ph.fetchDecodeDecodePeak, decodeSlotStats.peak); // ADR-559: the at-scale decodes run in this phase
+          const rz = await this.applyFitResizes(list);
+          ph.fitBudgetResizes += rz; ph.fitBudget += plan.search + rz;
+        } else { const fb = await this.fitBudget(list, reserve, keep, keepVis + wearFloor); ph.fitBudget += now() - fbT0; ph.fitBudgetSearch += fb.search; ph.fitBudgetResizes += fb.resizes; }
     const hsT0 = now(); this.sideScale = (await halveSide(list, this.sideShift)) ? 1 / (1 << this.sideShift) : 1; ph.halveSide += now() - hsT0;
     const layT1 = now();
     const layout = (): void => { this.pack(list); this.pools = []; groups.forEach((g, i) => this.planPool(g.lazy, g.minSlots, list, g.cls, g.cap, g.share, g.cls === "wear" ? visHold.slice(i + 1).reduce((t, b) => t + b, 0) : g.cls === "bld" ? bldHold : 0)); let b = this.totalFrames; for (const a of lazyList) { a.base = b; b += a.count; } this.totalFrames = b; };
@@ -1126,6 +1360,9 @@ export class AtlasManager {
     // ADR-548: cold-atlas bytes (not ms — see rebuildTimings). bodyPages was set by the eager
     // body step above (ADR-553: landed eager pages, not the pool size).
     ph.coldAtlasBytes = this.coldAtlasBytes();
+    // ADR-557: resize chain-wait vs run over the whole rebuild (all sliced() resizes since rzStats0).
+    ph.resizeChainWait = resizeStats.waitMs - rzStats0.waitMs;
+    ph.resizeChainRun = resizeStats.runMs - rzStats0.runMs;
     this.held = held; this.version++;
     for (const [k, u] of prevHeld) this.assets.release(k, u);
     this.rebuildTimings = { ...ph };
@@ -1313,7 +1550,13 @@ export class AtlasManager {
    * (rare variants, distant LODs, one-shot fx, unreferenced) are shrunk first. Tries (hot, cold) best-first: hot 1 with cold
    * 1..MIN, then hot 0.5 with cold 0.5..MIN, ... Atlases larger than a layer are always shrunk.
    */
-  private async fitBudget(list: AtlasRT[], reserveBytes = 0, keepBytes = 0, floorBytes = 0): Promise<{ search: number; resizes: number }> {
+  /**
+   * ADR-558: the fitBudget SEARCH only (dims-only: reads img.width/height, never pixels). Split out
+   * of fitBudget so rebuild can run it on IHDR dims BEFORE decoding, then decode each demoted image
+   * once at the chosen scale. Records the per-atlas choice on a.fitK and the tier globals
+   * (downscale / coldDownscale / pinnedKeys / fitInfo) exactly as the combined fitBudget did.
+   */
+  private planFit(list: AtlasRT[], reserveBytes = 0, keepBytes = 0, floorBytes = 0): { search: number } {
     const s0 = now(); // ADR-548: trial packings are the search; the final scaleList resizes are timed separately
     const S = this.layerSize; const full = this.textureBudgetMB * 1048576;
     this.classify(list);
@@ -1433,9 +1676,21 @@ export class AtlasManager {
       console.warn(`[render] atlas arrays over the ${this.textureBudgetMB} MB GPU budget at full res: hot x${h} (${list.length - nc} atlases), cold x${c} (${nc}) (~${Math.round(this.estimate(list) / 1048576)} MB)`);
     }
     const searchMs = now() - s0; // every trial packing + the final pack, before any image is resized
+    // ADR-558: the per-atlas final scale, for the decode-at-scale step (and applyFitResizes).
+    list.forEach((a, i) => { a.fitK = scaleOf(i, h, c); });
+    return { search: searchMs };
+  }
+  /** ADR-558: the fit resize pass, for atlases NOT already decoded at their final scale. Returns ms. */
+  private async applyFitResizes(list: AtlasRT[]): Promise<number> {
     const r0 = now();
-    await Promise.all(list.map((a, i) => { const k = scaleOf(i, h, c); return k < 1 ? scaleList([a], k) : undefined; }));
-    return { search: searchMs, resizes: now() - r0 };
+    await Promise.all(list.map((a) => { const k = a.fitK ?? 1; return k < 1 && !a.preScaled ? scaleList([a], k) : undefined; }));
+    return now() - r0;
+  }
+  /** Hot/cold budget fit: planFit (search) + the resize pass for atlases not already at final scale. */
+  private async fitBudget(list: AtlasRT[], reserveBytes = 0, keepBytes = 0, floorBytes = 0): Promise<{ search: number; resizes: number }> {
+    const plan = this.planFit(list, reserveBytes, keepBytes, floorBytes);
+    const resizes = await this.applyFitResizes(list);
+    return { search: plan.search, resizes };
   }
   /** Tier every resident atlas (see defaultAtlasTier / atlasTier / recentlyUsed). */
   private classify(list: AtlasRT[]): void {
