@@ -118,7 +118,7 @@ export class GameMenus {
     this.nav = new UINav({ root: o.root, onPause: () => this.pause(), onPage: (d, kind) => { if (this.nav.top === "inventory" && pageContainer(d)) this.refresh(); else if (this.nav.top === "skills") { pageSkillCategory(d); this.refresh(); } else cycleTabs(this.nav, d, kind ?? "tab"); }, ...(o.input ? { input: o.input } : {}), hotkeys, ...(o.getGamepads ? { getGamepads: o.getGamepads } : {}), ...(o.pollGamepads !== undefined ? { pollGamepads: o.pollGamepads } : {}) });
     if (o.showMenuBar !== false) {
       const bar = document.createElement("nav"); bar.id = "game-menubar"; bar.setAttribute("aria-label", "Game menus");
-      const add = (id: string, icon: string, title: string, fn: () => void): void => { const b = document.createElement("button"); b.type = "button"; b.dataset["open"] = id; b.dataset["tip"] = title; b.setAttribute("aria-label", title); if (isIconFile(icon)) b.append(iconImg(icon, 24, title)); else b.textContent = icon; b.addEventListener("click", (e) => { e.stopPropagation(); fn(); }); bar.append(b); };
+      const add = (id: string, icon: string, title: string, fn: () => void): void => { const b = document.createElement("button"); b.type = "button"; b.dataset["open"] = id; b.dataset["tip"] = title; b.setAttribute("aria-label", title); if (isIconFile(icon)) b.append(iconImg(icon, 24, title)); else b.textContent = icon; b.addEventListener("pointerdown", (e) => e.stopPropagation()); b.addEventListener("click", (e) => { e.stopPropagation(); fn(); }); bar.append(b); };
       for (const m of GAME_MENUS) if (m.bar) { add(m.id, m.icon, m.title, () => { bar.dataset["expanded"] = "false"; this.toggle(m.id); }); if (!PRIMARY_BAR_MENUS.has(m.id)) bar.lastElementChild!.classList.add("gm-secondary"); }
       add("more", "⋯", "More menus", () => { const on = bar.dataset["expanded"] !== "true"; bar.dataset["expanded"] = String(on); (bar.querySelector('[data-open="more"]') as HTMLElement).setAttribute("aria-expanded", String(on)); });
       const more = bar.lastElementChild as HTMLElement; more.classList.add("gm-more"); more.setAttribute("aria-expanded", "false"); bar.insertBefore(more, bar.firstChild);
@@ -134,11 +134,11 @@ export class GameMenus {
     const p = document.createElement("div"); p.className = "gm-panel"; p.setAttribute("aria-label", title);
     const camper = id === "camper"; if (camper) { p.dataset["panel"] = "camper-station"; p.dataset["key"] = String(this.camperTarget ?? 0); }
     const h = document.createElement("header"); if (camper) h.dataset["role"] = "title"; const h2 = document.createElement("h2"); h2.textContent = title;
-    const x = document.createElement("button"); x.type = "button"; x.className = "alt"; x.dataset["role"] = "close"; x.setAttribute("aria-label", `Close ${title}`); x.dataset["tip"] = "Close (B)"; if (camper) x.dataset["key"] = "close"; x.textContent = "✕"; x.addEventListener("click", () => this.nav.close());
+    const x = document.createElement("button"); x.type = "button"; x.className = "alt"; x.dataset["role"] = "close"; x.setAttribute("aria-label", `Close ${title}`); x.dataset["tip"] = "Close (B)"; if (camper) x.dataset["key"] = "close"; x.textContent = "✕"; x.addEventListener("pointerdown", (e) => e.stopPropagation()); x.addEventListener("click", () => this.nav.close());
     h.append(h2, x);
     const b = document.createElement("div"); b.dataset["role"] = "body"; if (!camper) b.style.cssText = "display:flex;flex-direction:column;gap:8px"; /* camper: grid areas from gameplay-panels.css */ b.append(...body);
     const actions = document.createElement("div"); actions.className = "gm-grid";
-    for (const [t, fn, cls, icon] of buttons) { const bt = document.createElement("button"); bt.type = "button"; if (icon) bt.append(iconImg(icon, 20, t)); bt.append(document.createTextNode(t)); if (cls) bt.className = cls; bt.dataset["action"] = t; bt.addEventListener("click", fn); actions.append(bt); }
+    for (const [t, fn, cls, icon] of buttons) { const bt = document.createElement("button"); bt.type = "button"; if (icon) bt.append(iconImg(icon, 20, t)); bt.append(document.createTextNode(t)); if (cls) bt.className = cls; bt.dataset["action"] = t; bt.addEventListener("pointerdown", (e) => e.stopPropagation()); bt.addEventListener("click", fn); actions.append(bt); }
     p.append(h, b); if (buttons.length) p.append(actions);
     const hint = document.createElement("div"); hint.className = "hint"; hint.textContent = "Tap · Tab/arrows + Enter, Esc back · D-pad + A, B back"; p.append(hint);
     m.append(p); m.dataset["menu"] = id; return m;
@@ -336,11 +336,11 @@ export class GameMenus {
       picker.replaceChildren(); picker.hidden = this.chatChannel !== 5; const g = this.o.gameplay; const c = g?.ctx(); if (picker.hidden || !c) return;
       const ts = onlineTargets(c, g!.social); if (!ts.length) picker.append(this.para("Nobody online."));
       for (const t of ts.slice(0, 16)) { const b = document.createElement("button"); b.type = "button"; b.textContent = t.name; b.dataset["key"] = `whisper-${t.playerId}`; const on = t.playerId === this.whisperTo; b.className = on ? "" : "alt"; b.setAttribute("aria-pressed", String(on));
-        b.addEventListener("click", () => { this.whisperTo = t.playerId; fillPicker(); }); picker.append(b); }
+        b.addEventListener("pointerdown", (e) => e.stopPropagation()); b.addEventListener("click", () => { this.whisperTo = t.playerId; fillPicker(); }); picker.append(b); }
     };
     const chans = document.createElement("div"); chans.className = "gm-grid"; chans.dataset["role"] = "chat-channels"; chans.dataset["tabs"] = "tab";
     for (const [n, c] of CHAT_CHANNELS) { const b = document.createElement("button"); b.type = "button"; b.className = c === this.chatChannel ? "" : "alt"; b.textContent = n; b.dataset["key"] = `chan-${c}`; b.setAttribute("aria-pressed", String(c === this.chatChannel));
-      b.addEventListener("click", () => { this.chatChannel = c; for (const o of Array.from(chans.children)) { const on = o === b; (o as HTMLElement).className = on ? "" : "alt"; o.setAttribute("aria-pressed", String(on)); } fillPicker(); }); chans.append(b); }
+      b.addEventListener("pointerdown", (e) => e.stopPropagation()); b.addEventListener("click", () => { this.chatChannel = c; for (const o of Array.from(chans.children)) { const on = o === b; (o as HTMLElement).className = on ? "" : "alt"; o.setAttribute("aria-pressed", String(on)); } fillPicker(); }); chans.append(b); }
     fillPicker();
     const m = this.panel("chat", "Chat", [log, chans, picker, input], [["Send", send]]); // header ✕, Esc, B and tap-outside close it; no second Close button
     { const sb = m.querySelector<HTMLElement>("[data-action=Send]")!; sb.dataset["role"] = "submit"; sb.dataset["pad"] = "X"; }

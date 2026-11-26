@@ -7,11 +7,12 @@ import { mountLedgeWarning } from "./ledge-warning.js";
 import { mountNameTags } from "./name-tags.js";
 import { mountPetStatus } from "./pet-status.js";
 import { waitForWorldReady } from "./ready.js";
+import { drainFirstView as drainFirstViewPages } from "./first-view-drain.js";
 import { mountSnapOverlay } from "./snap-overlay.js";
 import { lastPlayedKey } from "./delete-progress.js";
 import { CHAT_TAG, chatLine, chatSender } from "./chat-line.js";
 import { intentPayload } from "./send-intent.js";
-import { LoadCostBreakdown, LoadProgress } from "./load-progress.js";
+import { LoadCostBreakdown, LoadProgress, serverLocationNote } from "./load-progress.js";
 import { attachZoom, type ZoomControl } from "./camera-zoom.js";
 import { attachCameraRotate, screenDirToWorld, type CameraRotateControl } from "./camera-rotate.js";
 let camZoom: ZoomControl | undefined; let padZoomT = 0; // ADR-177
@@ -19,7 +20,7 @@ let camRot: CameraRotateControl | undefined; // ADR-253
 import { mountUi } from "./ui-root.js";
 import { showRenderError, glInfo } from "./glcheck.js";
 import { BUILD_HASH, errorLog, installGlobalErrorCapture, logRecoverable } from "./error-log.js";
-import { assetBytes, setAssetCacheVersion, setRenderErrorSink, Sprite, type WarmupResult } from "@engine/render";
+import { assetBytes, setAssetCacheVersion, setRenderErrorSink, Sprite } from "@engine/render";
 import { startDiag } from "./diag.js";
 import { installFullscreenRestore, exitFullscreen } from "./fullscreen.js";
 import { uiRoot, safeAreaInsets } from "./ui-root.js";
@@ -122,6 +123,8 @@ errorLog().ctx = { renderer: () => (iso ? (iso.renderer.gl ? "webgl2" : "canvas2
 const loadProgress = new LoadProgress();
 /** ADR-370: client cost breakdown (boot / world-ready / warm-up timings) for ?diag=1 + window.__survivazLoadCost. */
 const loadCost = new LoadCostBreakdown();
+/** ADR-543: where the singleplayer server runs — set once singleplayer starts; ?diag=1 shows it (undefined on the menu / before start). */
+let serverLocation: string | undefined;
 const bootT0 = performance.now();
 { const w = globalThis as { __survivazLoadCost?: () => string }; w.__survivazLoadCost = () => loadCost.format(); }
 const onStage = (id: string, f: number, label?: string): void => { const v = loadProgress.update(id, f, label); boot?.progress(v, loadProgress.label); };
@@ -136,7 +139,9 @@ const isoReady: Promise<void> = wantIso ? (async () => {
   // when nothing changed, and the camera zoom + keyboard-viewport helpers also listen to resize.
   addEventListener("orientationchange", onResize); onResize();
   attachContextRecovery(canvas, { notify: showRenderError });
-  camZoom = attachZoom(v.renderer.camera, canvas, { enabled: () => !document.querySelector("[data-boot=menu]") });
+  // ADR-541: lazy getter — browserInput is created below (main.ts:170), after this async block starts, so the
+  // VirtualControls object cannot be passed directly; the getter is only called on pointer events, long after init.
+  camZoom = attachZoom(v.renderer.camera, canvas, { enabled: () => !document.querySelector("[data-boot=menu]"), controls: () => browserInput.controls });
   iso = v; (window as { __view?: unknown }).__view = { ready: true, renderer: "iso", iso: v };
 })().catch((e: unknown) => {
   // keep the sprite renderer: retry once at safe quality (still full art) before the Canvas2D debug view
@@ -302,7 +307,7 @@ const session = new ClientSession({ storage: localStorage, slot: SLOT, sampleInp
   hashes: async () => { await isoReady.catch(() => undefined); const c = iso?.registry.cosmetics; return c?.size ? cosmeticsHashes(c) : undefined; } });
 let world = new World({ seed: 1234 }); installDemoWorld(world, "client");
 installFullscreenRestore();
-const diag = startDiag({ renderer: () => iso?.renderer, entities: () => world.entityCount, tick: () => world.tick, player: () => session.player, loadCost: () => loadCost.format(),
+const diag = startDiag({ renderer: () => iso?.renderer, entities: () => world.entityCount, tick: () => world.tick, player: () => session.player, loadCost: () => loadCost.format(), serverLocation: () => serverLocation,
   snapshot: () => session.client ? { received: session.client.latestTick >= 0, latestTick: session.client.latestTick, snapshots: session.client.stats.snapshots } : undefined,
   // ADR-254: ?seed= pins the preview (and a remote join); otherwise 1234 until the local server reports its seed.
   spawnPoints: (() => { let c: { seed: number; points: { x: number; y: number }[] } | undefined; return () => (c ??= (() => { const seed = Number(params.get("seed") ?? 1234); return { seed, points: computeSpawnPoints(new ProceduralGenerator({ seed })) }; })()); })() });
@@ -510,6 +515,10 @@ async function startSingleplayer(chosenSeed?: number): Promise<void> {
       local = { inWorker: false, createTransport: () => inTab.createTransport(), save: async () => { await inTab.game.persist?.saveAll(); }, stop: () => inTab.stop() };
     }
     log(local.inWorker ? "server running in Web Worker" : "server running in tab");
+    // ADR-543: the console line above is invisible on a phone screenshot — put the same fact where ?diag=1
+    // and window.__survivazLoadCost() can show it (read paths only; no behaviour change).
+    serverLocation = serverLocationNote(local.inWorker, params.get("worker") === "0");
+    loadCost.note(serverLocation);
     const srv = local;
     let wiped = false; // after "Delete save" nothing may write the slot again
     addEventListener("pagehide", () => { if (!wiped) void srv.save(); });
@@ -625,22 +634,20 @@ const defaultUrl = serverParam ?? `${location.protocol === "https:" ? "wss" : "w
  * the first view — warmupKeysForSprites turns them into page keys and warmupFirstView requests
  * them first (it pumps while it waits, so this does not stall the way the boot window used
  * to). The drain after it covers whatever the draws queued. A failure here must never block
- * ready: the drain still runs and the overlay still lifts on its own timeout. */
+ * ready: the drain still runs and the overlay still lifts on its own timeout.
+ * ADR-544: the two 1500 ms windows above are replaced by one shared 25 s cap (first-view-drain.ts):
+ * the overlay no longer lifts on a timer while pages are still landing — it lifts once pending
+ * == 0, or at the cap if the drain is pathological. The cap sits inside the 30 s absolute
+ * READY_TIMEOUT_MS; the user accepted a 20–30 s loading screen for a finished world. */
 const drainFirstView = async (): Promise<void> => {
   if (!iso) return;
-  const atlas = iso.renderer.atlas;
-  let warm: WarmupResult | undefined;
-  try {
-    const spriteIds: number[] = [];
-    for (const ve of iso.view.query([Sprite])) { const id = iso.view.getField(ve, Sprite, "spriteId"); if (id !== undefined) spriteIds.push(id); }
-    const keys = atlas.warmupKeysForSprites?.(spriteIds) ?? [];
-    if (keys.length) warm = await atlas.warmupFirstView?.(keys, { firstView: keys });
-  } catch (e) { console.warn("first-view warm-up failed", e); }
-  const drain = await atlas.warmupDrain?.();
-  if (!drain) return;
-  loadCost.record("warmup-drain", drain.ms);
-  if (warm) loadCost.note(`world-entry warm-up: ${warm.resident}/${warm.requested + warm.alreadyResident} first-view pages resident in ${warm.ms}ms${warm.timedOut ? ` (timed out, ${warm.stillPending} pending)` : ""}`);
-  loadCost.note(drain.drained ? `first-view pages drained in ${drain.ms}ms` : `${drain.pending} first-view page(s) still pending after ${drain.ms}ms`);
+  const spriteIds: number[] = [];
+  for (const ve of iso.view.query([Sprite])) { const id = iso.view.getField(ve, Sprite, "spriteId"); if (id !== undefined) spriteIds.push(id); }
+  const r = await drainFirstViewPages(iso.renderer.atlas, spriteIds);
+  if (!r.drain) return;
+  loadCost.record("warmup-drain", r.drain.ms);
+  if (r.warmup) loadCost.note(`world-entry warm-up: ${r.warmup.resident}/${r.warmup.requested + r.warmup.alreadyResident} first-view pages resident in ${r.warmup.ms}ms${r.warmup.timedOut ? ` (timed out, ${r.warmup.stillPending} pending)` : ""}`);
+  loadCost.note(r.drain.drained ? `first-view pages drained in ${r.drain.ms}ms` : `${r.drain.pending} first-view page(s) still pending after ${r.drain.ms}ms`);
 };
 const signalReady = async (): Promise<void> => {
   const t0 = performance.now();

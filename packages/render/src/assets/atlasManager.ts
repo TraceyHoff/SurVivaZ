@@ -173,11 +173,21 @@ export const SIDE_SHIFT_LOWMEM: number = 2;
 const POOL_MIN_SLOTS_DESKTOP = 48, POOL_MIN_SLOTS_LOWMEM = 24, POOL_GAP = 4, PAGE_CONCURRENCY = 6, POOL_PROTECT_FRAMES = 90;
 /** 1x wear pool slots when the budget cannot hold minSlots at 1x: the local player's worn set + the nearest neighbour's (~9 layers each); farther characters page by distance priority. */
 /** Manifest residency "stream" sheets (crops, saplings, clutter, ADR-110 animals): pool slots, page-in starts per
- *  frame (upload budget), frames off-screen before a page is dropped (~3 s at 60 fps; touched again inside the keep
- *  radius = hysteresis), and screen-px margins around the view: load radius, keep radius (x1.5), animals (move into view). */
-/** ADR-148: GPU page uploads per frame (see uploadTurn). */
+ *  frame (upload budget), frames off-screen before a page is dropped (~10 s at 60 fps; touched again inside the keep
+ *  radius = hysteresis), and screen-px margins around the view: load radius, keep radius (x2), animals (move into view). */
+/** ADR-148: GPU page uploads per frame (see uploadTurn). ADR-545: the base (busy-frame) rate — the BOOST pair below. */
 export const PAGE_UPLOADS_PER_FRAME = 2;
-export const STREAM_POOL_SLOTS_DESKTOP = 24, STREAM_POOL_SLOTS_LOWMEM = 12, STREAM_UPLOADS_PER_FRAME = 2, STREAM_UNLOAD_FRAMES = 180;
+export const STREAM_POOL_SLOTS_DESKTOP = 24, STREAM_POOL_SLOTS_LOWMEM = 12, STREAM_UPLOADS_PER_FRAME = 2, STREAM_UNLOAD_FRAMES = 600;
+/** ADR-545: boosted page-in rates — stream page-in starts and GPU uploads per frame while the loading overlay is up
+ *  or the last rendered frame left headroom (see pageInBoosted). 6 = PAGE_CONCURRENCY, so the per-frame start cap
+ *  stops binding before in-flight concurrency does; the base 2 above still applies while frames are busy. The
+ *  user's phone (Mali-G68, 460 MB total vs a 256 MB budget, 41 misses, 0 evictions) is over budget, so the pool
+ *  slots and STREAM_BUDGET_SHARE are deliberately NOT raised — only the rate adapts, never the memory footprint. */
+export const STREAM_UPLOADS_PER_FRAME_BOOST = 6, PAGE_UPLOADS_PER_FRAME_BOOST = 6;
+/** ADR-545: frame-time (ms) at or below which the boosted rates apply. The phone's once-loaded frame CPU is 5.0 ms
+ *  of a 16.7 ms budget, so 8 ms leaves about half the budget as headroom; a busy frame (sprint chunk-gen, heavy
+ *  draws) measures above it and falls back to the base 2. Fed by IsoRenderer.stats.cpuMs via noteFrameTime. */
+export const PAGE_IN_FRAME_BUDGET_MS = 8;
 /** ADR-314: stream pages larger than this (either side, 1x px) are planned in their own pool (see splitStreamPages). */
 export const STREAM_PAGE_MAX_PX = 1024;
 export const BIG_STREAM_SLOTS_DESKTOP = 2, BIG_STREAM_SLOTS_LOWMEM = 1;
@@ -187,7 +197,7 @@ export function splitStreamPages<T extends { lazy?: { w1: number; h1: number } |
   for (const a of pages) (Math.max(a.lazy?.w1 ?? 0, a.lazy?.h1 ?? 0) > maxPx ? big : small).push(a);
   return [small, big];
 }
-export const STREAM_MARGIN_PX = 256, STREAM_MARGIN_ANIMAL_PX = 640, STREAM_KEEP_FACTOR = 1.5;
+export const STREAM_MARGIN_PX = 256, STREAM_MARGIN_ANIMAL_PX = 640, STREAM_KEEP_FACTOR = 2;
 const WEAR_1X_SLOTS_LOWMEM = 18, WEAR_1X_SLOTS_DESKTOP = 32;
 /** Wear pages whose 1x size fits WEAR_SMALL_PX square (faces, eyes, shoes, small accessories: ~1/3 of the MaxRects-
  *  trimmed customization pages) get their own wear pool sized to them: 672 + 2x688 pitch = 2048 -> 3x3 slots per 2048 layer instead
@@ -1595,7 +1605,7 @@ export class AtlasManager {
   /** Once per frame before drawing: advances the LRU clock and uploads frame-table rows patched by page-ins/evictions. */
   beginFrame(): void {
     this.frame++; this.streamStarts = 0; this.uploadsThisFrame = 0;
-    while (this.uploadWaiters?.length && this.uploadsThisFrame < PAGE_UPLOADS_PER_FRAME) { this.uploadsThisFrame++; this.uploadWaiters.shift()!(); }
+    while (this.uploadWaiters?.length && this.uploadsThisFrame < this.pageUploadsPerFrame()) { this.uploadsThisFrame++; this.uploadWaiters.shift()!(); }
     if ((this.frame & 15) === 0) this.unloadIdleStream();
     if (this.queue.length) this.pump();
     if (this.tableDirty0 < 0 || !this.frameTex) return;
@@ -1615,13 +1625,34 @@ export class AtlasManager {
   /** rows the pre-ADR-154 min..max span upload would have sent */
   tableSpanRows = 0;
   private streamStarts = 0;
-  /** ADR-148: decoded pages wait here for their GPU upload turn - at most PAGE_UPLOADS_PER_FRAME uploads per frame (the
-   *  local player's own pages never wait), so a burst of finished decodes no longer lands as one long frame. */
+  /** ADR-148: decoded pages wait here for their GPU upload turn - at most the effective per-frame upload cap
+   *  (pageUploadsPerFrame: base PAGE_UPLOADS_PER_FRAME, boosted while the loading overlay is up or frames leave
+   *  headroom) uploads per frame (the local player's own pages never wait), so a burst of finished decodes no longer
+   *  lands as one long frame. */
   private uploadsThisFrame = 0; private uploadWaiters: (() => void)[] = [];
   private uploadTurn(prio: number): Promise<void> | void {
-    if (prio === 0 || this.settling || this.uploadsThisFrame < PAGE_UPLOADS_PER_FRAME) { this.uploadsThisFrame++; return; }
+    if (prio === 0 || this.settling || this.uploadsThisFrame < this.pageUploadsPerFrame()) { this.uploadsThisFrame++; return; }
     return new Promise<void>((res) => (this.uploadWaiters ??= []).push(res));
   }
+  /** ADR-545: loading-overlay boost (set while a warm-up window runs) and the last rendered frame's CPU ms
+   *  (Infinity = unknown: no frame has reported yet, so the base rates apply). Both default to the base rates —
+   *  a manager that never hears about the overlay or frame time behaves exactly as before. Prototype fakes
+   *  (Object.create) read these as undefined, which is falsy / not <= the budget, so they also get the base rates. */
+  private loadingBoost = false;
+  private lastFrameMs = Infinity;
+  /** ADR-545: force the boosted page-in rates (loading overlay up). Warm-up windows set this themselves;
+   *  embedders may set it while any loading screen covers the world. Cleared when the overlay lifts. */
+  setLoadingBoost(on: boolean): void { this.loadingBoost = on; }
+  /** ADR-545: feed the last rendered frame's CPU ms (IsoRenderer.stats.cpuMs — once-loaded 5.0 ms on the user's
+   *  phone). At or below PAGE_IN_FRAME_BUDGET_MS the boosted rates apply; above it, the base 2. Ignores
+   *  non-finite / negative input, so a bad reading never changes the rate. */
+  noteFrameTime(ms: number): void { if (Number.isFinite(ms) && ms >= 0) this.lastFrameMs = ms; }
+  /** ADR-545: boosted while the loading overlay is up or the last frame left headroom — never on a busy frame. */
+  private pageInBoosted(): boolean { return this.loadingBoost === true || this.lastFrameMs <= PAGE_IN_FRAME_BUDGET_MS; }
+  /** ADR-545: effective per-frame stream page-in starts (base 2, boosted 6). */
+  streamUploadsPerFrame(): number { return this.pageInBoosted() ? STREAM_UPLOADS_PER_FRAME_BOOST : STREAM_UPLOADS_PER_FRAME; }
+  /** ADR-545: effective per-frame GPU page uploads (base 2, boosted 6). */
+  pageUploadsPerFrame(): number { return this.pageInBoosted() ? PAGE_UPLOADS_PER_FRAME_BOOST : PAGE_UPLOADS_PER_FRAME; }
   /** Stream pool pages not touched for STREAM_UNLOAD_FRAMES (off-screen and outside the keep radius) are dropped. */
   private unloadIdleStream(): void {
     if (this.ctxLost) return;
@@ -1711,12 +1742,13 @@ export class AtlasManager {
    * The tick itself issues no GL calls; the only GL work it can trigger is pageIn's own
    * texSubImage3D uploads — the same uploads a rendered frame performs, on the same context,
    * which IsoRenderer owns and which is current (setRegistry has run before the boot warm-up;
-   * no other GL user runs during the boot window). The 2/frame caps are unchanged: the tick
-   * resets the same counters beginFrame resets, to the same limits.
+   * no other GL user runs during the boot window). The per-frame caps are the effective ones
+   * (pageUploadsPerFrame / streamUploadsPerFrame: boosted while a warm-up window runs, base 2
+   * otherwise): the tick resets the same counters beginFrame resets, to the same limits.
    */
   pumpWarmupTick(): void {
     this.streamStarts = 0; this.uploadsThisFrame = 0;
-    while (this.uploadWaiters?.length && this.uploadsThisFrame < PAGE_UPLOADS_PER_FRAME) { this.uploadsThisFrame++; this.uploadWaiters.shift()!(); }
+    while (this.uploadWaiters?.length && this.uploadsThisFrame < this.pageUploadsPerFrame()) { this.uploadsThisFrame++; this.uploadWaiters.shift()!(); }
     if (this.queue.length) this.pump();
   }
   /** ADR-374: slots of the main manifest stream-sheet pool (24 desktop / 12 low-memory) — the
@@ -1746,6 +1778,9 @@ export class AtlasManager {
    * (warmupPageBudget): a 12-slot low-memory pool caps at 12 pages, not 24.
    */
   async warmupFirstView(keys: Iterable<string>, opts: { firstView?: Iterable<string>; maxPages?: number; timeoutMs?: number } = {}): Promise<WarmupResult> {
+    // ADR-545: a warm-up window IS the loading overlay — page-ins run at the boosted rate for its whole duration.
+    const prevBoost = this.loadingBoost; this.loadingBoost = true;
+    try {
     const t0 = Date.now();
     const firstView = new Set(opts.firstView ?? []);
     const ordered = sortWarmupKeys([...new Set(keys)], firstView).filter((k) => isWarmupCandidate(k, firstView));
@@ -1773,6 +1808,7 @@ export class AtlasManager {
     }
     const landed = want.filter((a) => a.lazy!.state === 2).length;
     return { requested: want.length, alreadyResident, resident: alreadyResident + landed, stillPending: want.length - landed, skipped, ms: Date.now() - t0, timedOut: want.some((a) => a.lazy!.state !== 2) };
+    } finally { this.loadingBoost = prevBoost; }
   }
   /** ADR-370: lazy page keys for sprites (deduped, first-seen order) — the caller passes the sprites in the first view so they sort tier 0 in warmupFirstView. */
   warmupKeysForSprites(spriteIds: Iterable<number>): string[] {
@@ -1784,8 +1820,11 @@ export class AtlasManager {
    * ADR-370: wait (bounded) for the page-in queue to drain — used after the world is ready, while the
    * second loading screen still covers the first frames, so the overlay lifts onto a sharp frame.
    * Returns immediately when nothing is queued (no draws have requested pages yet).
+   * ADR-545: the drain runs under the loading overlay, so page-ins run at the boosted rate for its duration.
    */
   async warmupDrain(timeoutMs: number = WARMUP_WINDOW_MS): Promise<{ pending: number; ms: number; drained: boolean }> {
+    const prevBoost = this.loadingBoost; this.loadingBoost = true;
+    try {
     const t0 = Date.now(); const deadline = t0 + Math.max(0, timeoutMs);
     while (Date.now() < deadline) {
       if (this.queue.length + this.inflight === 0) return { pending: 0, ms: Date.now() - t0, drained: true };
@@ -1793,6 +1832,7 @@ export class AtlasManager {
     }
     const pending = this.queue.length + this.inflight;
     return { pending, ms: Date.now() - t0, drained: pending === 0 };
+    } finally { this.loadingBoost = prevBoost; }
   }
   /** Atlas key of a sprite's streamed page (null when resident / not streamed). */
   pageKey(spriteId: number): string | null { return this.lazyOf(spriteId)?.key ?? null; }
@@ -1814,8 +1854,9 @@ export class AtlasManager {
   private pump(): void {
     if (this.contextLost) return;
     while (this.inflight < PAGE_CONCURRENCY && this.queue.length) {
-      // stream sheets: at most STREAM_UPLOADS_PER_FRAME page-in starts per frame (the rest wait in the queue)
-      const qi = this.streamStarts >= STREAM_UPLOADS_PER_FRAME ? this.queue.findIndex((q) => this.poolOfA(q)?.cls !== "stream") : 0; if (qi < 0) break;
+      // stream sheets: at most the effective per-frame cap (streamUploadsPerFrame: base STREAM_UPLOADS_PER_FRAME,
+      // boosted while the loading overlay is up or frames leave headroom) page-in starts per frame (the rest wait)
+      const qi = this.streamStarts >= this.streamUploadsPerFrame() ? this.queue.findIndex((q) => this.poolOfA(q)?.cls !== "stream") : 0; if (qi < 0) break;
       const a = this.queue.splice(qi, 1)[0]!; const g = this.gen;
       const pr = a.lazy!.prio ?? Infinity; const p = this.poolOfA(a); if (!p || !this.poolOn(p, pr) || !p.lru.canAllocate(a.key, this.frame, pr)) continue;
       if (p.cls === "stream") this.streamStarts++;

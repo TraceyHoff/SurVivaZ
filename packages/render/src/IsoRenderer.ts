@@ -712,6 +712,7 @@ export class IsoRenderer implements Renderer {
 
     stats.staticChunks = this.sprites.staticChunksDrawn; stats.staticInstances = this.sprites.staticInstances;
     stats.cpuMs = performance.now() - t0;
+    this.atlas.noteFrameTime(stats.cpuMs); // ADR-545: page-in runs boosted while frames leave headroom (<= PAGE_IN_FRAME_BUDGET_MS), base 2 while busy
     stats.phases = pt.ms; // ADR-381: shared record — the diag overlay reads the last frame's splits
     if (this.tilemap && this.w > 0 && this.h > 0 && !this.atlas.settling && !gl.isContextLost()) { this.prepareQuarter = false; this.completeFrames++; }
   }

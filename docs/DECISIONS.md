@@ -13849,3 +13849,419 @@ download). Last slice of the zombie/predator batch (ADR-535–539).
   the roster (the 160-animal cycle deals from `animalDefs()`); that is inherent to
   the golden's design, not a regression — re-pin with a scratch-probe attribution
   as done here.
+
+## ADR-541 — Move + tap a touch button no longer zooms the view
+
+**Problem (user, 2026-11-25, phone):** holding the virtual joystick to walk while tapping a UI button (the user believes it was the attack button) zoomed the view — and the accidental zoom persisted.
+
+**Root cause (verified in code):** a double-tracked pointer. `attachZoom` (`apps/client/src/camera-zoom.ts:84`) unconditionally tracked *every* touch pointer on `#game` as a pinch pointer, while `VirtualControls` (`packages/input/src/touch.ts:27`) independently claimed the same pointer for the joystick/button. The touch overlay is `pointer-events:none`, so virtual-button taps land directly on `#game`: joystick finger = pinch pointer #1, button finger = pinch pointer #2, and any joystick movement then changed the finger spread and zoomed, with no deadband. The zoom persisted via the 300 ms-debounced save to `engine-settings`. `browser.ts:75` already guarded the gesture recognizer correctly (`if (!controls?.pointerDown(…)) gestures.down(…)`); `attachZoom` was the only pinch path without the equivalent guard. DOM buttons are siblings of the canvas and never reach `attachZoom` — the virtual path was the fix; the DOM guard is defence-in-depth.
+
+**Fix (option A from the prep, no behaviour change to VirtualControls, browser.ts routing, or overlay drawing):**
+- `packages/input/src/touch.ts`: read-only `VirtualControls.hasPointer(id)` over the private `owners` map.
+- `apps/client/src/camera-zoom.ts`: `attachZoom` takes a lazy `() => VirtualControls | undefined` getter (it is created in the async `isoReady` block, `main.ts:139`, before `browserInput` at `main.ts:170`, so the object cannot be passed directly). `down()` skips pointers owned by VirtualControls and now also checks `enabled()`; `move()` drops owned ids if they ever appear (listener-order flip) and resets `pinch0` on the drop path so no stale baseline jumps the next pinch. When `controls` is undefined (non-coarse devices) pinch degrades to today's behaviour — all touch pointers pinch. Hit-testing goes through VirtualControls, so left-handed, portrait, build-mode and driving layouts are unaffected. Mouse/pen unchanged (`down()` still returns early unless `pointerType` is touch); `world-map.ts` untouched (separate pinch system).
+- `apps/client/src/main.ts`: wires `controls: () => browserInput.controls`.
+- `apps/client/src/game-menus.ts` (hygiene, matches hotbar/HUD/camera-rotate): `pointerdown` `stopPropagation()` on menu-bar buttons, panel close/action buttons, and chat picker/channel buttons. Previously only `click` was stopped.
+
+**Tests:** new `apps/client/test/adr541_touch_zoom_guard.test.ts` (10 tests, following the `adr177_pad_zoom` pattern, synthetic touch PointerEvents + VirtualControls geometry at the 844×390 reference): repro (joystick + attack, move joystick → `user` stays 1, `touch.move` still updates, attack still pressed) **fails before, passes after**; reverse order; legit pinch still works proportionally and clamps to `[USER_ZOOM_MIN, USER_ZOOM_MAX]`; pinch starting ≤40 px apart does not zoom (documents the current `pinch0` threshold); joystick continuity after the button lifts + no stale pinch after both lift; claimed-pointer drop path; DOM menu-bar button pointerdown stops at the button; mouse/pen regression + `enabled()===false` blocks nudge/move; no `engine-settings` write on the accidental sequence; `hasPointer` read-only query. Neighbours pass: `adr177_pad_zoom`, `adr244_touch_context`, `input.test.ts`, `task10_compass_map_tutorial`, plus `touch_layout`, `adr175_camera_zoom`, `adr206_indoor_zoom`, `build_zoom`, `delete_picker`, `adr416_canvas2d_indoor_zoom`, `adr107_ui` (80 tests, 11 files). Typecheck clean with pinned TS 5.9.3 (`packages/input`, `apps/client`).
+
+**Honest cuts:**
+- Pinch-zoom while moving now requires lifting the move finger first: a finger on the joystick is moving, not pinching, so both pinch pointers must start outside every virtual control. This is the intended semantics (per the prep), but the user never explicitly confirmed it — it is a deliberate UX trade-off, not a silent side effect.
+- Verified in the harness only. Still owed: phone playtest — walk with the joystick while tapping Hit/Use/hotbar/menu (no zoom), then two-finger pinch on empty ground (zoom still works and persists only when intended).
+
+## ADR-542: Default zoom much closer on phones only, stored zoom reset once
+Status: Accepted 2026-11-25 (user ruling ~21:35 CST). Context: on the live site the phone default zoom is 0.557 at 390×844 — the same world span as PC by the ADR-175 invariant — and the user asked for the default view much closer on their phone. The old default only reaches new/cleared players: any stored user multiplier in `engine-settings` survives a default change. Decision: (1) a phone-only closer step, option B from the load-in/zoom/touch prep — `PHONE_CLOSER = 1.40`, phone default 0.557 → 0.709 at 390×844 (and 844×390, symmetry kept); desktop/Xbox keep `DEFAULT_CLOSER = 1.1` and the exact current 1.543 at 1920×1080. Detection is the coarse-pointer test main.ts already uses for the virtual touch layout (`matchMedia("(pointer: coarse)")`); a touchscreen laptop's fine primary pointer stays desktop, a touch tablet takes the phone branch with the touch layout. (2) A one-time migration drops any pre-change stored zoom multiplier on first load after the change and sets a versioned marker (`survivaz-zoom-reset-542`, its own localStorage key so the `engine-settings` object the UI and the ADR-526 wipe read stays exactly as it was); a second load never resets again, and other settings keys survive. The marker is written lazily — only when a zoom is actually dropped, or by `saveUserZoom` on the first zoom saved after the change — so a fresh profile writes nothing on first load and a zoom set after the change is never mistaken for a pre-change one. (3) `INDOOR_GAIN` (1.55) and `USER_ZOOM_MIN` (0.68) were not ruled on and stay unchanged, so phone indoor zoom becomes 0.709 × 1.55 ≈ 1.10 and the farthest-out view stays as-is. Consequences: this deliberately breaks the ADR-175 same-world-span invariant on phones (user ruled phone-only anyway) — the ADR-175 span tests still pass in the harness only because `matchMedia` answers fine there; phone span is now narrower by design. A player who deliberately set a custom zoom loses it once and re-pinches (honest cut). Closer zoom lowers draw load (fewer visible chunks/tiles/sprites per frame); chunk generation is unaffected. Still owed: phone playtest at play zoom outdoors and in a small room (indoor 1.10 may feel cramped in 4×4–6×6 rooms), and a check that minor character layers staying off below zoom 0.75 reads fine at 0.709. Tests: new `apps/client/test/adr542_phone_default_zoom.test.ts` (9 tests, fail 9/9 without the fix); neighbours `adr175_camera_zoom`, `adr206_indoor_zoom`, `build_zoom`, `delete_picker`, `adr177_pad_zoom`, `adr541_touch_zoom_guard`, `adr416_canvas2d_indoor_zoom`, `task19_orientation` — 47 passed total, the two tests pinning the old value (`adr206_indoor_zoom`, `delete_picker:53`) pass unchanged. Typecheck clean with pinned TS 5.9.3.
+
+## ADR-543: Phone load diagnostics — complete the ?diag=1 + load-cost surface (measurement only)
+
+**Status:** Done, local only (not pushed). No behaviour change: diagnostics are read paths only.
+
+**What was already present (verified, left alone):** the `?diag=1` boot sub-phase
+bracket (`view.ts` `bootPhases` → `main.ts` `recordSub("boot", …)` → diag `loadCost` line:
+renderer / manifest / painted / registry.fetch / registry.fitBudget / registry.halveSide /
+registry.layout / registry.upload / registry.tables / registry.bodies / registry.restore /
+warmup / variants / lighting + `other`); the `vram` line (`VramStats`: budget/resident/
+streamed/total/reserved MB, pagesResident/pageSlots/pageIns/evictions/pending/misses,
+withinBudget); the `phases prep/spr/upl/…` line (ADR-381); frame CPU (`frame draws … cpu`);
+the renderer line (`gl ANGLE …`, lowEnd/mobile/flags, limits); the boot/world-entry warm-up
+notes (resident counts, time-outs, still-pending); and `window.__survivazLoadCost()`
+(`LoadCostBreakdown.format()`). All of these rendered in the user's 2026-11-25 cold-start
+screenshot, so none of them needed code.
+
+**The one gap (closed here):** whether the singleplayer server runs in a Web Worker or
+falls back to in-tab existed only as a console-only log (`main.ts` `startSingleplayer`:
+`log("server running in Web Worker" | "server running in tab")`). The diag overlay did
+have a `local server running` token — but that is the lifecycle state from `localStatus`
+(`opening-store`/`starting`/`connecting`/`running`/`failed`, `main.ts:409`), not the
+location — so a phone screenshot could never answer the worker-vs-in-tab question, and the
+user's screenshot left it open.
+
+**Change (3 source files, +1 test file):**
+- `apps/client/src/load-progress.ts`: pure `serverLocationNote(inWorker, workerForcedOff?)`
+  → `"server: in Web Worker"` | `"server: in tab (?worker=0)"` |
+  `"server: in tab (worker unavailable or start timed out)"` (covers `?worker=0`, no Worker
+  support, worker constructor/error/fail, and the 15 s start timeout in `local-bridge.ts`).
+- `apps/client/src/main.ts`: module-level `serverLocation` is set in `startSingleplayer`
+  right after the existing log line and recorded as a `loadCost` note (so it appears in
+  `window.__survivazLoadCost()` even without `?diag=1`); `startDiag` gets a
+  `serverLocation: () => serverLocation` source.
+- `apps/client/src/diag.ts`: `DiagSources.serverLocation?()` renders a dedicated
+  `server in Web Worker` / `server in tab (…)` line right after the load-cost line. The
+  load-cost note and the dedicated line intentionally carry the same fact twice: the note
+  keeps `__survivazLoadCost()` self-contained for console paste, the line is plain at a
+  glance in a screenshot. No per-frame cost: the overlay still refreshes on its existing
+  500 ms interval from cheap getters only.
+- Out of scope, noted: P2P hosting always runs the server in-tab by design
+  (`host.local.pump`); this line covers the singleplayer local server only.
+
+**Phone numbers recorded (user's 2026-11-25 ~21:35 CST cold start, `?diag=1`, Mali-G68 —
+NOT assumed to be the ADR-381 Galaxy A16 profile):** device ANGLE (ARM, Mali-G68,
+OpenGL ES 3.2), mobile=true, lowEnd=false, DPR 1.575, backbuffer 647×1343 @ scale 1.500.
+Atlas 835 atlases, 24 layers @2048px, downscale x0.5, cold x0.25, 6029 sprites; vram
+budget 256 MB (mobile) but total 460 MB — withinBudget=FALSE (resident 165.3 + streamed
+78.6 + reserved 294.7); pagesResident=12, pageSlots=71, pageIns=23, evictions=0,
+pending=0, misses=41; hot 121 / cold 116 atlases. Load cost boot 31,946 ms (89%) —
+painted 14,217 ms (biggest chunk), manifest 5,486 ms, registry.fetch 4,362 ms,
+registry.upload 1,548 ms, registry.bodies 1,391 ms, registry.fitBudget 1,112 ms,
+warmup 1,503 ms, registry.layout 674 ms, registry.tables 609 ms, renderer 345 ms,
+lighting 177 ms, variants 83 ms; world-ready 2,219 ms (6%); warmup-drain 1,770 ms (5%);
+total 35,935 ms. Warm-up timeouts: boot warm-up 24/27 first-view pages resident in
+1500 ms (timed out, 3 pending); world-entry warm-up 0/1 in 2134 ms (timed out, 1 pending);
+1 first-view page still pending after 1770 ms. Frame once loaded is cheap: draws 17,
+sprites 110, cpu 5.0 ms; phases spr 4.3 ms. Quality preset auto, governor ema 48.3 ms,
+device mobile → low (remembered): res x0.6, light 1/4, bloom off, weather x0.4,
+particles x0.5, clutter x0.5. ktx2 target astc; ktx2 pages 11. Zoom at capture z0.934
+(user had pinched).
+
+**What these numbers imply for ADR-545/546 tuning (tuning itself is those slices' job):**
+- Boot dominates (89%) and the single biggest chunk is `painted` (14.2 s — runtime-painted
+  atlases), then manifest fetch (5.5 s) and registry.fetch (4.4 s): cold-cache fetch + paint,
+  not upload (1.5 s), is the boot cost. Any boot win must cut paint/fetch, not upload.
+- VRAM is OVER budget on this phone (460/256 MB, withinBudget=FALSE) despite 0 evictions
+  and only 41 misses: the resident arrays + reserved pool alone exceed the budget, so
+  ADR-545 must NOT raise stream slots or `STREAM_BUDGET_SHARE` on this device class until
+  the resident/reserved over-budget is understood — raising the pool would grow the
+  already-over-budget total. The 12 resident pages vs 71 slots with 0 evictions says the
+  pool is not thrashing yet at this working set; the pop-in/out is the 2-pages/frame
+  page-in rate + 1.5 s warm-up windows timing out, not eviction.
+- Both warm-ups timed out with pages still pending (3 at boot, 1 at entry after 2.1 s):
+  ADR-544's longer drain cap is the direct fix, and ADR-545's adaptive page-in rate has
+  headroom to use — frame CPU once loaded is only 5.0 ms, so upload work has frame
+  budget to borrow during/just after entry.
+- Worker-vs-in-tab is still UNKNOWN for this phone (no line was visible in the
+  screenshot): the next cold start with this slice live must be read first — if it says
+  in-tab, worker-start robustness jumps ahead of streaming tuning.
+
+**Tests:** `apps/client/test/adr543_load_diagnostics.test.ts` — 6 tests: the three
+`serverLocationNote` wordings; the phone load-cost shape (boot 31,946 ms / 89%, painted
+14,217 ms, total 35,935 ms, warm-up timeout notes, server note); a jsdom harness check
+that the full `?diag=1` overlay renders from a fixture carrying the phone's numbers
+(boot bracket, vram misses/evictions/pending + resident vs budget + withinBudget=false,
+phases spr 4.3, frame cpu 5.0 ms, renderer line, worker line distinct from the
+`local server running` state line); the in-tab variant; no server line before
+singleplayer starts; and the overlay refreshing on its 500 ms interval only (no
+per-frame cost). New tests fail without the fix (5 failed / 1 passed with the source
+changes stashed). Re-run: 6/6 pass; neighbours `adr370_load_cost`, `adr380_boot_load_cost`,
+`load_progress` 17/17 pass (23 total); client typecheck clean (pinned TS 5.9.3).
+
+## ADR-544 — Ready means ready: world entry waits until the first view is actually loaded (2026-11-25)
+
+**Ask.** After character creation and entering the world, the game lags ~5–6 minutes with assets
+popping in and out (user, 2026-11-25 ~21:16 CST, phone, live `ee511be1`). The prep
+(`~/workspace/work/loadin-zoom-touch-prep.md` §1) ranks the causes: the "world ready" gate waits
+for only a 3×3 chunk block while the server keeps a 5×5 active set, and the world-entry warm-up
+is time-boxed to ~1.5 s + ~1.5 s whether or not it finished — the overlay lifts onto an
+unfinished world by design. The user's own screenshot proves it: boot warm-up 24/27 first-view
+pages resident in 1500 ms (timed out, 3 pending); world-entry warm-up 0/1 first-view pages
+resident in 2134 ms (timed out, 1 pending); 1 first-view page still pending after 1770 ms.
+
+**Decision: the overlay lifts once the first view has actually landed, or at a 25 s cap.**
+
+- **Ready gate 3×3 → 5×5 (`apps/client/src/ready.ts`).** `readyFraction` now covers the full
+  `loadRadius` block: `READY_RADIUS_CHUNKS = 2` (matches the server `ChunkManager loadRadius: 2`),
+  `READY_CHUNK_COUNT = 25`. A world whose inner 3×3 is streamed but whose outer ring is missing
+  is no longer "ready" (fraction 9/25). The loading-screen progress bar now tracks 25 chunks.
+  `READY_TIMEOUT_MS = 30000` and the failure behaviour are unchanged: a never-ready world
+  still lifts at 30 s, and a failed/disconnected session still resolves false immediately.
+- **One shared 25 s drain cap (`apps/client/src/first-view-drain.ts`, new; `main.ts`
+  `drainFirstView` delegates to it).** The old two `WARMUP_WINDOW_MS = 1500 ms` windows are
+  replaced by `FIRST_VIEW_DRAIN_CAP_MS = 25000`: `warmupFirstView` gets the full cap, then
+  `warmupDrain` gets whatever time is left — the cap is shared across both phases, not per
+  phase, so the entry warm-up can never run longer than 25 s in total. The overlay lifts once
+  `pending == 0`, or at the cap if the drain is pathological; a failure in either phase still
+  never blocks ready (the drain still runs, the result reports `drained: false`, the overlay
+  still lifts at the cap). The `?diag=1` / `__survivazLoadCost()` notes are byte-identical to
+  before ("world-entry warm-up: …", "first-view pages drained in …" / "… still pending after …"),
+  so the ADR-543 diagnostics surface is unchanged. No atlas, chunk, or streaming budget changed
+  — this slice only decides *when* the overlay lifts, which is why it is safe to land before the
+  ADR-543 phone numbers gate the ADR-545/546 tuning.
+- **Why 25 s, not 20 or 30.** The user accepted a 20–30 s loading screen for a finished world
+  (2026-11-25 ~21:35 CST), overriding the prep's ~10 s cap. 25 s is the midpoint of that range
+  and sits inside the 30 s absolute `READY_TIMEOUT_MS` with 5 s headroom. The drain runs after
+  `waitForWorldReady` resolves true, so the 25 s bounds the warm-up phase itself; worst-case
+  entry is still bounded by the ready wait (≤ 30 s) + the drain (≤ 25 s), and a normal entry
+  pays only the time the pages actually need.
+
+**Tests (11 new).** `apps/client/test/adr544_ready_means_ready.test.ts`: ready gate — a
+3×3-complete world is NOT ready (9/25), all-25 ready, one corner missing 24/25; absolute 30 s
+timeout still lifts a never-ready world (fake clock, default timeout, no opts) and chunks
+arriving at 29 s still count as ready. Drain — overlay stays until pending == 0 (late-landing
+pages waited for, `drained: true`, elapsed ≥ 150 ms for a 120 + 80 ms landing); cap respected
+(nothing ever lands → lifts at the 200 ms test cap, `drained: false`, `timedOut: true`, never
+forever); the drain gets only the time the warm-up left (shared-cap pin); a warm-up throw still
+drains and never blocks ready; nothing to warm up drains immediately; the default 25 s cap is
+passed to the warm-up when the caller gives no cap. `task14_ready_tips.test.ts` updated to the
+5×5 block (24/25 pin). Fail-without-fix proved by stash: with `ready.ts`/`main.ts` reverted and
+the new module moved aside, the file fails to load; with the module restored, the two gate
+tests fail on the old 3×3 code (fraction 1 for a 3×3-complete world, 1 for a missing outer
+corner). Neighbours: `task14_ready_tips` 4/4, `adr370_warmup` 14/14, `adr374_warmup_pump` 5/5
+— combined re-run 34/34. Client typecheck clean, pinned TS 5.9.3 (one `exactOptionalPropertyTypes`
+error in the new test file caught and fixed first run). Full gate NOT run — coordinator runs it
+at the end of the batch. Nothing pushed.
+
+**Cost.** No graphics/quality trade, no new per-tick scans, nothing per frame. The only cost
+is wall-clock: a slow entry now waits up to 25 s under the loading screen instead of lifting
+after ~3 s onto placeholders. The 30 s absolute timeout and the vitals freeze until
+`gameplay.ready` are unchanged, so a slow load still costs waiting, not hunger.
+
+**Consequences / cuts.**
+- The harness proves the overlay *waits*; it cannot prove the phone *feels* finished — time to
+  playable + pop-in count on a cold start still owed on the phone (the user's screenshot is the
+  baseline: entry warm-up 0/1 in 2134 ms, 1 page pending after 1770 ms).
+- A pathological drain still waits the full 25 s on every entry (by design — the cap is the
+  bound, not the target). If the ADR-543 re-measurement shows the drain routinely hitting the
+  cap on this phone, that is an atlas-throughput problem for ADR-545, not a reason to shorten
+  the cap.
+- The 25 s cap bounds only the warm-up phase; the ready wait can still take up to 30 s first,
+  so worst-case entry is ~55 s under the loading screen. That is the pre-existing absolute
+  timeout doing its job, not new waiting — the old code lifted after ~3 s of warm-up onto an
+  unfinished world and then lagged for minutes.
+- This slice does not change atlas page-in rate, pool sizes, eviction, chunk streaming, or the
+  static budget — the pop-in/out loop's other three pipelines (§1.7 items 3–7) are ADR-545–547.
+
+## ADR-545 — Faster atlas page-in when frames allow, longer stream-page keep (2026-11-26)
+
+**Ask.** After character creation and entering the world, the game lags ~5–6 minutes with assets
+popping in and out (user, 2026-11-25 ~21:16 CST, phone, live `ee511be1`). The prep
+(`~/workspace/work/loadin-zoom-touch-prep.md` §1.2, §1.7 item 4) names the mechanism: atlas
+page-in is throttled to 2 stream pages/frame into a 12-slot stream pool against 131+ stream
+pages, pages evict after ~3 s idle (`STREAM_UNLOAD_FRAMES = 180`), and the entry warm-up
+windows were 1500 ms each — miss → placeholder → page-in → evict → miss again, at 2 pages/frame.
+
+**Decision: adapt the page-in rate to the frame budget and the loading overlay, keep pages
+longer — and do NOT raise any memory budget.**
+
+- **Adaptive rates (`packages/render/src/assets/atlasManager.ts`).** New effective caps
+  `streamUploadsPerFrame()` / `pageUploadsPerFrame()`: base 2 while frames are busy, boosted 6
+  (`STREAM_UPLOADS_PER_FRAME_BOOST = 6`, `PAGE_UPLOADS_PER_FRAME_BOOST = 6`) while the loading
+  overlay is up or the last rendered frame cost ≤ `PAGE_IN_FRAME_BUDGET_MS = 8` ms. 6 =
+  `PAGE_CONCURRENCY`, so the per-frame start cap stops binding before in-flight concurrency
+  does. The boost engages two ways: `setLoadingBoost(true)`, which `warmupFirstView` and
+  `warmupDrain` set themselves for their whole duration (try/finally, previous value
+  restored), and `noteFrameTime(ms)`, fed once per frame by `IsoRenderer.render` from the
+  already-measured `stats.cpuMs` (one additive line in `packages/render/src/IsoRenderer.ts`).
+  `pump()`, `uploadTurn()`, `beginFrame()` and `pumpWarmupTick()` all read the effective caps,
+  so a warm-up tick, a rendered frame and a queued decode all drain at the same rate. No signal
+  at all (unknown frame time, no overlay) behaves exactly as before: base 2. Bad readings are
+  ignored (`noteFrameTime` drops non-finite / negative input); the threshold is inclusive at
+  8 ms. A boost that pushes a frame over budget falls back to 2 on the next frame, so the rate
+  oscillates between two safe values rather than latching.
+- **Why 8 ms.** The phone's once-loaded frame CPU is 5.0 ms of a 16.7 ms budget, so 8 ms
+  leaves about half the budget as headroom; a busy frame (sprint chunk-gen, heavy draws)
+  measures above it and falls back to the base 2.
+- **Longer keep (`atlasManager.ts`).** `STREAM_UNLOAD_FRAMES` 180 → 600 (~3 s → ~10 s at
+  60 fps) and `STREAM_KEEP_FACTOR` 1.5 → 2 (keep radius = load margin ×2: 512 px ground /
+  1280 px animals, via the existing `sprites.ts` import — no other file changed). Backtracking
+  while walking/sprinting no longer re-pages a page the player just saw. This costs no VRAM:
+  the pool is still 12 slots and LRU allocation can still reclaim an idle slot for a nearer
+  page; only the time-based drop is delayed.
+- **Longer boot warm-up window (`packages/render/src/assets/warmup.ts`).** `WARMUP_WINDOW_MS`
+  1500 → 5000. ADR-544's world-entry drain passes its own explicit 25 s cap, so this constant
+  now bounds only the boot warm-up (`view.ts` passes no timeout) and direct callers. The
+  phone's boot warm-up landed 24/27 pages in 1500 ms and timed out, so 5 s lets cold-cache
+  fetch + decode + mip chains land instead of expiring mid-page. The window is a bound, not a
+  fixed wait: `warmupFirstView` returns as soon as every page lands, and a pathological stall
+  costs at most +3.5 s of boot.
+- **Deliberately NOT raised — the screenshot numbers are the reason.** The phone's vram line
+  reads total 460 MB vs a 256 MB budget (resident 165.3 + streamed 78.6 + reserved 294.7),
+  `withinBudget=FALSE`; evictions were 0, misses 41, pending 0 — the pop-in here is slow
+  page-in + warm-up timeouts, not eviction thrash. So `STREAM_POOL_SLOTS_LOWMEM` stays 12,
+  `STREAM_POOL_SLOTS_DESKTOP` stays 24, `STREAM_BUDGET_SHARE` stays 0.25, `STREAM_FLOOR_SLOTS`
+  stays 4. At 128 MB budgets, over-budgeting risks OOM/context loss (the ADR-407 failure
+  mode). The rate adapts; the memory footprint never grows. The ADR-544 25 s drain cap, the
+  ready gate, chunk streaming and the server are untouched.
+
+**Tests (12 new).** `packages/render/test/adr545_atlas_throughput.test.ts`: base rates are 2
+with no signal (getters + pump behaviour: 6 requests → 2 started, all 6 after 4 frames);
+loading overlay boosts to 6 (getters + pump: all 6 start in the first frame) and restores to
+2; frame time adapts (5.0 ms → 6, 8 ms boundary inclusive → 6, 8.5/12 ms → 2, recovers at
+5.0 ms, NaN/negative ignored); `pumpWarmupTick` drains the boosted waiter cap while
+loading-boosted and 2 otherwise, frame untouched; `warmupFirstView` and `warmupDrain` hold
+the boost for their whole window and restore it after; eviction timing (600 frames, keep
+factor 2, hysteresis: touched page stays, untouched page drops and re-requests); pool slots
+and budget share unchanged (constants + planner: 12 slots at 256 MB, 24 at 768 MB, both at
+1x; at 128 MB the planner keeps full res with fewer slots, never below the floor of 4);
+`WARMUP_WINDOW_MS` is 5000. `packages/render/test/adr370_warmup.test.ts` updated to the new
+window pin (1500 → 5000). Fail-without-fix proved by stash: with the four production/test
+files reverted, 8 of the 12 new tests fail (the 4 that pass pin pre-existing behaviour: base
+rates 2 and the unchanged slot/share constants). Neighbours: `stream` 8/8, `adr370_warmup`
+14/14, `adr374_warmup_pump` 5/5, `adr438` blur 7/7, `adr251_pool_budget` 10/10,
+`adr388_crouch_anim` 3/3, `perframe` 4/4, `adr380_boot` 2/2, `adr544_ready_means_ready`
+11/11, `adr248_server_manifest_parity` 2/2 — combined re-run 66/66 plus the 12 new (78/78).
+Render typecheck clean, pinned TS 5.9.3. Full gate NOT run — coordinator runs it at the end
+of the batch. Nothing pushed. No art touched, so no art registration — the manifest parity
+test ran as a neighbour anyway (2/2).
+
+**Cost.** No graphics/quality trade, no new per-tick scans, nothing per frame (one
+`noteFrameTime` assignment per rendered frame). The only costs are bounded: up to 6 page-ins
+per frame instead of 2 while the overlay is up or frames leave headroom, and stream pages
+resident up to ~10 s idle instead of ~3 s (bounded by the unchanged 12-slot pool).
+
+**Consequences / cuts.**
+- The harness proves the rate adapts and the keep lengthens; it cannot prove the phone
+  *feels* finished — pop-in/out on a walk + sprint loop, and the `?diag=1` vram line (misses
+  must fall, resident MB must stay under budget), still owed on the phone.
+- Boot cost is still dominated by cold-cache fetch + paint, NOT upload: `painted` 14,217 ms +
+  manifest/fetch ~9,800 ms vs upload 1,548 ms (89% of load cost is boot). Painted-atlas and
+  manifest/fetch costs are OUT of scope for this slice — recorded here as a follow-up cut, not
+  fixed here.
+- The boosted rate only helps where pages are actually requested: a sprint into wholly new
+  territory still waits on chunk-gen and the 8 KiB/tick static stream (ADR-546/547), and a
+  cold-cache first load after a deploy still fetches every atlas over the network.
+- `IsoRenderer.ts` gained exactly one additive line (`noteFrameTime(stats.cpuMs)`) so the
+  frame-time path is live in production, not just in tests. It touches no other worker's files.
+  Canvas2D has no atlas pools, so this slice does not change its path.
+
+## ADR-546: player-first chunk streaming, region siting precomputed off the load path
+
+Sprinting (4.64 tiles/s) crosses a chunk boundary every ~6.9 s and demands ~60% more new
+chunks than walking, but the server's chunk budget (2 ms/update, maxLoadsPerUpdate 4) was shared
+FIFO row-major across every chunk source — the player plus up to 8 world-wide AI-human bots — so
+the player's chunks queued behind bots' far chunks. And the first chunk in a fresh 1536-tile
+region paid the whole siting plan at once (57–263 ms VM: water layout + lake siting, massifs,
+canyons, river network) on the chunk-load path.
+
+- `packages/world/src/chunkManager.ts`: `InterestSource.priority` (0 = real player, default;
+  bots use 1) and `playerChunksPerBotChunk` (default `DEFAULT_PLAYER_CHUNKS_PER_BOT_CHUNK` = 4).
+  Before each drain, `reorderPending` orders the pending queue player-first with a fairness floor
+  — 4 player chunks, then 1 bot chunk, repeating — so bots still load and never starve. Within
+  each class the order is heading-ahead first, then FIFO insertion order: NOT nearest-first
+  (ADR-370 stays reverted — far chunks always progress, which is what broke ADR-252 bots).
+  The heading is derived in the manager from each source's position delta between updates
+  (>= 0.1 tiles/update; walk is 0.145/tick, sprint 0.232 at 20 Hz); the chunk-prewarm ordering
+  input the warmup.ts header names exists nowhere else in code, so it is derived here from the
+  source positions the manager already gets. The ahead score is a cone score (ahead projection
+  minus lateral distance), so the chunk straight ahead of a sprinting player drains before the
+  far ahead-corner. A stationary source keeps FIFO order exactly (adr379's FIFO test unchanged).
+- `packages/world/src/generator.ts`: `precomputeRegionPlans(x, y)` warms the siting plans of the
+  region(s) across a boundary the player is within `REGION_PRECOMPUTE_DISTANCE_TILES` (256) of —
+  ~55 s of sprint travel, far ahead of the 96-tile streaming radius — sliced across calls at
+  `REGION_PRECOMPUTE_PIECES_PER_CALL` (1) plan piece per call in dependency order (water →
+  massifs → canyons → rivers), returning the pieces still queued. Bound to
+  `REGION_PRECOMPUTE_MAX_REGIONS` (2) edge-adjacent regions, nearest boundary first; the diagonal
+  region is not warmed. `regionsToPrecompute` is the pure trigger (unit-testable). Scheduling
+  only: every piece is the same memoised accessor `load()` would call, so layouts are
+  byte-identical with or without warming (pinned by test: identical `encodeChunk` bytes, nodes,
+  and `sampleAt` heights across warmed and cold generators).
+- `apps/server/src/game.ts`: the ChunkManager gets `playerChunksPerBotChunk:
+  DEFAULT_PLAYER_CHUNKS_PER_BOT_CHUNK`; `postSim` marks bot sources `priority: 1` and, after
+  `chunks.update()`, calls `generator.precomputeRegionPlans` once per real player per tick
+  (bots are world-wide — warming around all 8 would be wasted work; precompute never delays
+  the current region's streaming because it runs after this tick's chunk loads). The server
+  static budget and the ADR-544 ready gate/drain cap are untouched (ADR-547's surface).
+
+Measured (VM, cold JIT inflates first-touch): per-piece siting cost — water layout 7–46 ms,
+massifs 2–18 ms, canyons 1–37 ms, rivers 13–194 ms (the dominant piece). One piece per call
+keeps each tick's precompute slice small except the river-network piece, which is still a single
+synchronous computation — slicing it further means reworking `planRiverNetwork` (honest cut,
+out of scope). The hitch is now paid up to ~55 s before the boundary crossing, spread across
+ticks, while the player still has a full streaming radius of loaded chunks — instead of on the
+first chunk load past it. The memo cap is still FIFO-16 per plan map (not LRU): precomputing
+1–2 adjacent regions adds at most 2 entries per map, so evicting a hot region's plan is
+possible in theory but negligible in practice.
+
+Tests: `packages/world/test/adr546_chunk_streaming.test.ts` (6 tests, all pass; 5 of 6 fail
+without the fix — the bot-only FIFO test is a regression guard that passes either way):
+queue order is player-first with the 4:1 fairness floor pinned (5th load is a bot chunk; all 25
+bot chunks still load); bot-only drains FIFO row-major; directional pre-warm loads the chunk
+straight ahead next (east, then west on reversal); trigger pure tests (nothing far from a
+boundary, 1 region at an edge, 2 at a corner, never the diagonal); precompute drains 1 piece
+per call (4 calls for one region, 8 for a corner) and reports the queue; byte-identical layouts.
+Neighbours: adr379_chunk_budget, adr530 (climate/flat/height), adr273_world_preview pass;
+adr423_map_size passes alone (12/12 — its origin 9×9 mean probe tripped once under parallel
+load on the shared 1.5-CPU box, a CPU-contention flake, not this change: the probe does not
+use ChunkManager and no load-path code changed); adr252_ai_humans_live — see handoff.
+Phone playtest still owed: sprint across a region boundary and time the hitch.
+
+## ADR-547: Server streaming — entry static burst + ruin stamps stay time-sliced from tick 0 (SurVivaZ)
+
+**Context.** Two server-side contributors to the 5–6 minute load-in lag (prep §1.1, §1.7
+items 6–7). (a) Static entity streaming to a fresh client is capped at 8 KiB/tick/client
+(`net/src/server.ts`, `static.ts` streams closest-first under that byte budget): a fresh
+client waits many ticks for its whole area of interest — the 3000-piece / 9-chunk fixture
+in `static.test.ts` takes 10 ticks (500 ms) at 8 KiB. (b) The abandoned-structure stamp:
+ADR-382 already time-sliced the stamp itself (plan on chunk load, place ≤20 pieces/tick
+via the postSim pump), but `game.ts` still drained every pending stamp synchronously
+while `world.tick < 60` — so a site chunk loaded during the world-entry window still cost
+one 4–9 ms stamp ending its tick, exactly when the player is entering the world.
+
+**Design — entry burst (`packages/net/src/server.ts`).** New option
+`entryStaticBurst?: { bytes?, ticks?, totalBytes? } | false` (defaults: 32 KiB/tick = 4×
+the steady budget, 100 ticks = 5 s at 20 Hz, 512 KiB total). Per session, `replicate()`
+passes the burst budget to `statics.build()` while the client is inside its window and
+under the byte cap; after that the steady 8 KiB/tick applies again. The cap is enforced
+by shrinking the budget to the bytes left under it, so one burst tick can overshoot the
+cap by at most one entity record — and the burst never throttles below the steady budget:
+once less than one steady tick is left under the cap, the burst ends and the steady budget
+applies (a sub-steady budget would stall the stream until the window expired). The
+snapshot budget (16 KiB) is untouched: the burst only changes the argument to
+`statics.build()`; the budget only constrains stream parts (deltas/hits/leaves are
+unbudgeted either way). A resumed session gets a fresh burst window, since it re-streams
+its AOI; direct (in-process) clients skip statics entirely, so bots are unaffected.
+Resolved values are readable as `server.entryBurstBytes/Ticks/TotalBytes`, and
+`server.entryBurst(clientId)` reports the live per-client state (for `?diag=1` / tests).
+
+**Design — stamp (`apps/server/src/game.ts`).** The `if (world.tick < 60)
+drainAbandonedStamps(world)` in `step()` is removed; the boot drain stays. The boot drain
+runs once at load time, not frame time, and ADR-203 needs it (boot-area ruins must be
+complete before the first tick — the campfire came ~2400 ticks late when they were still
+assembling). In-play stamps now stay time-sliced from tick 0: a site chunk's stamp is
+planned in `onLoad` (~0.1 ms) and completes over the next few ticks in the postSim pump.
+No `chunkManager.ts` change was needed: the ADR-379/378 accounting already counts the
+stamp whether it lands in one tick or sliced across ticks, so a sliced stamp costs less
+per tick and more chunks fit — the accounting composes without either side knowing about
+the other. `maxLoadTimeMs` / `maxLoadsPerUpdate` (ADR-546) and the chunk queue ordering
+are unchanged.
+
+**Tests.** New: `packages/net/test/adr547_entry_burst.test.ts` (3 tests) and
+`apps/server/test/adr547_stamp_timeslice.test.ts` (2 tests). `static.test.ts`'s setup pins
+the steady budget with `entryStaticBurst: false` — it asserts closest-first spread over
+~10 ticks at 8 KiB, which the default-on burst would collapse to ~4 ticks; the burst
+itself is covered by the new file.
+
+**Measurements** (VM, headless harness — not phone ms).
+| metric | before | after |
+|---|---|---|
+| 3000-piece AOI stream, steady 8 KiB/tick | 10 ticks | 10 ticks (control arm, burst off) |
+| 3000-piece AOI stream, entry burst | — | **4 ticks** (67,815 burst bytes) |
+| Fresh 2000-piece stream after the 100-tick window | — | 7 ticks, max 8,207 B/tick (steady budget + 15 B) |
+| 3000-piece AOI, burst capped at 32 KiB total | — | 7 ticks, 32,776 burst bytes (cap + 8 B) |
+| Site chunk loaded in play (seed 11, chunk -8,-8) | stamp drained in the load tick | stamp pending after the load tick, first pump slice ≤20 pieces, marker on completion a few ticks later |
+| Sliced vs drained final ruins (seed 11, 40 ticks) | — | byte-identical: pieces + loot + markers all equal |
+
+Neighbours: `static.test.ts` 6/6, `bench.test.ts` (PERF=1) 3/3, `adr382_stamp_timeslice`
+9/9, `adr382_goto_routes_around_structures` 1/1, `adr252_ai_humans` (gameplay) 18/18,
+`adr252_ai_humans_live` 8/8, `adr203_ai_human_autonomy` 3/3 — the ADR-382 revert reason
+(campfire timing) holds with the tick<60 drain removed. Typecheck clean, all 11
+projects, lockfile-pinned TS 5.9.3. Fail-without-fix proved by stash: all 3 burst tests
+fail on the old `server.ts`; the pending-after-load-tick stamp test fails on the old
+`game.ts` (0 pending — the drain completed it).
+
+**Honest cuts.** The burst is bounded, not free: an AOI larger than 512 KiB still
+finishes at 8 KiB/tick after the cap trips, and the burst is per-client, so a host with
+many simultaneous joiners sends up to 32 KiB/tick/client for the first seconds (loopback
+in singleplayer; the dedicated-server case is unmeasured). No phone measurement exists:
+the 10→4 tick stream gain is a headless loopback number, and whether the entry feels
+faster on the user's phone still needs a cold-start playtest with `?diag=1`. The boot
+drain is deliberately kept, so server boot still pays the whole boot-area stamp
+synchronously before the first tick — that cost is load time, not frame time, and ADR-203
+depends on it.

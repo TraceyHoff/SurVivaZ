@@ -96,6 +96,9 @@ export interface ClientSession {
 }
 interface SessionState extends ClientSession {
   static: StaticSession;
+  /** ADR-547: entry-burst state — first tick the burst no longer applies, and static bytes sent while bursting. */
+  staticBurstUntilTick: number;
+  staticBurstBytes: number;
   /** Per-client distantThrottle override (setDistantThrottle); null = explicitly off. */
   throttle?: { nearTiles: number; interval: number } | null;
   views: Map<number, WorldState>;
@@ -171,6 +174,19 @@ export interface NetServerOptions {
   /** Per-client bytes per tick for streaming static chunks on entry (default 8 KiB); static change batches are not budgeted. */
   staticBudgetBytes?: number;
   /**
+   * ADR-547: entry burst for the static channel. For the first `ticks` after a client connects
+   * (default 100 ticks = 5 s at 20 Hz), static chunks stream at `bytes` per tick (default 4x the
+   * steady staticBudgetBytes) until `totalBytes` have been sent under burst (default 512 KiB);
+   * then the steady 8 KiB/tick budget applies again. The burst never throttles below the steady
+   * budget: once less than one steady tick is left under `totalBytes`, the burst ends. The snapshot budget (budgetBytes, 16 KiB)
+   * is untouched — the burst only changes the budget passed to the static channel, and the
+   * budget only constrains stream parts (deltas/hits/leaves are unbudgeted either way). All
+   * three bounds apply together: whichever trips first ends the burst. `false` (or ticks 0)
+   * disables the burst: the steady budget applies from the first tick. A resumed session
+   * (reconnect) gets a fresh burst window, since it re-streams its AOI.
+   */
+  entryStaticBurst?: { bytes?: number; ticks?: number; totalBytes?: number } | false;
+  /**
    * A client presented a token this server does not know (e.g. stored before a restart). Return true to accept it:
    * a new session is created with that same token (session.resumed = true) and onClientJoin runs. Default: reject (BadToken).
    */
@@ -236,6 +252,8 @@ export class NetServer {
   private handlers = new Map<MessageDefBase, CommandHandler[]>();
   private ownerCi: number | undefined;
   readonly tickHz: number; readonly historySize: number; readonly budgetBytes: number; readonly staticBudgetBytes: number;
+  /** ADR-547: resolved entry-burst tunables — per-tick burst budget, window in ticks, total burst-byte cap. */
+  readonly entryBurstBytes: number; readonly entryBurstTicks: number; readonly entryBurstTotalBytes: number;
   /** Timings of the last network phase, for benchmarks. */
   private posX = new Float64Array(0);
   private curArr: (EntityState | undefined)[] = [];
@@ -270,6 +288,12 @@ export class NetServer {
   constructor(opts: NetServerOptions) {
     this.opts = opts; this.world = opts.world;
     this.tickHz = opts.tickHz ?? 20; this.historySize = opts.historySize ?? 32; this.budgetBytes = opts.budgetBytes ?? 16 * 1024; this.staticBudgetBytes = opts.staticBudgetBytes ?? 8 * 1024;
+    // ADR-547: burst 4x the steady static budget (32 KiB/tick at the 8 KiB default) for the first
+    // 100 ticks (5 s at 20 Hz), capped at 512 KiB of burst bytes total. `false` / ticks 0 disables it.
+    const burst = opts.entryStaticBurst;
+    this.entryBurstBytes = burst === false ? 0 : (burst?.bytes ?? this.staticBudgetBytes * 4);
+    this.entryBurstTicks = burst === false ? 0 : (burst?.ticks ?? 100);
+    this.entryBurstTotalBytes = burst === false ? 0 : (burst?.totalBytes ?? 512 * 1024);
     this.schema = new NetSchema(this.world);
     this.ownerCi = this.schema.indexOf(Owner, this.world);
     this.netIds = new NetIdRegistry(this.world);
@@ -374,6 +398,11 @@ export class NetServer {
   getReplicationClass(def: ComponentDef): ReplicationClass { const ci = this.schema.indexOf(def, this.world); return ci !== undefined && this.staticCis.has(ci) ? "static" : "dynamic"; }
   /** Static-channel state, for stats/tests. */
   get staticReplication(): StaticServer | undefined { return this.statics; }
+  /** ADR-547: this client's entry-burst state (undefined = unknown client). `bursting` is whether the next replicate would stream at the burst budget. */
+  entryBurst(clientId: number): { bursting: boolean; untilTick: number; bytes: number } | undefined {
+    const s = this.sessions.get(clientId) as SessionState | undefined; if (!s) return undefined;
+    return { bursting: this.world.tick < s.staticBurstUntilTick && this.entryBurstTotalBytes - s.staticBurstBytes >= this.staticBudgetBytes, untilTick: s.staticBurstUntilTick, bytes: s.staticBurstBytes };
+  }
   staticStats(clientId: number): { bytes: number; streamedChunks: number; hits: number; streaming: number } | undefined {
     const s = this.sessions.get(clientId) as SessionState | undefined; if (!s) return undefined;
     return { bytes: s.static.bytes, streamedChunks: s.static.streamedChunks, hits: s.static.hits, streaming: s.static.streams.size };
@@ -504,6 +533,8 @@ export class NetServer {
         if (!s) { this.reject(conn, RejectReason.BadToken); return; }
         if (s.conn !== undefined) this.byConn.delete(s.conn);
         s.conn = conn; s.lastAckTick = -1; s.views.clear(); s.static = new StaticSession();
+        // ADR-547: a resumed session re-streams its AOI, so it gets a fresh burst window.
+        s.staticBurstUntilTick = this.world.tick + this.entryBurstTicks; s.staticBurstBytes = 0;
       }
     } else {
       if (this.opts.maxClients !== undefined && this.playerSlotCount() >= this.opts.maxClients) { this.reject(conn, RejectReason.ServerFull, this.opts.serverFullDetail ?? ""); return; }
@@ -520,6 +551,8 @@ export class NetServer {
       stats: { commands: 0, droppedCommands: 0, rateLimited: 0, deferred: 0, bytesSent: 0, lateEdges: 0, throttled: 0, lingered: 0 },
       views: new Map(), lastSent: new Int32Array(256), linger: new Map(), static: new StaticSession(), buckets: new Map(), commands: [], events: [],
       pingAt: 0, pingNonce: 0,
+      // ADR-547: fresh entry-burst window from the join tick.
+      staticBurstUntilTick: this.world.tick + this.entryBurstTicks, staticBurstBytes: 0,
     };
     this.sessions.set(s.clientId, s); this.byToken.set(tokenKey(token), s);
     this.opts.onClientJoin?.(s, this.world);
@@ -864,8 +897,18 @@ export class NetServer {
       this.flushEvents(s, tick);
       if (this.statics) {
         const rel = grid ? (grid.grid.get(s.clientId)?.chunks ?? NO_CHUNKS) : undefined;
-        const msg = this.statics.build(s.static, tick, rel, viewsOf.get(s.clientId) ?? [], this.staticBudgetBytes);
-        if (msg) { s.stats.bytesSent += msg.length; this.opts.transport.send(s.conn!, msg, "reliable"); }
+        // ADR-547: entry burst — a fresh client streams its AOI at the burst budget until the
+        // window (ticks), the total-byte cap, or the AOI itself runs out; the steady budget (and
+        // the separate 16 KiB snapshot budget) apply after that. The cap is enforced by shrinking
+        // the budget to the bytes left under it, so one burst tick can overshoot the cap by at
+        // most one entity record — and the burst never throttles below the steady budget: once
+        // less than one steady tick is left under the cap, the burst ends and the steady budget
+        // applies (a sub-steady budget would stall the stream until the window expired).
+        const burstLeft = this.entryBurstTotalBytes - s.staticBurstBytes;
+        const bursting = tick < s.staticBurstUntilTick && burstLeft >= this.staticBudgetBytes;
+        const staticBudget = bursting ? Math.min(Math.max(this.entryBurstBytes, this.staticBudgetBytes), burstLeft) : this.staticBudgetBytes;
+        const msg = this.statics.build(s.static, tick, rel, viewsOf.get(s.clientId) ?? [], staticBudget);
+        if (msg) { if (bursting) s.staticBurstBytes += msg.length; s.stats.bytesSent += msg.length; this.opts.transport.send(s.conn!, msg, "reliable"); }
       }
     }
     this.perf.sendMs = now() - t1;

@@ -24,18 +24,18 @@ describe("Task 14: world-ready condition", () => {
     const w = new World({ seed: 1, maxEntities: 1 << 12 }); G.installGameplay(w, {});
     const p = w.create(); w.add(p, Transform, { x: 0, y: 0 });
     const keys = new Set<string>();
-    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) keys.add(chunkKeyOf(dx * 32, dy * 32));
+    for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) keys.add(chunkKeyOf(dx * 32, dy * 32));
     for (const m of opts.missing ?? []) keys.delete(m);
     const s: ReadySessionLike = { status: opts.status ?? "connected", world: w, player: opts.withPlayer === false ? undefined : p, client: { tiles: { tiles: { getChunkByKey: (k: string) => (keys.has(k) ? {} : undefined) } } } };
     return { s, w, p };
   };
-  test("ready only when connected, player spawned, and all 9 chunks present", () => {
+  test("ready only when connected, player spawned, and all 25 chunks present", () => {
     expect(isWorldReady(fake().s)).toBe(true);
     expect(isWorldReady(fake({ status: "connecting" }).s)).toBe(false);
     expect(isWorldReady(fake({ withPlayer: false }).s)).toBe(false);
     const missing = fake({ missing: [chunkKeyOf(32, 0)] });
     expect(isWorldReady(missing.s)).toBe(false);
-    expect(readyFraction(missing.s)).toBeCloseTo(8 / 9);
+    expect(readyFraction(missing.s)).toBeCloseTo(24 / 25);
     expect(readyFraction(fake({ withPlayer: false }).s)).toBe(0);
   });
   test("waitForWorldReady resolves true when chunks arrive, false on timeout", async () => {

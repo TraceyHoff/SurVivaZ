@@ -8,7 +8,7 @@ import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSig
 import { parseChunkKey } from "@engine/world";
 /** Authoritative game server: world + gameplay + streaming chunks + persistence + NetServer sessions. */
 import { ChannelRegistry, CommandRejected, DEFAULT_TICK_HZ, FixedLoop, installCommandHandlers, cosmeticsHashes, type CosmeticCatalogLike, Membership, Owner, PlayerId, Season, SEASON_COUNT, TimeOfDay, Transform, World, type Entity, type PermissionsRes } from "@engine/core";
-import { CHUNK_SIZE, ChunkManager, ProceduralGenerator, computeSpawnPoints, chunkKeyOf, type BuildingGrid, type PopulationSpawner } from "@engine/world";
+import { CHUNK_SIZE, ChunkManager, DEFAULT_PLAYER_CHUNKS_PER_BOT_CHUNK, ProceduralGenerator, computeSpawnPoints, chunkKeyOf, type BuildingGrid, type PopulationSpawner } from "@engine/world";
 import { computeAiSpawnPoints, pickAiSpawnPoint, setAiSpawnPoints, spawnPoints, addTemporarySafeSpawnPoint, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, drainAbandonedStamps, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, isSunkenCacheNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, worldgenBands, computeWildCropTopUp, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
   appearanceServerHooks, applyReplication, installStallBuyHook, installViewBonus, setHitValidator, installPvp, PVP, installBedRespawn, installCraftQueue, installExpressionCommands, installVehicleCommands, installVehicleCraftCommands, installVehicleGuard, requestEmote, CraftQueue, CraftQueuesRes, playerNames, stallListing, listingRevision, stallOf, tillOf, StallHeader, StallOwnerKind, installMapMarkerCommands, MapMarker } from "@engine/gameplay";
 import { AppearanceServer, ChatServer, NameSync, NetServer, StallResult, StallServer, TileSync, validateHit, type ClientSession, type ServerTransport, type StallHooks } from "@engine/net";
@@ -204,8 +204,12 @@ export function createGameServer(o: GameServerOptions): GameServer {
   // ADR-379: maxLoadTimeMs is a real budget now — ChunkManager checks elapsed time after every chunk install
   // (load + onLoad stamp) and won't start a chunk the last chunk's cost says won't fit, so plain-chunk
   // updates stop at ~2 loads (~1.6 ms) and a site chunk ends its update. maxLoadsPerUpdate stays 4 as the
-  // hard cap for cheap chunks. Load radius, cache size, unload margin and FIFO order unchanged.
-  const chunks = new ChunkManager({ provider: persist?.provider ?? generator, loadRadius, unloadMargin: 1, cacheSize: 64, maxLoadsPerUpdate: 4, maxLoadTimeMs: 2 });
+  // hard cap for cheap chunks.
+  // ADR-546: the pending queue drains player-first (bots' far chunks behind the player's, with a
+  // fairness floor of one bot chunk per DEFAULT_PLAYER_CHUNKS_PER_BOT_CHUNK player chunks, so bots
+  // still load — ADR-370's nearest-first stays reverted: within each class the order is heading-ahead
+  // first, then FIFO). The server chunk budget itself is unchanged (that's ADR-547's surface).
+  const chunks = new ChunkManager({ provider: persist?.provider ?? generator, loadRadius, unloadMargin: 1, cacheSize: 64, maxLoadsPerUpdate: 4, maxLoadTimeMs: 2, playerChunksPerBotChunk: DEFAULT_PLAYER_CHUNKS_PER_BOT_CHUNK });
   // ADR-428: node kinds are resource ids (worldgenBands), so spawn every kind the defs know — the old
   // 7-entry NODE_RESOURCES allowlist silently dropped every wild crop and fruit tree the generator
   // placed. Abandoned-site stamping on chunk load is preserved.
@@ -522,8 +526,13 @@ export function createGameServer(o: GameServerOptions): GameServer {
   // Streaming: players are the interest sources. Runs before persist.track (registered by attach below).
   world.addSystem("postSim", "server.chunks", () => {
     // A watchtower's AOI bonus widens streaming too, so the extra chunks exist to be sent.
-    for (const [cid, p] of players) { if (offStream.has(cid)) { chunks.removeSource(cid); continue; } const t = world.get(p.entity, Transform); if (t) chunks.setSource({ id: cid, x: t.x, y: t.y, radius: loadRadius + net.viewRadiusBonus(cid) }); }
+    // ADR-546: bots are deprioritised sources (priority 1) — the player's chunks drain first.
+    for (const [cid, p] of players) { if (offStream.has(cid)) { chunks.removeSource(cid); continue; } const t = world.get(p.entity, Transform); if (t) chunks.setSource({ id: cid, x: t.x, y: t.y, radius: loadRadius + net.viewRadiusBonus(cid), priority: p.bot ? 1 : 0 }); }
     chunks.update();
+    // ADR-546: warm the siting plans of the regions the real players are about to enter (bots are
+    // world-wide — warming around all of them would be wasted work). One plan piece per player per
+    // tick, after this tick's chunk loads, so precompute never delays the current region's streaming.
+    for (const p of players.values()) { if (p.bot) continue; const t = world.get(p.entity, Transform); if (t) generator.precomputeRegionPlans(t.x, t.y); }
   });
   persist?.attach(chunks);
   // ADR-176/178: the authority's TerrainRes reads ChunkManager. It was never set, so every TerrainRes user silently fell
@@ -570,11 +579,20 @@ export function createGameServer(o: GameServerOptions): GameServer {
   // ADR-382: boot-area stamps complete synchronously, before the first tick, so the AI's
   // early gather/claim/campfire decisions see the same world as synchronous stamping
   // (ADR-203: the campfire came ~2400 ticks late when boot ruins were still assembling).
+  // ADR-547: the boot drain STAYS — it runs once at load time, not frame time, and ADR-203
+  // needs it. What ADR-547 removes is the `tick < 60` drain that used to run in step():
+  // it completed every stamp for chunks loaded in the first 60 ticks synchronously in that
+  // tick — exactly the world-entry window — so a site chunk still cost one 4–9 ms stamp
+  // ending its tick. In-play stamps now stay time-sliced from tick 0: the postSim pump
+  // (gameplay.abandonedStamps, <= ABANDONED_STAMP_PIECES_PER_TICK/tick) completes a site a
+  // few ticks after its chunk loads. The chunk budget already counts the stamp whether it
+  // lands in one tick or sliced (chunkManager.ts, ADR-379/378): a sliced stamp costs less
+  // per tick, so more chunks fit — no accounting change is needed on either side.
   drainAbandonedStamps(world);
   rearmCrafts();
 
   const tickTimes: number[] = [];
-  const step = (dt: number): void => { const t0 = performance.now(); world.step(dt); if (world.tick < 60) drainAbandonedStamps(world); tickTimes.push(performance.now() - t0); if (tickTimes.length > 4096) tickTimes.splice(0, 2048); };
+  const step = (dt: number): void => { const t0 = performance.now(); world.step(dt); tickTimes.push(performance.now() - t0); if (tickTimes.length > 4096) tickTimes.splice(0, 2048); };
   const loop = new FixedLoop({ tickHz, step });
   return {
     world, net, chunks, persist, loop, permissions, players, spawnPoints: worldSpawnPoints(world), mode: mode.mode, modeConfig: mode, population, markVirtual, setStreaming, stalls, appearance, chat, agents, step, tickTimes,

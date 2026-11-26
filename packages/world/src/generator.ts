@@ -33,6 +33,39 @@ import { flowWaterRaw, waterDepthAt, WaterDepth, WATER_TILE } from "./waterDepth
 export const REGION_SIZE = 1536;
 export const REGION_HALF = REGION_SIZE / 2;
 
+/** ADR-546: region-siting precompute tunables (see precomputeRegionPlans).
+ *  DISTANCE_TILES: a neighbouring region's plan starts warming when the player comes within this
+ *  many tiles of the shared boundary — ~55 s of sprint travel, far ahead of the 96-tile streaming
+ *  radius, so the sliced warming (1 piece/call, 4 pieces/region) finishes long before arrival.
+ *  MAX_REGIONS: at most this many adjacent regions are warmed per position (edge-adjacent only,
+ *  nearest boundary first) — no wasted work on the diagonal region or regions the player never
+ *  approaches. PIECES_PER_CALL: plan pieces warmed per precomputeRegionPlans call (one call per
+ *  real player per server tick), so the 57–263 ms first-touch hitch is spread across ticks. */
+export const REGION_PRECOMPUTE_DISTANCE_TILES = 256;
+export const REGION_PRECOMPUTE_MAX_REGIONS = 2;
+export const REGION_PRECOMPUTE_PIECES_PER_CALL = 1;
+/** ADR-546: one region's siting plan, in dependency order — water first (massifs/canyons/rivers
+ *  all read the sited water layout), then massifs, canyons, river network. */
+export type RegionPlanPiece = "water" | "massifs" | "canyons" | "rivers";
+export const REGION_PLAN_PIECES: readonly RegionPlanPiece[] = ["water", "massifs", "canyons", "rivers"];
+/** ADR-546: the edge-adjacent regions whose siting plans should be precomputed for a player at
+ *  (x, y) — the regions across a boundary the player is within REGION_PRECOMPUTE_DISTANCE_TILES
+ *  of, nearest boundary first, capped at REGION_PRECOMPUTE_MAX_REGIONS. Pure (no generator
+ *  state), so the trigger is unit-testable on its own. The diagonal region is deliberately not
+ *  included: crossing into it means crossing one of these two regions' boundaries first, and
+ *  its plan warms when the player nears that boundary. */
+export function regionsToPrecompute(x: number, y: number): Array<[number, number]> {
+  const rx = Math.floor((x + REGION_HALF) / REGION_SIZE), ry = Math.floor((y + REGION_HALF) / REGION_SIZE);
+  const lx = x - rx * REGION_SIZE, ly = y - ry * REGION_SIZE;
+  const cands: Array<{ r: [number, number]; d: number }> = [];
+  if (lx > REGION_HALF - REGION_PRECOMPUTE_DISTANCE_TILES) cands.push({ r: [rx + 1, ry], d: REGION_HALF - lx });
+  if (lx < -REGION_HALF + REGION_PRECOMPUTE_DISTANCE_TILES) cands.push({ r: [rx - 1, ry], d: lx + REGION_HALF });
+  if (ly > REGION_HALF - REGION_PRECOMPUTE_DISTANCE_TILES) cands.push({ r: [rx, ry + 1], d: REGION_HALF - ly });
+  if (ly < -REGION_HALF + REGION_PRECOMPUTE_DISTANCE_TILES) cands.push({ r: [rx, ry - 1], d: ly + REGION_HALF });
+  cands.sort((a, b) => a.d - b.d);
+  return cands.slice(0, REGION_PRECOMPUTE_MAX_REGIONS).map((c) => c.r);
+}
+
 /** ADR-386: noise-aware elevated-lake siting + spillway (waterfall) channel.
  *  SITING_SEA_MARGIN: a sited lake has no biome sea within disc + this many tiles (disc + beach
  *  shelf + one tile of land margin), so every sited lake has a full land shore.
@@ -921,6 +954,70 @@ export class ProceduralGenerator implements ChunkProvider, BaseClimateSource {
     if (this.regionRivers.size >= 16) this.regionRivers.delete(this.regionRivers.keys().next().value!);
     this.regionRivers.set(key, net);
     return net;
+  }
+  /**
+   * ADR-546: region-siting precompute — take the first-touch hitch off the chunk-load path.
+   *
+   * The first chunk in a fresh 1536-tile region pays the whole siting plan at once (water layout
+   * + great/elevated-lake siting, massifs, canyons, river network: 57–263 ms VM, rivers alone
+   * 13–194 ms). `precomputeRegionPlans` warms those memoised plans for the region(s) the player
+   * is about to enter, sliced across calls: at most REGION_PRECOMPUTE_PIECES_PER_CALL plan
+   * pieces per call, in dependency order (water → massifs → canyons → rivers), so the cost
+   * lands while the player is still REGION_PRECOMPUTE_DISTANCE_TILES from the boundary — at
+   * sprint speed (4.64 tiles/s) that is ~55 s of travel for a 4-piece region — instead of on
+   * the first chunk load past it. Bound: at most REGION_PRECOMPUTE_MAX_REGIONS adjacent
+   * regions (edge-adjacent only, nearest boundary first; the diagonal region is not warmed),
+   * and only for real players — bots are world-wide, and warming around all 8 of them would
+   * be wasted work if the player never crosses (see game.ts, which calls this per real player).
+   *
+   * Scheduling only, not new worldgen: every piece is the same memoised accessor load()
+   * would call, with the same seed and inputs, so layouts are byte-identical with or without
+   * warming (pinned by the ADR-546 test). Returns the pieces still queued (0 = everything the
+   * player is near is warm). Region zero is skipped — its plan is the constructor's starter
+   * layout (water) and empty massif/canyon/river plans, already warm.
+   */
+  precomputeRegionPlans(x: number, y: number): number {
+    for (const [rx, ry] of regionsToPrecompute(x, y)) {
+      if (rx === 0 && ry === 0) continue;
+      for (const piece of REGION_PLAN_PIECES) {
+        const key = `${rx},${ry}:${piece}`;
+        if (this.precomputeQueued.has(key) || this.isPlanPieceWarm(piece, rx, ry)) continue;
+        this.precomputeQueued.add(key);
+        this.precomputeQueue.push({ rx, ry, piece });
+      }
+    }
+    // Slice across calls: warm at most PIECES_PER_CALL pieces per call, in queue order
+    // (dependency order within each region, nearest-boundary region first).
+    for (let n = 0; n < REGION_PRECOMPUTE_PIECES_PER_CALL; n++) {
+      const next = this.precomputeQueue.shift();
+      if (!next) break;
+      this.precomputeQueued.delete(`${next.rx},${next.ry}:${next.piece}`);
+      this.warmPlanPiece(next.piece, next.rx, next.ry);
+    }
+    return this.precomputeQueue.length;
+  }
+  /** ADR-546: the pieces of one region's siting plan, in dependency order. */
+  private readonly precomputeQueue: Array<{ rx: number; ry: number; piece: RegionPlanPiece }> = [];
+  private readonly precomputeQueued = new Set<string>();
+  private isPlanPieceWarm(piece: RegionPlanPiece, rx: number, ry: number): boolean {
+    const key = `${rx},${ry}`;
+    // Pieces whose accessor returns early without memoising (feature off) count as warm —
+    // otherwise they would re-queue on every call and churn the queue.
+    switch (piece) {
+      case "water": return !this.water || this.regionWater.has(key);
+      case "massifs": return this.regionMassifs.has(key);
+      case "canyons": return this.opts.canyons === false || this.regionCanyons.has(key);
+      case "rivers": return this.opts.rivers === false || this.regionRivers.has(key);
+    }
+  }
+  private warmPlanPiece(piece: RegionPlanPiece, rx: number, ry: number): void {
+    const ox = rx * REGION_SIZE, oy = ry * REGION_SIZE;
+    switch (piece) {
+      case "water": this.regionLayout(ox, oy); break;
+      case "massifs": this.massifsInRegion(rx, ry); break;
+      case "canyons": this.canyonsInRegion(rx, ry); break;
+      case "rivers": this.riversInRegion(rx, ry); break;
+    }
   }
   private computeRivers(rx: number, ry: number): RiverNetwork {
     const ox = rx * REGION_SIZE, oy = ry * REGION_SIZE;

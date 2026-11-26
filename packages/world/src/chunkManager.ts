@@ -1,7 +1,17 @@
 import { Chunk, chunkKey, parseChunkKey, TileMap, tileToChunk, tileToLocal, type ChunkKey } from "./chunk.js";
 import type { AsyncChunkProvider, ChunkProvider, GeneratedChunk, NodePlacement } from "./generator.js";
 
-export interface InterestSource { id: number; x: number; y: number; /** load radius in chunks (default manager radius) */ radius?: number }
+export interface InterestSource {
+  id: number; x: number; y: number; /** load radius in chunks (default manager radius) */ radius?: number;
+  /** ADR-546: drain priority — 0 = real player (default), higher = deprioritised (AI-human bots use 1).
+   *  A chunk wanted by any priority-0 source is a player chunk; the pending queue drains player
+   *  chunks first, with a fairness floor (see playerChunksPerBotChunk) so bot chunks still load. */
+  priority?: number;
+}
+/** ADR-546: how many player chunks drain before one bot chunk is served (fairness floor — bots
+ *  must not starve while the player sprints; ADR-370's nearest-first ordering stays reverted,
+ *  so within each class the order is heading-ahead first, then FIFO insertion order). */
+export const DEFAULT_PLAYER_CHUNKS_PER_BOT_CHUNK = 4;
 export interface ChunkManagerOptions {
   /** Sync or async provider. Async loads are tracked as in-flight: never requested twice, dropped if no longer wanted on arrival. */
   provider: ChunkProvider | AsyncChunkProvider;
@@ -20,6 +30,9 @@ export interface ChunkManagerOptions {
    *  before starting the next chunk using the cost of the chunk just loaded — so plain-chunk updates
    *  stop at two loads (~1.6 ms) instead of three (~2.4 ms), and a site chunk ends its update. */
   maxLoadTimeMs?: number;
+  /** ADR-546: player chunks drained per bot chunk (fairness floor, default
+   *  DEFAULT_PLAYER_CHUNKS_PER_BOT_CHUNK). Only affects the drain order, never the active set. */
+  playerChunksPerBotChunk?: number;
 }
 export type ChunkLoadHook = (chunk: Chunk, nodes: readonly NodePlacement[]) => void;
 export type ChunkUnloadHook = (chunk: Chunk) => void;
@@ -31,8 +44,17 @@ export type ChunkUnloadHook = (chunk: Chunk) => void;
  */
 export class ChunkManager extends TileMap {
   readonly loadRadius: number; readonly unloadMargin: number; readonly cacheSize: number; readonly maxLoads: number;
+  readonly playerChunksPerBotChunk: number;
   private sources = new Map<number, InterestSource>();
   private active = new Set<ChunkKey>();
+  /** ADR-546: last seen position per source + the movement heading derived from it (unit vector,
+   *  updated when a source moves >= 0.1 tiles between updates — walk is 0.145 tiles/tick and sprint
+   *  0.232 at 20 Hz, so both register; a stationary source keeps its last heading, which is harmless
+   *  because its want set is static then). The heading is the chunk-prewarm ordering input the
+   *  warmup.ts header names: chunks ahead of the heading drain first. There is no such input in
+   *  code anywhere else — it is derived here from the source positions the manager already gets. */
+  private lastPos = new Map<number, { x: number; y: number }>();
+  private headings = new Map<number, { x: number; y: number }>();
   /** LRU of inactive-but-resident chunk keys (Map iteration order = recency). */
   private lru = new Map<ChunkKey, true>();
   private loadHooks: ChunkLoadHook[] = []; private unloadHooks: ChunkUnloadHook[] = [];
@@ -45,6 +67,7 @@ export class ChunkManager extends TileMap {
     super();
     this.loadRadius = opts.loadRadius ?? 2; this.unloadMargin = opts.unloadMargin ?? 1;
     this.cacheSize = opts.cacheSize ?? 64; this.maxLoads = opts.maxLoadsPerUpdate ?? Infinity;
+    this.playerChunksPerBotChunk = opts.playerChunksPerBotChunk ?? DEFAULT_PLAYER_CHUNKS_PER_BOT_CHUNK;
   }
   onLoad(fn: ChunkLoadHook): () => void { this.loadHooks.push(fn); return () => rm(this.loadHooks, fn); }
   onUnload(fn: ChunkUnloadHook): () => void { this.unloadHooks.push(fn); return () => rm(this.unloadHooks, fn); }
@@ -59,6 +82,33 @@ export class ChunkManager extends TileMap {
   /** Resolves when no async loads are in flight (tests/tools). */
   async settle(): Promise<void> { while (this.inflight.size) await Promise.all([...this.inflightPromises.values()]); }
   private inflightPromises = new Map<ChunkKey, Promise<void>>();
+  /** ADR-546: reorder the pending queue for one drain — player chunks first, ahead-of-heading first
+   *  within each class, with the fairness floor interleaving one lower-priority (bot) chunk per
+   *  playerChunksPerBotChunk player chunks. NOT nearest-first (ADR-370 stays reverted): within a
+   *  class the order is heading score, then FIFO insertion order, so far chunks always progress —
+   *  a chunk wanted only by bots still drains, just behind the player's. Chunks with no meta are
+   *  stale (no longer wanted); they sort as player-class with score 0 and the drain loop drops
+   *  them when reached. The merge restarts every update, so with the usual 2-loads/update time
+   *  budget a bot chunk is served after ~4 player chunks have drained across updates. */
+  private reorderPending(meta: Map<ChunkKey, { prio: number; score: number }>): void {
+    if (this.pending.length < 2) return;
+    const idx = new Map<ChunkKey, number>();
+    this.pending.forEach((k, i) => idx.set(k, i));
+    const player: ChunkKey[] = [], other: ChunkKey[] = [];
+    for (const k of this.pending) (meta.get(k)?.prio ?? 0) > 0 ? other.push(k) : player.push(k);
+    const byScore = (a: ChunkKey, b: ChunkKey): number => {
+      const d = (meta.get(b)?.score ?? 0) - (meta.get(a)?.score ?? 0);
+      return d !== 0 ? d : (idx.get(a) ?? 0) - (idx.get(b) ?? 0);
+    };
+    player.sort(byScore); other.sort(byScore);
+    const merged: ChunkKey[] = [];
+    let pi = 0, oi = 0;
+    while (pi < player.length || oi < other.length) {
+      for (let n = 0; n < this.playerChunksPerBotChunk && pi < player.length; n++) merged.push(player[pi++]!);
+      if (oi < other.length) merged.push(other[oi++]!);
+    }
+    this.pending = merged;
+  }
   private install(k: ChunkKey, cx: number, cy: number, g: GeneratedChunk | undefined): void {
     const chunk = g?.chunk ?? new Chunk(cx, cy);
     this.chunks.set(k, chunk); this.adopt(chunk); this.active.add(k); this.stats.loads++;
@@ -67,12 +117,37 @@ export class ChunkManager extends TileMap {
 
   /** Recompute active set, queue/perform loads (budgeted), move released chunks to LRU, evict overflow. */
   update(): void {
+    // ADR-546: derive each source's movement heading from its position delta since the last update.
+    for (const s of this.sources.values()) {
+      const last = this.lastPos.get(s.id);
+      if (last) {
+        const dx = s.x - last.x, dy = s.y - last.y;
+        if (dx * dx + dy * dy >= 0.01) { const len = Math.hypot(dx, dy); this.headings.set(s.id, { x: dx / len, y: dy / len }); }
+      }
+      this.lastPos.set(s.id, { x: s.x, y: s.y });
+    }
     const want = new Set<ChunkKey>(), keep = new Set<ChunkKey>();
+    /** ADR-546: per wanted chunk, the best (lowest) priority of any source wanting it and the best
+     *  heading-ahead score (chunk-centre offset projected on the heading, minus its lateral distance
+     *  — a cone score, so the chunk straight ahead of a sprinting player drains before the far
+     *  ahead-corner). Sources without a heading score 0, so a stationary source keeps FIFO order. */
+    const wantMeta = new Map<ChunkKey, { prio: number; score: number }>();
     for (const s of this.sources.values()) {
       const r = s.radius ?? this.loadRadius, cx = tileToChunk(s.x), cy = tileToChunk(s.y), R = r + this.unloadMargin;
+      const prio = s.priority ?? 0, h = this.headings.get(s.id);
       for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
         const k = chunkKey(cx + dx, cy + dy); keep.add(k);
-        if (Math.abs(dx) <= r && Math.abs(dy) <= r) want.add(k);
+        if (Math.abs(dx) <= r && Math.abs(dy) <= r) {
+          want.add(k);
+          let score = 0;
+          if (h) {
+            const ox = (cx + dx + 0.5) * 32 - s.x, oy = (cy + dy + 0.5) * 32 - s.y;
+            const ahead = ox * h.x + oy * h.y, lx = ox - ahead * h.x, ly = oy - ahead * h.y;
+            score = ahead - Math.hypot(lx, ly);
+          }
+          const prev = wantMeta.get(k);
+          if (!prev || prio < prev.prio || (prio === prev.prio && score > prev.score)) wantMeta.set(k, { prio, score });
+        }
       }
     }
     this.keepSet = keep;
@@ -94,6 +169,9 @@ export class ChunkManager extends TileMap {
     // cap-2 rule would be unobservable whenever a time budget is configured, and without one a "site chunk"
     // could only be guessed from cost (which misfires on JIT-warm-up chunks). maxLoadsPerUpdate stays the
     // hard cap; the time budget governs.
+    // ADR-546: order the pending queue player-first (with the fairness floor) and ahead-of-heading first
+    // before draining, so a sprinting player's next chunks are not queued behind bots' far chunks.
+    this.reorderPending(wantMeta);
     let n = 0; const started = performance.now();
     const budgetMs = this.opts.maxLoadTimeMs ?? Infinity;
     let lastChunkMs = 0; // wall time the chunk just loaded this update cost

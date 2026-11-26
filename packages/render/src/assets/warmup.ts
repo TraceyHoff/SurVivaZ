@@ -26,8 +26,11 @@ export const WARMUP_PRIO = 1;
  * refuses what the pool cannot hold, so the cap never forces an eviction storm.
  */
 export const WARMUP_MAX_PAGES = 24;
-/** Wall-clock budget for one warm-up window (ms). Expiry never blocks boot: the caller continues with a soft start. */
-export const WARMUP_WINDOW_MS = 1500;
+/** Wall-clock budget for one warm-up window (ms). Expiry never blocks boot: the caller continues with a soft start.
+ *  ADR-545: 1500 -> 5000. ADR-544's world-entry drain passes its own explicit 25 s cap, so this constant now bounds
+ *  only the boot warm-up (view.ts passes no timeout) and direct callers; the phone's boot warm-up landed 24/27 pages
+ *  in 1500 ms and timed out, so 5 s lets cold-cache fetch + decode + mip chains land instead of expiring mid-page. */
+export const WARMUP_WINDOW_MS = 5000;
 /** Poll interval (ms) while waiting for warm-up page-ins to land (matches AtlasManager.prefetch). */
 export const WARMUP_POLL_MS = 16;
 

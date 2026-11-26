@@ -58,6 +58,9 @@ export class VirtualControls {
     }
     return undefined;
   }
+  /** ADR-541: read-only ownership query — lets the camera pinch tracker (camera-zoom.ts) skip pointers a
+   * virtual control already claimed, without touching VirtualControls behaviour. */
+  hasPointer(id: number): boolean { return this.owners.has(id); }
   pointerDown(id: number, x: number, y: number): boolean {
     const el = this.hit(x, y); if (!el) return false; const p = this.place(el);
     const cx = el.kind === "joystick" && el.mode === "floating" ? x : p.x, cy = el.kind === "joystick" && el.mode === "floating" ? y : p.y;

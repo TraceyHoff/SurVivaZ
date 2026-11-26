@@ -9,6 +9,8 @@ import type { IsoRenderer } from "@engine/render";
 export interface DiagSources { renderer(): IsoRenderer | undefined; entities(): number; tick(): number; snapshot(): { received: boolean; latestTick: number; snapshots: number } | undefined; player(): unknown;
   /** ADR-370: client load-cost breakdown (boot / world-ready / warm-up timings). */
   loadCost?(): string | undefined;
+  /** ADR-543: where the singleplayer server runs ("in Web Worker" / "in tab ...") — undefined before singleplayer starts. */
+  serverLocation?(): string | undefined;
   /** World spawn points (ADR-106) and the seed they were computed for. */
   spawnPoints?(): { seed: number; points: { x: number; y: number }[] } | undefined }
 let lastError = "";
@@ -40,6 +42,10 @@ export function startDiag(src: DiagSources): { afterRender(): void } | undefined
       const ph = (r.stats as unknown as { phases?: Record<string, number> }).phases;
       if (ph) L.push(`phases prep ${ph.prep?.toFixed(1)} spr ${ph.sprites?.toFixed(1)} upl ${ph.upload?.toFixed(1)} lit ${ph.lightsPrep?.toFixed(1)} scn ${ph.scene?.toFixed(1)} lgt ${ph.light?.toFixed(1)} blm ${ph.bloom?.toFixed(1)} cmp ${ph.composite?.toFixed(1)} wth ${ph.weather?.toFixed(1)}`);
       const lc = src.loadCost?.(); if (lc) L.push(lc);
+      // ADR-543: plain worker-vs-in-tab line (the `local server <state>` line below is only the lifecycle
+      // state — running/connecting/... — it never said where the server runs; the console-only log in
+      // main.ts startSingleplayer did, and a phone screenshot can't show the console).
+      const sl = src.serverLocation?.(); if (sl) L.push(`server ${sl}`);
       L.push(`glError ${glErr ? "0x" + glErr.toString(16) : "none"} centre ${pixel} cam ${r.camera.x.toFixed(1)},${r.camera.y.toFixed(1)} z${r.camera.zoom}`);
       if (c.fallbacks.length) L.push(`fallbacks: ${c.fallbacks.join("; ")}`);
       if (c.problems.length) L.push(`PROBLEMS: ${c.problems.join("; ")}`);

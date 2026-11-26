@@ -12,6 +12,10 @@ async function setup(opts: { loss?: number; cacheChunks?: number } = {}) {
   const net = new LoopbackNetwork(11); const sw = mk();
   let player = 0;
   const server = new NetServer({ world: sw, transport: net.createServer(), interest: { radius: 2, hysteresis: 0 }, staticBudgetBytes: 8 * 1024,
+    // ADR-547: this file pins the steady 8 KiB budget (closest-first spread over ~10 ticks); the
+    // default entry burst would deliver the whole AOI in ~4 ticks and break the early-arrival
+    // pins below. Burst behaviour is covered by adr547_entry_burst.test.ts.
+    entryStaticBurst: false,
     onClientJoin: (s, w) => { player = w.create(); w.add(player, Transform, { x: 112, y: 112 }).add(player, Owner, { clientId: s.clientId }); } });
   server.setReplicationClass(BuildPiece, "static");
   // 3000-piece base over 3x3 chunks (96x96 tiles) starting at tile 64

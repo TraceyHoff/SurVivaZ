@@ -42,6 +42,17 @@ export class LoadProgress {
   }
 }
 
+/**
+ * ADR-543: one-line server-location note for ?diag=1 + window.__survivazLoadCost — whether the
+ * singleplayer server runs in a Web Worker or falls back to in-tab (main.ts:504-509: ?worker=0, no
+ * Worker support, or a worker that fails / does not come up within the 15 s start timeout). Pure, so
+ * the exact wording is pinned by tests and both surfaces stay in sync.
+ */
+export function serverLocationNote(inWorker: boolean, workerForcedOff = false): string {
+  if (inWorker) return "server: in Web Worker";
+  return workerForcedOff ? "server: in tab (?worker=0)" : "server: in tab (worker unavailable or start timed out)";
+}
+
 /** Counting progress with an unknown tail: done/expected, capped below 1 until the caller completes the stage. */
 export function countFraction(done: number, expected: number, cap = 0.97): number {
   if (expected <= 0) return done > 0 ? cap : 0;

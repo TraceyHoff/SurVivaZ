@@ -79,7 +79,7 @@ describe("ADR-370 warm-up ordering (pure)", () => {
   it("constants: near-player priority, bounded window", () => {
     expect(WARMUP_PRIO).toBe(1); // <= PRIO_NEAR (16) so it is budget-exempt like near art, != 0 so it still queues behind the local player and through the 2-uploads/frame turn
     expect(WARMUP_MAX_PAGES).toBe(24);
-    expect(WARMUP_WINDOW_MS).toBe(1500);
+    expect(WARMUP_WINDOW_MS).toBe(5000); // ADR-545: 1500 -> 5000 (boot warm-up only now; ADR-544's entry drain passes its own 25 s cap)
   });
 });
 
