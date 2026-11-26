@@ -367,8 +367,14 @@ export const SIGN_TEXT_MAX = 48;
 export const Sign = defineComponent("Sign", { kind: "u8", rot: "u8", owner: "u32", clan: "u32", len: "u8", text: { type: "u8", length: SIGN_TEXT_MAX } }, { networked: true, persistent: true });
 /** ADR-121 roaming horde member (hordes.ts): horde id, target piece entity + target centroid (retarget if destroyed). Server-only. */
 export const HordeMember = defineComponent("HordeMember", { horde: "u16", target: "u32", tx: "f32", ty: "f32", siegeUntil: "u32" }); // ADR-476: tick the siege expires (0 = not sieging); the director sets it, the zombie AI reads it for the shyGoal exemption
-/** ADR-121 world rules on the environment singleton (replicated so clients show them): hordes 0/1, grace in in-game days. */
-export const WorldRules = defineComponent("WorldRules", { hordes: "u8", hordeGraceDays: "f32", aiHumans: "u8" }, { networked: true });
+/** ADR-539 predator pack member (packs.ts): pack id, prey survivor entity, watch point (the prey's base
+ * centroid, or the prey's position when there is no base) the pack waits at while the prey is indoors,
+ * siege clock (0 = not sieging). Server-only, like HordeMember — a NEW component, never HordeMember
+ * on animals. */
+export const PackMember = defineComponent("PackMember", { pack: "u16", prey: "u32", watchX: "f32", watchY: "f32", siegeUntil: "u32" });
+/** ADR-121 world rules on the environment singleton (replicated so clients show them): hordes 0/1, grace in in-game days.
+ *  ADR-535: zombies 0/1 — ambient zombies on/off, new worlds only (off also stops the horde director: hordes are zombies). */
+export const WorldRules = defineComponent("WorldRules", { hordes: "u8", hordeGraceDays: "f32", aiHumans: "u8", zombies: "u8" }, { networked: true });
 export const enum HordePhase { Idle = 0, Warning = 1, Active = 2 }
 /** ADR-121 horde director status on the environment singleton: drives client toasts + audio (snapshot diffs).
  *  seq bumps per horde; kind 1 solo / 2 clan; alive/size members; x,y = target centroid; owner = clan id or PlayerId. */
@@ -635,4 +641,5 @@ export const GAMEPLAY_COMPONENTS = [
   FloodTile, // append-only (ADR-467 flood water per tile; server-only, persistent)
   Discoveries, // append-only (ADR-498 first-visit discoveries per player; networked + persistent)
   Fishing, // append-only (ADR-493 per-fisher cast state; transient, derived — not networked, not persistent)
+  PackMember, // append-only (ADR-539 predator pack member; server-only)
 ] as const;

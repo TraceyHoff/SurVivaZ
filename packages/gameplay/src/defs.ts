@@ -300,8 +300,10 @@ export interface AiTuning {
   readonly sightFogMul: { readonly fog: number; readonly blizzard: number };
   /** ADR-486: smell — a zombie investigates a smell whose sampled contribution reaches `threshold`
    * (see strongestSmell in combat/zombies.ts). One radius/strength pair per source: carcass is the
-   * strongest and shortest, fire the widest, carried rot and a fresh kill's loot bag in between. */
-  readonly smell: { readonly threshold: number; readonly carcass: SmellSpec; readonly rot: SmellSpec; readonly kill: SmellSpec; readonly fire: SmellSpec };
+   * strongest and shortest, fire the widest, carried rot and a fresh kill's loot bag in between.
+   * ADR-537: `meat` — a ground loot bag holding uncooked meat smells as strongly as a carcass;
+   * carried meat never smells (the Inventory branch of the spoilage pass only ever attaches rot). */
+  readonly smell: { readonly threshold: number; readonly carcass: SmellSpec; readonly rot: SmellSpec; readonly kill: SmellSpec; readonly fire: SmellSpec; readonly meat: SmellSpec };
 }
 
 /** ADR-486: one smell source's field shape — radius in tiles, strength at the source (linear falloff). */

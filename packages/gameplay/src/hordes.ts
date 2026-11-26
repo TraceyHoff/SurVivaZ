@@ -11,6 +11,8 @@
  *   clan: min(clan.cap, round((clan.base + clan.perMember * members) * scale))
  * then clipped to the global budget (maxHordeZombies alive in hordes, maxActiveHordes). With the shipped data the
  * smallest clan horde (16) is larger than the largest solo horde (14).
+ * ADR-535: WorldRules.zombies = 0 also disables the director — a horde is zombies, so the contradictory
+ * zombies-off + hordes-on combination resolves to no hordes (packs replace them in ADR-539).
  */
 import { terrainBlocksWalker } from "./systems/movement.js";
 import { defineResource, GroupKind, TimeOfDay as TimeOfDayLike, Permissions, PlayerId, Transform, type Entity, type World } from "@engine/core";
@@ -41,7 +43,7 @@ export interface HordeTuning {
 }
 export const HORDES = raw.hordes as HordeTuning;
 export const HORDES_EVERY = 20;
-export const enum HordeKind { Solo = 1, Clan = 2 }
+export const enum HordeKind { Solo = 1, Clan = 2, /** ADR-539: HordeStatus.kind for a predator pack (reuses the HordeStatus channel). */ Pack = 3 }
 
 /** Pure size formula (see file header). */
 export function hordeSize(o: { clan: boolean; members?: number; level?: number; daysPastGrace?: number }, t: HordeTuning = HORDES): number {
@@ -50,19 +52,20 @@ export function hordeSize(o: { clan: boolean; members?: number; level?: number; 
   return Math.min(t.clan.cap, Math.round((t.clan.base + t.clan.perMember * Math.max(1, o.members ?? 1)) * scale));
 }
 
-export interface WorldRulesOpts { hordes?: boolean; hordeGraceDays?: number; /** Task 22: AI humans spawn / are recruitable (default on). */ aiHumans?: boolean }
+export interface WorldRulesOpts { hordes?: boolean; hordeGraceDays?: number; /** Task 22: AI humans spawn / are recruitable (default on). */ aiHumans?: boolean; /** ADR-535: ambient zombies on/off (default on). New worlds only; off also stops the horde director. */ zombies?: boolean }
 /** Sets the replicated world rules on the environment singleton (server/standalone at install; loaders after meta). */
 export function setWorldRules(world: World, r: WorldRulesOpts): void {
   const cur = world.get(world.environment, WorldRules);
   const hordes = r.hordes ?? (cur ? cur.hordes === 1 : HORDES.enabledDefault);
   const grace = Math.max(0, Math.min(365, r.hordeGraceDays ?? cur?.hordeGraceDays ?? HORDES.graceDaysDefault));
   const aiHumans = r.aiHumans ?? (cur ? cur.aiHumans === 1 : true);
-  const v = { hordes: hordes ? 1 : 0, hordeGraceDays: grace, aiHumans: aiHumans ? 1 : 0 };
+  const zombies = r.zombies ?? (cur ? cur.zombies === 1 : true);
+  const v = { hordes: hordes ? 1 : 0, hordeGraceDays: grace, aiHumans: aiHumans ? 1 : 0, zombies: zombies ? 1 : 0 };
   if (cur) world.set(world.environment, WorldRules, v); else world.add(world.environment, WorldRules, v);
 }
-export function worldRules(world: World): { hordes: boolean; hordeGraceDays: number; aiHumans: boolean } {
+export function worldRules(world: World): { hordes: boolean; hordeGraceDays: number; aiHumans: boolean; zombies: boolean } {
   const r = world.get(world.environment, WorldRules);
-  return { hordes: r ? r.hordes === 1 : HORDES.enabledDefault, hordeGraceDays: r?.hordeGraceDays ?? HORDES.graceDaysDefault, aiHumans: r ? r.aiHumans === 1 : true };
+  return { hordes: r ? r.hordes === 1 : HORDES.enabledDefault, hordeGraceDays: r?.hordeGraceDays ?? HORDES.graceDaysDefault, aiHumans: r ? r.aiHumans === 1 : true, zombies: r ? r.zombies === 1 : true };
 }
 /** In-game days since the world clock epoch (fractional). */
 export function worldDays(world: World): number {
@@ -207,11 +210,14 @@ export function hordeDirectorSystem(world: World, dt = 1 / 20): void {
   let alive = 0;
   for (const h of [...rt.hordes.values()]) { const n = aliveIn(world, h); alive += n; if (n === 0) rt.hordes.delete(h.id); }
   const st = status(world);
-  if (st && st.phase === HordePhase.Active) {
+  // ADR-539: the HordeStatus channel is shared with the pack director (kind Pack = 3) — the horde
+  // director must never clear or rewrite a pack warning / active pack status.
+  const packStatus = st !== undefined && st.kind === HordeKind.Pack;
+  if (st && st.phase === HordePhase.Active && !packStatus) {
     const cur = [...rt.hordes.values()].reduce((s, h) => s + h.members.size, 0);
     if (rt.hordes.size === 0) setStatus(world, { phase: HordePhase.Idle, alive: 0 }); else if (st.alive !== cur) setStatus(world, { alive: cur });
   }
-  if (!rules.hordes) { rt.pending = undefined; if (st && st.phase === HordePhase.Warning) setStatus(world, { phase: HordePhase.Idle }); return; }
+  if (!rules.hordes || !rules.zombies) { rt.pending = undefined; if (st && st.phase === HordePhase.Warning && !packStatus) setStatus(world, { phase: HordePhase.Idle }); return; } // ADR-535: zombies off forces hordes off (a horde is zombies)
   const len = world.env(TimeOfDayLike).dayLengthTicks; if (len <= 0) return;
   if (rt.nextTick === 0) rt.nextTick = world.tick + Math.round(len * HORDES.intervalDays * 0.5);
   // ADR-476: hordes hunt by sound, then by lamplight. The director reads the last loud survivor

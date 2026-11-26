@@ -6328,7 +6328,9 @@
     "bld_stairs_t1": 6326,
     "bld_stairs_t2": 6327,
     "bld_stairs_t3": 6328,
-    "bld_stairs_t4": 6329
+    "bld_stairs_t4": 6329,
+    "animal_cougar": 6330,
+    "animal_wolverine": 6331
   },
   "sounds": {
     "amb_rain": 1,

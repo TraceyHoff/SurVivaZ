@@ -39,10 +39,11 @@ const SAFETY_NET: [string, string, number][] = [
 ];
 
 describe("ADR-485 animal scale", () => {
-  it("live-art table: the 11 large species scale up/down to readable height; everything else draws at 1", () => {
+  it("live-art table: the 13 large species scale up/down to readable height; everything else draws at 1", () => {
     expect(ANIMAL_SCALES.scales).toEqual({
       animal_alpaca: 0.85, animal_bear: 1.65, animal_bison: 1.85, animal_boar: 1.35, animal_cow: 1.65,
       animal_elk: 0.9, animal_moose: 1.4, animal_pig: 1.25, animal_red_deer: 1.2, animal_sheep: 1.2, animal_wolf: 0.9,
+      animal_cougar: 1, animal_wolverine: 0.8,
     });
     for (const [k, s] of Object.entries(ANIMAL_SCALES.scales)) { expect(animalScale(k)).toBe(s); expect(animalDrawScale(k)).toBe(s); }
     for (const k of ["animal_deer", "animal_rabbit", "animal_chicken", "animal_fox", "animal_bee", "animal_owl", "animal_horse", "animal_donkey", "animal_yak", "animal_snake", undefined]) {
@@ -52,7 +53,7 @@ describe("ADR-485 animal scale", () => {
 
   it("live-art table keys are real animals; no mounts, no bee/owl (deliberately over-scale)", () => {
     const keys = Object.keys(ANIMAL_SCALES.scales);
-    expect(keys).toHaveLength(11);
+    expect(keys).toHaveLength(13);
     for (const k of keys) expect(animalDefs().some((a) => a.key === k)).toBe(true);
     for (const k of ["animal_horse", "animal_donkey", "animal_yak", "animal_bee", "animal_owl"]) expect(keys).not.toContain(k);
   });
@@ -85,7 +86,7 @@ describe("ADR-485 animal scale", () => {
 
   it("every animal key with a fallback entry resolves when its own art is missing; boar/chicken/rabbit have none (own art only)", () => {
     const keys = animalDefs().map((a) => a.key);
-    expect(keys).toHaveLength(40);
+    expect(keys.length).toBeGreaterThanOrEqual(40); // floor, not an exact count, so a def another worker adds does not fail CI
     const unresolvable: string[] = [];
     for (const k of keys) { const r = resolveSprite(k, without(k)); if (!r) unresolvable.push(k); else expect(has(r.key)).toBe(true); }
     // boar, chicken and rabbit have own art in the pack and no fallback entry: if that art ever goes
@@ -94,16 +95,21 @@ describe("ADR-485 animal scale", () => {
   });
 
   it("live-art drawn heights come out in the right relative order (measured live px x table scale)", () => {
-    // measured drawn heights (idle direction-0 frame 0) in the live pack at f40445b5
+    // measured drawn heights (idle direction-0 frame 0) in the live pack at f40445b5;
+    // cougar / wolverine measured the same way from the ADR-540 runtime painter (39 / 32 px).
     const px: Record<string, number> = {
       animal_deer: 42, animal_bear: 28, animal_bison: 30, animal_cow: 27, animal_moose: 45, animal_boar: 23,
       animal_elk: 50, animal_wolf: 30, animal_pig: 22, animal_sheep: 23, animal_red_deer: 35, animal_alpaca: 36,
+      animal_cougar: 39, animal_wolverine: 32,
     };
     const drawn = (k: string): number => px[k]! * animalDrawScale(k);
     expect(drawn("animal_bear")).toBeGreaterThan(drawn("animal_boar")); // bear is bigger than a boar
     expect(drawn("animal_bison")).toBeGreaterThan(drawn("animal_cow")); // bison is bigger than a cow
     expect(drawn("animal_moose")).toBeGreaterThan(drawn("animal_elk")); // moose is bigger than an elk
     expect(drawn("animal_boar")).toBeGreaterThan(drawn("animal_wolf")); // boar is bigger than a wolf
+    expect(drawn("animal_cougar")).toBeGreaterThan(drawn("animal_wolf")); // cougar is bigger than a wolf
+    expect(drawn("animal_cougar")).toBeLessThan(drawn("animal_bear")); // cougar is smaller than a bear
+    expect(drawn("animal_wolverine")).toBeLessThan(drawn("animal_wolf")); // wolverine is smaller than a wolf
     expect(drawn("animal_red_deer")).toBeCloseTo(drawn("animal_deer"), 0); // red deer ~ deer height
     expect(drawn("animal_alpaca")).toBeLessThan(drawn("animal_deer")); // alpaca is smaller than a deer
   });

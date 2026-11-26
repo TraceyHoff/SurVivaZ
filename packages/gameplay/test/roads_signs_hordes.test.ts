@@ -93,9 +93,9 @@ describe("hordes (ADR-121)", () => {
     expect(G.hordeSize({ clan: false, level: 1 })).toBe(4); expect(G.hordeSize({ clan: true, members: 3, level: 1 })).toBe(24);
   });
   it("world rules: default on with ~3 day grace; disable stops the director", () => {
-    const w = makeWorld(); expect(G.worldRules(w)).toEqual({ hordes: true, hordeGraceDays: 3, aiHumans: true });
+    const w = makeWorld(); expect(G.worldRules(w)).toEqual({ hordes: true, hordeGraceDays: 3, aiHumans: true, zombies: true });
     const off = makeWorld({ worldRules: { hordes: false } }); expect(G.worldRules(off).hordes).toBe(false);
-    G.setWorldRules(w, { hordeGraceDays: 5 }); expect(G.worldRules(w)).toEqual({ hordes: true, hordeGraceDays: 5, aiHumans: true });
+    G.setWorldRules(w, { hordeGraceDays: 5 }); expect(G.worldRules(w)).toEqual({ hordes: true, hordeGraceDays: 5, aiHumans: true, zombies: true });
     expect(G.graceFor(3, 1)).toBe(6); expect(G.graceFor(3, 5)).toBe(3);
   });
   it("targets group pieces by owner; a forced horde spawns members that hunt the base", () => {

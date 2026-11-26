@@ -7,7 +7,7 @@
  * Wolf only in v1 (the sole hostile species); a wolf with its own target keeps it.
  */
 import { describe, it, expect } from "vitest";
-import { Transform } from "@engine/core";
+import { setTimeOfDay, Transform } from "@engine/core";
 import * as G from "../src/index.js";
 import { makeWorld, steps } from "./helpers.js";
 
@@ -67,6 +67,7 @@ describe("ADR-494 wolves hunt in packs", () => {
 
   it("a target-less wolf joins the hunt and closes in on the prey", () => {
     const w = worldWithAnimalAI();
+    setTimeOfDay(w, 0, 0); // ADR-538: pack hunts run at night — by day the 1-tile engagement below is outside the 0.625 day range, so A would never attack and there would be no hunt to join
     G.spawnPlayer(w, { x: 400, y: 0, maxWeight: 0, clientId: 1 });
     G.spawnAnimal(w, WOLF, 401, 0); // A: in range, attacks on its own
     const b = G.spawnAnimal(w, WOLF, 406, 0); // B: no own target (6 > 2.5), prey within share range 7
@@ -90,6 +91,7 @@ describe("ADR-494 wolves hunt in packs", () => {
 
   it("a wolf with its own target keeps it instead of sharing", () => {
     const w = worldWithAnimalAI();
+    setTimeOfDay(w, 0, 0); // ADR-538: night, so B engages P2 at 1 tile (inside the 3.75 night range; by day it is outside 0.625 and B would share instead)
     G.spawnPlayer(w, { x: 400, y: 0, maxWeight: 0, clientId: 1 }); // P1: A's prey
     G.spawnPlayer(w, { x: 407, y: 0, maxWeight: 0, clientId: 2 }); // P2: B's own prey, 1 tile away
     G.spawnAnimal(w, WOLF, 401, 0); // A attacks P1

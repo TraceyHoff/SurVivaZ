@@ -102,6 +102,15 @@ export function shovelTarget(device: RoadDevice, body: { x: number; y: number; f
   return { x: Math.floor(body.x + Math.cos(body.facing)), y: Math.floor(body.y + Math.sin(body.facing)) };
 }
 export const HORDE_TEXT = { warning: "A zombie horde is gathering — prepare your defenses!", active: "The horde is here!", defeated: "The horde has been defeated." } as const;
+/** ADR-539: the same toast channel carries predator packs (HordeStatus kind Pack = 3) — a pack
+ * warning must never say "zombie horde". */
+export const PACK_TEXT = { warning: "A predator pack is closing in — get inside and shut the door!", active: "The predator pack is here!", defeated: "The predator pack has scattered." } as const;
+/** Toast text for a HordeStatus cue: pack copy when kind is Pack, horde copy otherwise. Pure, tested. */
+export function hordeToastText(cue: "warning" | "active" | "defeated", kind: number, size: number): string {
+  const pack = kind === 3; // HordeKind.Pack
+  if (cue === "warning") return pack ? `${PACK_TEXT.warning} (~${size} predators)` : `${HORDE_TEXT.warning} (~${size} zombies)`;
+  return pack ? PACK_TEXT[cue] : HORDE_TEXT[cue];
+}
 const CSS = `#world-labels{position:absolute;inset:0;pointer-events:none;z-index:4;overflow:hidden}
 #world-labels .sign-label{position:absolute;transform:translate(-50%,-100%);pointer-events:auto;cursor:text;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 font:600 12px Fredoka,system-ui,sans-serif;color:#3B2433;background:#F6EAD2;border:2px solid #74432C;border-radius:6px;padding:1px 6px;box-shadow:0 2px 0 #432C24}
@@ -326,7 +335,7 @@ export function mountWorldTools(root: HTMLElement, d: WorldToolsDeps): WorldTool
       const cur = st ? { phase: st.phase, seq: st.seq } : undefined;
       const cue = hordeCue(prevHorde, cur); prevHorde = cur;
       if (cue) {
-        toast.dataset["phase"] = cue; toast.textContent = cue === "warning" ? `${HORDE_TEXT.warning} (~${st!.size} zombies)` : HORDE_TEXT[cue]; toast.style.opacity = "1";
+        toast.dataset["phase"] = cue; toast.textContent = hordeToastText(cue, st!.kind, st!.size); toast.style.opacity = "1";
         clearTimeout(toastTimer); toastTimer = setTimeout(() => { toast.style.opacity = "0"; }, 5000);
         d.sound?.(cue === "warning" ? "horde.warning" : cue === "active" ? "horde.spawn" : "horde.defeated");
       }

@@ -24,6 +24,27 @@
    "capMul": 1.5
   }
  },
+ "zombiesOff": {
+  "$comment": "ADR-536: when WorldRules.zombies is off, predators fill the gap left by ~97 ambient zombies. Per-species multipliers on the already-built spawn entries (density + caps, applied after the mode caps; group sizes clamp to the boosted per-chunk cap, same rule as scaleAnimalCaps). Playtest tunables — start x3: wolf globalCap 10 -> 30, bear 4 -> 12. Density is raised with the caps because density is what drives the per-chunk target; raising caps alone would not spawn more. Boar stays unboosted (defensive, not a predator).",
+  "predators": {
+   "animal_wolf": {
+    "densityMul": 3,
+    "capMul": 3
+   },
+   "animal_bear": {
+    "densityMul": 3,
+    "capMul": 3
+   },
+   "animal_cougar": {
+    "densityMul": 3,
+    "capMul": 3
+   },
+   "animal_wolverine": {
+    "densityMul": 3,
+    "capMul": 3
+   }
+  }
+ },
  "tables": {
   "zombies": [
    {
@@ -404,6 +425,64 @@
     "group": [
      1,
      1
+    ],
+    "groupSpread": 4,
+    "modes": {
+     "sp": true,
+     "mp": true
+    }
+   },
+   {
+    "kind": "animal_cougar",
+    "category": "animal",
+    "density": 0.05,
+    "timeWeights": {
+     "night": 1.6,
+     "dawn": 0.8,
+     "day": 0.3,
+     "dusk": 1.2
+    },
+    "biomeWeights": {
+     "forest": 1,
+     "stone": 0.8,
+     "grass": 0.2
+    },
+    "minPlayerDistance": 10,
+    "perChunkCap": 1,
+    "globalCap": 4,
+    "despawnDistance": 70,
+    "group": [
+     1,
+     1
+    ],
+    "groupSpread": 4,
+    "modes": {
+     "sp": true,
+     "mp": true
+    }
+   },
+   {
+    "kind": "animal_wolverine",
+    "category": "animal",
+    "density": 0.08,
+    "timeWeights": {
+     "night": 1.4,
+     "dawn": 0.9,
+     "day": 0.4,
+     "dusk": 1.1
+    },
+    "biomeWeights": {
+     "forest": 1,
+     "stone": 0.8,
+     "grass": 0.5
+    },
+    "minPlayerDistance": 10,
+    "perChunkCap": 2,
+    "globalCap": 6,
+    "despawnDistance": 70,
+    "group": [
+     1,
+     2
     ],
     "groupSpread": 4,
     "modes": {

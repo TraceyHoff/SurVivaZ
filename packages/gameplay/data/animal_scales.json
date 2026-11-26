@@ -11,6 +11,8 @@
     "animal_pig": 1.25,
     "animal_red_deer": 1.2,
     "animal_sheep": 1.2,
-    "animal_wolf": 0.9
+    "animal_wolf": 0.9,
+    "animal_cougar": 1,
+    "animal_wolverine": 0.8
   }
 }

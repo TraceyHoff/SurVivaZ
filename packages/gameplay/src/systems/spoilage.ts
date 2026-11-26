@@ -87,8 +87,8 @@ export function spoilageSystem(world: World, dt: number): void {
       // temperature / piece / salt lookups run for every holder — only the per-item
       // decay/conversion loop is skipped. Salt still only burns while food is present.
       const slot = st.slot(idx); const n = Math.min(st.data.slotCount[slot]!, def.schema.items.length);
-      let spoilable = false; let hasRot = false;
-      for (let i = 0; i < n; i++) { const item = st.readElement(idx, "items", i) ?? 0; if (!item) continue; if (defs.items.get(item)?.spoilSeconds) spoilable = true; if (item === defs.spoiledItem) hasRot = true; if (spoilable && hasRot) break; }
+      let spoilable = false; let hasRot = false; let hasRawMeat = false;
+      for (let i = 0; i < n; i++) { const item = st.readElement(idx, "items", i) ?? 0; if (!item) continue; const idef = defs.items.get(item); if (idef?.spoilSeconds) spoilable = true; if (idef?.rawMeat) hasRawMeat = true; if (item === defs.spoiledItem) hasRot = true; if (spoilable && hasRot && hasRawMeat) break; }
       // ADR-486: smell — a holder carrying rot (or a ground loot bag holding fresh meat / rot)
       // smells, and stops smelling when the rot / meat is gone. Refreshed here, on the pass that
       // already visits every holder every 20 ticks — no new scan. Stored containers (a storage box
@@ -96,8 +96,15 @@ export function spoilageSystem(world: World, dt: number): void {
       // before the spoilable early-continue below, so a rot-only holder (nothing left to decay)
       // still loses its smell the pass after the rot leaves — and newly rotted food starts smelling
       // on the next pass (<= 1 s later).
+      // ADR-537: a ground loot bag holding UNCOOKED meat (ItemDef.rawMeat) smells with the meat
+      // spec (radius 8, strength 1 — as strong as a carcass), so predators investigate dropped
+      // meat; a bag with other spoilables (cooked meat, berries) keeps the kill spec. Carried
+      // meat never smells — the Inventory branch below only ever attaches rot, so a player
+      // carrying raw meat does not draw predators (user ruling 2026-11-25: no player scent).
+      // A kill bag is created with the kill spec (dropAnimalLoot/dropZombieLoot) and upgrades to
+      // meat on the next pass (<= 1 s) when it holds raw meat.
       const isBag = def === Container && world.has(e, LootBag);
-      setSmellEmitter(world, e, def === Inventory ? (hasRot ? defs.ai.smell.rot : undefined) : isBag ? (spoilable || hasRot ? defs.ai.smell.kill : undefined) : undefined);
+      setSmellEmitter(world, e, def === Inventory ? (hasRot ? defs.ai.smell.rot : undefined) : isBag ? (hasRawMeat ? defs.ai.smell.meat : spoilable || hasRot ? defs.ai.smell.kill : undefined) : undefined);
       // ADR-488: one climateAt sample per holder gives both the ambient temperature and the humidity
       // (damp air rots food faster, x(1 + humidity)). Holders with no position use the 0.5 band
       // default; the no-ClimateRes path keeps the hoisted surface temperature, as before.

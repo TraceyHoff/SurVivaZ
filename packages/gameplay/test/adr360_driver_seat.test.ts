@@ -325,7 +325,7 @@ describe("ADR-360 AI drives drawn vehicles", () => {
 
 describe("ADR-360 schema", () => {
   it("no new component: the world schema hash is unchanged from ADR-359", () => {
-    expect(makeWorld().getSchemaHash()).toBe(0xe8ba61b6); // ADR-519: Vehicle gains paint (old saves migrate, VEHICLE_PAINT_MIGRATION). ADR-486–501: Fishing (493) + Discoveries (498) components appended, Animal gains old (496) (old saves keep their node bits)
+    expect(makeWorld().getSchemaHash()).toBe(0x1a04f8ca); // ADR-519: Vehicle gains paint (old saves migrate, VEHICLE_PAINT_MIGRATION). ADR-486–501: Fishing (493) + Discoveries (498) components appended, Animal gains old (496) (old saves keep their node bits). ADR-535: WorldRules gains zombies (old saves migrate, WORLD_RULES_ZOMBIES_MIGRATIONS). ADR-539: PackMember component appended (server-only, new components need no migration)
   });
   it("the drawn drive speed is sim-local: a resource, cleared on exit, never a component", () => {
     const { w, p } = setup(); const { m, v } = rig(w, p);

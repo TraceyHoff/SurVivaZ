@@ -11,11 +11,11 @@ describe("animals (spawns.json -> PopulationSpawner, ai.json behavior)", () => {
   it("toSpawnEntries feeds every animal kind (art keys) incl. boar, wolf and chicken in both modes", () => {
     for (const mode of ["sp", "mp"] as const) {
       const es = G.toSpawnEntries(mode); const kinds = es.filter((e) => e.category === "animal").map((e) => e.kind);
-      expect(kinds).toEqual(["animal_rabbit", "animal_deer", "animal_boar", "animal_wolf", "animal_chicken", "animal_stag", "animal_red_deer", "animal_elk", "animal_moose", "animal_bear", "animal_fox", "animal_hare", "animal_squirrel", "animal_turkey", "animal_duck", "animal_goose", "animal_goat", "animal_sheep", "animal_cow", "animal_bison", "animal_snake", /* ADR-145 pets */ "animal_dog_dachshund", "animal_dog_lab", "animal_dog_husky", "animal_dog_shepherd", "animal_dog_beagle", "animal_cat_tabby", "animal_cat_siamese", "animal_cat_black", "animal_parrot", "animal_crow", "animal_ferret", /* Task 32 */ "animal_owl", "animal_turtle", "animal_pig", "animal_alpaca", "animal_bee", /* ADR-319 */ "animal_horse", "animal_donkey", "animal_yak"]);
+      expect(kinds).toEqual(["animal_rabbit", "animal_deer", "animal_boar", "animal_wolf", "animal_chicken", "animal_stag", "animal_red_deer", "animal_elk", "animal_moose", "animal_bear", /* ADR-540 */ "animal_cougar", "animal_wolverine", "animal_fox", "animal_hare", "animal_squirrel", "animal_turkey", "animal_duck", "animal_goose", "animal_goat", "animal_sheep", "animal_cow", "animal_bison", "animal_snake", /* ADR-145 pets */ "animal_dog_dachshund", "animal_dog_lab", "animal_dog_husky", "animal_dog_shepherd", "animal_dog_beagle", "animal_cat_tabby", "animal_cat_siamese", "animal_cat_black", "animal_parrot", "animal_crow", "animal_ferret", /* Task 32 */ "animal_owl", "animal_turtle", "animal_pig", "animal_alpaca", "animal_bee", /* ADR-319 */ "animal_horse", "animal_donkey", "animal_yak"]);
       for (const e of es) { expect(e.density).toBeGreaterThan(0); expect(Math.max(...Object.values(e.timeWeights!))).toBeCloseTo(1); expect(e.tiles!.length).toBeGreaterThan(0); }
       expect(es.some((e) => e.category === "human_bot")).toBe(mode === "sp");
     }
-    expect(G.animalDefs().map((a) => a.spriteKey)).toEqual(["animal_rabbit", "animal_deer", "animal_boar", "animal_wolf", "animal_chicken", "animal_stag", "animal_red_deer", "animal_elk", "animal_moose", "animal_bear", "animal_fox", "animal_hare", "animal_squirrel", "animal_turkey", "animal_duck", "animal_goose", "animal_goat", "animal_sheep", "animal_cow", "animal_bison", "animal_snake", /* ADR-145 pets */ "animal_dog_dachshund", "animal_dog_lab", "animal_dog_husky", "animal_dog_shepherd", "animal_dog_beagle", "animal_cat_tabby", "animal_cat_siamese", "animal_cat_black", "animal_parrot", "animal_crow", "animal_ferret", /* Task 32 */ "animal_owl", "animal_turtle", "animal_pig", "animal_alpaca", "animal_bee", /* ADR-319 */ "animal_horse", "animal_donkey", "animal_yak"]);
+    expect(G.animalDefs().map((a) => a.spriteKey)).toEqual(["animal_rabbit", "animal_deer", "animal_boar", "animal_wolf", /* ADR-540 */ "animal_cougar", "animal_wolverine", "animal_chicken", "animal_stag", "animal_red_deer", "animal_elk", "animal_moose", "animal_bear", "animal_fox", "animal_hare", "animal_squirrel", "animal_turkey", "animal_duck", "animal_goose", "animal_goat", "animal_sheep", "animal_cow", "animal_bison", "animal_snake", /* ADR-145 pets */ "animal_dog_dachshund", "animal_dog_lab", "animal_dog_husky", "animal_dog_shepherd", "animal_dog_beagle", "animal_cat_tabby", "animal_cat_siamese", "animal_cat_black", "animal_parrot", "animal_crow", "animal_ferret", /* Task 32 */ "animal_owl", "animal_turtle", "animal_pig", "animal_alpaca", "animal_bee", /* ADR-319 */ "animal_horse", "animal_donkey", "animal_yak"]);
   });
   it("the spawner actually spawns boar and wolf (and chicken) over forest/grass", () => {
     const w = new World(); const got: Record<string, number> = {}; let n = 0;
@@ -33,12 +33,13 @@ describe("animals (spawns.json -> PopulationSpawner, ai.json behavior)", () => {
   it("goofy wolf: bites only at close range, flees once lightly hurt", () => {
     const wolfAi = G.populationData().ai.archetypes.animal_wolf!;
     expect(wolfAi.aggro.range).toBeLessThanOrEqual(3); expect(wolfAi.flee.hpFrac).toBeGreaterThanOrEqual(0.6);
-    const w = makeWorld(); setTimeOfDay(w, 0, 0); // ADR-495: wolves hunt at night (daytime activity 0.4x shrinks the 2.5-tile aggro range to 1.0, outside the 1.2-tile spawn; the far wolf at 6 tiles still does not attack)
+    const w = makeWorld(); setTimeOfDay(w, 0, 0); // ADR-495: wolves hunt at night. ADR-538: the night aggro range is 3.75 (2.5 x 1.5), so the far wolf at 6 tiles still does not attack and the near wolf at 1.2 bites — but a hurt wolf no longer flees at night, so the flee half runs by day (day range 0.625, flee at 70% hp).
     const p = G.spawnPlayer(w, { x: 0, y: 0, maxWeight: 0, clientId: 1 });
     const far = G.spawnAnimal(w, "animal_wolf", 6, 0); const hp0 = w.get(p, Health)!.hp;
     steps(w, 10); expect(w.get(far, G.Animal)!.state).not.toBe(G.AnimalState.Attack); expect(w.get(p, Health)!.hp).toBe(hp0);
     const near = G.spawnAnimal(w, "animal_wolf", 1.2, 0); steps(w, 40);
     expect(w.get(p, Health)!.hp).toBeLessThan(hp0);
+    setTimeOfDay(w, 12, 0); // day: the goofy wolf breaks off once lightly hurt
     const max = w.get(near, Health)!.max; w.set(near, Health, { hp: max * 0.6 }); steps(w, 3);
     expect(w.get(near, G.Animal)!.state).toBe(G.AnimalState.Flee);
   });

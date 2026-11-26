@@ -28,6 +28,9 @@ export interface GameSpawnEntry {
 export interface SpawnData {
   chunkTiles: number; intervalSeconds: number; phases: string[]; biomes: Record<string, number>;
   modes: Record<GameMode, { densityMul: number; capMul: number }>; tables: Record<SpawnCategory, GameSpawnEntry[]>;
+  /** ADR-536: predator boost while WorldRules.zombies is off — per-species density/cap multipliers
+   * on the already-built spawn entries (applied by applyZombiesOffPredatorBoost, after the mode caps). */
+  zombiesOff?: { predators?: Record<string, { densityMul?: number; capMul?: number }> };
 }
 export type AggroMode = "hostile" | "territorial" | "defensive" | "passive";
 export interface Perception { sightRange: number; hearingMul: number; fovDeg: number }
@@ -45,10 +48,24 @@ export interface ArchetypeBehavior {
   wander: { radius: number; idleSeconds: [number, number] }; attack?: AttackData | null; loot: LootEntry[];
   /** ADR-495: night-activity window (animals only; zombies/humans ignore it). */
   activity?: ActivityWindow;
+  /** ADR-538: per-phase aggro-range multiplier (animals only). When present it replaces
+   * `activity` for the engagement range only — the wander share still uses `activity`, so a
+   * night hunter is not also a night restless wanderer (a 1.5 night `activity` would lift the
+   * wander share to 0.75). Absent = `activity`, so every species without its own window keeps
+   * today's behaviour exactly. Values above 1.0 are the point of this field (a night hunter);
+   * the (0, 2] validation cap bounds how far a data edit can push one species' range. */
+  aggroActivity?: ActivityWindow;
+  /** ADR-538: flee threshold used at night instead of `flee.hpFrac` when present (animals only).
+   * 0 = never flees at night. A species without it flees at night exactly as by day. */
+  nightFleeHpFrac?: number;
   /** ADR-496: extra loot rows rolled only for old variants of this species. */
   oldLoot?: LootEntry[];
   /** ADR-494: pack hunter — a target-less animal of this archetype joins a packmate's hunt. */
   pack?: boolean;
+  /** ADR-536: behaviour override while WorldRules.zombies is off (today: only the bear — it hunts
+   * instead of holding territory). Fields present replace the base values; absent fields keep them.
+   * The base values still apply whenever zombies are on. */
+  zombiesOff?: { aggro?: { mode: AggroMode; range: number; leashRange: number }; fleeHpFrac?: number };
 }
 export interface AiData { archetypes: Record<string, ArchetypeBehavior>; tuning?: { chaseLimitTiles?: number; /** ADR-462: wild-animal drink/shade (cosmetic). */ animalDrink?: { chance?: number; radius?: number; nearPlayerTiles?: number; drinkSeconds?: [number, number] }; /** ADR-463: carrion crows circling a fresh kill (ground only). */ carrion?: { crowsPerKill?: number; circleRadius?: number; maxSeconds?: number; nearPlayerTiles?: number }; /** ADR-475: wild-deer herds graze and move on when the patch is bare. */ herd?: { grazeCooldownSeconds?: number; bareRadius?: number; bareFrac?: number; moveMinTiles?: number; moveMaxTiles?: number }; /** ADR-496: rare old animals — 2% of spawns of the eligible species are old (bigger, tougher, extra loot). `eligible` is the only species list: real-art species only (boar/wolf in the live pack — deer has the only other animal_* art, but deer is a mount species, so the tameable exclusion removes it), never a tameable species. */ old?: { chance?: number; scaleMul?: number; hpMul?: number; eligible?: string[] } } }
 /** Fully resolved behavior (zombie fields merged from zombies.json). */
@@ -83,6 +100,13 @@ export function validateSpawnData(d: SpawnData, ai: AiData = aiRaw as unknown as
   const err: string[] = [];
   if (!(num(d.chunkTiles) && d.chunkTiles > 0)) err.push("chunkTiles must be > 0");
   for (const m of ["sp", "mp"] as const) if (!d.modes?.[m] || !nonNeg(d.modes[m].densityMul) || !nonNeg(d.modes[m].capMul)) err.push(`modes.${m} invalid`);
+  // ADR-536: zombies-off predator boost — listed kinds must be real animals, multipliers non-negative.
+  for (const [k, b] of Object.entries(d.zombiesOff?.predators ?? {})) {
+    if (ai.archetypes[k]?.kind !== "animal") err.push(`zombiesOff.predators.${k}: not an animal archetype`);
+    if (b === null || typeof b !== "object") { err.push(`zombiesOff.predators.${k}: needs densityMul/capMul`); continue; }
+    if (b.densityMul !== undefined && !nonNeg(b.densityMul)) err.push(`zombiesOff.predators.${k}: densityMul`);
+    if (b.capMul !== undefined && !nonNeg(b.capMul)) err.push(`zombiesOff.predators.${k}: capMul`);
+  }
   const zKeys = new Set(ZOMBIES.zombies.map((z) => z.key)); const seen = new Set<string>();
   for (const cat of ["zombies", "animals", "humans"] as const) {
     const t = d.tables?.[cat]; if (!Array.isArray(t)) { err.push(`tables.${cat} missing`); continue; }
@@ -132,6 +156,16 @@ export function validateAiData(d: AiData): string[] {
         if (!(num(v) && v > 0 && v <= 1)) err.push(`${k}: activity.${ph} must be in (0, 1]`);
       }
     }
+    // ADR-538: an aggro window is all four phases, each a multiplier in (0, 2] — above 1.0 is the
+    // point (a night hunter engages further out), but 2 caps how far a data edit can push one
+    // species' range; a night flee threshold is a fraction like flee.hpFrac.
+    if (a.aggroActivity !== undefined) {
+      for (const ph of ["night", "dawn", "day", "dusk"] as const) {
+        const v = a.aggroActivity[ph];
+        if (!(num(v) && v > 0 && v <= 2)) err.push(`${k}: aggroActivity.${ph} must be in (0, 2]`);
+      }
+    }
+    if (a.nightFleeHpFrac !== undefined && !frac(a.nightFleeHpFrac)) err.push(`${k}: nightFleeHpFrac`);
     for (const l of a.loot ?? []) {
       if (!ITEM_KEYS.has(l.item)) err.push(`${k}: unknown loot item ${l.item}`);
       if (!(Number.isInteger(l.min) && l.min >= 0 && Number.isInteger(l.max) && l.max >= l.min) || !frac(l.chance)) err.push(`${k}: loot ${l.item}`);
@@ -144,6 +178,17 @@ export function validateAiData(d: AiData): string[] {
     }
     if (a.oldLoot !== undefined && !(d.tuning?.old?.eligible ?? []).includes(k)) err.push(`${k}: oldLoot needs the species in tuning.old.eligible`);
     if (a.pack !== undefined && typeof a.pack !== "boolean") err.push(`${k}: pack must be boolean`);
+    // ADR-536: zombies-off behaviour override — same shape rules as the base aggro/flee, and a
+    // hostile override still needs an attack (it hunts, so it must be able to bite).
+    const zo = a.zombiesOff;
+    if (zo !== undefined) {
+      if (zo.aggro !== undefined) {
+        if (!["hostile", "territorial", "defensive", "passive"].includes(zo.aggro.mode)) err.push(`${k}: zombiesOff.aggro.mode`);
+        if (!nonNeg(zo.aggro.range) || !nonNeg(zo.aggro.leashRange) || zo.aggro.leashRange < zo.aggro.range) err.push(`${k}: zombiesOff.aggro ranges`);
+        if (zo.aggro.mode !== "passive" && !a.fromZombies && !a.attack) err.push(`${k}: zombiesOff aggressive archetype needs attack`);
+      }
+      if (zo.fleeHpFrac !== undefined && !frac(zo.fleeHpFrac)) err.push(`${k}: zombiesOff.fleeHpFrac`);
+    }
   }
   // ADR-496: old-variant tuning — a chance in (0, 1), scales at or above 1 (an "old" animal is
   // never smaller or frailer), and the eligible list is animal archetypes only, never tameable.
@@ -259,5 +304,22 @@ export function toSpawnEntries(mode: GameMode, d: SpawnData = populationData().s
       perChunkCap: cap.perChunk, globalCap: cap.global, despawnDistance: e.despawnDistance, group: [e.group[0], Math.min(e.group[1], cap.perChunk)] };
     if (e.maxPlayerDistance !== undefined) out.maxPlayerDistance = e.maxPlayerDistance;
     return out;
+  });
+}
+
+/**
+ * ADR-536: predator boost while WorldRules.zombies is off — per-species density/cap multipliers
+ * from spawns.json `zombiesOff.predators`, applied to already-built WorldSpawnEntries (after
+ * toSpawnEntries + the mode caps, so mp's capMul still composes). Kinds not listed pass through
+ * untouched, and so does every entry when the data block is absent. Group sizes clamp to the
+ * boosted per-chunk cap, the same rule scaleAnimalCaps uses. Pure and deterministic.
+ */
+export function applyZombiesOffPredatorBoost(entries: readonly WorldSpawnEntry[], d: SpawnData = populationData().spawns): WorldSpawnEntry[] {
+  const boosts = d.zombiesOff?.predators; if (!boosts) return [...entries];
+  return entries.map((e) => {
+    const b = boosts[e.kind]; if (!b || e.category !== "animal") return e;
+    const per = Math.max(1, Math.floor(e.perChunkCap * (b.capMul ?? 1)));
+    return { ...e, density: e.density * (b.densityMul ?? 1), perChunkCap: per, globalCap: Math.max(1, Math.floor(e.globalCap * (b.capMul ?? 1))),
+      ...(e.group ? { group: [Math.min(e.group[0], per), Math.min(e.group[1], per)] as [number, number] } : {}) };
   });
 }

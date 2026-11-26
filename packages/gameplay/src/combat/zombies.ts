@@ -14,7 +14,7 @@
 import { isCrouched, STANCE } from "../stance.js";
 import { entityIndex, NetId, Transform, Weather, timeOfDay, sunFractionOf, type Entity, type World } from "@engine/core";
 import { installSpatialIndex, EmitterIndexRes } from "@engine/world";
-import { Anim, AnimState, Attacker, BodyTemp, Dead, Exposure, Health, NoiseLevel, Survival, Zombie, ZombieBrain, ZState } from "../components.js";
+import { Anim, AnimState, Attacker, BodyTemp, Dead, Exposure, Health, NoiseLevel, Survival, WorldRules, Zombie, ZombieBrain, ZState } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks, WeatherKind, type AiTuning, type ZombieDef } from "../defs.js";
 import { DayPhase, emit, ZombieSpawned, ZombieStateChanged } from "../events.js";
@@ -60,6 +60,9 @@ export function spawnZombie(world: World, kind: number | string, x: number, y: n
 export function zombieSpawnerSystem(world: World, dt: number): void {
   if (!isAuthority(world) || world.isReplaying) return;
   if (world.getResource(PopulationZombies)) return; // a PopulationSpawner owns zombie spawning
+  // ADR-535: zombies off — no ambient spawns. (Reads the component directly: hordes.ts imports this
+  // module, so worldRules() from there would be an ESM cycle. Absent rules = on, the default.)
+  if (world.get(world.environment, WorldRules)?.zombies === 0) return;
   const defs = gameplayDefs(world); const sp = defs.spawning; const ph = currentPhaseKey(world);
   const index = installSpatialIndex(world); const terrain = world.getResource(TerrainRes); const idx = structures(world);
   const players = [...world.query([Survival, Transform], [Dead])].sort((a, b) => a - b);

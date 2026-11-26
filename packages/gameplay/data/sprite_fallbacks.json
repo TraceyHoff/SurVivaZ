@@ -519,6 +519,20 @@
       "tint": "#705038",
       "scale": 1.93
     },
+    "animal_cougar": {
+      "to": [
+        "animal_wolf"
+      ],
+      "tint": "#c69e68",
+      "scale": 1.3
+    },
+    "animal_wolverine": {
+      "to": [
+        "animal_boar"
+      ],
+      "tint": "#4a3428",
+      "scale": 1.11
+    },
     "animal_fox": {
       "to": [
         "animal_wolf"

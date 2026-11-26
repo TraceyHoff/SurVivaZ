@@ -12,10 +12,11 @@ import { isTameableAnimalKey } from "./tameable_defs.js";
 import { DEFAULT_TICK_HZ, Permissions, SeasonId, Transform, Weather, defineResource, entityIndex, seasonAt, type Entity, type World } from "@engine/core";
 import { PopulationSpawner, type BuildingGrid, type ChunkKey, type PhaseKey, type PopulationHost, type SpawnEntry, type PopulationViewpoint } from "@engine/world";
 import { Zombie } from "./components.js";
-import { Anim, AnimState, Animal, Carrion, GrazedTile, Grazing, Tamed, Container, ContainerViewers, Dead, Health, LootBag, RopeLead, Survival } from "./components.js";
+import { Anim, AnimState, Animal, BuildPiece, Carrion, GrazedTile, Grazing, PackMember, Tamed, Container, ContainerViewers, Dead, Health, LootBag, NoiseLevel, RopeLead, Survival } from "./components.js";
 import { gameplayDefs, isAuthority } from "./config.js";
 import { indexEntity } from "./spawn.js";
-import { currentPhaseKey, fogSightFactor, PopulationZombies, spawnZombie } from "./combat/zombies.js";
+import { currentPhaseKey, fogSightFactor, PopulationZombies, spawnZombie, strongestSmell } from "./combat/zombies.js";
+import { worldRules } from "./hordes.js"; // ADR-535: zombies-off filters the zombie spawn entries out
 import { zombieKindAllowed } from "./combat/zombie_gate.js";
 import { applyDamage, lastAttacker, setAnim } from "./combat/combat.js";
 import { addItem } from "./inventory.js";
@@ -26,10 +27,10 @@ import { nearWater } from "./systems/vitals.js";
 import { shelterAt } from "./building/shelter.js";
 import { isRaining, setSmellEmitter } from "./realism.js";
 import { WeatherKind } from "./defs.js";
-import { creatureStep, type TileBlocked } from "./systems/creature_nav.js";
+import { creatureStep, walledOff, type TileBlocked } from "./systems/creature_nav.js";
 import { nearestClaimHostile, tamedOwnerTribe, TERRITORY_BITE, TERRITORY_DEFEND_RANGE } from "./territory.js";
 import { installSpatialIndex } from "@engine/world";
-import { populationData, resolveBehavior, toSpawnEntries, type ActivityWindow, type AggroMode, type GameMode, type LootEntry } from "./ai/population.js";
+import { populationData, resolveBehavior, toSpawnEntries, applyZombiesOffPredatorBoost, type ActivityWindow, type AggroMode, type GameMode, type LootEntry } from "./ai/population.js";
 import scalesRaw from "../data/animal_scales.json";
 import { Died } from "./events.js";
 import { inSpawnSafeRadius } from "./spawn_points.js";
@@ -39,11 +40,15 @@ import { inSpawnSafeRadius } from "./spawn_points.js";
  * near a spawn point; they still will not engage a survivor standing inside the radius (see animalAISystem).
  * ADR-354: tameable species never count as aggressive here either, whatever ai.json says — a tameable
  * animal must not count as a hostile anywhere (the animalAI initiation guard is the enforcement point). */
-export function isAggressiveSpawnKind(kind: string, category: string): boolean {
+export function isAggressiveSpawnKind(kind: string, category: string, zombiesOff = false): boolean {
   if (category === "zombie") return true;
   if (category !== "animal") return false;
   if (isTameableAnimalKey(kind)) return false;
-  return animalDefs().find((a) => a.key === kind)?.aggro.mode === "hostile";
+  // ADR-536: with zombies off, a species whose zombiesOff override turns it hostile (today: the
+  // bear) counts as aggressive too, so boosted bears never spawn inside the safe radius either.
+  const def = animalDefs().find((a) => a.key === kind);
+  const mode = zombiesOff && def?.zombiesOff ? def.zombiesOff.aggro.mode : def?.aggro.mode;
+  return mode === "hostile";
 }
 
 /** Animal def resolved from ai.json (kind "animal"); key = art key (animal_*), spawn rows in spawns.json. */
@@ -53,26 +58,52 @@ export interface AnimalDef {
   loot: readonly LootEntry[]; drops: string[];
   /** ADR-495: per-phase activity window from ai.json (undefined = unwindowed, 1.0 at every phase). */
   activity?: ActivityWindow;
+  /** ADR-538: per-phase aggro-range window from ai.json (undefined = fall back to `activity`). */
+  aggroActivity?: ActivityWindow;
+  /** ADR-538: flee threshold used at night instead of `fleeHpFrac` (undefined = same as day). */
+  nightFleeHpFrac?: number;
   /** ADR-496: extra loot rows rolled only for old variants of this species (empty when the species
    * can never be old). `oldScaleMul` is the view-side draw scale for an old animal of this species. */
   oldLoot: readonly LootEntry[]; oldScaleMul: number;
+  /** ADR-537: hearing multiplier from ai.json `perception.hearingMul` — until this slice the
+   * perception block was dead data gameplay never read; now the hearing sense reads it (wolf 1.4,
+   * bear 1.2). A survivor is heard at NoiseLevel x hearingMul tiles. */
+  hearingMul: number;
   /** ADR-494: pack hunter — a target-less animal of this species joins a packmate's hunt. */
   pack: boolean;
+  /** ADR-536: behaviour override while WorldRules.zombies is off (ai.json `zombiesOff`), with
+   * absent fields already defaulted to the base values. Undefined = the species behaves the same
+   * with zombies on or off. */
+  zombiesOff?: { aggro: { mode: AggroMode; range: number; leashRange: number }; fleeHpFrac: number };
 }
 /** ADR-495: the activity multiplier for this animal in this phase — 1.0 when the species has no
  * window. Multipliers are soft: a sluggish animal can still flee (flee is never windowed) and an
  * already-engaged one keeps its fight; only new engagements and wandering are windowed. */
 export const activityMul = (def: AnimalDef, phase: PhaseKey): number => def.activity?.[phase] ?? 1;
+/** ADR-538: the aggro-range multiplier for this animal in this phase. A species with its own
+ * aggro window uses it; every other species falls back to its activity window, so defensive /
+ * passive animals keep today's behaviour exactly (their 0.4 night activity still shrinks their
+ * defensive range at night, and an unwindowed species is still 1.0 at every phase). */
+export const aggroActivityMul = (def: AnimalDef, phase: PhaseKey): number => def.aggroActivity?.[phase] ?? activityMul(def, phase);
 let animalsCache: AnimalDef[] | undefined;
 export const animalDefs = (): readonly AnimalDef[] => (animalsCache ??= Object.entries(populationData().ai.archetypes)
   .filter(([, a]) => a.kind === "animal").map(([key]) => {
     const b = resolveBehavior(key);
     return { key, spriteKey: key, hp: b.hp, speed: b.speed * 0.45, fleeSpeed: b.speed, fleeRange: b.flee.range, fleeHpFrac: b.flee.hpFrac, wanderRadius: b.wander.radius,
       aggro: b.aggro, attack: b.attack, loot: b.loot, drops: b.loot.map((l) => l.item),
+      hearingMul: b.perception.hearingMul,
       ...(b.activity === undefined ? {} : { activity: b.activity }),
+      ...(b.aggroActivity === undefined ? {} : { aggroActivity: b.aggroActivity }),
+      ...(b.nightFleeHpFrac === undefined ? {} : { nightFleeHpFrac: b.nightFleeHpFrac }),
+      ...(b.zombiesOff === undefined ? {} : { zombiesOff: { aggro: b.zombiesOff.aggro ?? b.aggro, fleeHpFrac: b.zombiesOff.fleeHpFrac ?? b.flee.hpFrac } }),
       oldLoot: b.oldLoot ?? [], oldScaleMul: oldVariantTuning().scaleMul, pack: b.pack === true };
   }));
 export const animalKindOf = (key: string): number => { const i = animalDefs().findIndex((a) => a.key === key); if (i < 0) throw new Error(`unknown animal ${key}`); return i; };
+let boostedAnimalsCache: AnimalDef[] | undefined;
+/** ADR-536: the animal defs with each species' `zombiesOff` override applied (today only the bear:
+ * hostile, range 8, leash 20, never flees). Cached like animalDefs(); the base defs are untouched,
+ * so zombies-on behaviour is byte-identical — animalAISystem picks one array or the other per run. */
+export const animalDefsZombiesOff = (): readonly AnimalDef[] => (boostedAnimalsCache ??= animalDefs().map((d) => d.zombiesOff ? { ...d, aggro: d.zombiesOff.aggro, fleeHpFrac: d.zombiesOff.fleeHpFrac } : d));
 /** ADR-485: live-art draw scales (data/animal_scales.json) — view-side only, no sim change. */
 export interface AnimalScaleData { scales: Record<string, number> }
 export const ANIMAL_SCALES = scalesRaw as unknown as AnimalScaleData;
@@ -89,7 +120,11 @@ export function animalDrawScale(key: string | undefined): number {
 /** Data-driven defaults (data/spawns.json). */
 export const POPULATION_DATA = { get intervalSeconds(): number { return populationData().spawns.intervalSeconds; }, spawns: (mode: GameMode) => toSpawnEntries(mode) };
 
-export const enum AnimalState { Idle = 0, Wander = 1, Flee = 2, Attack = 3, Dead = 4, Drink = 5 }
+export const enum AnimalState { Idle = 0, Wander = 1, Flee = 2, Attack = 3, Dead = 4, Drink = 5, Investigate = 6 }
+/** ADR-537: Investigate is a new enum value in the existing u8 `state` field — the component schema
+ * is unchanged (same fields, same types), so no migration: an investigating animal walks to a heard
+ * noise or a smelled source at wander speed and only bites through its own `wants` check once the
+ * prey is in aggro range, the way a zombie's Investigate works. */
 /** Corpse lingers this long (death anim) before the animal entity is removed; loot stays in a LootBag. */
 export const ANIMAL_CORPSE_SECONDS = 3;
 export function spawnAnimal(world: World, kind: number | string, x: number, y: number): Entity {
@@ -401,6 +436,117 @@ export function populationTile(world: World, tx: number, ty: number): number {
   return world.getResource(PopulationTiles)?.(tx, ty) ?? 0;
 }
 const animAt = (world: World, e: Entity, anim: Anim): void => { if (world.has(e, AnimState) && world.getField(e, AnimState, "anim") !== Anim.Hurt) setAnim(world, e, anim); };
+
+/** ADR-539: a way into a structure — a hung door (open iff its DoorState is open) or a doorway
+ * frame with no door hung (an open way in, by definition). */
+export interface PackOpening { x: number; y: number; open: boolean }
+/** Doors / open doorways within `radius` of (x, y), nearest first. Only ever called from
+ * packMemberTick on its 20-tick decision cadence, and only while the prey is indoors — never
+ * a per-tick scan, and never while the pack hunts in the open. */
+export function packOpeningsNear(world: World, x: number, y: number, radius = 12): PackOpening[] {
+  const idx = structures(world);
+  const doors: PackOpening[] = []; const frames: PackOpening[] = [];
+  for (const e of world.query([BuildPiece, Transform], [Dead])) {
+    const def = gameplayDefs(world).pieces.get(world.getField(e, BuildPiece, "type")!);
+    if (!def) continue;
+    const t = world.get(e, Transform)!; if (Math.hypot(t.x - x, t.y - y) > radius) continue;
+    // A hung door is its own piece (def.door) with a DoorState attachment; a doorway frame
+    // (opening Door) never carries one — the door hangs beside it in the same slot, so a frame
+    // counts as an open way in only when no door piece sits in its slot.
+    if (def.door) doors.push({ x: t.x, y: t.y, open: idx.doorOpen(e) });
+    else if (def.opening === 2 /* SocketKind.Door — a const enum, erased at runtime across modules */) frames.push({ x: t.x, y: t.y, open: true });
+  }
+  const out = [...doors];
+  for (const f of frames) if (!doors.some((dr) => Math.hypot(dr.x - f.x, dr.y - f.y) < 1)) out.push(f);
+  return out.sort((a, b) => (Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y)));
+}
+/** ADR-539 pack steering — the predator version of hordeSteer, driving Animal goals instead of
+ * ZombieBrain. One tick of a pack member's hunt (called from animalAISystem, which skips the
+ * normal loop for pack members entirely):
+ * - prey gone (dead / destroyed) -> disband to a plain animal (drop PackMember, wander home),
+ *   mirroring hordeSteer's disband when its target piece is gone.
+ * - prey in the open -> Attack the prey itself. The safe-radius acquisition ban, the leash /
+ *   chase limit and fleeing do NOT apply: a directed pack is exempt, the same exemption horde
+ *   members get (otherwise a pack could never reach a player standing at home, and a hurt wolf
+ *   would break off a directed hunt). The bite is the normal animal bite, on the prey only —
+ *   never on a wall, door or any other piece: there is no structure-attack path here at all,
+ *   and the bite is refused while a wall stands between member and prey.
+ * - prey sheltered (shelterAt().enclosed, or walled off from this member — a roofless pen
+ *   counts too) -> WATCH: hold at the nearest door / open doorway in Investigate (walk in,
+ *   do not attack) and re-check on the 20-tick decision cadence; the moment a way in is open,
+ *   the goal becomes the prey and creatureStep routes the member through the opening — its A*
+ *   only ever passes open doors / doorways, never closed doors or walls, so a closed door is
+ *   a hard stop. No door at all -> hold at the pack watch point (the prey's base centroid, or
+ *   the prey's position when there is no base). A member hunting sheltered prey may only bite
+ *   once it is under the roof itself — roof coverage, not enclosure, decides "indoors" for the
+ *   bite, because opening the door breaks the enclosure while the prey is still under the roof.
+ * Decisions run every 20 ticks (the horde repath cadence); between decisions the member keeps
+ * its goal and keeps moving, so a door opening is acted on within ~1 s. */
+function packMemberTick(world: World, e: Entity, def: AnimalDef, tx: number, ty: number, dt: number, tileBlocked: TileBlocked, unwalk: ReadonlySet<number>): void {
+  const pm = world.get(e, PackMember)!;
+  const a = world.get(e, Animal)!;
+  const prey = pm.prey as Entity;
+  if (!world.isAlive(prey) || world.has(prey, Dead)) {
+    world.remove(e, PackMember);
+    world.setField(e, Animal, "state", AnimalState.Wander);
+    world.setField(e, Animal, "goalX", a.homeX); world.setField(e, Animal, "goalY", a.homeY);
+    return;
+  }
+  const pt = world.get(prey, Transform)!;
+  const preyIndoors = shelterAt(world, pt.x, pt.y, pt.z ?? 0).enclosed;
+  const blocked = walledOff(world, tx, ty, pt.x, pt.y, pt.z ?? 0, tileBlocked);
+  const sheltered = preyIndoors || blocked;
+  let state = a.state, gx = a.goalX, gy = a.goalY;
+  if (world.tick >= a.thinkAt) {
+    if (!sheltered) { state = AnimalState.Attack; gx = pt.x; gy = pt.y; }
+    else {
+      const openings = packOpeningsNear(world, pt.x, pt.y, 12);
+      const open = openings.find((o) => o.open);
+      if (open) { state = AnimalState.Attack; gx = pt.x; gy = pt.y; }
+      else if (openings.length) { state = AnimalState.Investigate; gx = openings[0]!.x; gy = openings[0]!.y; }
+      else { state = AnimalState.Investigate; gx = pm.watchX; gy = pm.watchY; }
+    }
+    world.setField(e, Animal, "thinkAt", world.tick + 20);
+  }
+  // The bite is the normal animal bite, on the prey only — and only when the prey is not walled
+  // off from this member (a prey standing against the inside of a wall is never bitten through
+  // it). Roof coverage, not enclosure, decides "indoors" here: opening the door breaks the
+  // room's enclosure, but the prey is still under the roof — so a member hunting roofed prey
+  // may only bite once it is under the roof itself (it must cross the threshold, never bite
+  // from the doorway).
+  const preyRoofed = shelterAt(world, pt.x, pt.y, pt.z ?? 0).covered;
+  const memberRoofed = shelterAt(world, tx, ty, world.get(e, Transform)?.z ?? 0).covered;
+  if (state === AnimalState.Attack && def.attack && !blocked && (!preyRoofed || memberRoofed)) {
+    const ddx = pt.x - tx, ddy = pt.y - ty; const range = def.attack.range + 0.4;
+    if (ddx * ddx + ddy * ddy <= range * range) {
+      gx = tx; gy = ty;
+      if (world.tick >= a.thinkAt) {
+        applyDamage(world, prey, def.attack.damage, e); animAt(world, e, Anim.Attack);
+        world.setField(e, Animal, "thinkAt", world.tick + Math.max(1, Math.round(def.attack.cooldownSeconds / dt)));
+      }
+    }
+  }
+  let moving = false;
+  if (state !== AnimalState.Idle && state !== AnimalState.Drink) {
+    const dx = gx - tx, dy = gy - ty, d = Math.hypot(dx, dy);
+    const sp = (state === AnimalState.Wander || state === AnimalState.Investigate ? def.speed : def.fleeSpeed) * swimSpeedMulAt(world, tx, ty) * dt;
+    if (d < 0.1) { /* arrived: a watcher holds at the door, a hunter waits on the prey */ }
+    else {
+      const nav = creatureStep(world, e, gx, gy, sp, 0, tileBlocked, dt);
+      if (nav !== undefined) { moving = nav; /* stalled at a wall/closed door: a watcher keeps watching */ }
+      else {
+        const nx = tx + (dx / d) * Math.min(sp, d), ny = ty + (dy / d) * Math.min(sp, d);
+        if (!unwalk.has(populationTile(world, Math.floor(nx), Math.floor(ny)))) { world.set(e, Transform, { x: nx, y: ny, facing: Math.atan2(dy, dx) }); moving = true; }
+        else state = AnimalState.Idle;
+      }
+    }
+  }
+  const curAnim = world.getField(e, AnimState, "anim");
+  const want = moving ? (state === AnimalState.Wander || state === AnimalState.Investigate ? Anim.Walk : Anim.Run) : state === AnimalState.Attack ? (curAnim ?? Anim.Idle) : Anim.Idle;
+  animAt(world, e, want);
+  if (state !== a.state) world.setField(e, Animal, "state", state);
+  if (gx !== a.goalX || gy !== a.goalY) { world.setField(e, Animal, "goalX", gx); world.setField(e, Animal, "goalY", gy); }
+}
 /**
  * Animal AI (authority, every tick). Idle/wander around home; flee from living survivors in fleeRange (or once hp <= fleeHpFrac);
  * aggressive kinds (ai.json aggro) chase + bite targets within aggro.range, leash back past leashRange: hostile = anyone close,
@@ -431,7 +577,10 @@ interface AnimalListCache {
 const animalListCaches = new WeakMap<World, AnimalListCache>();
 export function animalAISystem(world: World, dt: number): void {
   if (!isAuthority(world) || world.isReplaying) return;
-  const index = installSpatialIndex(world); const unwalk = gameplayDefs(world).worldgen.unwalkableTiles; const defs = animalDefs();
+  const index = installSpatialIndex(world); const unwalk = gameplayDefs(world).worldgen.unwalkableTiles;
+  // ADR-536: with zombies off, species with a `zombiesOff` override use the boosted defs (the bear
+  // hunts); with zombies on the base defs are used, so behaviour is byte-identical to before.
+  const defs = worldRules(world).zombies ? animalDefs() : animalDefsZombiesOff();
   // Task 29: hoisted component stores + chase limit. world.get() copies the component into a fresh
   // object per call (~0.8us for Animal alone); the loops below read store data directly instead.
   const aStore = world.store(Animal); const tfStore = world.store(Transform); const deadStore = world.store(Dead);
@@ -498,14 +647,28 @@ export function animalAISystem(world: World, dt: number): void {
     const aState = aD.state[aSlot]!; const aHomeX = aD.homeX[aSlot]!; const aHomeY = aD.homeY[aSlot]!; const aGoalX = aD.goalX[aSlot]!; const aGoalY = aD.goalY[aSlot]!; const aThinkAt = aD.thinkAt[aSlot]!;
     const tSlot = tfStore.slot(ei); const tfD = tfStore.data; const tx = tfD.x[tSlot]!; const ty = tfD.y[tSlot]!;
     const hSlot = hStore.slot(ei); const hD = hStore.data; const hp = hSlot >= 0 ? hD.hp[hSlot]! : undefined; const maxHp = hSlot >= 0 ? hD.max[hSlot]! : undefined;
-    const hurt = hp !== undefined && maxHp !== undefined && hp < maxHp; const scared = hurt && hp! <= maxHp! * def.fleeHpFrac;
+    const hurt = hp !== undefined && maxHp !== undefined && hp < maxHp;
+    // ADR-538: night flee — a species with a nightFleeHpFrac uses it at night instead of
+    // flee.hpFrac (0 = a wolf that never breaks off at night). Flee is still never windowed by
+    // `activity`: a bedded deer still runs, and this override is night-only, never by day.
+    const fleeHpFrac = phase === "night" && def.nightFleeHpFrac !== undefined ? def.nightFleeHpFrac : def.fleeHpFrac;
+    const scared = hurt && hp! <= maxHp! * fleeHpFrac;
     const anSlot = anStore.slot(ei); const anD = anStore.data;
+    // ADR-539: pack members are driven by packMemberTick, not the normal animal loop — no
+    // wandering, fleeing, drinking, sharing or herd behaviour while on a pack hunt (the bite,
+    // the safe-radius / leash exemptions and the door-watching all live there).
+    if (world.has(e, PackMember)) { packMemberTick(world, e, def, tx, ty, dt, tileBlocked, unwalk); continue; }
     const aggressive = !!def.attack && def.aggro.mode !== "passive" && !scared;
     // ADR-495: night-activity window — a sluggish animal engages at a shorter range and wanders
     // less (bedding down = the Idle pose it falls back to when it doesn't wander). Flee is never
     // windowed: a bedded deer still runs. Already-engaged/retaliating animals keep their fight
     // (the leash branch below), so only *new* engagements are windowed.
+    // ADR-538: the engagement range uses the aggro window, not the activity window — a predator
+    // with an aggroActivity above 1.0 at night engages further out at night without wandering
+    // more (the wander roll below still uses `activity`). Species without an aggro window use
+    // their activity window here, exactly as before.
     const activity = activityMul(def, phase);
+    const aggroActivity = aggroActivityMul(def, phase);
     // ADR-377: squared home distance — homeD is only ever compared against ranges, never used as a value.
     const homeDx = tx - aHomeX, homeDy = ty - aHomeY; const homeD2 = homeDx * homeDx + homeDy * homeDy;
     let threat: { e: Entity; x: number; y: number; d2: number } | undefined;
@@ -549,7 +712,7 @@ export function animalAISystem(world: World, dt: number): void {
     // its actual attacker (the branch above), so self-defence is unchanged.
     const safeTarget = threat !== undefined && !retaliating && inSpawnSafeRadius(world, threat.x, threat.y);
     const wants = aggressive && threat && !safeTarget && ((engaged || retaliating) ? threat.d2 <= leash2 && homeD2 <= pressHome2
-      : !isTameableAnimalKey(def.key) && threat.d2 <= (def.aggro.range * fog * activity) * (def.aggro.range * fog * activity) && (def.aggro.mode === "hostile" || (def.aggro.mode === "territorial" && homeD2 <= leash2) || (def.aggro.mode === "defensive" && hurt)));
+      : !isTameableAnimalKey(def.key) && threat.d2 <= (def.aggro.range * fog * aggroActivity) * (def.aggro.range * fog * aggroActivity) && (def.aggro.mode === "hostile" || (def.aggro.mode === "territorial" && homeD2 <= leash2) || (def.aggro.mode === "defensive" && hurt)));
     // Task 14: tame animals defend their owner's claim. Passive farm animals have no species attack, so they
     // get a generic bite; goat/cow reuse their own attack. Movement still goes through creatureStep, so a
     // fenced-in defender strains at the fence instead of teleporting through it.
@@ -608,6 +771,60 @@ export function animalAISystem(world: World, dt: number): void {
         state = AnimalState.Wander; gx = anchor.x + Math.cos(ang) * cfg.circleRadius; gy = anchor.y + Math.sin(ang) * cfg.circleRadius;
         world.setField(e, Animal, "thinkAt", world.tick + Math.round(rng.range(2, 6) * DEFAULT_TICK_HZ));
       } else {
+      // ADR-537: predator senses — hearing + smell, zombie-style. A hostile-mode animal (the wolf;
+      // the zombies-off bear, whose ADR-536 override makes it hostile) with no target investigates a
+      // heard survivor or the strongest nearby smell on its think tick, instead of wandering.
+      // Hearing reuses NoiseLevel (ai.json perception.hearingMul — today 1.4 wolf, 1.2 bear) over the
+      // already-built THREATS list, so a walking player is heard at ~17 tiles and a sprinter at ~25;
+      // a heard-but-unseen target is Investigated (walk to the noise), never instantly chased — the
+      // bite still goes through the animal's own `wants` check once the prey is in aggro range.
+      // Smell reuses strongestSmell() (max 8 emitters, threshold 0.25): carcasses, rot, kill loot
+      // bags, lit fires — and, from this slice, dropped uncooked meat. A heard/smelt goal never
+      // bypasses the safe radius (a survivor inside it is never a heard target, a smell inside it
+      // is never a goal), the tameable-initiation guard (ADR-354), or the leash/chase limit (the
+      // goal must sit within pressHome of home, the same bound an engaged animal keeps). Between
+      // thinks an investigating animal keeps its goal without re-scanning (the think branch only
+      // runs at thinkAt for Investigate, unlike Attack); the next think re-samples, and a stale
+      // goal falls through to the drink/wander re-roll below. Per-think cost: one scan of the
+      // small survivor list + one bounded smell query, only for hostile-mode animals with no
+      // target — no new per-tick scan.
+      let sensed = false;
+      if (!tame && !wants && !scared && def.aggro.mode === "hostile" && !isTameableAnimalKey(def.key) && state !== AnimalState.Flee && world.tick >= aThinkAt) {
+        // Hearing: the nearest heard survivor outside the safe radius (THREATS; the spatial-index
+        // fallback covers the capped-list case — radius 40 bounds the loudest noise, an explosion
+        // at 27 x the wolf's 1.4 hearingMul = 37.8).
+        let heard: { x: number; y: number; d2: number } | undefined;
+        const hear = (px: number, py: number, noise: number): void => {
+          if (inSpawnSafeRadius(world, px, py)) return;
+          const ddx = px - tx, ddy = py - ty; const d2 = ddx * ddx + ddy * ddy;
+          const hearD2 = (noise * def.hearingMul) * (noise * def.hearingMul);
+          if (d2 > hearD2) return;
+          if (!heard || d2 < heard.d2) heard = { x: px, y: py, d2 };
+        };
+        if (few) { for (let i = 0; i < THREATS.length; i += 3) { const p = THREATS[i]! as Entity; const noise = world.getField(p, NoiseLevel, "value") ?? 0; if (noise > 0) hear(THREATS[i + 1]!, THREATS[i + 2]!, noise); } }
+        else for (const p of index.queryRadius(tx, ty, 40)) {
+          if (!world.has(p, Survival) || world.has(p, Dead)) continue;
+          const noise = world.getField(p, NoiseLevel, "value") ?? 0; if (noise <= 0) continue;
+          const pt = world.get(p, Transform)!; hear(pt.x, pt.y, noise);
+        }
+        // The goal must sit within pressHome of home (the chase-limit bound) and outside the safe radius.
+        const senseGoal = (x: number, y: number): boolean => {
+          if (inSpawnSafeRadius(world, x, y)) return false;
+          const hdx = x - aHomeX, hdy = y - aHomeY;
+          return hdx * hdx + hdy * hdy <= pressHome2;
+        };
+        let gx2: number | undefined, gy2: number | undefined;
+        if (heard && senseGoal(heard.x, heard.y)) { gx2 = heard.x; gy2 = heard.y; }
+        else {
+          const smell = strongestSmell(world, tx, ty);
+          if (smell && senseGoal(smell.x, smell.y)) { gx2 = smell.x; gy2 = smell.y; }
+        }
+        if (gx2 !== undefined) {
+          state = AnimalState.Investigate; gx = gx2; gy = gy2!;
+          world.setField(e, Animal, "thinkAt", world.tick + Math.round(rng.range(2, 6) * DEFAULT_TICK_HZ));
+          sensed = true;
+        }
+      }
       // ADR-494: pack share — a target-less pack wolf joins a packmate's hunt. The scan runs only
       // on a real think tick (over `animals`, the already-built live list). The share sets state
       // Attack + the packmate's goal, so the wolf closes at attack speed and bites through its own
@@ -618,7 +835,7 @@ export function animalAISystem(world: World, dt: number): void {
       // drink/wander re-roll below and gives up. A wolf with its own target never reaches this
       // branch (the attack branch above takes it), so only target-less wolves share.
       let shared = false;
-      if (def.pack && !tame && !wants && state !== AnimalState.Flee) {
+      if (def.pack && !tame && !wants && !sensed && state !== AnimalState.Flee) {
         if (world.tick >= aThinkAt) {
           const mate = packShareTarget(world, e, aKind, tx, ty, def.aggro.leashRange, animals);
           if (mate) {
@@ -639,7 +856,7 @@ export function animalAISystem(world: World, dt: number): void {
       // below — the roll only gates the trip). Shade: in rain or a heat wave, an animal already under
       // cover lingers there — point query only, no directed shade search (none exists to reuse).
       let decided = false;
-      if (!tame && !shared) {
+      if (!tame && !shared && !sensed) {
         const near2 = drinkCfg.nearPlayerTiles * drinkCfg.nearPlayerTiles;
         let nearPlayer = false;
         if (few) { for (let i = 0; i < THREATS.length; i += 3) { const dx = THREATS[i + 1]! - tx, dy = THREATS[i + 2]! - ty; if (dx * dx + dy * dy <= near2) { nearPlayer = true; break; } } }
@@ -666,7 +883,7 @@ export function animalAISystem(world: World, dt: number): void {
           }
         }
       }
-      if (!shared && !decided) {
+      if (!shared && !decided && !sensed) {
         // ADR-475: a wild deer standing on bare ground checks whether the patch is grazed out (the
         // completion check below cannot fire when no graze can start — e.g. a tame herd stripped it).
         if (!tame && HERD_DEER_KEYS.has(def.key)) {
@@ -687,7 +904,7 @@ export function animalAISystem(world: World, dt: number): void {
     }
     let moving = false;
     if (state !== AnimalState.Idle && state !== AnimalState.Drink) { // ADR-462: drinking animals stand still
-      const dx = gx - tx, dy = gy - ty, d = Math.hypot(dx, dy); const sp = (state === AnimalState.Wander ? def.speed : def.fleeSpeed) * swimSpeedMulAt(world, tx, ty) * dt;
+      const dx = gx - tx, dy = gy - ty, d = Math.hypot(dx, dy); const sp = (state === AnimalState.Wander || state === AnimalState.Investigate ? def.speed : def.fleeSpeed) * swimSpeedMulAt(world, tx, ty) * dt; // ADR-537: Investigate walks, like Wander — a cautious approach, not a charge
       if (d < 0.1) {
         // ADR-462: arrived at the shore on a wander — drink (one drink per trip; the next think resumes
         // normal behaviour). Near-player gate, same as the think branch (THREATS / spatial fallback).
@@ -715,7 +932,7 @@ export function animalAISystem(world: World, dt: number): void {
     // write on change, add the component if missing), without the per-call getField/store lookups.
     const curAnim = anSlot >= 0 ? anD.anim[anSlot]! : undefined;
     if (curAnim !== Anim.Attack || !moving) {
-      const want = moving ? (state === AnimalState.Wander ? Anim.Walk : Anim.Run) : state === AnimalState.Attack ? (curAnim as Anim) : state === AnimalState.Drink ? Anim.Drink : Anim.Idle;
+      const want = moving ? (state === AnimalState.Wander || state === AnimalState.Investigate ? Anim.Walk : Anim.Run) : state === AnimalState.Attack ? (curAnim as Anim) : state === AnimalState.Drink ? Anim.Drink : Anim.Idle;
       if (anSlot >= 0) { if (curAnim !== Anim.Hurt && curAnim !== want) { anD.anim[anSlot] = want; anD.startTick[anSlot] = world.tick; anStore.markChanged(ei); } }
       else animAt(world, e, want);
     }
@@ -765,7 +982,14 @@ export function scaleAnimalCaps<T extends { category: string; perChunkCap: numbe
 }
 export function installPopulation(world: World, o: InstallPopulationOptions): PopulationSpawner {
   if (o.tileAt) world.setResource(PopulationTiles, o.tileAt);
-  const spawns = scaleAnimalCaps((o.spawns ?? toSpawnEntries(o.mode ?? (o.humanBots ? "sp" : "mp"))).filter((s) => s.category !== "human_bot" || o.humanBots), o.animalCapMul ?? 1);
+  // ADR-535: with zombies off, the zombie entries never reach the spawner — PopulationZombies is never set
+  // (so the legacy spawner has no population owner) and no ambient zombie can spawn. Animals are untouched.
+  // ADR-536: with zombies off, predators fill the gap — the wolf/bear entries are scaled up by the
+  // spawns.json `zombiesOff.predators` tunables (density + caps x3), so the spawner actually fills
+  // the raised caps. With zombies on the table is exactly the pre-ADR-536 table.
+  const zombiesOn = worldRules(world).zombies;
+  const base = scaleAnimalCaps((o.spawns ?? toSpawnEntries(o.mode ?? (o.humanBots ? "sp" : "mp"))).filter((s) => s.category !== "human_bot" || o.humanBots).filter((s) => zombiesOn || s.category !== "zombie"), o.animalCapMul ?? 1);
+  const spawns = zombiesOn ? base : applyZombiesOffPredatorBoost(base);
   const host: PopulationHost = {
     chunks: o.chunks, viewpoints: o.viewpoints,
     phase: (): PhaseKey => currentPhaseKey(world),
@@ -774,7 +998,8 @@ export function installPopulation(world: World, o: InstallPopulationOptions): Po
     spawn: (entry, x, y) => {
       // Task 33: no aggressive creature spawns inside the safe radius around spawn points. The spawner
       // retries other positions in the chunk, so the radius only ever costs a spawn attempt, never a crash.
-      if (isAggressiveSpawnKind(entry.kind, entry.category) && inSpawnSafeRadius(world, x, y)) return undefined;
+      // ADR-536: the zombiesOff flag makes boosted bears count as aggressive here too (they hunt now).
+      if (isAggressiveSpawnKind(entry.kind, entry.category, !zombiesOn) && inSpawnSafeRadius(world, x, y)) return undefined;
       if (entry.category === "zombie") { if (!zombieKindAllowed(world, entry.kind, x, y)) return undefined; /* ADR-226 */ const rng = world.rngFor(`pop.variant:${entry.kind}`); return spawnZombie(world, entry.kind, x, y, rng.int(0, 255)); }
       if (entry.category === "animal") { const e = spawnAnimal(world, entry.kind, x, y); maybeMarkOld(world, e); return e; }
       if (entry.category === "human_bot") return o.humanBots?.spawn(x, y, entry.kind) ? "pending" : undefined;

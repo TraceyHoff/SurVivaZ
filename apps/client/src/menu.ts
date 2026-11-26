@@ -30,9 +30,9 @@ const BR: Branding = (typeof __BRANDING__ !== "undefined" && __BRANDING__) || { 
 export const APP_TITLE = BR.title;
 export type MenuChoice = { kind: "singleplayer"; seed?: number } | { kind: "multiplayer"; url: string } | { kind: "host"; seed?: number } | { kind: "join"; code: string };
 /** hostCap: desktop P2P host player cap incl. the host (mobile hosts are fixed at 6, see p2p.ts). */
-export interface Settings { bots: number; showHud: boolean; fullscreen: boolean; hostCap: number; /** ADR-121: new-world rules */ hordes: boolean; hordeGraceDays: number; /** Task 22: AI humans in multiplayer (new worlds) */ aiHumans?: boolean; /** ADR-126: tool symbol near resource nodes */ toolHints: boolean; /** ADR-173: name tags over other players */ nameTags?: boolean; /** ADR-306: hidden-ledge drop arrows (on by default; off for a harder run) */ ledgeWarnings?: boolean; /** ADR-239/243: HUD temperature units (default F; C only with tempUnitChosen) */ tempUnit?: "C" | "F"; /** ADR-243: the player picked tempUnit themselves */ tempUnitChosen?: boolean }
+export interface Settings { bots: number; showHud: boolean; fullscreen: boolean; hostCap: number; /** ADR-121: new-world rules */ hordes: boolean; hordeGraceDays: number; /** Task 22: AI humans in multiplayer (new worlds) */ aiHumans?: boolean; /** ADR-535: ambient zombies in new worlds (default on; off also stops hordes) */ zombies?: boolean; /** ADR-126: tool symbol near resource nodes */ toolHints: boolean; /** ADR-173: name tags over other players */ nameTags?: boolean; /** ADR-306: hidden-ledge drop arrows (on by default; off for a harder run) */ ledgeWarnings?: boolean; /** ADR-239/243: HUD temperature units (default F; C only with tempUnitChosen) */ tempUnit?: "C" | "F"; /** ADR-243: the player picked tempUnit themselves */ tempUnitChosen?: boolean }
 /** ADR-121: the world rules a NEW local / hosted world is created with (an existing save keeps its own). */
-export function newWorldRules(s: Settings = loadSettings()): { hordes: boolean; hordeGraceDays: number; aiHumans: boolean } { return { hordes: s.hordes !== false, hordeGraceDays: Math.max(0, Math.min(30, Number(s.hordeGraceDays) || 0)), aiHumans: s.aiHumans !== false }; }
+export function newWorldRules(s: Settings = loadSettings()): { hordes: boolean; hordeGraceDays: number; aiHumans: boolean; zombies: boolean } { return { hordes: s.hordes !== false, hordeGraceDays: Math.max(0, Math.min(30, Number(s.hordeGraceDays) || 0)), aiHumans: s.aiHumans !== false, zombies: s.zombies !== false }; }
 const SETTINGS_KEY = "engine-settings";
 /** ADR-243: the HUD temperature unit a Settings object resolves to. °F is the default; °C only when the player picked it
  *  (`tempUnitChosen`). A bare `tempUnit: "C"` is the ADR-239 default that every Settings save wrote, not a choice -> °F. */
@@ -55,7 +55,7 @@ export function tempUnitControl(s: { tempUnit?: string; tempUnitChosen?: boolean
 }
 export function saveSettings(s: Settings): void { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as object), ...s })); } catch { /* private mode */ } }
 export function loadSettings(): Settings {
-  try { return { bots: 3, showHud: true, fullscreen: true, hostCap: 12, hordes: true, hordeGraceDays: 3, aiHumans: true, toolHints: true, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as Partial<Settings> }; } catch { return { bots: 3, showHud: true, fullscreen: true, hostCap: 12, hordes: true, hordeGraceDays: 3, aiHumans: true, toolHints: true }; }
+  try { return { bots: 3, showHud: true, fullscreen: true, hostCap: 12, hordes: true, hordeGraceDays: 3, aiHumans: true, zombies: true, toolHints: true, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as Partial<Settings> }; } catch { return { bots: 3, showHud: true, fullscreen: true, hostCap: 12, hordes: true, hordeGraceDays: 3, aiHumans: true, zombies: true, toolHints: true }; }
 }
 
 const CSS = (base: string): string => `@font-face{font-family:Fredoka;src:url(${base}art/ui/fonts/Fredoka.ttf) format("truetype");font-display:swap}
@@ -404,6 +404,8 @@ export class BootUI {
         const l5 = document.createElement("label"); l5.append("Roaming zombie hordes (new worlds)", hz);
         const gd = document.createElement("input"); gd.type = "number"; gd.min = "0"; gd.max = "30"; gd.step = "0.5"; gd.value = String(s.hordeGraceDays ?? 3); gd.style.width = "70px"; gd.dataset["setting"] = "hordeGraceDays"; bindTypingFullscreenExit(gd);
         const l6 = document.createElement("label"); l6.append("Horde grace period (in-game days)", gd);
+        const zb = document.createElement("input"); zb.type = "checkbox"; zb.checked = s.zombies !== false; zb.dataset["setting"] = "zombies"; // ADR-535
+        const l6b = document.createElement("label"); l6b.append("Zombies (new worlds)", zb);
         const tu = tempUnitControl(s); const l7 = tu.el; // ADR-243: near the top, gamepad/touch toggle
         // ADR-483: the in-game-only rows, brought to the start menu. Graphics/audio/FX live-apply
         // (same as in-game); the three toggles are plain engine-settings booleans saved on Save.
@@ -424,8 +426,8 @@ export class BootUI {
         const fxRows = opts.fx ? fxSettingsRows(opts.fx) : undefined;
         const audioRows = opts.audio ? audioSettingsRows(opts.audio) : undefined;
         const manage = document.createElement("button"); manage.className = "alt"; manage.textContent = "Delete progress…"; manage.dataset["action"] = "manage-saves"; manage.addEventListener("click", saves);
-        const save = (): void => { const qp = parsePreset(q.value) ?? DEFAULT_QUALITY_PRESET; savePreset(qp); localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as object), bots: Math.max(0, Math.min(12, Number(bots.value) || 0)), showHud: hud.checked, fullscreen: fs.checked, toolHints: th.checked, nameTags: nt.checked, ledgeWarnings: lw.checked, hordes: hz.checked, hordeGraceDays: Math.max(0, Math.min(30, Number(gd.value) || 0)), aiHumans: ah.checked, hostCap: Math.max(2, Math.min(32, Math.round(Number(cap.value)) || 12)), ...tu.patch() })); main(); };
-        this.screen([["Save", save], ["Back", main, "alt"]], main, `<h2>Settings</h2>`, l7, l1, l1b, l2, l3, l4, l5, l6, l8, l9, l10, l11, ...(fxRows ? [fxRows] : []), ...(audioRows ? [audioRows] : []), manage);
+        const save = (): void => { const qp = parsePreset(q.value) ?? DEFAULT_QUALITY_PRESET; savePreset(qp); localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...(JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}") as object), bots: Math.max(0, Math.min(12, Number(bots.value) || 0)), showHud: hud.checked, fullscreen: fs.checked, toolHints: th.checked, nameTags: nt.checked, ledgeWarnings: lw.checked, hordes: hz.checked, hordeGraceDays: Math.max(0, Math.min(30, Number(gd.value) || 0)), zombies: zb.checked, aiHumans: ah.checked, hostCap: Math.max(2, Math.min(32, Math.round(Number(cap.value)) || 12)), ...tu.patch() })); main(); };
+        this.screen([["Save", save], ["Back", main, "alt"]], main, `<h2>Settings</h2>`, l7, l1, l1b, l2, l3, l4, l5, l6, l6b, l8, l9, l10, l11, ...(fxRows ? [fxRows] : []), ...(audioRows ? [audioRows] : []), manage);
       };
       // Delete progress (ADR-099, ADR-436): pick what to delete from this device, then hold to confirm.
       const slot = opts.slot ?? "1";

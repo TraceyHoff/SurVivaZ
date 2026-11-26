@@ -62,6 +62,8 @@
     "animal_cow": 1.2,
     "animal_elk": 2,
     "animal_wolf": 2.2,
+    "animal_cougar": 3,
+    "animal_wolverine": 2.4,
     "animal_bison": 2.5,
     "animal_moose": 2.8,
     "animal_horse": 2,

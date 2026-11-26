@@ -88,6 +88,7 @@ import { task420AtlasSources, installTask420MenuIcons, TASK420_ATLAS_KEYS } from
 import { task421AtlasSources, installBoatMenuIcons, TASK421_ATLAS_KEYS } from "./task421-art.js";
 import { task422AtlasSources, installMotorboatMenuIcons, TASK422_ATLAS_KEYS } from "./task421-art.js";
 import { task479AtlasSources, installSailboatMenuIcons, TASK479_ATLAS_KEYS } from "./task421-art.js";
+import { task540AtlasSources, TASK540_ATLAS_KEYS } from "./task540-art.js"; // ADR-540: cougar + wolverine
 import { installGuideArt } from "./task364-art.js";
 import { installGuideMenuIcon } from "./guide-art.js";
 import { installWetWoodIcon } from "./wetwood-art.js"; // ADR-457: wet firewood's own icon
@@ -506,6 +507,8 @@ export class IsoView {
     for (const [k, src] of await task422AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-479: dedicated sailboat atlas (world sprite keyed by def id, like ADR-421/422).
     for (const [k, src] of await task479AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
+    // ADR-540: dedicated cougar + wolverine atlases (animal sprites animal_cougar / animal_wolverine).
+    for (const [k, src] of await task540AtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-455: dedicated footprint atlas (one boot print, 8 facings — the ground decal for snow/mud).
     for (const [k, src] of await footprintAtlasSources()) if (registry.atlases.has(k)) sources.set(k, src);
     // ADR-501: dedicated animal-track atlas (two small iso-aligned ovals, 8 facings — the ground decal animals leave).
@@ -565,7 +568,7 @@ export class IsoView {
     // ADR-118: count atlas/KTX2 image responses as they land (Resource Timing works for fetch and <img>); expected =
     // the eager atlases (paper-doll/streamed ones load on demand later), so the fraction stays honest and capped < 1.
     // Task 34 blob URLs carry no file extension, so the png-regex watcher never counts them; exclude them so the fraction stays honest.
-    const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[]), ...(TASK355_ATLAS_KEYS as readonly string[]), ...(TASK361_ATLAS_KEYS as readonly string[]), ...(TASK410_ATLAS_KEYS as readonly string[]), ...(TASK420_ATLAS_KEYS as readonly string[]), ...(TASK421_ATLAS_KEYS as readonly string[]), ...(TASK422_ATLAS_KEYS as readonly string[])]);
+    const paintedAtlas = new Set<string>([...(TASK34_ATLAS_KEYS as readonly string[]), ...(TASK256_ATLAS_KEYS as readonly string[]), ...(TASK355_ATLAS_KEYS as readonly string[]), ...(TASK361_ATLAS_KEYS as readonly string[]), ...(TASK410_ATLAS_KEYS as readonly string[]), ...(TASK420_ATLAS_KEYS as readonly string[]), ...(TASK421_ATLAS_KEYS as readonly string[]), ...(TASK422_ATLAS_KEYS as readonly string[]), ...(TASK540_ATLAS_KEYS as readonly string[])]);
     const expected = [...registry.atlases.keys()].filter((k) => !custom.includes(k) && !paintedAtlas.has(k)).length;
     const stopWatch = watchResources(/\.(png|webp|ktx2|avif|jpe?g)(\?|$)/i, (n, bytes) => onStage("atlases", countFraction(n, expected), `Loading sprite atlases (${n}/${expected}${bytes ? `, ${(bytes / 1048576).toFixed(1)} MB` : ""})`));
     // ADR-380: the initial setRegistry has no frames to protect — disable the ADR-190 resize slicer for it (its

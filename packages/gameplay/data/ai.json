@@ -1,5 +1,5 @@
 {
- "$comment": "Per-archetype behavior data (consumed by an external AgentController / AI; gameplay runs no controller). aggro.mode: hostile|territorial|defensive|passive. Zombies use fromZombies=true: hp/speed/attack/sight come from zombies.json. loot: item keys from items.json; chance 0..1. Animal kinds match art keys (animal_*). The wolf is goofy: aggro only at close range, flees early.",
+ "$comment": "Per-archetype behavior data (consumed by an external AgentController / AI; gameplay runs no controller). aggro.mode: hostile|territorial|defensive|passive. Zombies use fromZombies=true: hp/speed/attack/sight come from zombies.json. loot: item keys from items.json; chance 0..1. Animal kinds match art keys (animal_*). The wolf is goofy by day (close aggro, flees early) and bolder at night (ADR-538: wider aggro, never flees).",
  "archetypes": {
   "zombie_walker": {
    "kind": "zombie",
@@ -355,6 +355,8 @@
    "kind": "animal",
    "pack": true,
    "activity": {"night": 1,"dawn": 0.4,"day": 0.4,"dusk": 1},
+   "aggroActivity": {"night": 1.5,"dawn": 0.4,"day": 0.25,"dusk": 1},
+   "nightFleeHpFrac": 0,
    "hp": 70,
    "speed": 3.4,
    "perception": {
@@ -399,6 +401,140 @@
     },
     {
      "item": "fur",
+     "min": 1,
+     "max": 2,
+     "chance": 1
+    },
+    {
+     "item": "bone",
+     "min": 1,
+     "max": 2,
+     "chance": 0.8
+    },
+    {
+     "item": "sinew",
+     "min": 1,
+     "max": 1,
+     "chance": 0.7
+    }
+   ]
+  },
+  "animal_cougar": {
+   "kind": "animal",
+   "pack": false,
+   "activity": {"night": 1,"dawn": 0.4,"day": 0.4,"dusk": 1},
+   "aggroActivity": {"night": 1.5,"dawn": 0.4,"day": 0.25,"dusk": 1},
+   "nightFleeHpFrac": 0,
+   "hp": 120,
+   "speed": 3.8,
+   "perception": {
+    "sightRange": 12,
+    "hearingMul": 1.5,
+    "fovDeg": 240
+   },
+   "aggro": {
+    "mode": "hostile",
+    "range": 4,
+    "leashRange": 12
+   },
+   "flee": {
+    "hpFrac": 0.3,
+    "range": 10
+   },
+   "wander": {
+    "radius": 16,
+    "idleSeconds": [
+     1,
+     4
+    ]
+   },
+   "attack": {
+    "damage": 10,
+    "range": 1.2,
+    "cooldownSeconds": 1.3
+   },
+   "loot": [
+    {
+     "item": "raw_prime_cut",
+     "min": 2,
+     "max": 3,
+     "chance": 1
+    },
+    {
+     "item": "fur_pelt",
+     "min": 1,
+     "max": 1,
+     "chance": 1
+    },
+    {
+     "item": "fur",
+     "min": 1,
+     "max": 2,
+     "chance": 1
+    },
+    {
+     "item": "bone",
+     "min": 1,
+     "max": 2,
+     "chance": 0.8
+    },
+    {
+     "item": "sinew",
+     "min": 1,
+     "max": 1,
+     "chance": 0.7
+    }
+   ]
+  },
+  "animal_wolverine": {
+   "kind": "animal",
+   "pack": false,
+   "activity": {"night": 1,"dawn": 0.4,"day": 0.4,"dusk": 1},
+   "aggroActivity": {"night": 1.5,"dawn": 0.4,"day": 0.25,"dusk": 1},
+   "nightFleeHpFrac": 0,
+   "hp": 90,
+   "speed": 3.2,
+   "perception": {
+    "sightRange": 10,
+    "hearingMul": 1.3,
+    "fovDeg": 220
+   },
+   "aggro": {
+    "mode": "hostile",
+    "range": 3,
+    "leashRange": 10
+   },
+   "flee": {
+    "hpFrac": 0.2,
+    "range": 8
+   },
+   "wander": {
+    "radius": 12,
+    "idleSeconds": [
+     1,
+     4
+    ]
+   },
+   "attack": {
+    "damage": 8,
+    "range": 1.0,
+    "cooldownSeconds": 1.2
+   },
+   "loot": [
+    {
+     "item": "raw_meat",
+     "min": 1,
+     "max": 2,
+     "chance": 1
+    },
+    {
+     "item": "fur",
+     "min": 1,
+     "max": 2,
+     "chance": 1
+    },
+    {
+     "item": "animal_fat",
      "min": 1,
      "max": 2,
      "chance": 1
@@ -965,6 +1101,7 @@
   "animal_bear": {
    "kind": "animal",
    "activity": {"night": 1,"dawn": 0.4,"day": 0.4,"dusk": 1},
+   "aggroActivity": {"night": 1.5,"dawn": 0.4,"day": 0.25,"dusk": 1},
    "hp": 260,
    "speed": 3.3,
    "perception": {
@@ -976,6 +1113,15 @@
     "mode": "territorial",
     "range": 5,
     "leashRange": 14
+   },
+   "zombiesOff": {
+    "$comment": "ADR-536: with zombies off the bear hunts instead of holding territory — hostile mode (anyone close, not just near home), a longer reach, and it never flees. The base territorial values above still apply whenever zombies are on. Applied by animalDefsZombiesOff(); the tameable-initiation guard (ADR-354) and the safe-radius acquisition ban are untouched (a bear is not tameable).",
+    "aggro": {
+     "mode": "hostile",
+     "range": 8,
+     "leashRange": 20
+    },
+    "fleeHpFrac": 0
    },
    "flee": {
     "hpFrac": 0.1,

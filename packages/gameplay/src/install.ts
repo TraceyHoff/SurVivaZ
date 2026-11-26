@@ -47,6 +47,7 @@ import { expressionSystem, EXPRESSION_EVERY } from "./expression.js";
 import { stallDisplaySystem, STALL_DISPLAY_EVERY } from "./systems/stall_display.js";
 import { storeFillSystem, STORE_FILL_EVERY } from "./systems/store_fill.js";
 import { hordeDirectorSystem, HORDES_EVERY, setWorldRules, type WorldRulesOpts } from "./hordes.js";
+import { packDirectorSystem, PACKS_EVERY } from "./packs.js";
 
 export * from "./spawn.js";
 
@@ -94,6 +95,7 @@ export const GAMEPLAY_SYSTEM_ORDER: readonly (readonly [Phase, string, number?])
   ["simulation", "gameplay.rope"], // ADR-351: rope lead follow / balk / break / arrival (after animal AI)
   ["simulation", "gameplay.dung", DUNG_EVERY], // ADR-352: animal dung production (after animal AI; 1 s check)
   ["simulation", "gameplay.hordes", HORDES_EVERY], // ADR-121 server director (no-op on clients / when disabled)
+  ["simulation", "gameplay.packs", PACKS_EVERY], // ADR-539 pack director (runs instead of hordes when hordes are off)
   ["simulation", "gameplay.stance"], // ADR-244 carry follow / block break / sleep heal / night skip (authority)
   ["simulation", "gameplay.vitals"],
   ["simulation", "gameplay.diseases"], // Task 13: symptom drains + exposure + transmission (after vitals, before death)
@@ -155,7 +157,7 @@ export function installGameplay(world: World, options: GameplayOptions | number 
     "gameplay.recruitment": recruitmentSystem,
     "gameplay.clearIntents": clearIntentsSystem, "gameplay.equipmentSync": equipmentSyncSystem, "gameplay.noiseDecay": noiseDecaySystem,
     "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.storeFill": storeFillSystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.abandonedStamps": (w) => { pumpAbandonedStamps(w); }, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.flood": floodSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
-    "gameplay.hordes": hordeDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem, "gameplay.rope": ropeSystem, "gameplay.dung": dungSystem,
+    "gameplay.hordes": hordeDirectorSystem, "gameplay.packs": packDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem, "gameplay.rope": ropeSystem, "gameplay.dung": dungSystem,
     ...installBuildingSystems(world), ...installCombatSystems(world),
   };
   installProgression(world);

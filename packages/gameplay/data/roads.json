@@ -41,5 +41,22 @@
     "siegeMinutes": 30,
     "lightSeekTiles": 20,
     "noiseTargetRadius": 32
+  },
+  "packs": {
+    "intervalDays": 1,
+    "warnSeconds": 30,
+    "phases": ["dusk", "night"],
+    "solo": { "base": 3, "cap": 6 },
+    "clan": { "base": 6, "perMember": 2, "cap": 12 },
+    "levelScalePerLevel": 0.05,
+    "dayScalePerDay": 0.03,
+    "scaleCap": 2.5,
+    "maxActivePacks": 3,
+    "maxPackAnimals": 36,
+    "spawnRingMin": 36,
+    "spawnRingMax": 48,
+    "composition": { "animal_wolf": 4, "animal_bear": 1 },
+    "noiseMin": 8,
+    "siegeMinutes": 30
   }
 }

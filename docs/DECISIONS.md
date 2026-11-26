@@ -13332,3 +13332,520 @@ wall-clock flake — passes alone 1/1 on re-run; the file has zero references to
 `agents_persist.test.ts` client (5 s timeout under full-suite load — passes alone 1/1). New tests
 re-run by the coordinator on the final tree: 4/4. Gate verdict: GREEN (modulo the 3 known failures).
 Nothing pushed — push decision is the parent's.
+
+## ADR-535 — Zombies on/off setting for new worlds (2026-11-25)
+
+**Ask.** A settings toggle to disable zombies entirely (user, 2026-11-25). Ruling (§0b, user
+2026-11-25 ~15:07 CST): the toggle is **new-world-only**, following the hordes precedent — there
+is no live toggle for an existing world, and no standing-zombie despawn. **Zombies-off implies
+hordes-off / packs-on**: a horde is zombies, so the contradictory zombies-off + hordes-on
+combination resolves to no hordes (predator packs replace hordes in ADR-539).
+
+**Change.** `WorldRules` gains `zombies: "u8"` (default 1/on; `components.ts`, appended last so
+existing field order is untouched). `WorldRulesOpts` / `setWorldRules` / `worldRules` (`hordes.ts`)
+carry it, defaulting to on when no rules component exists. Enforcement when off, all three ambient
+paths: (a) `installPopulation` (`population.ts`) filters out `category === "zombie"` entries, so
+`PopulationZombies` is never set and the legacy spawner has no population owner; (b)
+`zombieSpawnerSystem` (`combat/zombies.ts`) returns early — it reads the `WorldRules` component
+directly because `hordes.ts` imports this module and `worldRules()` back would be an ESM cycle;
+(c) `hordeDirectorSystem` returns early on `!rules.hordes || !rules.zombies` (same bookkeeping +
+pending-warning clear as hordes-off). Verified no other `spawnZombie` callers exist outside the
+spawner / director / tests — `spawnZombie` itself and the `forceHorde` dev hook stay ungated
+deliberately. Settings: `Settings.zombies` + a "Zombies (new worlds)" checkbox in the main-menu
+Settings screen (`menu.ts`, default on), `newWorldRules()` passthrough. Save meta: `WorldMeta.zombies`
+(`persist/types.ts`), `extraMeta` writes it and the load override applies it with meta winning over
+launch options (`game.ts`, hordes pattern). Pause menu (`game-menus.ts:316`) shows
+`zombies ON/OFF · zombie hordes … · AI humans …`, with hordes read as *effectively* off when
+zombies are off (the director forces it). Guide (`guide.json`, combat section): one prose line —
+zombies can be turned off in Settings for a new world, hordes turn off with them (prose carries no
+digits, so no fact needed). Migration: `WORLD_RULES_ZOMBIES_MIGRATIONS` (`migrate.ts`, in
+`DEFAULT_MIGRATIONS`) covers both pre-zombies layouts — saves written after aiHumans (Task 22) and
+saves predating both fields — so old saves load with zombies ON; the live value comes from the save
+meta, which has no `zombies` key on old saves, so `game.ts` falls back to on. An old save must never
+silently change difficulty — tested explicitly at the schema level and through a real local server
+reload.
+
+**Verification.** New tests (12): `packages/gameplay/test/adr535_zombies_toggle.test.ts` (8) —
+rules default/merge; population spawner off (0 zombies, `PopulationZombies` unset, wolves still
+spawn) vs on control; legacy spawner off (0 in 2000 calls) vs on control; director off (no pending,
+no Warning, 0 zombies, with hordes on) vs on control (Warning scheduled); a directly spawned
+zombie is untouched by the toggle. `packages/persist/test/adr535_zombies_migration.test.ts` (1) —
+`planFor` maps both pre-zombies layouts. `apps/client/test/adr535_zombies_toggle.test.ts` (3) —
+settings round-trip through localStorage/`newWorldRules`; a zombies-off world persists `zombies: 0`
+and reloads off; an old save with no `zombies` meta key loads on. 8 of the 12 fail on the pre-change
+code (stash check); the 4 that pass there are the by-design controls (zombies-on behaviour and the
+direct-spawn pin). Neighbours: gameplay population/hordes/zombie/menu/guide suites 10 files /
+106 passed; persist package 24 files / 67 passed (plus `bench.test.ts`, the known autosave p95
+wall-clock flake — passes alone 1/1); client menu/settings/guide suites 6 files / 39 passed.
+Typecheck clean with lockfile-pinned TypeScript 5.9.3 across all 11 projects (`pnpm -r typecheck`,
+exit 0; re-confirmed 11/11 Done, zero failures). Full gate NOT run (coordinator runs it once at
+the end of the batch). New tests re-run on the final tree: 12/12. Nothing pushed.
+
+**Honest cuts.** The Settings checkbox itself is covered by the localStorage round-trip, not a DOM
+test (the settings screen is built inside the menu closure, like the hordes checkbox before it).
+The guide's zombie numbers (night rate/cap) are static data and stay visible in a zombies-off
+world — the guide has no per-world conditional; the new prose line is the only per-world note.
+Standing zombies in a world are untouched: the toggle gates spawning only, and a world created
+with zombies off can still gain a zombie through a direct spawn / dev hook. Phone/Xbox check still
+owed: the checkbox reachable and the rule line reading correctly in the pause menu on the phone.
+
+## ADR-536 — More predators when zombies are off (2026-11-25)
+
+**Ask.** With zombies off, more predator animals spawn on the map, and bears are more
+aggressive when zombies are disabled (user rulings §0b, 2026-11-25 ~15:07 CST).
+
+**Change.** Data + wiring only, in `installPopulation` (`population.ts`) and the spawn-table
+loader (`ai/population.ts`):
+- `spawns.json` gains a `zombiesOff.predators` block — per-species density/cap multipliers,
+  applied by the new pure `applyZombiesOffPredatorBoost()` to the already-built spawn entries
+  (after `toSpawnEntries` + the mode caps, so mp's capMul still composes: mp wolf 15 → 45,
+  bear 6 → 18). Wolf and bear both ×3: wolf density 0.15, globalCap 10 → 30 (per-chunk 3 → 9);
+  bear density 0.06, globalCap 4 → 12 (per-chunk 1 → 3). Group sizes clamp to the boosted
+  per-chunk cap, the same rule `scaleAnimalCaps` uses — `scaleAnimalCaps` itself was NOT reused
+  because it scales *every* animal (rabbits included); the per-species override is the cleaner
+  knob, and the numbers are playtest tunables in the data file, not hardcoded magic.
+  `minPlayerDistance` stays 10 for both. Boar stays unboosted (defensive, not a predator).
+- Bear aggression: `ai.json` `animal_bear` gains a `zombiesOff` override (hostile mode, range
+  5 → 8, leashRange 14 → 20, `fleeHpFrac` 0.1 → 0 — a mauled bear still hunts). It is data
+  where possible, but the condition is per-world, so `population.ts` applies it: `animalDefs()`
+  carries the override, `animalDefsZombiesOff()` returns the cached boosted defs, and
+  `animalAISystem` picks one array or the other per run from `worldRules(world).zombies` — the
+  base defs are untouched, so zombies-on behaviour is byte-identical. The override flows
+  through the existing `wants` / threat-radius / leash / flee branches with no new state; the
+  tameable-initiation guard (ADR-354) and the safe-radius acquisition ban are untouched (a bear
+  is not tameable, and `safeTarget` still gates engagement inside the radius).
+- Safe radius: `isAggressiveSpawnKind(kind, category, zombiesOff?)` — a boosted bear counts as
+  aggressive only when zombies are off, so boosted bears never *spawn* inside 20 tiles of a
+  spawn point either (the prep's open question, decided: no boosted bears near spawn).
+  `installPopulation` passes `!zombiesOn` into the spawn host's gate.
+
+**Numbers (why ×3).** The ambient zombie table totals ~97 globalCap (walker 60 + runner 25 +
+brute 8 + snuffer 4). ×3 gives 30 wolves + 12 bears = 42 predators — deliberately below 97:
+wolves are individually weaker than zombies (70 hp, 4 damage, flee at 70% hp) so 30 of them is
+meaningful pressure without matching zombie counts 1:1, and 12 bears at 260 hp / 24 damage is
+plenty. Density is raised with the caps because density is what drives the per-chunk target;
+raising caps alone would not spawn more. All of it is a starting point for playtesting, not a
+formula — see §6 of the prep (numbers need a playtest with the toggle off).
+
+**Verification.** New `packages/gameplay/test/adr536_predator_boost.test.ts` (11 tests):
+spawn-table pins (zombie entries absent + wolf 30 / bear 12 + rabbit/boar unchanged when off;
+wolf 10 / bear 4 + zombies present when on); the boost as a pure transform (composes after
+mp caps, leaves zombie entries alone, no-op without the data block; bad boost data rejected);
+boosted-def pins (only the bear changes; every other species identical in both arrays);
+live bear hunts a player at 7 tiles when off (outside territorial 5, inside hostile 8) and
+bites, holds territory when on; a hurt bear never flees when off, flees at 5% hp when on;
+`isAggressiveSpawnKind` bear true only when zombiesOff; spawner gate (0 boosted predators in
+a bed-covered chunk, spawns freely without beds). 8/11 fail on the pre-change code (stash
+check); the 3 passing there are the by-design zombies-on controls. Neighbours: 20 files /
+178 passed (population, animals, adr110, adr325/326, adr348, adr353, adr354, adr377,
+adr462/463, adr475, adr487, adr494/495/496, adr535, spawn_points, task15, roads_signs_hordes).
+Typecheck clean with lockfile-pinned TypeScript 5.9.3 across all 11 projects (log
+`~/workspace/work/adr536_typecheck.log`). Full gate NOT run (coordinator runs it once at the
+end of the batch). Nothing pushed.
+
+**Honest cuts.** The numbers are unplaytested starting defaults (see above) — the world may
+feel empty or unfair with the toggle off until someone plays it. The bear's night behaviour
+is unchanged by this slice (activity 0.4× by day still shrinks the boosted range to 3.2 by
+day); bigger night aggro is ADR-538. Wolves keep their goofy flee-at-70% behaviour — only
+their numbers rise. No new predator species here (that is the art job in the rulings, not
+this slice). Phone/Xbox check still owed: predator density and bear aggression in a real
+zombies-off world.
+
+## ADR-538 — Predators more aggressive at night: larger aggro range after dark (2026-11-25)
+
+**Ask.** Predators more aggressive at night, with a larger aggro range than daytime (user ask
+#5, 2026-11-25). Applies to predators generally — NOT gated on the zombies toggle: night
+predators are scarier whether zombies are on or off. Zombies are out of scope (their day/night
+temperament already exists in `zombieAggressive()`); defensive/passive animals are out of scope
+(their 0.4 night activity is a sleepiness model, not aggression).
+
+**Decision: split the window, don't raise `activity`.** The cheapest version (data-only: wolf
+night `activity` 1.0 → 1.5) was evaluated and rejected on two counts. First, it is actually
+blocked: ADR-495 validation pins `activity` to (0, 1] and its test asserts 1.5 is invalid, so
+raising it would mean loosening a guard another ADR deliberately set. Second, the coupling is
+real: `activityMul` is also the wander share (0.5 × activity), so a 1.5 night activity would
+make night wolves wander on 75% of thinks instead of 50% — night restlessness, a different
+behaviour change than "larger aggro range". So the engagement range gets its own window:
+- `ai.json` archetypes gain an optional `aggroActivity` window (same four-phase shape).
+  `population.ts` adds `aggroActivityMul(def, phase)` = the species' own aggro window when
+  present, else its `activity` window — so every species without one keeps today's behaviour
+  exactly, including defensive/passive animals whose 0.4 night activity still shrinks their
+  defensive range at night. Validation caps the aggro window at (0, 2]: above 1.0 is the point
+  of the field, but 2 bounds how far a data edit can push one species' range.
+- `animalAISystem` uses `aggroActivityMul` in the `wants` engagement check only; the wander
+  roll still uses `activity`. No new state, no new scan, no per-frame cost — one extra
+  multiply per animal per run, on the values already read.
+- Wolf and bear both get `aggroActivity: { night: 1.5, dawn: 0.4, day: 0.25, dusk: 1 }`.
+  Dawn/dusk match their activity window; only night goes up and day goes down, so the change
+  is exactly "scarier at night, calmer by day". The snake (territorial, night 0.4) is left
+  alone — a venomous ambush animal, not a hunting predator; boar/moose/elk/bison are defensive
+  and out of scope.
+
+**Numbers (playtest tunables, not a formula).** Effective aggro ranges (× fog, before leash):
+- Wolf 2.5 → **3.75 at night, 0.625 by day** (was 2.5 / 1.0). Dawn 1.0, dusk 2.5, unchanged.
+- Bear 5 → **7.5 at night, 1.25 by day** (was 5 / 2.0). Dawn 2.0, dusk 5, unchanged.
+- The overtuning line from the prep was a 2.5-tile wolf becoming a 6-tile no-flee night
+  hunter; 3.75 stays well under it, and the leash (wolf 7, bear 14) and chase limit (18)
+  still bound every pursuit. A player who hears a wolf at night can still break the leash.
+- **No-flee at night for wolves:** `nightFleeHpFrac: 0` — a wolf hurt below 70% hp keeps
+  fighting after dark instead of breaking off; by day it still flees at 70% hp. Implemented
+  as a phase-gated effective flee threshold in `animalAISystem` (one line + one optional
+  data field, validated as a fraction). The bear keeps its 0.1 flee threshold at night
+  (zombies-on); it already never flees when zombies are off (ADR-536). No night speed bump:
+  movement speeds are identical day/night — the threat comes from range + commitment, not
+  from wolves you cannot outrun. A speed bump is a separate tuning decision if playtesting
+  says night wolves still feel toothless.
+
+**Composition with ADR-536.** The night multiplier multiplies the def's range, and the
+zombies-off bear's def range is the boosted 8 — so a zombies-off bear is **12 at night
+(8 × 1.5) and 2 by day (8 × 0.25)**. Note the day number moved: ADR-536 documented the
+boosted bear's day range as 3.2 (8 × 0.4 activity); it is now 2.0 — the day/night contrast
+is the point of this slice, but it means boosted bears are noticeably tamer by day than
+ADR-536 shipped. The night 12 still fits inside the boosted leash (20) and the chase limit
+(18), so the threat scan (max(fleeRange, leashRange)) always sees a target the bear could
+engage. The wolf is identical in both worlds (no `zombiesOff` override). The `zombiesOff`
+def spread (`animalDefsZombiesOff`) preserves `aggroActivity`/`nightFleeHpFrac` untouched.
+
+**Verification.** New `packages/gameplay/test/adr538_night_aggression.test.ts` (14 tests):
+table pins (wolf/bear aggro 1.5 night / 0.25 day, activity unchanged, effective ranges,
+nightFleeHpFrac wolf 0 / bear undefined; boosted-bear composition 12 / 2; aggro defaults to
+activity for deer/moose/elk/bison/boar/snake/chicken/dog/rabbit; validation pins for the new
+fields); live wolf range pins by phase (engages 3.5 not 4.0 at night, 0.5 not 1.0 by day,
+same night range with zombies off); hurt-wolf no-flee at night vs flee by day; wolf bites
+after closing from 3.5 tiles; wander share still 0.5 at night (statistical pin, 50–100 of
+150 thinks — a 1.5× activity leak would give ~112); live bear range pins (7 at night, not 2
+by day; boosted bear 11 at night, not 3 by day); defensive/territorial unchanged (hurt boar
+still engages at 2.5 at night; snake will not strike at 1.0 at night but does by day).
+11/14 fail on the pre-change code (stash check); the 3 passing there are the by-design
+no-change pins (boar, snake, wander share). Neighbours: 29 files / 287 passed
+(population, animals, adr110, adr319, adr325/326, adr348, adr352/353/354, adr377, adr462/463,
+adr475, adr485/486/487, adr494/495/496, adr535/536, spawn_points, task15, roads_signs_hordes,
+skills, xp_equip). Typecheck clean with lockfile-pinned TypeScript 5.9.3 across all 11
+projects (log `~/workspace/work/adr538_typecheck.log`). Full gate NOT run (coordinator runs
+it once at the end of the batch). Nothing pushed.
+- Neighbour updates (same commit, behaviour pins only — no production code beyond this
+  slice): `animals.test.ts` goofy-wolf test now runs its flee half by day (a hurt wolf no
+  longer flees at night); `adr494_pack_hunt` runs its two 1-tile wolf engagements at night
+  (by day 1 tile is outside the 0.625 range, so there would be no hunt to join); the ADR-536
+  bear control moves from 7 to 8 tiles (outside the new 7.5 night range, still inside the
+  boosted 8 it distinguishes from) with `thinkAt` pinned so a wander step cannot cross the
+  0.5-tile margin; ADR-377 golden hashes re-pinned (open `b4c7dcfb`, base `e4b537a6` —
+  deliberate behaviour change, stable across two runs; the scenario runs at the default day
+  phase, where wolf/bear day ranges shrank).
+
+**Honest cuts.** The numbers are unplaytested starting defaults — 3.75-tile night wolves
+that never flee, and 12-tile night bears with zombies off, may feel unfair until someone
+plays them at night, and the day ranges (wolf 0.625, boosted bear 2.0) may feel too tame
+by day. All of it is data in `ai.json` (`aggroActivity`, `nightFleeHpFrac`), tunable
+without code. No night speed bump (see above). No new predator species (art job, not this
+slice). Phone/Xbox check still owed: night predator pressure in a real world, zombies on
+and off.
+
+## ADR-537 — Predators hunt by noise and smell: hearing + zombie-style smell + uncooked meat (2026-11-25)
+
+**Ask.** Predators hunt players by noise and smell like zombies (user ask #3, 2026-11-25).
+User rulings (2026-11-25 ~15:07 CST) fix the smell scope: zombie-style (carcasses, rot, kill
+loot bags, lit fires) PLUS **uncooked meat** — and explicitly **no new player smell**:
+predators never smell the player's scent. Applies to predators generally — NOT gated on the
+zombies toggle: a wolf hunts by sense whether zombies are on or off (ADR-538's night
+aggression composes with it untouched — no `aggroActivity` / `nightFleeHpFrac` numbers
+changed here).
+
+**Decision: reuse the zombie senses, add one Investigate state, add one meat spec.**
+
+- **Hearing.** `animalAISystem` reuses `NoiseLevel` (`systems/noise.ts`) on think ticks only:
+  a hostile-mode animal hears the nearest living survivor at `NoiseLevel × hearingMul`,
+  where `hearingMul` is the existing ai.json `perception.hearingMul` — until this slice the
+  whole `perception` block was dead data gameplay never read (wolf 1.4, bear 1.2). A walking
+  player is heard at ~17 tiles by a wolf (12 × 1.4) and a sprinter at ~25 (18 × 1.4); a door
+  (5) at ~7. Crouch and stealth already shrink `NoiseLevel` in `makeNoise`, so hearing
+  respects them for free; fog does not shrink hearing, the zombie precedent (ADR-487).
+  The scan reuses the already-built THREATS survivor list (the spatial-index fallback
+  covers the capped-list case, radius 40 bounds the loudest noise, an explosion at
+  27 × 1.4 = 37.8).
+- **Smell.** Reuses `strongestSmell()` from `combat/zombies.ts` (imported, not moved) on the
+  same think tick, bounded the same way (max 8 emitters, threshold 0.25): carcasses, rot,
+  kill loot bags, lit fires. A heard-but-unseen target and a smelt source both set an
+  **Investigate** goal — the animal walks to the noise/smell and only bites through its own
+  `wants` check once the prey is in aggro range, mirroring the zombie behaviour.
+- **Investigate state.** `AnimalState.Investigate = 6` — a new enum value in the existing
+  u8 `state` field. `Animal` is persistent/networked, but adding an enum value to a u8
+  field does not change the component schema (same fields, same types), so no migration.
+  An investigating animal moves at wander speed with a Walk anim (a cautious approach, not
+  a charge — unlike a zombie's Investigate, which runs); on arrival it idles, and the next
+  think re-samples the stimulus, falling through to the drink/wander re-roll when it is
+  gone. Between thinks an investigating animal keeps its goal without re-scanning (the
+  think branch only runs at `thinkAt` for Investigate, unlike Attack). Senses run before
+  pack share / drink / wander, and set `sensed`, so a sensing animal does not also drink
+  or share a pack hunt that think.
+- **Guards (nothing bypassed).** Senses run only for hostile-mode animals (`aggro.mode ===
+  "hostile"` — today the wolf, and the zombies-off bear via its ADR-536 override; the
+  zombies-on territorial bear does not hunt by sense), only when not tame, not scared, not
+  fleeing, and not already engaged/retaliating; the ADR-354 tameable-initiation guard is
+  checked explicitly (`!isTameableAnimalKey`) even though no tameable species is hostile in
+  current data. A heard survivor inside the spawn safe radius is never a target and a smell
+  inside it is never a goal (Task 33, same rule as `wants`). The goal must sit within
+  `pressHome` (min(leash × 2, chaseLimit 18) — wolf 14, zombies-off bear 18) of home, the
+  same bound an engaged animal keeps — so a wolf will not walk further to investigate than
+  it would chase.
+- **Uncooked meat as a smell source — exact scope.** A new `ai.smell.meat` spec
+  (`zombies.json`, radius 8, strength 1 — as strong as a carcass, the strongest short-range
+  draw; `defs.ts` `AiTuning.smell` gains the `meat` field, no validation change — the JSON
+  is passed through). It is a **WORLD emitter only**: the spoilage pass (the single
+  maintenance point, every 20 ticks, no new scan) attaches it to a **ground loot bag**
+  holding an item with `ItemDef.rawMeat` — a player-dropped bag (`dropOwnedBag`, the real
+  drop path), a kill bag, any `LootBag` on the ground. A bag with other spoilables (cooked
+  meat, berries) keeps the kill spec (radius 6, strength 0.8). **Carried meat never smells:**
+  the Inventory branch of the spoilage pass only ever attaches rot, so a player carrying
+  raw meat gets no emitter and draws no predator — there is no player-scent mechanic
+  anywhere in this slice. A kill bag is created with the kill spec (`dropAnimalLoot` /
+  `dropZombieLoot` unchanged, ADR-486 pins untouched) and upgrades to meat on the next
+  spoilage pass (≤ 1 s) when it holds raw meat; an emptied bag loses its smell on the next
+  pass, as before. Stored containers never smell (pre-existing ADR-486 v1 limit).
+
+**Per-think cost.** One scan of the small survivor list + one bounded smell query, only
+for hostile-mode animals with no target, only on think ticks (2–6 s, staggered) — no new
+per-tick scan, no new per-frame work. `strongestSmell` is one bounded spatial query per
+think, the same cadence zombies already pay.
+
+**Verification.** New `packages/gameplay/test/adr537_predator_senses.test.ts` (13 tests):
+table pins (wolf hearingMul 1.4, bear 1.2, Investigate = 6, meat tuning 8/1, threshold
+0.25); wolf hears a loud survivor and investigates (walks to the noise, does not instantly
+attack); hearing is noise-gated and hearingMul-gated (door noise 5 at 10 tiles is nothing,
+at 6 it draws the wolf); heard goal past the chase limit is not investigated (sprint heard
+at 25.2 tiles, goal 15 from home > pressHome 14); wolf investigates carcass and rot smells
+and ignores a below-threshold smell; wolf investigates a lit campfire's smoke (real
+campfire, full chain); wolf investigates dropped uncooked meat (real `dropOwnedBag` path,
+meat spec 8/1) while cooked meat keeps the kill spec (6/0.8); a kill's loot bag upgrades
+kill → meat on the spoilage pass; carried meat does NOT attract (explicit negative test:
+no emitter on the carrier after spoilage passes, wolf never investigates; rot-carrier
+control still smells per ADR-486); no acquisition inside the safe radius via hearing or
+smell; a tameable moose never initiates via senses; senses work with zombies on and off;
+the zombies-off bear hunts by noise while the zombies-on territorial bear does not.
+9/13 fail on the pre-change code (stash check); the 4 passing there are the by-design
+negative controls (carried meat, safe radius, tameable, chase limit). Neighbours: 31 files
+/ 307 passed (population, animals, adr110, adr319, adr325/326, adr348, adr352/353/354,
+adr377, adr388, adr462/463, adr475, adr485/486/487, adr494/495/496, adr535/536/538,
+roads_signs_hordes, skills, spawn_points, task15, xp_equip). Typecheck clean with
+lockfile-pinned TypeScript 5.9.3 across all 11 projects (log
+`~/workspace/work/adr537_typecheck.log`). Full gate NOT run (coordinator runs it once at
+the end of the batch). Nothing pushed.
+- Neighbour update (same commit, behaviour pin only — no production code beyond this
+  slice): ADR-377 golden hashes re-pinned (open `c4080356`, base `ca872380` — deliberate
+  behaviour change, stable across two runs). Drift attribution (scratch probe, same
+  scenario shape — 160 animals, 4 walking players, 20 zombies, 800 ticks): only wolves
+  ever enter Investigate (2 of 5 at the snapshot; 0 non-hostile, 0 bears); on pre-change
+  code the same probe has no Investigate at all. The golden players walk continuously, so
+  their walk noise (12) now draws wolves from ~17 tiles, and zombie kills leave raw-meat
+  bags that smell meat — both intended consequences of this slice.
+
+**Honest cuts.** The meat spec (8/1) is an unplaytested starting default — as strong as a
+carcass, it may draw wolves further than feels right; it is data in `zombies.json`,
+tunable without code. A kill bag smells kill (not meat) for up to 1 s until the spoilage
+pass upgrades it. Hearing is unwindowed by phase and fog: a wolf hears a walker at ~17
+tiles by day as well as by night (ADR-538's night effect is range, not hearing). A
+heard/smelt goal is a snapshot position — a survivor who goes quiet walks away from a wolf
+that keeps walking to where the noise was, by design (zombie Investigate works the same
+way). No new predator species (art job, not this slice). Phone/Xbox check still owed:
+predator pressure from noise/smell in a real world, zombies on and off; whether 17-tile
+hearing makes daytime wolves feel unfair.
+
+## ADR-539 — Predator packs replace hordes: open-air hunts that slip through open doors (2026-11-25)
+
+**Ask.** With zombie hordes off, packs of ferocious predator animals replace hordes and hunt
+players/AI humans the same way zombie hordes would (user ask #4, 2026-11-25). User ruling
+(2026-11-25 ~15:07 CST): packs hunt in the OPEN only — no attacking or chewing walls or
+structures — AND they watch for openings: an open door / way into a structure is how they get in.
+
+**Decision: a parallel pack director, prey targeting, and a predator steering loop.**
+
+- **Activation matrix (packs.ts `packsActive` / `hordesActive`, pure reads of WorldRules).**
+  Hordes run only when zombies ON and hordes ON. Packs run in every other combination:
+  zombies ON + hordes OFF → packs; zombies OFF + hordes ON → packs (a horde is zombies, so
+  the contradictory combination resolves to packs, per ADR-535); both off → packs. The horde
+  director needed two guards so it never clears or rewrites a pack Warning/Active status —
+  both directors share the HordeStatus channel.
+- **Director (`gameplay.packs`, every 20 ticks, after `gameplay.hordes` in system order).** A
+  parallel director, not a generalisation of the horde director: it reuses the cadence, the
+  dusk/night + grace + 1-day interval schedule (same `hordeGraceDays`, same low-level grace
+  doubling), the 30 s warning, the 36–48 tile spawn ring, the noise siege (ADR-476
+  `lastLoudNoise`, noiseMin 8, 30 siege minutes, re-target onto the noise maker, sieging packs
+  never pulled away), and the warning channel. It does NOT reuse the light-seek (predators do
+  not seek lamplight — cut, below) or `hordeSteer` (zombie-specific: it sets ZombieBrain).
+- **Targeting — the core difference from hordes.** A horde targets a structure group to attack.
+  A pack targets PREY: `packPreyTargets()` lists every living survivor (player or AI human),
+  outside-first, then by entity id. `hordeTargets()` is reused only to find the base whose
+  occupants are the prey — the watch point while the prey is indoors. "Inside" for the picker
+  is `shelterAt().enclosed` (roofed + walled-in). A pack with no prey never forms.
+- **Members.** Wolves (pack hunters already) + bears (the ferocious anchor), composition
+  wolf 4 / bear 1 in `roads.json` `packs`. Size mirrors `hordeSize` but smaller — solo 3–6,
+  clan 6–12 — as playtest tunables, same level/day scaling. Members are direct `spawnAnimal`
+  entities (untracked by the ambient PopulationSpawner, so they never despawn while the pack
+  lives) tagged with a NEW server-only `PackMember` component (pack id, prey entity, watch
+  point, siege clock) — never `HordeMember` on animals. Max 3 active packs / 36 pack animals.
+- **Steering (`packMemberTick`, in `animalAISystem`).** Pack members skip the normal animal
+  loop entirely: no wandering, fleeing, drinking, sharing, or herd behaviour while on a pack
+  hunt. The safe-radius acquisition ban, the leash/chase limit, and fleeing do not apply — a
+  directed pack is exempt, the same exemption horde members get (otherwise a pack could never
+  reach a player standing at home, and a hurt wolf would break off a directed hunt). Decisions
+  run every 20 ticks (the horde repath cadence); between decisions the member keeps its goal.
+  The bite is the normal animal bite, on the prey only.
+- **Watching for openings — exactly what it does.** When the prey is sheltered (enclosed, or
+  walled off from this member — a roofless pen counts too), the member walks to the nearest
+  door or open doorway of the shelter and holds there in Investigate, re-checking on its
+  20-tick decision cadence. A hung door counts as open iff its DoorState is open; a doorway
+  frame counts as a way in only when no door piece hangs in its slot (the door's attachment
+  belongs to the door piece, never to the frame — the first implementation resolved the frame
+  and every doorway read as open, which is how the bug was found). The moment a way in is
+  open, the goal becomes the prey and `creatureStep` routes the member through the opening —
+  its A* only ever passes open doors / doorways, never closed doors or walls. With no door at
+  all, the member holds at the pack watch point (the prey's base centroid, or the prey's
+  position when there is no base). Two hard guarantees, both pinned in tests: a member NEVER
+  bites through a wall (`walledOff` guard on the bite), and a member hunting roofed prey may
+  only bite once it is under the roof itself — roof coverage, not enclosure, decides
+  "indoors" for the bite, because opening the door breaks the enclosure while the prey is
+  still under the roof (the first implementation bit the prey from the doorway threshold).
+- **Disband.** When the prey is dead or gone, the director disbands the pack and each member
+  drops `PackMember` and becomes a plain animal again (wanders home), mirroring `hordeSteer`'s
+  disband when its target piece is gone. Pack steering self-disbands the same way.
+- **Warning.** The `HordeStatus` channel is reused with kind Pack = 3 (a numeric literal in
+  `packs.ts` — `HordeKind` is a const enum, erased at runtime across modules, so the value
+  cannot be imported). The client toast/audio keep working through the same `hordeCue` state
+  machine; the copy is pack copy via a pure `hordeToastText(cue, kind, size)` helper:
+  "A predator pack is closing in — get inside and shut the door! (~N predators)" /
+  "The predator pack is here!" / "The predator pack has scattered." The pause-menu rules
+  line now also shows predator packs ON/OFF.
+- **Cost.** Same class as a horde: director every 20 ticks, `creatureStep`'s cached routes per
+  member, the door scan only on 20-tick decisions and only while the prey is sheltered, the
+  `walledOff` bite guard only when in bite range. No new per-tick scans, nothing per frame.
+
+**Consequences / cuts.**
+- Numbers are unplaytested starting defaults (solo 3–6, clan 6–12, wolf 4 / bear 1, 3 packs /
+  36 animals vs ~97 ambient zombies and 14–64-strong hordes — a pack is deliberately a
+  smaller, sharper threat than a horde; whether it feels like enough pressure needs a
+  playtest with hordes off).
+- No light-seek for packs (hordes seek lamplight while sieging; predators do not — a pack
+  that has lost its prey in the dark waits at the base instead).
+- A pack hunts one prey at a time; it does not split across a clan, and it does not hunt
+  herds, troughs, or livestock — only survivors.
+- The pack warning is a HordeStatus with kind 3: any other reader of HordeStatus that
+  assumes kind 1/2 (solo/clan horde) will misread a pack warning. The two known readers
+  (the client toast, the pause-menu line) are handled; a future reader must branch on kind.
+- Phone/Xbox check still owed: pack pressure, warning toast, and door-watching in a real
+  hordes-off world; whether 3–6 wolves + a bear feel ferocious or trivial next to a horde.
+
+## ADR-540 — New predator species: cougar + wolverine with full art (2026-11-25)
+
+**Ask.** Add new predator species with FULL art — sprites, animations, everything —
+compressed as small as possible WITHOUT compromising graphics (user ruling 2026-11-25
+~15:07 CST; standing preference: never trade graphics, look, or play for a smaller
+download). Last slice of the zombie/predator batch (ADR-535–539).
+
+**Decision: two solitary ambush hunters, runtime-painted art, data-driven wiring.**
+
+- **Species chosen — cougar (`animal_cougar`) + wolverine (`animal_wolverine`).** Both
+  are solitary ambush hunters, so they are `pack: false` and never join the ADR-539 pack
+  director — packs stay wolf:bear 4:1, no `packs.ts`/`roads.json` change. They are
+  clearly distinct from wolf and bear: the cougar is a big tawny cat (long tail with a
+  dark tip, small rounded ears with dark backs, plain coat) vs the grey canid wolf and
+  the bulky brown bear; the wolverine is a dark-brown stocky mustelid with a pale
+  head/saddle stripe, bushy tail, and short legs — smaller than the wolf, famously
+  ferocious. Rejected: lynx/jaguar (would read as a small cougar), coyote (a canid —
+  a wolf recolor risk). No AI image generation, no recolor or reuse of wolf/bear
+  sprites; unique dedicated art only.
+- **Art pipeline — runtime painting, the Task 34 pattern.** The wolf/bear sheets are
+  generated by procedural Python (`packages/assets/pack/nature/src/beasts.py` +
+  `fauna.py`) into binary PNGs — that pipeline cannot satisfy the text-only snapshot
+  push (no binaries in the commit). So the new species follow the repo's existing
+  snapshot-pushable pattern: `apps/client/src/task540-art.ts` (16,747 bytes) paints
+  both atlases at load with the `Px` software rasterizer, one shared quadruped rig
+  (`paintQuadrupedCell`) + two per-species specs, 8 facings, anims idle / walk / run
+  (= walk frames @12fps) / attack / death; `hit` / `swim` / `eat` rely on the
+  renderer's existing animation fallbacks (no painted rows). Atlas sizes: cougar
+  448x1792 (56 px cells), wolverine 384x1536 (48 px cells) — both under the 2048 px
+  mobile cap. Layout-only fragment `packages/assets/pack/task540/manifest.task540.json`
+  (2,361 bytes) points image/ktx2 at the existing `items_build` atlas (never fetched),
+  exactly like task34. Registered in BOTH the server manifest
+  (`packages/assets/src/manifest-index.ts`) and the client config allowlist
+  (`apps/client/vite.config.ts` MOUNTS regex, `apps/client/src/view.ts`
+  `task540AtlasSources()` + `paintedAtlas` set); ids locked as `animal_cougar: 6330`,
+  `animal_wolverine: 6331` (appended, nothing renumbered).
+- **Compression — oxipng N/A for this slice.** There are NO PNG files in the commit, so
+  `scripts/oxipng.mjs` has nothing to compress here (it recompresses built dist PNGs
+  at build time, unchanged). Shipped art bytes = the 16,747-byte painter source (text,
+  minified by the build) + the 2,361-byte manifest fragment; the runtime RGBA buffers
+  (cougar 448x1792x4 = 3,211,264 B, wolverine 384x1536x4 = 2,359,296 B) are generated
+  in memory at load, never shipped. Nothing was traded for size: full 8-facing,
+  4-anim art for both species.
+- **Wiring (all data-driven, no `population.ts` / `packs.ts` changes).** `ai.json`:
+  cougar hostile, hp 120, speed 3.8, sight 12 / hearingMul 1.5 / fov 240, aggro 4 /
+  leash 12, flee hpFrac 0.3 / range 10, dmg 10 / range 1.2 / cd 1.3; wolverine hostile,
+  hp 90, speed 3.2, sight 10 / hearingMul 1.3 / fov 220, aggro 3 / leash 10, flee
+  hpFrac 0.2 / range 8, dmg 8 / range 1.0 / cd 1.2; both `aggroActivity` { night 1.5,
+  dawn 0.4, day 0.25, dusk 1 } (effective night/day aggro cougar 6.0/1.0, wolverine
+  4.5/0.75), `nightFleeHpFrac` 0 (never flee at night), `pack: false`. Senses (ADR-537
+  hearing + smell) and night aggression (ADR-538) apply automatically via the
+  existing data-driven code; `isAggressiveSpawnKind` picks both up (hostile mode, not
+  tameable). `spawns.json`: cougar density 0.05, perChunkCap 1, globalCap 4, group
+  [1,1], forest 1 / stone 0.8 / grass 0.2, night-weighted; wolverine density 0.08,
+  perChunkCap 2, globalCap 6, group [1,2], forest 1 / stone 0.8 / grass 0.5;
+  `zombiesOff.predators` both at densityMul 3 / capMul 3 (cougar 4->12, wolverine
+  6->18; mp composes to 18 / 27). `animal_scales.json`: cougar 1.0, wolverine 0.8
+  (measured idle d0 f0 drawn heights 39 px / 25.6 px — cougar taller than the wolf's
+  27 px, smaller than the bear's 46.2 px; wolverine smaller than the wolf, as it
+  should be). `xp.json`: cougar 3, wolverine 2.4. `sprite_fallbacks.json`: cougar ->
+  wolf art 1.3x tawny `#c69e68`, wolverine -> boar art 1.11x dark brown `#4a3428` —
+  safety net only, engaged if the painted art ever goes missing (ADR-485 design:
+  degrade to a similar animal, never the 0.55x bare-player fallback).
+- **Neighbour updates in the same commit (roster pins only).** `population.test.ts` /
+  `animals.test.ts` expected animal lists gain the two species in spawn-table /
+  def order; `adr110.test.ts` exact 40-def count becomes a floor (>= 40); ADR-485
+  live-art table 11 -> 13 entries + drawn-height assertions for the new species +
+  def-count floor. ADR-377 golden hashes re-pinned (open d8e6d969, base 5b6f8ab9,
+  stable twice): the 160-animal cycle now deals cougars/wolverines too (40 -> 42
+  defs, 34 kinds in the scenario) and kind indices after the wolf shift by 2.
+  Drift attribution (scratch probe, same scenario shape): 5 cougars + 5 wolverines
+  in the open run (1 cougar Attack, 1 cougar + 1 wolverine Investigate), 4 + 5 in
+  the base run (1 wolverine Investigate) — the new predators genuinely hunt in the
+  scenario, not just a kind-index shift. `paintTask540Atlases()` returns a
+  `[PaintedAtlas, PaintedAtlas]` tuple (the array return typed destructured elements
+  as possibly-undefined under `noUncheckedIndexedAccess` — 14 client typecheck
+  errors, fixed at the source).
+- **Tests (20 new).** Gameplay `adr540_new_predators.test.ts` (14): def pins, night
+  windows, solo-hunter + PACKS composition still { wolf 4, bear 1 }, safe-radius,
+  spawn + zombies-off x3 (incl. mp composition), validators, hear-and-investigate
+  (cougar walk noise 12 x 1.5 = 18 tiles), carcass-smell investigate, live night
+  engagement boundaries, night close-in + bite, hurt flee by day / never at night.
+  Client `adr540_predator_art.test.ts` (5): keys/dimensions/frame math, anims +
+  directions differ with the dark-plum outline, species separable by palette
+  (cougar tawny [198,158,104] > 50 px, wolverine 0 tawny; wolverine pale stripe
+  [214,196,160] present, cougar 0), no cell bleeds into neighbours, standalone
+  `paintQuadrupedCell` matches the atlas cell. Parity `adr248` +1 test (ADR-540):
+  both server and client fragment lists contain `task540` and are equal, both
+  registries have both sprites/atlases, hashes equal. Fail-without-fix proved by
+  stash: gameplay 13/14 fail on pre-change data (the 1 pass is the by-design
+  validation control); parity both ways proved by removing `task540` from the vite
+  MOUNTS regex (both parity tests fail) and restoring it (pass). Neighbours: 21
+  gameplay files / 194 passed; assets pack + manifest 66 passed + the 1 known
+  pre-existing pack.test.ts KEYS.md ENOENT failure (the `assets/building/` dir is
+  absent from this checkout, untouched by this slice); client art/registry
+  neighbours 33 passed; typecheck clean, pinned TS 5.9.3, 11 projects (log
+  `~/workspace/work/adr540_typecheck.log`). Full gate NOT run — coordinator runs it
+  at the end of the batch. Nothing pushed.
+- **Cost.** Generation-time art only: the painter runs once at load (blob URLs),
+  same as Task 34 / ADR-421. No new per-tick scans, nothing per frame.
+
+**Consequences / cuts.**
+- Art verified numerically only (pixel counts, palette signatures, cell bounds) —
+  never by eye; phone/Xbox visual check still owed (cougar/wolverine readability
+  at play zoom, night hunts, whether the cougar reads as a cat and not a big dog).
+- All tuning numbers are unplaytested starting defaults (cougar 4/12, wolverine
+  3/10 aggro; spawn caps 4/6, x3 zombies-off; flee lines 0.3/0.2 by day, 0 at
+  night; 4-5 of each per golden-scenario run may be too many or too few in a real
+  world — the ambient mix now has two more hunters alongside wolf/bear).
+- `run` reuses walk frames; `hit` / `swim` / `eat` rely on renderer fallbacks
+  (no painted rows) — same cut as the other runtime-painted species.
+- The ADR-377 golden hash now moves whenever a species is added or removed from
+  the roster (the 160-animal cycle deals from `animalDefs()`); that is inherent to
+  the golden's design, not a regression — re-pin with a scratch-probe attribution
+  as done here.

@@ -57,6 +57,13 @@ export const PROGRESSION_TREES_MIGRATION: AddedFields = { component: "Progressio
 export const LOOTBAG_DESPAWN_MIGRATION: AddedFields = { component: "LootBag", fields: ["spawnTick", "kind", "emptiedTick"] };
 /** Task 22: WorldRules gained aiHumans (0 = legacy: AI humans on, the default). */
 export const WORLD_RULES_AI_HUMANS_MIGRATION: AddedFields = { component: "WorldRules", fields: ["aiHumans"] };
+/** ADR-535: WorldRules gained zombies (1 = on, the default; a save predating the field loads with zombies on —
+ *  the value comes from the save meta, which has no zombies key on old saves, so game.ts falls back to on).
+ *  Two entries: saves written after aiHumans (Task 22) but before zombies, and saves predating both. */
+export const WORLD_RULES_ZOMBIES_MIGRATIONS: readonly AddedFields[] = [
+  { component: "WorldRules", fields: ["zombies"] },
+  { component: "WorldRules", fields: ["aiHumans", "zombies"] },
+];
 /** Task 31: Diseases gained careTicks (0 = legacy: no care-cure progress yet). */
 export const DISEASES_CARE_TICKS_MIGRATION: AddedFields = { component: "Diseases", fields: ["careTicks"] };
 /** ADR-280: infection clock rate; zero-filled legacy values are interpreted as the standard 20Hz. */
@@ -71,7 +78,7 @@ export const CROP_FERTILIZER_MIGRATION: AddedFields = { component: "Crop", field
 export const TERRAIN_EDIT_WIDEN_MIGRATION: AddedFields = { component: "TerrainEdit", fields: [], widened: { dig: "i8" } };
 /** ADR-519: Vehicle gained paint (0 = unpainted; gameplay's vehicleSystem assigns a pick on the next tick). */
 export const VEHICLE_PAINT_MIGRATION: AddedFields = { component: "Vehicle", fields: ["paint"] };
-export const DEFAULT_MIGRATIONS: readonly AddedFields[] = [VEHICLE_PAINT_MIGRATION, ...CRAFTER_ID_MIGRATIONS, APPEARANCE_VERSION_MIGRATION, ...CONTAINER_96_MIGRATIONS, ...INVENTORY_24_MIGRATIONS, ...APPEARANCE_HANDS_MIGRATIONS, APPEARANCE_SKIN_SCHEME_MIGRATION, PROGRESSION_TREES_MIGRATION, LOOTBAG_DESPAWN_MIGRATION, WORLD_RULES_AI_HUMANS_MIGRATION, DISEASES_CARE_TICKS_MIGRATION, ...DISEASES_INFECTION_CLOCK_MIGRATIONS, CROP_FERTILIZER_MIGRATION, TERRAIN_EDIT_WIDEN_MIGRATION];
+export const DEFAULT_MIGRATIONS: readonly AddedFields[] = [VEHICLE_PAINT_MIGRATION, ...CRAFTER_ID_MIGRATIONS, APPEARANCE_VERSION_MIGRATION, ...CONTAINER_96_MIGRATIONS, ...INVENTORY_24_MIGRATIONS, ...APPEARANCE_HANDS_MIGRATIONS, APPEARANCE_SKIN_SCHEME_MIGRATION, PROGRESSION_TREES_MIGRATION, LOOTBAG_DESPAWN_MIGRATION, WORLD_RULES_AI_HUMANS_MIGRATION, ...WORLD_RULES_ZOMBIES_MIGRATIONS, DISEASES_CARE_TICKS_MIGRATION, ...DISEASES_INFECTION_CLOCK_MIGRATIONS, CROP_FERTILIZER_MIGRATION, TERRAIN_EDIT_WIDEN_MIGRATION];
 
 const BYTES: Record<FieldType, number> = { f32: 4, f64: 8, i8: 1, u8: 1, i16: 2, u16: 2, i32: 4, u32: 4 };
 export const oldSchemaOf = (s: Schema, added: readonly string[], grown: Readonly<Record<string, number>> = {}, oldDefaults: Readonly<Record<string, number>> = {}, widened: Readonly<Record<string, FieldType>> = {}): Schema =>

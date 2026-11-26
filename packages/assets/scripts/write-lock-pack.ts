@@ -20,6 +20,8 @@ const SUBS: [string, string][] = [["ui-kit", root + "assets/ui/kit/manifest.ui.k
   ["task361", dir + "task361/manifest.task361.json"],
   // ADR-410: sloped-ground tileset fragment (layout only, no PNGs).
   ["task410", dir + "task410/manifest.task410.json"],
+  // ADR-540: dedicated cougar + wolverine fragment (layout only, no PNGs).
+  ["task540", dir + "task540/manifest.task540.json"],
   // ADR-242: Art's top-level drops; they repeat building-pack keys (first wins), so only their collisions are tolerated
   ["pvp_clan", root + "assets/pvp_clan/manifest.fragment.json"], ["stalls", root + "assets/stalls/manifest.fragment.json"]];
 const TOLERATED = new Set(["pvp_clan", "stalls"]);
