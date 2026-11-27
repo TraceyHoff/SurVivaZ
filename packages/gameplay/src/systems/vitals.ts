@@ -22,6 +22,7 @@ import { inWater, isSwimmingAt } from "./movement.js";
 import { isFrozenWaterAt } from "../frozen.js"; // ADR-450: frozen still water is walkable land
 import { heatAt } from "./environment.js";
 import { pendingReady } from "../ready.js";
+import { isCreativePlayer } from "../creative.js";
 import { TerrainRes } from "../world.js";
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
@@ -254,10 +255,12 @@ export function vitalsSystem(world: World, dt: number): void {
     const hungerMul = evaluate(world, e, Buffs, Stat.HungerRate, 1);
     const thirstMul = evaluate(world, e, Buffs, Stat.ThirstRate, 1);
 
+    // ADR-581: a Creative-world human player never drains and never takes vitals damage (below).
+    const creative = isCreativePlayer(world, e);
     // hunger / thirst
     const hunger0 = sv.data.hunger[s]!, thirst0 = sv.data.thirst[s]!;
-    const hunger = Math.max(0, hunger0 - vt.hungerDecayPerSec * hungerMul * dt);
-    const thirst = Math.max(0, thirst0 - vt.thirstDecayPerSec * thirstMul * dt);
+    const hunger = creative ? 100 : Math.max(0, hunger0 - vt.hungerDecayPerSec * hungerMul * dt);
+    const thirst = creative ? 100 : Math.max(0, thirst0 - vt.thirstDecayPerSec * thirstMul * dt);
     sv.data.hunger[s] = hunger; sv.data.thirst[s] = thirst;
     if (hunger0 > 0 && hunger === 0) emit(world, VitalDepleted, { entity: e, vital: Vital.Hunger });
     if (thirst0 > 0 && thirst === 0) emit(world, VitalDepleted, { entity: e, vital: Vital.Thirst });
@@ -271,7 +274,8 @@ export function vitalsSystem(world: World, dt: number): void {
 
     // body temperature drifts toward the felt temperature outside the comfort band
     let body = sv.data.bodyTemp[s]!;
-    if (ex.has(idx)) {
+    if (creative) { body = vt.bodyTempNormal; sv.data.bodyTemp[s] = body; } // ADR-581: temperature holds at normal
+    else if (ex.has(idx)) {
       const felt = ex.data.feltTemp[ex.slot(idx)]!;
       // ADR-472: cold bites — when felt is below the cold threshold AND the body is soaked AND the
       // wind is gale-force, body temperature drains coldDrain.mul x faster toward the cold. All three
@@ -291,7 +295,7 @@ export function vitalsSystem(world: World, dt: number): void {
 
     // damage / regen
     let dmg = 0; let cause: DamageCause = DamageCause.None;
-    const hurt = (amount: number, c: DamageCause): void => { if (amount > 0) { dmg += amount; cause = c; } };
+    const hurt = (amount: number, c: DamageCause): void => { if (!creative && amount > 0) { dmg += amount; cause = c; } }; // ADR-581: starvation / dehydration / exposure / drowning never land on a creative player
     if (hunger === 0) hurt(vt.starvationDps * dt, DamageCause.Starvation);
     if (thirst === 0) hurt(vt.dehydrationDps * dt, DamageCause.Dehydration);
     const tier = temperatureTier(body);

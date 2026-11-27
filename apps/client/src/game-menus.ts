@@ -98,7 +98,7 @@ export interface GameMenusOptions {
   setQuality?: (p: QualityPreset) => void;
   /** ADR-116: the live renderer's quality controller (Auto label + detected tier). */
   /** ADR-121: the current world's rules (read-only in game; set for new worlds in the main menu Settings). */
-  worldRules?: () => { hordes: boolean; hordeGraceDays: number; aiHumans: boolean; zombies: boolean } | undefined;
+  worldRules?: () => { hordes: boolean; hordeGraceDays: number; aiHumans: boolean; zombies: boolean; creative: boolean } | undefined;
   qualityInfo?: () => { autoLabel(): string; detected?: { name: string; klass: string; remembered: boolean } | undefined } | undefined;
   deleteProgress?: () => { label: string; message: string; settingsOption: boolean; run: (o: { resetSettings: boolean }) => Promise<string> } | undefined;
   showMenuBar?: boolean;
@@ -315,7 +315,7 @@ export class GameMenus {
     const wr = this.o.worldRules?.(); const l4 = document.createElement("small"); l4.dataset["role"] = "world-rules"; l4.style.cssText = "display:block;opacity:.8";
     // ADR-535: hordes read as effectively off when zombies are off — the director forces it (see hordes.ts).
     // ADR-539: predator packs run instead of hordes whenever hordes are off (zombies off or hordes off).
-    l4.textContent = wr ? `This world: zombies ${wr.zombies ? "ON" : "OFF"} · zombie hordes ${wr.hordes && wr.zombies ? `ON (after ${wr.hordeGraceDays} in-game days)` : "OFF"} · predator packs ${!wr.zombies || !wr.hordes ? "ON" : "OFF"} · AI humans ${wr.aiHumans ? "ON" : "OFF"}` : "";
+    l4.textContent = wr ? `This world: zombies ${wr.zombies ? "ON" : "OFF"} · zombie hordes ${wr.hordes && wr.zombies ? `ON (after ${wr.hordeGraceDays} in-game days)` : "OFF"} · predator packs ${!wr.zombies || !wr.hordes ? "ON" : "OFF"} · AI humans ${wr.aiHumans ? "ON" : "OFF"}${wr.creative ? " · CREATIVE" : ""}` : ""; // ADR-580: creative shown when on
     return this.panel("settings", "Settings", [l7, l1, l2, l5, l6, l8, l3, ...(wr ? [l4] : []), ...(this.o.fx ? [fxSettingsRows(this.o.fx)] : []), ...(this.o.audio ? [audioSettingsRows(this.o.audio)] : [])], [...(this.o.tutorial ? [["Play the guide again", () => { this.nav.closeAll(); this.o.tutorial!.replay(); }, "alt", GUIDE_BOOK_ICON_FILE] as [string, () => void, string, string]] : []), ...(del ? [[del.label, () => this.open("delete-progress"), "alt"] as [string, () => void, string]] : []), ["🐞 Error log", () => this.open("error-log"), "alt"],["Save", () => { saveSettings({ ...loadSettings(), showHud: hud.checked, fullscreen: fs.checked, toolHints: th.checked, nameTags: nt.checked, ledgeWarnings: lw.checked, ...tu.patch() }); const qp = parsePreset(q.value) ?? DEFAULT_QUALITY_PRESET; savePreset(qp); this.o.setQuality?.(qp); this.nav.close(); }], ["Back", () => this.nav.close(), "alt"]]);
   }
   private deletePanel(): HTMLElement {

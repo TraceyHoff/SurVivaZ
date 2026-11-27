@@ -20,6 +20,7 @@ import { CraftCompleted, CraftFail, CraftFailed, CraftStarted, emit } from "../e
 import { crafterIdFor } from "../economy/provenance.js";
 import { meetsSkill, recipeOutputUnlocked, recipeStationOk, stationInRange, stationUnlocked, torchCraftable } from "./crafting.js";
 import { recordRecentCraft } from "../recent.js";
+import { isCreativePlayer } from "../creative.js";
 
 export const CRAFT_QUEUE_SLOTS = 4;
 export const MAX_CRAFT_COUNT = 50;
@@ -74,6 +75,7 @@ export function installCraftQueue(world: World, handlers?: CommandHandlers): Job
       },
       onCancel: (w, e, job: JobInfo) => {
         const r = recipeOf(w, job.recipeId); if (!r) return;
+        if (isCreativePlayer(w, e)) return; // ADR-581: a creative craft consumed nothing, so cancelling refunds nothing (no items from thin air)
         transaction(w, (tx) => { for (const i of r.ingredients) { const a = tx.add(e, i.item, i.count * job.count); if (!a.ok) return a; } return { ok: true }; }, e);
         emit(w, CraftFailed, { entity: e, recipe: job.recipeId, reason: CraftFail.Cancelled });
       },
@@ -99,6 +101,7 @@ export function craftQueueReason(world: World, e: Entity, recipe: number, count:
   if (!meetsSkill(world, e, r)) return "skill_too_low";
   if (!recipeOutputUnlocked(world, e, r)) return "recipe_locked"; // ADR-320: saddles need their Saddlery node
   const q = world.getResource(CraftQueuesRes); if (q && q.jobs(e).length >= CRAFT_QUEUE_SLOTS) return "queue_full";
+  if (isCreativePlayer(world, e)) return undefined; // ADR-581: no ingredient check in creative (skill/station gates above still apply)
   let have = true;
   transaction(world, (t) => { for (const i of r.ingredients) if (!t.remove(e, i.item, i.count * count).ok) { have = false; break; } return { ok: false, reason: "dry_run" }; }, e);
   return have ? undefined : "missing_ingredients";
@@ -108,10 +111,12 @@ export function enqueueCraft(world: World, e: Entity, recipe: number, count = 1)
   if (!isAuthority(world) || world.isReplaying) return "not_authority";
   const why = craftQueueReason(world, e, recipe, count); if (why) return why;
   const r = recipeOf(world, recipe)!; const q = installCraftQueue(world);
-  const tx = transaction(world, (t) => { for (const i of r.ingredients) { const x = t.remove(e, i.item, i.count * count); if (!x.ok) return x; } return { ok: true }; }, e);
-  if (!tx.ok) return "missing_ingredients";
+  if (!isCreativePlayer(world, e)) { // ADR-581: creative crafts consume nothing
+    const tx = transaction(world, (t) => { for (const i of r.ingredients) { const x = t.remove(e, i.item, i.count * count); if (!x.ok) return x; } return { ok: true }; }, e);
+    if (!tx.ok) return "missing_ingredients";
+  }
   const slot = q.enqueue(e, recipe, count);
-  if (slot < 0) { transaction(world, (t) => { for (const i of r.ingredients) { const a = t.add(e, i.item, i.count * count); if (!a.ok) return a; } return { ok: true }; }, e); return "queue_full"; }
+  if (slot < 0) { if (!isCreativePlayer(world, e)) transaction(world, (t) => { for (const i of r.ingredients) { const a = t.add(e, i.item, i.count * count); if (!a.ok) return a; } return { ok: true }; }, e); return "queue_full"; } // ADR-581: no refund of ingredients a creative craft never paid
   emit(world, CraftStarted, { entity: e, recipe, totalTicks: Math.max(1, secondsToTicks(r.seconds / skillMul(world, e, "speed"), DT)) }); // ADR-477: the announced total matches the sped-up duration
   return slot;
 }

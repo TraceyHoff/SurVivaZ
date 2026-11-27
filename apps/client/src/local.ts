@@ -28,7 +28,7 @@ export function defaultMaxBots(d: DeviceHints = detectDevice()): number { return
 export interface LocalServerOptions {
   store?: WorldStore; seed?: number;
   /** ADR-121: world rules for a new world (hordes on/off, grace days). */
-  worldRules?: { hordes?: boolean; hordeGraceDays?: number; /** Task 22: AI humans spawn / are recruitable (default on). */ aiHumans?: boolean };
+  worldRules?: { hordes?: boolean; hordeGraceDays?: number; /** Task 22: AI humans spawn / are recruitable (default on). */ aiHumans?: boolean; /** ADR-535: ambient zombies (default on). */ zombies?: boolean; /** ADR-580: Creative mode (default off). */ creative?: boolean };
   /** Default "singleplayer". "multiplayer" allows human bots only when AI humans are on (Task 22). */
   mode?: GameMode;
   /** Dev: connect this many virtual players immediately at spawn (in addition to natural spawns; singleplayer only). */

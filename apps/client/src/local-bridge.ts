@@ -31,7 +31,7 @@ class WorkerClientTransport implements ClientTransport {
   /** @internal */ closed(): void { if (!this.open) return; this.open = false; for (const f of this.closeFns) f(); }
 }
 
-export async function startWorkerServer(o: { dbName: string; bots: number; devSandbox?: boolean; worldRules?: { hordes: boolean; hordeGraceDays: number; aiHumans?: boolean }; catalog?: CosmeticCatalogLike | undefined; status: WorkerStatusSink; log?: (s: string) => void; timeoutMs?: number; makeWorker?: () => Worker; /** ADR-254 */ seed?: number }): Promise<LocalServerHandle | undefined> {
+export async function startWorkerServer(o: { dbName: string; bots: number; devSandbox?: boolean; worldRules?: { hordes: boolean; hordeGraceDays: number; aiHumans?: boolean; zombies?: boolean; creative?: boolean }; catalog?: CosmeticCatalogLike | undefined; status: WorkerStatusSink; log?: (s: string) => void; timeoutMs?: number; makeWorker?: () => Worker; /** ADR-254 */ seed?: number }): Promise<LocalServerHandle | undefined> {
   if (!o.makeWorker && typeof Worker === "undefined") return undefined;
   let worker: Worker;
   try { worker = o.makeWorker ? o.makeWorker() : new Worker(new URL("./local-worker.ts", import.meta.url), { type: "module" }); } catch (e) { o.log?.(`worker unavailable: ${String(e)}`); return undefined; }

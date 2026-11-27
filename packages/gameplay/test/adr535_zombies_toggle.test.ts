@@ -45,11 +45,11 @@ const driveDirector = (w: World): void => {
 describe("ADR-535 zombies on/off setting", () => {
   it("world rules default to zombies on; setWorldRules merges the toggle without touching the rest", () => {
     const w = makeWorld();
-    expect(G.worldRules(w)).toEqual({ hordes: true, hordeGraceDays: 3, aiHumans: true, zombies: true });
+    expect(G.worldRules(w)).toEqual({ hordes: true, hordeGraceDays: 3, aiHumans: true, zombies: true, creative: false });
     G.setWorldRules(w, { zombies: false });
-    expect(G.worldRules(w)).toEqual({ hordes: true, hordeGraceDays: 3, aiHumans: true, zombies: false });
+    expect(G.worldRules(w)).toEqual({ hordes: true, hordeGraceDays: 3, aiHumans: true, zombies: false, creative: false });
     G.setWorldRules(w, { zombies: true, hordeGraceDays: 5 });
-    expect(G.worldRules(w)).toEqual({ hordes: true, hordeGraceDays: 5, aiHumans: true, zombies: true });
+    expect(G.worldRules(w)).toEqual({ hordes: true, hordeGraceDays: 5, aiHumans: true, zombies: true, creative: false });
   });
 
   it("population spawner: zombies off spawns no zombies and never sets PopulationZombies; animals still spawn", () => {

@@ -131,6 +131,7 @@ export * from "./terrain.js";
 export * from "./ramp.js"; // ADR-419: ramp planning + gameplay.terrainRamp
 export * from "./signs.js";
 export * from "./hordes.js";
+export * from "./creative.js";
 export * from "./packs.js"; // ADR-539: predator packs replace hordes
 export * from "./pets.js"; // ADR-145
 export * from "./mount_defs.js"; // ADR-319 / ADR-320

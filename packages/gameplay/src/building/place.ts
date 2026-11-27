@@ -25,6 +25,7 @@ import { countItem, exchangeItems } from "../inventory.js";
 import { emitterSpecs, EmitterKind } from "../realism.js";
 import { makeNoise } from "../systems/noise.js";
 import { recordRecentBuild } from "../recent.js";
+import { isCreativePlayer } from "../creative.js";
 import { TerrainRes } from "../world.js";
 import { MIN_SHAFT_DROP, shaftDrop, shaftSidesLevel } from "./terrain-hatch.js";
 import { linkAttachment } from "./links.js";
@@ -421,7 +422,7 @@ export function validatePlacement(world: World, builder: Entity, sn: Snapped, op
   if (candidateStability(world, sn) < b.minStability) return BuildFail.NoSupport;
   // ADR-310: after structural checks, base pieces need one of the builder's Claim Flags covering the spot
   if (builder && needsClaim(def) && !opts.ignoreClaim && !hasOwnClaim(world, builder, sn.pos.x, sn.pos.y)) return BuildFail.NeedClaim;
-  if (!opts.ignoreCost) for (const c of pieceCost(defs, def, sn.tier)) if (countItem(world, builder, c.item) < c.count) return BuildFail.CannotAfford;
+  if (!opts.ignoreCost && !(builder && isCreativePlayer(world, builder))) for (const c of pieceCost(defs, def, sn.tier)) if (countItem(world, builder, c.item) < c.count) return BuildFail.CannotAfford; // ADR-581: creative builds are free (claim + support checks above still apply)
   return 0;
 }
 
@@ -436,7 +437,7 @@ function onSurface(world: World, def: PieceDef, tiles: readonly (readonly [numbe
 export function placePiece(world: World, builder: Entity | 0, sn: Snapped, opts: { pay?: boolean; hp?: number; paint?: number; tribe?: number } = {}): Entity {
   const defs = gameplayDefs(world); const idx = structures(world); const { def, slot } = sn;
   if (builder && def.privilegeRadius > 0) ensurePersonalTribe(world, builder);
-  if (builder && opts.pay !== false) exchangeItems(world, builder, pieceCost(defs, def, sn.tier), []);
+  if (builder && opts.pay !== false && !isCreativePlayer(world, builder)) exchangeItems(world, builder, pieceCost(defs, def, sn.tier), []); // ADR-581: creative placement pays nothing
   if (def.small && def.placement === Placement.Free) sn = { ...sn, pos: { ...sn.pos, z: smallPieceZ(world, sn.pos.x, sn.pos.y, slot.z) } }; // ADR-162 (also persistence load)
   const e = world.create();
   const tribe = opts.tribe ?? (builder ? tribeOf(world, builder) : 0);

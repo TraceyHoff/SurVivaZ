@@ -159,7 +159,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   if (meta) { restoreDayClock(world, meta); restoreSeason(world, meta); }
   // ADR-121: horde rules belong to the save. ADR-258: explicit host AI policy overrides its saved default.
   // ADR-535: zombies likewise belong to the save (meta wins over launch options — new-world-only, like hordes).
-  setWorldRules(world, { ...o.worldRules, ...(meta?.hordes !== undefined ? { hordes: meta.hordes === 1 } : {}), ...(meta?.hordeGraceDays !== undefined ? { hordeGraceDays: meta.hordeGraceDays } : {}), ...(meta?.aiHumans !== undefined && o.worldRules?.aiHumans === undefined ? { aiHumans: meta.aiHumans === 1 } : {}), ...(meta?.zombies !== undefined ? { zombies: meta.zombies === 1 } : {}) });
+  setWorldRules(world, { ...o.worldRules, ...(meta?.hordes !== undefined ? { hordes: meta.hordes === 1 } : {}), ...(meta?.hordeGraceDays !== undefined ? { hordeGraceDays: meta.hordeGraceDays } : {}), ...(meta?.aiHumans !== undefined && o.worldRules?.aiHumans === undefined ? { aiHumans: meta.aiHumans === 1 } : {}), ...(meta?.zombies !== undefined ? { zombies: meta.zombies === 1 } : {}), ...(meta?.creative !== undefined ? { creative: meta.creative === 1 } : {}) }); // ADR-580: creative belongs to the save too (absent = off)
   if (meta) { world.tick = meta.tick; if (meta.schemaHash !== world.getSchemaHash()) log(`persist: save schema ${meta.schemaHash.toString(16)} != build ${world.getSchemaHash().toString(16)}; chunks with changed persistent components load read-only`); }
   // Clan rank masks / goals / contributions (gameplay ClanState) persist as the world blob "gameplay.clans", written on change.
   { const b = o.store?.readBlob(CLAN_BLOB); if (b) { try { loadClanState(world, decodeClanState(b.bytes)); } catch (e) { log(`persist: clan state unreadable: ${String(e)}`); } } }
@@ -196,7 +196,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
     topUpNodes: (w, chunk, ents) => computeWildCropTopUp(w, chunk, ents, generator.nodesInChunk(chunk.cx, chunk.cy)),
     ...(floorStampTick > 0 ? { legacyZ: { beforeTick: floorStampTick, fix: fixLegacyFloorZ } } : {}),
     social: permissions,
-    extraMeta: () => { const r = worldRules(world); return { hordes: r.hordes ? 1 : 0, hordeGraceDays: r.hordeGraceDays, aiHumans: r.aiHumans ? 1 : 0, zombies: r.zombies ? 1 : 0, floorLevels: defs.building.levelHeight, floorStampTick }; },
+    extraMeta: () => { const r = worldRules(world); return { hordes: r.hordes ? 1 : 0, hordeGraceDays: r.hordeGraceDays, aiHumans: r.aiHumans ? 1 : 0, zombies: r.zombies ? 1 : 0, creative: r.creative ? 1 : 0, floorLevels: defs.building.levelHeight, floorStampTick }; },
     ...(o.catalog ? { appearance: { catalog: o.catalog } } : {}),
   }) : undefined;
   let localPlayerIds = 1; // no store: ids only need to be unique for this run

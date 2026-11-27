@@ -373,8 +373,10 @@ export const HordeMember = defineComponent("HordeMember", { horde: "u16", target
  * on animals. */
 export const PackMember = defineComponent("PackMember", { pack: "u16", prey: "u32", watchX: "f32", watchY: "f32", siegeUntil: "u32" });
 /** ADR-121 world rules on the environment singleton (replicated so clients show them): hordes 0/1, grace in in-game days.
- *  ADR-535: zombies 0/1 — ambient zombies on/off, new worlds only (off also stops the horde director: hordes are zombies). */
-export const WorldRules = defineComponent("WorldRules", { hordes: "u8", hordeGraceDays: "f32", aiHumans: "u8", zombies: "u8" }, { networked: true });
+ *  ADR-535: zombies 0/1 — ambient zombies on/off, new worlds only (off also stops the horde director: hordes are zombies).
+ *  ADR-580: creative 0/1 — Creative mode, new worlds only (default OFF, opt-in unlike zombies): human players
+ *  craft/build without resource costs and take no vitals drain, exposure, injury or damage (ADR-581 waivers). */
+export const WorldRules = defineComponent("WorldRules", { hordes: "u8", hordeGraceDays: "f32", aiHumans: "u8", zombies: "u8", creative: "u8" }, { networked: true });
 export const enum HordePhase { Idle = 0, Warning = 1, Active = 2 }
 /** ADR-121 horde director status on the environment singleton: drives client toasts + audio (snapshot diffs).
  *  seq bumps per horde; kind 1 solo / 2 clan; alive/size members; x,y = target centroid; owner = clan id or PlayerId. */

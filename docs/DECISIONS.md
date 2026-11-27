@@ -15868,3 +15868,73 @@ zombies-on world; the next world they create with the toggle off will be zombie-
 A known sibling was left alone: the module snapshot also feeds hostPlayerCap on the
 hosting paths (a mid-session cap change has the same staleness, with far lower stakes);
 it is recorded here rather than silently fixed in this batch.
+
+## ADR-580: Creative mode is a world rule, chosen at creation (SurVivaZ)
+
+Requested 2026-11-27: a Creative mode where players craft, build and explore without
+restrictions or resources, keep earning skill points from levelling, and never have to
+eat, drink, or worry about temperature, broken legs, damage or death. Ruled by the user
+the same day: Creative is set when the world is created, like the zombies toggle — it is
+NOT a switch inside an existing world, so a survival world can never become creative
+(and a creative world stays creative).
+
+Plumbing follows the ADR-535 zombies template end to end. WorldRules gains
+creative: u8 (networked, so clients show it); setWorldRules/worldRules carry it with
+default OFF — creative is opt-in, the opposite default from zombies, and the asymmetry
+is deliberate: an absent rule must mean survival. Settings gains a "Creative mode (new
+worlds)" checkbox beside the zombies one; loadSettings defaults it false;
+newWorldRules() carries it (and, per ADR-579, startSingleplayer reads the settings
+fresh, so the tick reaches world creation). The server persists it in the save meta
+(extraMeta writes creative 1/0; on load the meta wins, an absent key means off). The
+local/worker option types now name zombies and creative explicitly instead of passing
+them through untyped. The pause menu's world-rules line appends "· CREATIVE" when on.
+Persistence: WORLD_RULES_CREATIVE_MIGRATIONS covers all three pre-creative WorldRules
+layouts (after zombies, after aiHumans only, predating both); the migrated value is 0,
+matching the meta fallback — old saves stay survival. The schema hash moves to
+0xc5f0ec5 (pins updated in the ADR-360/371 tests). The waivers themselves are ADR-581.
+
+## ADR-581: Creative waivers for human players (SurVivaZ)
+
+One shared identification, creative.ts isCreativePlayer(world, e): the world rule is on,
+the entity carries PlayerId, and it is not an AI human (the same test
+humanPlayerPositions uses; the server registers the AI predicate from its session
+table). AI humans in a Creative world get NO waiver — they still eat, pay and can die —
+and neither do creatures, mounts or pieces.
+
+Waivers, each at the system's existing chokepoint:
+- Damage: applyDamage returns early for a creative player target, before armor, block,
+  the mount-share split and the Damaged event — so no hp loss from any cause (combat,
+  fall, explosion, contact, PvP), no wound-infection or bleeding rolls, no hit react,
+  and falls can never fracture (the broken-leg roll requires hp to actually drop).
+  Death is unreachable: deathSystem only fires at hp 0. A creative player's mount is a
+  creature and still takes hits aimed at it directly.
+- Vitals: vitalsSystem pins a creative player's hunger/thirst to 100 (never drains, no
+  VitalDepleted), holds body temperature at normal (no drift, no shivering tiers), and
+  the hurt() accumulator is a no-op for them, so starvation, dehydration, exposure and
+  drowning damage never land. Stamina is unchanged — sprinting and swimming still cost
+  stamina; only the drowning DAMAGE is waived. Well-fed regen still applies.
+- Crafting, both paths: the queued path (craftQueueReason skips the ingredient
+  dry-run; enqueueCraft consumes nothing; onCancel and the queue-full rollback refund
+  nothing — a creative craft never paid, so a refund would mint items) and the timed
+  path (checkRecipe validates against an empty take list; completion exchanges output
+  for nothing). Skill, station and unlock gates are NOT waived: levelling and skill
+  points work exactly as in survival, per the request.
+- Building: validatePlacement skips only the CannotAfford check for a creative
+  builder (claim, support, zone and range checks still apply — a Claim Flag is still
+  required, it just costs nothing to place), placePiece skips the payment, and the
+  build menu (buildView) reports every tier affordable so the UI never blocks on cost.
+
+Not waived, deliberately: item repair costs (not crafting), stall trading (an exchange
+between players, not a cost), terrain editing (already free), and disease contraction
+(a creative player can still catch a cold; its damage channels are waived above, and
+with temperature pinned the cold-to-flu path never starts). Client-side, the AI
+predicate resource is unset on a replica, so isAiHuman reads false there — correct for
+the only entity a client predicts or previews for (its own player); every spend/spare
+decision is re-checked on the authority.
+
+Tests: adr580 (rule defaults/merging, the identification matrix incl. the bot
+exclusion; persist migration for all three layouts; client settings round-trip and
+save-meta persistence incl. the old-save default), adr581 (damage negation across
+causes + death, bot non-waiver, vitals pinning + starvation control, queued and timed
+free crafting incl. the no-refund dupe guard, free building at validation, payment
+and menu level — each with its survival control).

@@ -23,6 +23,7 @@ import { Animal, Mount, Pet, Riding } from "../components.js";
 import { mountOfRider, MOUNT_TUNING } from "../mount_defs.js";
 import { dropZombieLoot } from "../population.js";
 import { damageMulFor } from "../skills/tree.js";
+import { isCreativePlayer } from "../creative.js";
 import { Progression } from "../components.js";
 import { armorReduce, igniteTarget, landThrown, resolveAttack, spendRound, throwExplosive } from "./arms.js";
 
@@ -75,6 +76,10 @@ export function applyDamage(world: World, target: Entity, amount: number, source
   }
   if (world.has(target, BuildPiece)) { damagePiece(world, target, amount, source, cause); return; }
   const hp = world.getField(target, Health, "hp"); if (hp === undefined || world.has(target, Dead)) return;
+  // ADR-581: a Creative-world human player takes no damage of any cause — no hp loss, no Damaged
+  // event (so no wound-infection or bleeding rolls), no hit react, no wake-up. Their mount is a
+  // creature, not a player: it still takes its share below when the hit lands on it directly.
+  if (isCreativePlayer(world, target)) return;
   if ((cause === DamageCause.Combat || cause === DamageCause.Explosion) && world.isRegistered(Riding) && world.has(target, Riding)) {
     // ADR-319: the mount takes its share of a hit on its rider (each side then reduced by its own armor + saddle)
     const m = mountOfRider(world, target);

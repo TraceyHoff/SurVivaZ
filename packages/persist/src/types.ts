@@ -75,6 +75,8 @@ export interface WorldMeta { seed: number; tick: number; schemaHash: number; cre
   aiHumans?: number;
   /** World rules (ADR-535): ambient zombies on (1) / off (0) in new worlds. Absent = on (old saves keep zombies). */
   zombies?: number;
+  /** World rules (ADR-580): Creative mode on (1) / off (0), chosen at world creation. Absent = off (old saves stay survival). */
+  creative?: number;
   /** ADR-514: terrain levels per building floor the save's Transform.z values use (5 since ADR-511). Absent = written
    *  before the stamp: records saved before ADR-511 store z in 3-level floors. */
   floorLevels?: number;

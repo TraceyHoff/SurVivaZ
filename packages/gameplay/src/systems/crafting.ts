@@ -16,6 +16,7 @@ import { CraftCompleted, CraftFail, CraftFailed, CraftStarted, emit } from "../e
 import { exchangeItems } from "../inventory.js";
 import { crafterIdFor } from "../economy/provenance.js";
 import { recordRecentCraft } from "../recent.js";
+import { isCreativePlayer } from "../creative.js";
 import stationsRaw from "../../data/stations.json";
 
 /** Stations are looked up in the shared spatial index within this radius (>= any CraftingStation.range). */
@@ -92,8 +93,9 @@ function checkRecipe(world: World, e: Entity, r: RecipeDef): CraftFail | 0 {
   const torch = torchCraftable(world, e, r);
   if (!torch && !stationUnlocked(world, e, r.station)) return CraftFail.Locked;
   if (!torch && !stationInRange(world, e, r.station)) return CraftFail.NoStation;
-  if (!exchangeItems(world, e, r.ingredients, [], true)) return CraftFail.MissingIngredients;
-  if (!exchangeItems(world, e, r.ingredients, [r.output], true, crafterIdFor(world, e, r.output.item))) return CraftFail.InventoryFull;
+  const take = isCreativePlayer(world, e) ? [] : r.ingredients; // ADR-581: creative crafting costs no resources (skill/station gates stay)
+  if (!exchangeItems(world, e, take, [], true)) return CraftFail.MissingIngredients;
+  if (!exchangeItems(world, e, take, [r.output], true, crafterIdFor(world, e, r.output.item))) return CraftFail.InventoryFull;
   return 0;
 }
 
@@ -131,7 +133,7 @@ export function craftingSystem(world: World, dt: number): void {
     const why = checkRecipe(world, e, r);
     clear();
     if (why) { fail(current, why); continue; }
-    exchangeItems(world, e, r.ingredients, [r.output], false, crafterIdFor(world, e, r.output.item));
+    exchangeItems(world, e, isCreativePlayer(world, e) ? [] : r.ingredients, [r.output], false, crafterIdFor(world, e, r.output.item)); // ADR-581: free in creative
     if (world.getField(e, Worker, "job") === WorkerJob.Craft && world.has(e, WorkerOrder)) {
       const selected = Array.from(world.getArray(e, WorkerOrder, "selections") ?? []).filter(Boolean);
       const i = selected.indexOf(current); if (i >= 0) world.setField(e, WorkerOrder, "craftCursor", (i + 1) % selected.length);

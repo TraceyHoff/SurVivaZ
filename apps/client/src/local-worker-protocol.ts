@@ -2,7 +2,7 @@
 import type { Channel } from "@engine/net";
 import type { CatalogSnapshot } from "./catalog-snapshot.js";
 
-export interface WorkerInit { dbName: string; bots: number; devSandbox?: boolean; catalog?: CatalogSnapshot; worldRules?: { hordes: boolean; hordeGraceDays: number }; /** ADR-254: optional pinned world seed */ seed?: number }
+export interface WorkerInit { dbName: string; bots: number; devSandbox?: boolean; catalog?: CatalogSnapshot; worldRules?: { hordes: boolean; hordeGraceDays: number; aiHumans?: boolean; zombies?: boolean; creative?: boolean }; /** ADR-254: optional pinned world seed */ seed?: number }
 export type ToWorker =
   | { t: "init"; init: WorkerInit }
   | { t: "connect"; cid: number }

@@ -28,6 +28,7 @@ import { checkItemRepair, isRepairableSlot, itemRepairCost, itemRepairTier } fro
 import { ItemRepairCmd } from "../item_repair_commands.js";
 import { CancelQueuedCraftCmd, MAX_CRAFT_COUNT, QueueCraftCmd, craftQueueReason, owedOf } from "../systems/craft_queue.js";
 import { pieceCost, pieceGates, zonesAt } from "../building/place.js";
+import { isCreativePlayer } from "../creative.js";
 import { hasSkillUnlock, unlockRequirement, xpToNext } from "../skills/tree.js";
 import { activeDiseases, careStatus, diseasePresentation, CARE_DRY_MAX } from "../diseases.js";
 import { ambientTemperature, effectiveInsulation, heatAt, shelteredAirTemp, weatherDef, worldSeason } from "../systems/environment.js";
@@ -286,7 +287,7 @@ export function buildView(c: MenuCtx): BuildPieceView[] {
   return [...defs.pieces.values()].map((p) => {
     const tierIds = p.tiered ? defs.tiers.map((t) => t.id) : [p.fixedTier];
     const tiers = tierIds.map((t) => { const cost = withNames(w, pieceCost(defs, p, t), c.player); const miss = pieceGates(defs, p, t).filter((k) => !hasSkillUnlock(w, c.player, k)).map(unlockRequirement).filter((r) => !!r);
-      return { tier: t, key: defs.tiers.find((d) => d.id === t)?.key ?? String(t), cost, affordable: cost.every((x) => x.have >= x.count), locked: miss.length > 0,
+      return { tier: t, key: defs.tiers.find((d) => d.id === t)?.key ?? String(t), cost, affordable: isCreativePlayer(w, c.player) || cost.every((x) => x.have >= x.count), locked: miss.length > 0, // ADR-581: creative builders can afford every piece
         ...(miss.length ? { requirement: `Requires ${miss.map((r) => `${r!.name} (${r!.tree})`).join(" + ")}` } : {}) }; });
     const variants = Array.from({ length: Math.max(1, p.variants) }, (_, i) => p.variantNames[i] || `Variant ${i + 1}`);
     return { id: p.id, key: (p as { key?: string }).key ?? String(p.id), tiers, variants, paintable: p.paintable, category: p.category };

@@ -52,7 +52,7 @@ export function hordeSize(o: { clan: boolean; members?: number; level?: number; 
   return Math.min(t.clan.cap, Math.round((t.clan.base + t.clan.perMember * Math.max(1, o.members ?? 1)) * scale));
 }
 
-export interface WorldRulesOpts { hordes?: boolean; hordeGraceDays?: number; /** Task 22: AI humans spawn / are recruitable (default on). */ aiHumans?: boolean; /** ADR-535: ambient zombies on/off (default on). New worlds only; off also stops the horde director. */ zombies?: boolean }
+export interface WorldRulesOpts { hordes?: boolean; hordeGraceDays?: number; /** Task 22: AI humans spawn / are recruitable (default on). */ aiHumans?: boolean; /** ADR-535: ambient zombies on/off (default on). New worlds only; off also stops the horde director. */ zombies?: boolean; /** ADR-580: Creative mode (default OFF — opt-in). New worlds only; human players craft/build free and take no vitals drain or damage (ADR-581). */ creative?: boolean }
 /** Sets the replicated world rules on the environment singleton (server/standalone at install; loaders after meta). */
 export function setWorldRules(world: World, r: WorldRulesOpts): void {
   const cur = world.get(world.environment, WorldRules);
@@ -60,12 +60,13 @@ export function setWorldRules(world: World, r: WorldRulesOpts): void {
   const grace = Math.max(0, Math.min(365, r.hordeGraceDays ?? cur?.hordeGraceDays ?? HORDES.graceDaysDefault));
   const aiHumans = r.aiHumans ?? (cur ? cur.aiHumans === 1 : true);
   const zombies = r.zombies ?? (cur ? cur.zombies === 1 : true);
-  const v = { hordes: hordes ? 1 : 0, hordeGraceDays: grace, aiHumans: aiHumans ? 1 : 0, zombies: zombies ? 1 : 0 };
+  const creative = r.creative ?? (cur ? cur.creative === 1 : false); // ADR-580: opt-in, default off
+  const v = { hordes: hordes ? 1 : 0, hordeGraceDays: grace, aiHumans: aiHumans ? 1 : 0, zombies: zombies ? 1 : 0, creative: creative ? 1 : 0 };
   if (cur) world.set(world.environment, WorldRules, v); else world.add(world.environment, WorldRules, v);
 }
-export function worldRules(world: World): { hordes: boolean; hordeGraceDays: number; aiHumans: boolean; zombies: boolean } {
+export function worldRules(world: World): { hordes: boolean; hordeGraceDays: number; aiHumans: boolean; zombies: boolean; creative: boolean } {
   const r = world.get(world.environment, WorldRules);
-  return { hordes: r ? r.hordes === 1 : HORDES.enabledDefault, hordeGraceDays: r?.hordeGraceDays ?? HORDES.graceDaysDefault, aiHumans: r ? r.aiHumans === 1 : true, zombies: r ? r.zombies === 1 : true };
+  return { hordes: r ? r.hordes === 1 : HORDES.enabledDefault, hordeGraceDays: r?.hordeGraceDays ?? HORDES.graceDaysDefault, aiHumans: r ? r.aiHumans === 1 : true, zombies: r ? r.zombies === 1 : true, creative: r ? r.creative === 1 : false };
 }
 /** In-game days since the world clock epoch (fractional). */
 export function worldDays(world: World): number {
