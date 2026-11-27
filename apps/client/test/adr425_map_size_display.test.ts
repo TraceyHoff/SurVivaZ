@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 // ADR-425: the map-generation window states exactly how big the map is, in numbers computed
 // from the same constants worldgen uses — so the note and the world cannot drift apart
-// silently. If PREVIEW, REGION_SIZE or the walk speed changes, this test fails until menu.ts
-// (which builds the note from those constants) is re-checked.
+// silently. If PREVIEW, SURVEY_STRIDES or the walk speed changes, this test fails until
+// menu.ts (which builds the note from those constants) is re-checked.
+// ADR-585: the window is now a zoomable survey (see adr585_survey_map.test.ts); the note
+// states the CURRENT survey extent (PREVIEW.width x the current stride).
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PREVIEW, REGION_SIZE } from "@engine/world";
+import { PREVIEW, SURVEY_STRIDES } from "@engine/world";
 import { defaultDefs } from "@engine/gameplay";
 import { BootUI } from "../src/menu.js";
 
@@ -15,23 +17,27 @@ const click = (name: string) => Array.from(document.querySelectorAll<HTMLButtonE
 const flush = async () => { for (let i = 0; i < 6; i++) await Promise.resolve(); };
 
 describe("ADR-425: map size display in the map-generation window", () => {
-  it("note shows the preview extent from PREVIEW and the region walk-across time from REGION_SIZE", async () => {
+  it("note shows the survey extent from PREVIEW x the default stride and the walk-across time from that extent", async () => {
     vi.useFakeTimers();
     ui = new BootUI("/");
     void ui.menu({ hostedStatic: true, defaultUrl: "", initialSeed: "424242", savedSeed: async () => undefined, mp: { probe: async () => 1 } });
     click("Singleplayer"); await flush();
     const note = document.querySelector(".preview-note")!;
-    // The preview covers exactly one starter region: width px x stride tiles/px == REGION_SIZE.
-    const previewExtent = PREVIEW.width * PREVIEW.stride;
-    expect(previewExtent).toBe(REGION_SIZE);
-    expect(note.textContent).toContain(`${previewExtent} × ${previewExtent} tiles`);
-    // Human-readable scale: minutes to walk across one region at the player walk speed
-    // (movement.json walkSpeed, tiles/s). No metres-per-tile constant exists, so no metres.
-    const walkMinutes = Math.max(1, Math.round(REGION_SIZE / defaultDefs().movement.walkSpeed / 60));
+    // ADR-585: the default survey stride is SURVEY_STRIDES[3] (24) — the note's extent is
+    // PREVIEW.width x that stride. If the menu's default zoom changes, this fails until
+    // the note (built from the same constants in menu.ts) is re-checked.
+    const extent = PREVIEW.width * SURVEY_STRIDES[3]!;
+    expect(note.textContent).toContain(`${extent} × ${extent} tiles`);
+    // Human-readable scale: minutes to walk across the surveyed extent at the player walk
+    // speed (movement.json walkSpeed, tiles/s). No metres-per-tile constant exists, so no metres.
+    const walkMinutes = Math.max(1, Math.round(extent / defaultDefs().movement.walkSpeed / 60));
     expect(note.textContent).toContain(`about ${walkMinutes} minutes' walk across`);
-    // The preview is one region, not the whole world: no fixed edge.
-    expect(note.textContent).toMatch(/streams on beyond it/i);
+    // The survey is one window on an endless world: no fixed edge.
+    expect(note.textContent).toMatch(/streams on beyond/i);
     expect(note.textContent).toMatch(/no fixed edge/i);
+    // ADR-585/586 legends: spawn points and abandoned structures are marked on the survey.
+    expect(note.textContent).toMatch(/spawn point/i);
+    expect(note.textContent).toMatch(/abandoned structure/i);
   });
 
   it("note is seed-independent and the preview still renders for a fixed seed", async () => {

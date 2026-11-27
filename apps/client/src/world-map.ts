@@ -12,10 +12,10 @@
  * Compass: a rose on the canvas (fixed N/E/S/W, needle = facing) plus the HUD compass strip (compass-hud.ts).
  */
 import { Transform, type Entity, type World } from "@engine/core";
-import { compassOf, placeMapMarkerIntent, removeMapMarkerIntent, visibleMarkers, type MenuIntent } from "@engine/gameplay";
+import { compassOf, mapAbandonedSites, placeMapMarkerIntent, removeMapMarkerIntent, visibleMarkers, type MapAbandonedSite, type MenuIntent } from "@engine/gameplay";
 import { TILE_COLORS } from "@engine/render";
 import { createIdleTracker, idleCompass } from "./compass-hud.js";
-import { northUpToWorld, worldToNorthUp, type TileMap } from "@engine/world";
+import { CHUNK_SIZE, ProceduralGenerator, northUpToWorld, worldToNorthUp, type TileMap } from "@engine/world";
 import { iconImg } from "./game-icons.js";
 
 export interface WorldMapSource {
@@ -24,6 +24,9 @@ export interface WorldMapSource {
   tiles(): TileMap | undefined;
   send(i: MenuIntent): boolean;
   status?(t: string): void;
+  /** ADR-586: the world seed, when the client knows it (singleplayer / hosting). Without it
+   * the abandoned-structure overlay cannot be enumerated and simply does not draw. */
+  seed?(): number | undefined;
 }
 /** Pin colour by MarkerVisibility (0 private, 1 party, 2 clan). */
 export const markerPinColor = (visibility: number): string => visibility === 1 ? "#7dff9b" : visibility === 2 ? "#ffb347" : "#7fb3ff";
@@ -70,7 +73,7 @@ export function createWorldMap(src: WorldMapSource, doc: Document = document): {
   btn("Mark here", () => { state.placed = { ...state.centre }; showForm(); }, { pad: "X", padLabel: "Mark here" });
   btn("Mark my location", () => { const w = src.world(), p = src.player(); if (!w || p === undefined) return; const t = w.get(p, Transform); if (!t) return; state.placed = { x: t.x, y: t.y }; showForm(); });
   btn("Zoom +", () => { state.scale = Math.min(32, state.scale * 1.5); draw(); }); btn("Zoom −", () => { state.scale = Math.max(2, state.scale / 1.5); draw(); });
-  const note = doc.createElement("p"); note.dataset["role"] = "map-note"; note.style.cssText = "margin:0;font-size:13px"; note.textContent = "North is up ↑. Dark areas are unexplored. Tap a spot on the map (or use Mark here / Mark my location) to place a marker. Markers are small pins; tap one in the list to remove it.";
+  const note = doc.createElement("p"); note.dataset["role"] = "map-note"; note.style.cssText = "margin:0;font-size:13px"; note.textContent = "North is up ↑. Dark areas are unexplored. Amber diamonds mark abandoned structures where they spawn. Tap a spot on the map (or use Mark here / Mark my location) to place a marker. Markers are small pins; tap one in the list to remove it.";
   // Marker creation form (hidden until a spot is picked).
   const form = doc.createElement("div"); form.dataset["role"] = "marker-form"; form.hidden = true; form.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-items:center";
   const labelInput = doc.createElement("input"); labelInput.type = "text"; labelInput.maxLength = 24; labelInput.placeholder = "Marker name"; labelInput.setAttribute("aria-label", "Marker name");
@@ -126,6 +129,21 @@ export function createWorldMap(src: WorldMapSource, doc: Document = document): {
   canvas.addEventListener("pointerup", endPointer);
   canvas.addEventListener("pointercancel", endPointer);
   canvas.addEventListener("wheel", (e) => { e.preventDefault(); state.scale = Math.min(32, Math.max(2, state.scale * (e.deltaY < 0 ? 1.25 : 0.8))); draw(); }, { passive: false });
+  // ADR-586: abandoned-structure sites for the visible chunk range, enumerated from the world
+  // seed with the same plans and gates the server stamper applies (mapAbandonedSites), so the
+  // diamonds name the ruins that actually stand in the world — including in dark, unexplored
+  // areas, which is the point of showing them. Memoised per (seed, chunk range): panning
+  // inside a range is free, and the generator is built once per seed.
+  let ruinCache: { seed: number; key: string; gen: ProceduralGenerator; sites: MapAbandonedSite[] } | undefined;
+  const ruinSites = (): MapAbandonedSite[] => {
+    const seed = src.seed?.(); if (seed === undefined) return [];
+    const b = mapWorldBounds(canvas.width, canvas.height, state.centre, state.scale);
+    const cx0 = Math.floor(b.x0 / CHUNK_SIZE), cx1 = Math.floor(b.x1 / CHUNK_SIZE), cy0 = Math.floor(b.y0 / CHUNK_SIZE), cy1 = Math.floor(b.y1 / CHUNK_SIZE);
+    const key = `${cx0},${cy0},${cx1},${cy1}`;
+    if (!ruinCache || ruinCache.seed !== seed) ruinCache = { seed, key: "", gen: new ProceduralGenerator({ seed }), sites: [] };
+    if (ruinCache.key !== key) { const gen = ruinCache.gen; ruinCache = { seed, key, gen, sites: mapAbandonedSites(seed, (x, y) => gen.sampleAt(x, y), cx0, cy0, cx1, cy1) }; }
+    return ruinCache.sites;
+  };
   // Task 26 smoothness: the map used to redraw every tile (~2700 fillRects) on every rAF while open, even
   // when the player stood still. Skip the canvas work when nothing it depends on changed (centre/scale,
   // player pos/facing/idle, visible markers, visible chunks' versions); the rAF loop stays so a moving
@@ -147,7 +165,8 @@ export function createWorldMap(src: WorldMapSource, doc: Document = document): {
       const getChunk = (tiles as { getChunk?: (cx: number, cy: number) => { version?: number } | undefined }).getChunk;
       if (getChunk) for (let cy = Math.floor(ty0 / 32); cy <= Math.floor(ty1 / 32); cy++) for (let cx = Math.floor(tx0 / 32); cx <= Math.floor(tx1 / 32); cx++) tv += getChunk.call(tiles, cx, cy)?.version ?? 0;
     }
-    const sig = [state.centre.x.toFixed(2), state.centre.y.toFixed(2), state.scale, t ? t.x.toFixed(2) : "", t ? t.y.toFixed(2) : "", facing ? Math.round(facing.heading / 2) : "", idle, markers.map((m) => `${m.entity}:${m.label}:${m.visibility}`).join("|"), tv].join("|");
+    const ruins = ruinSites();
+    const sig = [state.centre.x.toFixed(2), state.centre.y.toFixed(2), state.scale, t ? t.x.toFixed(2) : "", t ? t.y.toFixed(2) : "", facing ? Math.round(facing.heading / 2) : "", idle, markers.map((m) => `${m.entity}:${m.label}:${m.visibility}`).join("|"), tv, ruinCache ? `${ruinCache.seed}:${ruinCache.key}:${ruins.length}` : ""].join("|");
     rebuildList(markers);
     if (sig === lastSig) return;
     lastSig = sig;
@@ -179,6 +198,10 @@ export function createWorldMap(src: WorldMapSource, doc: Document = document): {
     for (const m of markers) { const { px, py } = worldToCanvas(m.x, m.y, W, H, c, s); if (px < -20 || px > W + 20 || py < -20 || py > H + 20) continue;
       ctx.fillStyle = markerPinColor(m.visibility); ctx.beginPath(); ctx.arc(px, py - 4, 5, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(px - 1, py - 4, 2, 8);
       ctx.font = "bold 11px system-ui,sans-serif"; ctx.strokeStyle = "rgba(0,0,0,.8)"; ctx.lineWidth = 3; ctx.strokeText(m.label || "Marker", px + 8, py); ctx.fillStyle = "#FFFAF0"; ctx.fillText(m.label || "Marker", px + 8, py); }
+    // ADR-586: abandoned structures as amber diamonds at their footprint centres.
+    ctx.fillStyle = "#ffb347"; ctx.strokeStyle = "rgba(0,0,0,.65)"; ctx.lineWidth = 1;
+    for (const site of ruins) { const { px, py } = worldToCanvas(site.originX + site.width / 2, site.originY + site.height / 2, W, H, c, s); if (px < -20 || px > W + 20 || py < -20 || py > H + 20) continue;
+      ctx.beginPath(); ctx.moveTo(px, py - 5); ctx.lineTo(px + 5, py); ctx.lineTo(px, py + 5); ctx.lineTo(px - 5, py); ctx.closePath(); ctx.fill(); ctx.stroke(); }
     // Player arrow (always the true facing) + compass rose (settles north when standing still, like the HUD compass).
     if (t && facing && rose) { const { px, py } = worldToCanvas(t.x, t.y, W, H, c, s); const { heading } = facing;
       ctx.save(); ctx.translate(px, py); ctx.rotate(heading * Math.PI / 180); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(6, 8); ctx.lineTo(0, 4); ctx.lineTo(-6, 8); ctx.closePath(); ctx.fill(); ctx.restore();

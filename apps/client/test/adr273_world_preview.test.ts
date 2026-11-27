@@ -17,6 +17,7 @@ it.each(["singleplayer", "host"] as const)("%s seed preview debounces typing/pas
   click("Random"); vi.advanceTimersByTime(100); expect(img.dataset["seed"]).toBe(input.value);
   input.value = "abc"; input.dispatchEvent(new Event("input")); expect(img.hidden).toBe(true);
   input.focus(); const press = (key: string) => { for (const type of ["keydown", "keyup"]) document.activeElement!.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true, cancelable: true })); };
-  for (const text of ["Random", "Create world", "Back"]) { press("GamepadDPadDown"); expect(document.activeElement?.textContent).toBe(text); }
+  // ADR-585: the survey zoom buttons join the gamepad stop list (DOM order).
+  for (const text of ["Random", "Zoom out −", "Zoom in +", "Create world", "Back"]) { press("GamepadDPadDown"); expect(document.activeElement?.textContent).toBe(text); }
   press("GamepadB"); expect(document.querySelector("[data-role=world-preview]")).toBeNull(); vi.advanceTimersByTime(100); expect(document.querySelector("[data-role=world-preview]")).toBeNull();
 });

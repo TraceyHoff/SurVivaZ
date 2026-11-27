@@ -3,8 +3,8 @@
  * with a progress bar, then the main menu (Singleplayer / Multiplayer / Settings).
  * Navigation: mouse, touch (buttons), keyboard (arrows/WASD/Tab, Enter/Space, Esc) and gamepad (d-pad/stick, A, B).
  */
-import { PREVIEW, REGION_SIZE, sampleWorldPreview, worldPreviewSvg, randomWorldSeed } from "@engine/world";
-import { defaultDefs } from "@engine/gameplay";
+import { CHUNK_SIZE, PREVIEW, ProceduralGenerator, SURVEY_STRIDES, computeSpawnPoints, northUpToWorld, sampleWorldSurvey, worldPreviewSvg, worldToSurveyPixel, randomWorldSeed } from "@engine/world";
+import { defaultDefs, mapAbandonedSites, type MapAbandonedSite } from "@engine/gameplay";
 import { parseWorldSeed } from "./world-seed.js";
 import { localizeTemps, saveTempUnit } from "./hud-temp.js";
 import { deleteConfirm, deleteLocalProgress, listLocalSaves, type LocalSaveKind } from "./delete-progress.js";
@@ -304,24 +304,77 @@ export class BootUI {
         const label = document.createElement("label"); label.textContent = "World seed (0–4294967295)"; label.htmlFor = seed.id;
         const chosen = document.createElement("p"); chosen.dataset["role"] = "chosen-seed"; chosen.setAttribute("aria-live", "polite");
         const preview = document.createElement("img"); preview.className = "world-preview"; preview.dataset["role"] = "world-preview";
-        preview.alt = "Seeded terrain preview: blue water, green lowlands, shaded hills and cliffs";
+        preview.alt = "Seeded world survey map: blue water, green lowlands, shaded hills and cliffs, ringed dots marking the spawn points, amber diamonds marking abandoned structures";
+        preview.style.touchAction = "none";
         const note = document.createElement("p"); note.className = "preview-note";
-        // ADR-425: map-size note, built from the same constants worldgen uses — never a hardcoded
-        // number, so the text drifts with the world instead of against it. Preview extent =
-        // PREVIEW.width x PREVIEW.stride tiles across (one starter region); the walk-across time
-        // is the region extent at the player walk speed (movement.json, tiles/s) — there is no
+        // ADR-425/585: survey note, built from the same constants worldgen uses — never a
+        // hardcoded number, so the text drifts with the world instead of against it. Survey
+        // extent = PREVIEW.width x the current stride tiles across; the walk-across time is
+        // that extent at the player walk speed (movement.json, tiles/s) — there is no
         // metres-per-tile constant anywhere in the game, so no distance in metres is claimed.
-        // The preview is one region only: the world streams on beyond it with no fixed edge.
-        const previewExtent = PREVIEW.width * PREVIEW.stride;
-        const walkMinutes = Math.max(1, Math.round(REGION_SIZE / defaultDefs().movement.walkSpeed / 60));
-        note.textContent = `Starter region · ${previewExtent} × ${previewExtent} tiles · about ${walkMinutes} minutes' walk across · North ↑. Shading shows relief. This is one region — the world streams on beyond it, with no fixed edge.`;
-        let previewTimer = 0;
-        const draw = (value: number): void => {
-          preview.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(worldPreviewSvg(sampleWorldPreview(value)))}`;
-          preview.dataset["seed"] = String(value); preview.setAttribute("aria-busy", "false");
+        // The survey is one window on an endless world: it streams on beyond it, no fixed edge.
+        let strideIdx = 3; // SURVEY_STRIDES[3] = 24 → 3,072 tiles across by default
+        const surveyNote = (stride: number): string => {
+          const extent = PREVIEW.width * stride;
+          const walkMinutes = Math.max(1, Math.round(extent / defaultDefs().movement.walkSpeed / 60));
+          return `World survey · ${extent} × ${extent} tiles around the spawn area · about ${walkMinutes} minutes' walk across · North ↑. ○ marks a spawn point — you start at one of the four. ◆ marks an abandoned structure. Shading shows relief. The world is endless — it streams on beyond the surveyed area, with no fixed edge. Zoom in for detail, out for more of the map.`;
         };
+        note.textContent = surveyNote(SURVEY_STRIDES[strideIdx]!);
+        let previewTimer = 0, surveyTimer = 0, surveyRun = 0;
+        let surveyGen: { seed: number; gen: ProceduralGenerator; spawns: { x: number; y: number }[] } | undefined;
+        const zoomIn = mpButton("Zoom in +", "survey-zoom-in", () => setStride(strideIdx - 1));
+        const zoomOut = mpButton("Zoom out −", "survey-zoom-out", () => setStride(strideIdx + 1));
+        function setStride(i: number): void {
+          const n = Math.max(0, Math.min(SURVEY_STRIDES.length - 1, i));
+          if (n === strideIdx) return;
+          strideIdx = n;
+          const v = parseWorldSeed(seed.value, generated); if (v !== undefined) draw(v);
+        }
+        const draw = (value: number): void => {
+          const run = ++surveyRun; clearTimeout(surveyTimer);
+          const stride = SURVEY_STRIDES[strideIdx]!;
+          if (!surveyGen || surveyGen.seed !== value) { const gen = new ProceduralGenerator({ seed: value }); surveyGen = { seed: value, gen, spawns: computeSpawnPoints(gen) }; }
+          const { gen, spawns } = surveyGen;
+          const survey = sampleWorldSurvey(gen, stride);
+          const spawnPx = spawns.map((p) => worldToSurveyPixel(survey, p.x, p.y));
+          const paint = (ruins: readonly { px: number; py: number }[]): void => { preview.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(worldPreviewSvg(survey, { spawns: spawnPx, ruins }))}`; };
+          paint([]);
+          preview.dataset["seed"] = String(value); preview.setAttribute("aria-busy", "false");
+          note.textContent = surveyNote(stride);
+          zoomIn.disabled = strideIdx === 0; zoomOut.disabled = strideIdx === SURVEY_STRIDES.length - 1;
+          // ADR-586: ruin enumeration is the expensive half (a seeded plan per chunk plus a
+          // terrain gate per planned site), so it fills in over a few frames behind the
+          // relief; the run token drops slices belonging to a superseded seed or zoom.
+          const extent = PREVIEW.width * stride, half = extent / 2;
+          const corners = [[-half, -half], [half, -half], [-half, half], [half, half]].map(([gx, gy]) => northUpToWorld(gx!, gy!));
+          const cx0 = Math.floor(Math.min(...corners.map((c) => c.x)) / CHUNK_SIZE), cx1 = Math.floor(Math.max(...corners.map((c) => c.x)) / CHUNK_SIZE);
+          const cy0 = Math.floor(Math.min(...corners.map((c) => c.y)) / CHUNK_SIZE), cy1 = Math.floor(Math.max(...corners.map((c) => c.y)) / CHUNK_SIZE);
+          const sampleAt = (x: number, y: number) => gen.sampleAt(x, y);
+          const sites: MapAbandonedSite[] = [];
+          let cy = cy0;
+          const step = (): void => {
+            if (run !== surveyRun) return;
+            const t0 = performance.now();
+            // Bounded by rows as well as time, so the slice terminates even on a frozen clock.
+            let rows = 0;
+            while (cy <= cy1 && rows < 24 && performance.now() - t0 < 24) { sites.push(...mapAbandonedSites(value, sampleAt, cx0, cy, cx1, cy)); cy++; rows++; }
+            paint(sites.map((s) => worldToSurveyPixel(survey, s.originX + s.width / 2, s.originY + s.height / 2)));
+            if (cy <= cy1) surveyTimer = window.setTimeout(step, 0);
+          };
+          surveyTimer = window.setTimeout(step, 0);
+        };
+        preview.addEventListener("wheel", (e) => { e.preventDefault(); setStride(strideIdx + (e.deltaY > 0 ? 1 : -1)); }, { passive: false });
+        const pinchPts = new Map<number, { x: number; y: number }>(); let pinchD = 0;
+        preview.addEventListener("pointerdown", (e) => { pinchPts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pinchPts.size === 2) { const [a, b] = [...pinchPts.values()] as [{ x: number; y: number }, { x: number; y: number }]; pinchD = Math.hypot(a.x - b.x, a.y - b.y); } });
+        preview.addEventListener("pointermove", (e) => { if (!pinchPts.has(e.pointerId)) return; pinchPts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pinchPts.size === 2 && pinchD > 0) { const [a, b] = [...pinchPts.values()] as [{ x: number; y: number }, { x: number; y: number }]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (Math.abs(d - pinchD) > 48) { setStride(strideIdx + (d > pinchD ? -1 : 1)); pinchD = d; } } });
+        const pinchEnd = (e: PointerEvent): void => { pinchPts.delete(e.pointerId); if (pinchPts.size < 2) pinchD = 0; };
+        preview.addEventListener("pointerup", pinchEnd); preview.addEventListener("pointercancel", pinchEnd);
         const update = (): void => {
           const value = parseWorldSeed(seed.value, generated); clearTimeout(previewTimer);
+          // ADR-585: typing supersedes the shown survey — stop its ruin fill-in at once, so
+          // the image stays frozen until the debounced redraw (and no work is wasted on a
+          // seed the player has already typed past).
+          clearTimeout(surveyTimer); surveyRun++;
           chosen.textContent = value === undefined ? "Enter a whole number from 0 to 4294967295." : `World seed: ${value} · Keep this number to replay this world.`;
           preview.hidden = value === undefined; preview.setAttribute("aria-busy", String(value !== undefined));
           if (value !== undefined) previewTimer = window.setTimeout(() => draw(value), 100);
@@ -331,9 +384,9 @@ export class BootUI {
         const random = mpButton("Random", "random-seed", () => { generated = randomWorldSeed(); seed.value = String(generated); update(); });
         seed.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); next(); } });
         const footer = document.createElement("div"); footer.className = "sticky-footer"; footer.dataset["role"] = "sticky-footer";
-        this.screen([["Create world", next], ["Back", back, "alt"]], back, "<h2>New world</h2>", label, mpRow(seed, random), preview, note, chosen, footer);
+        this.screen([["Create world", next], ["Back", back, "alt"]], back, "<h2>New world</h2>", label, mpRow(seed, random), preview, mpRow(zoomOut, zoomIn), note, chosen, footer);
         this.root.dataset["page"] = "world-seed";
-        this.cleanup = () => { clearTimeout(previewTimer); delete this.root.dataset["page"]; };
+        this.cleanup = () => { clearTimeout(previewTimer); clearTimeout(surveyTimer); surveyRun++; delete this.root.dataset["page"]; };
       };
       const main = (): void => {
         const extra: HTMLElement[] = [];

@@ -16020,3 +16020,68 @@ every creature sheet plans at fitK 1.0 (cow and owl named), pinnedKeys reports t
 and the hot tier does not drop below the pre-guarantee plan's scale on this registry.
 The adr573 subset test still passes unchanged. Harness numbers until the user's next
 play session: the phone verdict is animals sharp at play zoom.
+
+## ADR-585: the world-generation screen is a zoomable survey of the whole spawn area (SurVivaZ)
+
+The user asked for the world generation screen to show the whole world map, not just the
+starting zone, with the player's spawn point marked and zoom in/out. The world is endless
+(it streams region by region from the seed, ADR-425), so "whole world" is a zoomable
+survey centred on the spawn area: packages/world preview.ts gains sampleWorldSurvey —
+the same fixed 128 x 128 sample grid as the old preview, taken at a stride from
+SURVEY_STRIDES [3, 6, 12, 24, 48] tiles per sample (extents 384 / 768 / 1536 / 3072 /
+6144 tiles across), centred on the origin at every zoom, at the identical 16,384-sample
+cost per render. The stride-12 survey is byte-identical to the legacy preview (pinned by
+test). The ladder stops at 48: measured on this hardware, the generator's per-tile
+feature derivation (river networks / massifs / canyons, memoised per region with a cap
+of 16) makes even the relief sweep take ~6 s at stride 96 and the ruin enumeration
+~16 s; a wider survey wants a chunk-amortised sampler the generator does not have yet.
+
+The menu seed page replaces the static preview image with the survey: one
+ProceduralGenerator per seed is reused across zooms, the four deterministic spawn
+points (computeSpawnPoints — players start at one of the four) are drawn as ringed
+dots via worldToSurveyPixel, and zoom is stepped by on-screen Zoom in/out buttons
+(focusable, so gamepad/keyboard/touch all work), the mouse wheel, and two-finger
+pinch on the image. Default stride 24 (3,072 tiles across). The ADR-425 note is
+rebuilt for the survey: current extent and walk-across time from the same constants,
+the spawn/ruin legend, and the honest endless-world line. worldPreviewSvg gains an
+optional markers argument; without it the output is unchanged (legacy centre cross).
+
+Tests: adr585 (world) pins the ladder, the stride-12 equivalence, centring at every
+stride, the pixel round-trip, spawn pixels on-survey near the centre, and marker
+rendering/drop-off-survey; adr585 (client) drives the BootUI seed page — zoom buttons
+step the note through 3072 → 6144 → 3072 → 1536 → 768 → 384 with end-state disabling,
+and the rendered SVG gains spawn rings and ruin diamonds; adr425's note test updated
+to the survey contract.
+
+## ADR-586: abandoned structures are marked where they spawn, on both maps (SurVivaZ)
+
+The user asked for abandoned structures to be shown where they spawn on the
+world-generation map and on the in-game world map. The maps must not lie, so the
+markers are not the raw per-chunk plans (the ADR-498 journal's notion): gameplay's
+building/abandoned.ts gains mapAbandonedSites(seed, sampleAt, chunk range), a pure
+function that runs the chunk plan and then applies the same two seed-only gates
+stampAbandonedSite applies before queueing — the spawn exclusion (nearSpawn) and the
+strict single-level terrain gate, replicated against the generator sampler with the
+shipped data defs (mapSiteTerrainOk: no water, no unbuildable-unless-shallow, one
+level across the footprint, corners/centre probed first — the predicate is order-free,
+so the answer is footprintSpread's). Live-state gates (existing marker, busy
+footprint) cannot apply to a fresh-world survey. planAbandonedChunkForMap replicates
+planAbandonedChunk roll-for-roll with footprint sizes cached per (kind, rot), because
+a wide survey enumerates up to ~74k chunks and a full layout build per planned chunk
+costs seconds; a test pins the replication over thousands of chunks per seed.
+
+Consumers: the generation survey enumerates the chunks under its (rotated) extent in
+~24 ms time slices behind the relief, redrawing the SVG as diamonds fill in (a run
+token supersedes stale seed/zoom slices; slices are also row-capped so a frozen clock
+cannot spin them; seed typing cancels the run outright, so the shown image freezes
+until the debounced redraw — the adr273 debounce contract). The in-game world map enumerates the visible chunk range from the
+seed the client knows (singleplayer/hosting, wired from main.ts's menuWorldSeed; a
+remote guest's client does not know the seed and the overlay simply does not draw),
+memoised per (seed, chunk range), and draws amber diamonds at footprint centres —
+including over dark unexplored areas, which is the point of showing them.
+
+Ground truth: adr586 (gameplay) stamps a real generator-backed world over chunks
+-5..4 x -5..4 (ChunkManager + terrainFromTileMap, the ADR-384 harness), drains the
+stamps, and requires mapAbandonedSites over the same range to equal the AbandonedSite
+marker set exactly. Caveat recorded: player terrain edits after a chunk first loads
+can change what a later re-stamp would do; the maps show the seed's sites.

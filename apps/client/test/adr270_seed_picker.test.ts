@@ -53,10 +53,13 @@ describe("ADR-270: world seed before character creation", () => {
     document.querySelector<HTMLInputElement>("[data-role=room-code]")!.value = "ABC234"; button("Join").click();
     await expect(choice).resolves.toEqual({ kind: "join", code: "ABC234" }); expect(savedSeed).not.toHaveBeenCalled();
   });
-  it("gamepad navigation reaches field, Random, Create, Back; B returns without creating a world", async () => {
+  it("gamepad navigation reaches field, Random, zoom buttons, Create, Back; B returns without creating a world", async () => {
     open(); button("Singleplayer").click(); await flush();
     const press = (key: string) => { for (const type of ["keydown", "keyup"]) document.activeElement!.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true, cancelable: true })); };
     press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Random"));
+    // ADR-585: the survey zoom buttons are gamepad-reachable stops between Random and Create.
+    press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Zoom out −"));
+    press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Zoom in +"));
     press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Create world"));
     press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Back"));
     press("GamepadB"); expect(document.querySelector("[data-role=world-seed]")).toBeNull(); expect(button("Singleplayer")).toBeDefined();

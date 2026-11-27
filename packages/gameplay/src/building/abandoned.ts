@@ -9,6 +9,7 @@ import { PlayerId, Transform, type Entity, type World } from "@engine/core";
 import { CHUNK_SIZE, isWaterId, parseChunkKey, waterDepthAt, WaterDepth, type ChunkKey } from "@engine/world";
 import { AbandonedSite, BuildPiece, PieceOwner, PieceSlot, ResourceNode, Tribe } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
+import { defaultDefs } from "../data.js";
 import { BuildFail } from "../events.js";
 import { addItem } from "../inventory.js";
 import { indexEntity } from "../spawn.js";
@@ -1159,6 +1160,87 @@ export function planAbandonedChunk(seed: number, cx: number, cy: number): { orig
   const oy = cy * CHUNK_SIZE + margin + ((rand() * (CHUNK_SIZE - built.h - margin * 2 + 1)) | 0);
   const ruin = 0.18 + rand() * 0.62;
   return { originX: ox, originY: oy, kind, rot, ruin };
+}
+
+/** ADR-586: one abandoned site as the maps show it — the site's footprint origin and size. */
+export interface MapAbandonedSite { originX: number; originY: number; kind: AbandonedKindId; width: number; height: number }
+
+/**
+ * ADR-586: the footprint terrain gate of footprintSpread (cap 0), evaluated against a pure
+ * generator sampler instead of a live world: no water tile, no unbuildable tile (unless it is
+ * shallow water), and every tile at one single level. `sampleAt` must be the world seed's
+ * generator sampler, whose tile/height for a tile equal what a generated chunk stores.
+ */
+function mapSiteTerrainOk(sampleAt: (x: number, y: number) => { tile: number; height: number }, ox: number, oy: number, w: number, h: number): boolean {
+  const defs = defaultDefs();
+  const tileAt = (x: number, y: number): number => sampleAt(x, y).tile;
+  let level: number | undefined;
+  const check = (x: number, y: number): boolean => {
+    const s = sampleAt(x, y);
+    if (isWaterId(s.tile)) return false;
+    if (defs.worldgen.unbuildableTiles.has(s.tile) && waterDepthAt(tileAt, x, y, defs.movement.shallowRadius) !== WaterDepth.Shallow) return false;
+    if (level === undefined) level = s.height; else if (s.height !== level) return false;
+    return true;
+  };
+  // Probe the corners and centre first: the predicate is order-free (every tile must pass and
+  // share one level), and a straddling footprint usually betrays its second level at a corner —
+  // so most failures cost ~5 samples instead of a full footprint scan. Passing sites still get
+  // the complete scan below, so the answer is identical to footprintSpread's.
+  if (!check(ox, oy) || !check(ox + w - 1, oy) || !check(ox, oy + h - 1) || !check(ox + w - 1, oy + h - 1) || !check(ox + (w >> 1), oy + (h >> 1))) return false;
+  for (let y = oy; y < oy + h; y++) for (let x = ox; x < ox + w; x++) if (!check(x, y)) return false;
+  return true;
+}
+
+/** ADR-586: footprint sizes per (kind, rot), built once — the layouts themselves are pure. */
+const mapSiteSizes = new Map<string, { w: number; h: number }>();
+
+/**
+ * ADR-586: planAbandonedChunk without building the site's layout — identical rolls (the
+ * 0x51CE0001 stream is consumed in the same order: kind, rot, origin x, origin y, ruin;
+ * buildKind/rotateBuilt draw from no stream), with the footprint size served from
+ * mapSiteSizes instead of a fresh build. Exists because a map survey enumerates up to
+ * ~300k chunks and a full layout build per planned chunk costs seconds; the adr586 test
+ * pins this function to planAbandonedChunk over thousands of chunks so the two cannot drift.
+ */
+export function planAbandonedChunkForMap(seed: number, cx: number, cy: number): { originX: number; originY: number; kind: AbandonedKindId; rot: number; ruin: number; width: number; height: number } | undefined {
+  if (hashU32(seed, cx, cy, 0xC40CE) / 4294967296 >= SITE_CHANCE) return undefined;
+  const rand = rng(hashU32(seed, cx, cy, 0x51CE0001));
+  const kind = pickKind(rand);
+  const rot = rand() * 4 | 0;
+  const key = `${kind}:${rot}`;
+  let size = mapSiteSizes.get(key);
+  if (!size) { const b = rotateBuilt(buildKind(kind), rot); size = { w: b.w, h: b.h }; mapSiteSizes.set(key, size); }
+  const margin = 2;
+  if (size.w + margin * 2 > CHUNK_SIZE || size.h + margin * 2 > CHUNK_SIZE) return undefined;
+  const ox = cx * CHUNK_SIZE + margin + ((rand() * (CHUNK_SIZE - size.w - margin * 2 + 1)) | 0);
+  const oy = cy * CHUNK_SIZE + margin + ((rand() * (CHUNK_SIZE - size.h - margin * 2 + 1)) | 0);
+  const ruin = 0.18 + rand() * 0.62;
+  return { originX: ox, originY: oy, kind, rot, ruin, width: size.w, height: size.h };
+}
+
+/**
+ * ADR-586: the abandoned sites the chunk-load stamper WILL place in the chunk range
+ * [cx0..cx1] x [cy0..cy1] of a fresh world with this seed — for the world-generation survey
+ * map and the in-game world map. Pure function of (seed, generator sampler): per chunk it
+ * runs planAbandonedChunkForMap (= planAbandonedChunk), then applies the same two seed-only
+ * gates stampAbandonedSite applies before queueing (the spawn exclusion and the strict
+ * single-level terrain gate, via mapSiteTerrainOk with the shipped data defs — the defs
+ * every production world uses). The live-state gates (an existing marker, a busy footprint)
+ * cannot apply to a fresh-world survey. Player terrain edits after a chunk first loads can
+ * change what a later re-stamp would do; the maps show the seed's sites, as the discovery
+ * journal (ADR-498) records them. Guarded against drift by
+ * adr586_map_abandoned_sites.test.ts, which stamps real chunks in a generator-backed world
+ * and requires the two site sets to be identical.
+ */
+export function mapAbandonedSites(seed: number, sampleAt: (x: number, y: number) => { tile: number; height: number }, cx0: number, cy0: number, cx1: number, cy1: number): MapAbandonedSite[] {
+  const out: MapAbandonedSite[] = [];
+  for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) {
+    const planned = planAbandonedChunkForMap(seed, cx, cy); if (!planned) continue;
+    if (nearSpawn(planned.originX, planned.originY, planned.width, planned.height)) continue;
+    if (!mapSiteTerrainOk(sampleAt, planned.originX, planned.originY, planned.width, planned.height)) continue;
+    out.push({ originX: planned.originX, originY: planned.originY, kind: planned.kind, width: planned.width, height: planned.height });
+  }
+  return out;
 }
 
 /**
