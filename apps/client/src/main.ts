@@ -510,7 +510,12 @@ async function startSingleplayer(chosenSeed?: number): Promise<void> {
   const { createLocalServer, openBrowserStore, localStatus } = await import("./local.js");
   spStatus = localStatus;
   try {
-    const bots = Number(params.get("bots") ?? settings.bots);
+    // ADR-579: settings are re-read here, not taken from the module-level snapshot (which is
+    // captured at page load): a rule changed in the Settings screen this session — zombies off
+    // above all — must reach world creation, or the world is created under the stale rule and
+    // the save locks it in (the ADR-535 toggle appeared broken: zombies in a "zombies-off" world).
+    const fresh = loadSettings();
+    const bots = Number(params.get("bots") ?? fresh.bots);
     localStatus.state = "opening-store";
     stampPlayed("singleplayer");
     const devSandbox = params.get("dev") === "sandbox"; // ADR-140: QA sandbox, own throwaway save slot
@@ -523,11 +528,11 @@ async function startSingleplayer(chosenSeed?: number): Promise<void> {
     // ADR-254: ?seed=N forces a reproducible world; otherwise createLocalServer picks a random seed for a new save.
     const seedParam = params.get("seed"); const seedOpt = chosenSeed !== undefined ? { seed: chosenSeed } : seedParam != null && seedParam !== "" && Number.isFinite(Number(seedParam)) ? { seed: Number(seedParam) } : {};
     let local: import("./local-bridge.js").LocalServerHandle | undefined = params.get("worker") === "0" ? undefined
-      : await startWorkerServer({ dbName, bots, devSandbox, worldRules: newWorldRules(settings), catalog, status: localStatus, log, timeoutMs: 15000, ...seedOpt });
+      : await startWorkerServer({ dbName, bots, devSandbox, worldRules: newWorldRules(fresh), catalog, status: localStatus, log, timeoutMs: 15000, ...seedOpt });
     if (!local) {
       const store = await openBrowserStore(dbName);
       localStatus.state = "starting";
-      const inTab = await createLocalServer({ store, bots, devSandbox, worldRules: newWorldRules(settings), ...seedOpt, ...(catalog ? { catalog } : {}), log });
+      const inTab = await createLocalServer({ store, bots, devSandbox, worldRules: newWorldRules(fresh), ...seedOpt, ...(catalog ? { catalog } : {}), log });
       pumpLocal = inTab.pump; if (devSandbox) (window as { __qaServer?: unknown }).__qaServer = inTab.game; // ADR-145 QA: in-tab server (?worker=0)
       local = { inWorker: false, createTransport: () => inTab.createTransport(), save: async () => { await inTab.game.persist?.saveAll(); }, stop: () => inTab.stop() };
     }

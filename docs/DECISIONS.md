@@ -15835,3 +15835,36 @@ about one budget overshoot, never the whole burst; on the phone the burst now se
 outward over a few hundred milliseconds of frames instead of one freeze — the phone-side
 entry profile is owed from play, the harness evidence here is structural. Canvas2D draws
 tiles directly and has no chunk meshes, so there is nothing to slice on that path.
+
+## ADR-579: World-start settings are read fresh — the zombies toggle reaches world creation (SurVivaZ)
+
+Bug report (2026-11-27): zombies still spawn in a world created with zombies turned off.
+The investigation cleared every spawn path first: the population spawner's table is
+filtered at install (ADR-535), the legacy spawner and the horde director check
+WorldRules, the save meta writes and restores the rule (game.ts extraMeta / line 162),
+and old saves default to on by design. The break was in the client's world-start wiring:
+apps/client/src/main.ts captured `const settings = loadSettings()` once at page load and
+startSingleplayer passed that snapshot to newWorldRules(). The Settings screen writes
+localStorage when the user saves — so a zombies untick made during the same session, the
+normal way to use the toggle, never reached world creation. The world was created with
+zombies ON, and its save meta then locked zombies=1 in permanently; the pause-menu rule
+line honestly reported a zombies-on world. The ADR-535 tests never caught it because they
+always handed createLocalServer fresh settings — the stale hand-off in main.ts was the
+one untested link, and main.ts cannot be imported by a test (it boots the app).
+
+Fix (apps/client/src/main.ts): startSingleplayer re-reads the settings
+(`const fresh = loadSettings()`) and uses them for the bot count and for newWorldRules()
+on both server paths (Web Worker and in-tab fallback). The P2P host path already loaded
+fresh and is unchanged. Proof (apps/client/test/adr579_settings_fresh_read.test.ts): a
+wiring test pins the fixed call pattern in main.ts by source (it fails on the pre-fix
+file — verified by revert), and a behavioural test drives the exact pattern end to end:
+settings stored as on, unticked and saved in-session, fresh read, world created —
+WorldRules.zombies is false and the save meta records zombies 0. The ADR-535 suites
+(settings round-trip, meta persistence, old-save default) pass unchanged.
+
+Consequences, stated plainly: worlds already created under the stale rule keep it —
+world rules belong to the save (ADR-535), so the reporter's current world stays a
+zombies-on world; the next world they create with the toggle off will be zombie-free.
+A known sibling was left alone: the module snapshot also feeds hostPlayerCap on the
+hosting paths (a mid-session cap change has the same staleness, with far lower stakes);
+it is recorded here rather than silently fixed in this batch.
