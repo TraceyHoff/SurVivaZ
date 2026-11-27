@@ -37,14 +37,15 @@
  */
 import { describe, expect, it } from "vitest";
 import { TileMap, fromView, toView, tileToLocal } from "@engine/world";
-import { Canvas2DRenderer } from "../src/canvas2d.js";
+import { Canvas2DRenderer, C2D_SIDE } from "../src/canvas2d.js";
 import { c2dGroundGeometry, c2dNeighbourLow, c2dTileHeight } from "../src/canvasGroundHeight.js";
 import { GroundArt } from "../src/groundArt.js";
-import { TilemapRenderer } from "../src/tilemap.js";
+import { SIDE, TilemapRenderer } from "../src/tilemap.js";
 import { TileId } from "../src/ids.js";
 import type { AtlasSource } from "../src/assets/atlasManager.js";
 
 const GRASS = TileId.Grass, DIRT = TileId.Dirt, WATER = TileId.Water;
+const SNOW = TileId.Snow, STONE = TileId.Stone, FOREST = TileId.Forest, MUD = TileId.Mud;
 /** gt block geometry (canvas2d.ts GT_* constants): block 8x8, origin pads. */
 const B = 8, GT_OX = (B - 1) * 32 + 34, GT_OY = 18;
 
@@ -89,7 +90,7 @@ function fakeRegistry(): { registry: never; sources: Map<string, AtlasSource> } 
 
 // ---------- configurations (view-space offsets from the centre tile) ----------
 type TileSpec = number | string; // number = land height; "W:<bed>" = water with that stored bed height
-interface Cfg { name: string; key?: boolean; baseId: number; base: number; tiles: Record<string, TileSpec>; centreWorld?: [number, number] }
+interface Cfg { name: string; key?: boolean; baseId: number; base: number; tiles: Record<string, TileSpec>; centreWorld?: [number, number]; paths?: ("gt" | "mesh" | "flat")[] }
 const CORE: [number, number][] = [];
 for (let dv = -1; dv <= 1; dv++) for (let du = -1; du <= 1; du++) CORE.push([du, dv]);
 const CONFIGS: Cfg[] = [
@@ -105,6 +106,17 @@ const CONFIGS: Cfg[] = [
   { name: "+1 beside water, bed -71", baseId: GRASS, base: 0, tiles: { "0,0": 1, "1,0": "W:-71" } },
   { name: "screenshot arrangement", key: true, baseId: GRASS, base: 0, tiles: { "0,0": 1, "-1,-1": 1 } },
   { name: "chunk-border +1 (world 31,16)", key: true, baseId: GRASS, base: 0, tiles: { "0,0": 1 }, centreWorld: [31, 16] },
+  // ADR-583: multi-level drops (the ±100 terrain made these common; the ADR-572 matrix only
+  // covered 1-2 level steps) and the other land tiles' faces.
+  { name: "isolated +3", baseId: GRASS, base: 0, tiles: { "0,0": 3 } },
+  { name: "isolated +3, dirt", baseId: DIRT, base: 0, tiles: { "0,0": 3 } },
+  { name: "isolated +8", baseId: GRASS, base: 0, tiles: { "0,0": 8 } },
+  { name: "canyon trench -4", baseId: GRASS, base: 0, tiles: { "-1,0": -4, "0,0": -4, "1,0": -4 } },
+  { name: "isolated +2, snow", baseId: SNOW, base: 0, tiles: { "0,0": 2 }, paths: ["mesh", "flat"] },
+  { name: "isolated +2, stone", baseId: STONE, base: 0, tiles: { "0,0": 2 }, paths: ["mesh", "flat"] },
+  { name: "isolated +2, forest", baseId: FOREST, base: 0, tiles: { "0,0": 2 }, paths: ["mesh", "flat"] },
+  { name: "isolated +2, mud", baseId: MUD, base: 0, tiles: { "0,0": 2 }, paths: ["mesh", "flat"] },
+  { name: "water surface beside deep dry bed (-8)", baseId: GRASS, base: 0, tiles: { "0,0": "W:0", "1,0": -8 }, paths: ["mesh", "flat"] },
 ];
 const rotOff = (du: number, dv: number, r: number): [number, number] => {
   switch (r & 3) { case 1: return [-dv, du]; case 2: return [-du, -dv]; case 3: return [dv, -du]; default: return [du, dv]; }
@@ -280,12 +292,15 @@ describe("ADR-572 coverage oracle: no background inside the ground silhouette", 
     for (let r = 0; r < 4; r++) for (const zoom of zooms) {
       it(`${cfg.name} — rot ${r * 90}°, zoom ${zoom}: gt / mesh / flat leak = 0`, async () => {
         const { map, cu, cv, bx, by } = buildScene(cfg, r);
-        const gt = await gtPolys(map, r, cu, cv, bx, by);
+        // Configs restricted away from the gt path (tiles with no gt art in the fake registry)
+        // never bake a gt block; their expected/flat geometry uses topPad 0 like the mesh frame.
+        const gt = !cfg.paths || cfg.paths.includes("gt") ? await gtPolys(map, r, cu, cv, bx, by) : { polys: [] as Pt[][], topPad: 0 };
         const { expected, flat } = expectedAndFlat(map, r, cu, cv, bx, by, gt.topPad);
         const expSet = rasterize(expected, zoom);
         expect(expSet.size, "oracle sanity: the expected silhouette is non-trivial").toBeGreaterThan(400);
         const clip = bboxOf(expected, zoom, 2);
-        const cases: [string, Pt[][]][] = [["gt", gt.polys], ["mesh", meshPolys(map, r, bx, by, gt.topPad)], ["flat", flat]];
+        const all: [string, Pt[][]][] = [["gt", gt.polys], ["mesh", meshPolys(map, r, bx, by, gt.topPad)], ["flat", flat]];
+        const cases = cfg.paths ? all.filter(([p]) => cfg.paths!.includes(p as "gt" | "mesh" | "flat")) : all;
         for (const [path, polys] of cases) {
           const { leak, worstRun } = leakOf(expSet, rasterize(polys, zoom, clip));
           expect(leak, `${cfg.name} rot ${r * 90}° zoom ${zoom} ${path}: leak ${leak} px, worst column run ${worstRun}`).toBe(0);
@@ -325,5 +340,57 @@ describe("ADR-572 coverage oracle: no background inside the ground silhouette", 
     expect(fill.poly).toEqual([[-32, -16], [0, 0], [0, 16], [-32, 0]]); // flat-top quad: L corner back up at z=1, same bottom span
     const far = g.fillFaces.find((f) => f.side === 3)!;
     expect(far.poly).toEqual(g.faces.find((f) => f.side === 3)!.poly); // far faces fill as-is (side 1 here is a slope side, not a face)
+  });
+});
+
+// ---------- ADR-583: dirt faces are brown; every other tile's face matches its tile ----------
+describe("ADR-583 face colours: brown dirt, and each tile's face matches its tile", () => {
+  const LAND = [TileId.Grass, TileId.Sand, TileId.Dirt, TileId.Stone, TileId.Snow, TileId.Forest, TileId.Mud];
+  /** The pinned palette (user ruling): dirt brown; the rest match their own tile, deepened. */
+  const FACE: Record<number, [number, number, number]> = {
+    [TileId.Grass]: [112, 84, 56], [TileId.Sand]: [168, 140, 92], [TileId.Dirt]: [128, 92, 58],
+    [TileId.Stone]: [150, 144, 140], [TileId.Snow]: [205, 219, 233], [TileId.Forest]: [74, 110, 52],
+    [TileId.Mud]: [110, 84, 56], [TileId.Water]: [38, 92, 140], [TileId.ShallowWater]: [38, 92, 140],
+  };
+
+  it("both side-colour tables cover every tile, agree exactly, and match the pinned palette", () => {
+    for (const id of [...LAND, TileId.Water, TileId.ShallowWater]) {
+      expect(SIDE[id], `mesh SIDE tile ${id}`).toEqual(FACE[id]);
+      expect(C2D_SIDE[id], `C2D_SIDE tile ${id}`).toEqual(FACE[id]);
+      expect(SIDE[id]).not.toEqual([255, 0, 255]); // never the magenta sentinel
+    }
+  });
+
+  it("the WebGL2 mesh colours every land tile's cliff vertices with its face colour", () => {
+    for (const id of LAND) {
+      const map = new TileMap();
+      for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) { map.setTile(x, y, id); map.getChunk(Math.floor(x / 32), Math.floor(y / 32))!.setHeight(tileToLocal(x), tileToLocal(y), 0); }
+      map.getChunk(0, 0)!.setHeight(tileToLocal(0), tileToLocal(0), 2);
+      let buf: ArrayBuffer | null = null;
+      const gl = {
+        createVertexArray: () => ({}), createBuffer: () => ({}), bindVertexArray: () => {}, bindBuffer: () => {},
+        bufferData: (_t: unknown, data: ArrayBuffer | Uint16Array | Uint32Array) => { if (data instanceof ArrayBuffer) buf = data; },
+        enableVertexAttribArray: () => {}, vertexAttribPointer: () => {},
+      };
+      const renderer = Object.assign(Object.create(TilemapRenderer.prototype), { gl }) as { build(m: TileMap, c: unknown, o?: unknown): void };
+      for (const chunk of map.loadedChunks()) renderer.build(map, chunk, undefined);
+      const u8 = new Uint8Array(buf!); const n = u8.length / 16;
+      let cliffs = 0;
+      for (let k = 0; k < n; k++) {
+        const flag = u8[k * 16 + 15]!;
+        if (flag >= 2 && flag <= 5) { cliffs++; expect([u8[k * 16 + 12], u8[k * 16 + 13], u8[k * 16 + 14]], `tile ${id} cliff colour`).toEqual(SIDE[id]); }
+      }
+      expect(cliffs, `tile ${id} emitted cliff vertices`).toBeGreaterThan(0);
+    }
+  });
+
+  it("the Canvas2D cliff colour for every land tile is its shaded face colour (never magenta)", () => {
+    const canvas = stubCanvas();
+    const r = new Canvas2DRenderer(canvas as unknown as HTMLCanvasElement, new RecCtx() as unknown as CanvasRenderingContext2D);
+    const cliff = (r as unknown as { cliffColor(t: number, x: number, y: number, s: number): string }).cliffColor.bind(r);
+    for (const id of LAND) for (const shade of [0.28, 0.62, 0.8]) {
+      const want = SIDE[id]!.map((c) => Math.round(c * shade));
+      expect(cliff(id, 3, 5, shade), `tile ${id} shade ${shade}`).toBe(`rgb(${want[0]},${want[1]},${want[2]})`);
+    }
   });
 });

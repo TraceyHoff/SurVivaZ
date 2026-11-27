@@ -3,7 +3,7 @@ import { installVehicleCraft, VEHICLE_CRAFT_HASH } from "./vehicle_craft.js";
 import { CROP_EVERY, cropGrowthSystem, farmUseSystem } from "./farming.js";
 import { TERRAIN, terrainFlowSystem } from "./terrain.js";
 import { HUSBANDRY_EVERY, husbandrySystem, husbandryUseSystem } from "./skills/husbandry.js";
-import { installProgression, progressionMigrateSystem, xpTravelSystem } from "./skills/progression.js";
+import { creativeStartSystem, installProgression, progressionMigrateSystem, xpTravelSystem } from "./skills/progression.js";
 import { installPets, petSystem } from "./pets.js";
 import { DEFAULT_TICK_HZ, pruneModifiers, Season, setTimeOfDay, wallHoursForSun, worldSunSchedule, StallDisplay, TimeOfDay, Weather, type World } from "@engine/core";
 import { installSpatialIndex, setClimateModel, ClimateRes } from "@engine/world";
@@ -157,7 +157,7 @@ export function installGameplay(world: World, options: GameplayOptions | number 
     "gameplay.recruitment": recruitmentSystem,
     "gameplay.clearIntents": clearIntentsSystem, "gameplay.equipmentSync": equipmentSyncSystem, "gameplay.noiseDecay": noiseDecaySystem,
     "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.storeFill": storeFillSystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.abandonedStamps": (w) => { pumpAbandonedStamps(w); }, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.flood": floodSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
-    "gameplay.hordes": hordeDirectorSystem, "gameplay.packs": packDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem, "gameplay.rope": ropeSystem, "gameplay.dung": dungSystem,
+    "gameplay.hordes": hordeDirectorSystem, "gameplay.packs": packDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.creativeStart": creativeStartSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem, "gameplay.rope": ropeSystem, "gameplay.dung": dungSystem,
     ...installBuildingSystems(world), ...installCombatSystems(world),
   };
   installProgression(world);

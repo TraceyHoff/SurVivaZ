@@ -15938,3 +15938,85 @@ save-meta persistence incl. the old-save default), adr581 (damage negation acros
 causes + death, bot non-waiver, vitals pinning + starvation control, queued and timed
 free crafting incl. the no-refund dupe guard, free building at validation, payment
 and menu level — each with its survival control).
+
+## ADR-582: Creative start — max level and full skill points (SurVivaZ)
+
+A human player starting in a Creative world (ADR-580/581) begins at max level with
+enough points to learn every skill. Implemented as an authority system
+(gameplay.creativeStart, registered beside progressionMigrate) rather than a spawn-time
+write: it fires for any entity where isCreativePlayer holds AND the Progression row is
+still the untouched start (isFreshProgression: level 1, no XP anywhere, no points, no
+nodes owned). After the grant the character is level 120, so the fresh check can never
+match again — one-time by construction, no marker field, no schema change. A restored
+character with any progress keeps it (no top-ups); a fresh character joining an existing
+Creative world is granted; AI humans are excluded by the same predicate as every other
+Creative waiver.
+
+The grant: migrateProgression first (per-tree layout), then character level =
+SKILLS.levels.maxLevel (120), every tree level = SKILLS.treeLevels.maxLevel (60), and
+each tree's points = CREATIVE_TREE_POINTS — the summed cost of that tree's non-retired
+nodes, computed from skills.json at module load. Max level alone earns only 71 points
+per tree (treePointsAtLevel(60)) but the crafting tree costs 77, so points come from
+the node costs, not the level curve. Nodes are NOT pre-learned: the player spends the
+points themselves (prerequisites still gate unlock order, as usual).
+
+Tests: adr582 (the grant maxes level/trees/points; the whole tree is then actually
+unlocked end-to-end with the granted points; survival control untouched; bot gets no
+grant; a progressed character is unchanged; spending points is not undone by re-running
+the system).
+
+## ADR-583: every land tile's cliff face is a dirt colour (SurVivaZ)
+
+The user reported ground tiles still showing the sky and asked that all visible ground
+faces be the colour of the dirt. Root cause is colour, not coverage: both renderers
+defined cliff-face colours for only Grass, Sand and Water. In the WebGL2 mesh
+(tilemap.ts SIDE) every other tile fell back to its TOP palette colour — snow cliffs
+rendered pale sky-blue [238,244,251], forest cliffs green. In Canvas2D (canvas2d.ts
+C2D_SIDE + cliffColor) the same tiles fell back to magenta [255,0,255] wherever the
+geometric face fill shows. The ADR-572 coverage oracle only asserted geometry, so this
+shipped invisible to the tests.
+
+Fix (palette per the user's ruling: dirt faces are brown dirt; every other tile's
+face matches its own tile, deepened so it reads as a face under the cliff shading):
+SIDE and C2D_SIDE now carry an explicit face colour for every tile — Dirt [128,92,58]
+brown, Stone [150,144,140], Snow [205,219,233], Forest [74,110,52], Mud [110,84,56],
+ShallowWater joins Water [38,92,140]; Grass keeps its long-standing dirt side — and
+the two tables are pinned to agree exactly. Top faces keep their own colours; only
+faces change.
+
+The ADR-572 oracle is extended: multi-level configurations the ±100 terrain made
+common (isolated +3 grass and dirt, isolated +8, a −4 canyon trench, water surface
+beside a −8 dry bed, isolated +2 for snow/stone/forest/mud on the mesh and flat paths)
+— leak stays 0 in every path, confirming the geometry was already sealed and the
+visible defect was the colour. New colour assertions pin the fix: both tables cover
+every tile, agree exactly, and match the pinned per-tile palette (never magenta); the
+mesh colours every land tile's cliff vertices with exactly its face colour; Canvas2D's
+cliffColor returns the shaded face colour for every land tile at all three face shades.
+
+## ADR-584: creature sheets are full-res by construction at phone budgets (SurVivaZ)
+
+The user reported animals (cow, owl, others) still blurry after ADR-573. Root cause:
+ADR-573's pin tier 5 was validated on a 148-atlas subset of the registry with a flat
+85 MB reserve. Replicated against the REAL boot registry (AtlasManager.rebuild()'s
+resident partition and pool-reserve computation: 378 resident atlases, ~128 MB of pool
+reserve after Grok's ADR-449–502 content growth), tier 5 never wins and every creature
+sheet — the cow's nature_critters_a_40x40 and the owl's painted pets_owl included —
+planned at the halved hot scale; ADR-574's re-tier re-ran the same losing plan.
+
+Fix: at textureBudgetMB >= 256, planFit's scaleOf pins every non-cold creature sheet at
+1.0 in EVERY tier (the guarantee is folded into the pin test itself), and the guaranteed
+sheets join pinnedKeys so ?diag=1 and the runtime scaleOf report the truth. Measured on
+the real registry, creatures at 1.0 mixed into the winning pack cost the same 6 layers
+the phone plan already spends, and the phone's hot/cold scales are unchanged (its cold
+tier already sat at 0.125, ADR-557 diag). In the ADR-554 synthetic harness (flat 85 MB
+reserve, 77 atlases) the guarantee is funded by the cold tier stepping 0.5 -> 0.25 —
+that scenario's pins were re-measured and updated with the reason recorded in the test.
+Below 256 MB the tier contest is unchanged (a 128 MB device cannot carry the ~65 MB
+creature set at 1.0). Tier 5 itself is untouched for the budgets where it can still win.
+
+Tests: adr584 replicates rebuild()'s partition + reserve on the real merged registry
+(loadMergedPackManifest, wear shards excluded, Mali-class compressed caps) and asserts
+every creature sheet plans at fitK 1.0 (cow and owl named), pinnedKeys reports them,
+and the hot tier does not drop below the pre-guarantee plan's scale on this registry.
+The adr573 subset test still passes unchanged. Harness numbers until the user's next
+play session: the phone verdict is animals sharp at play zoom.

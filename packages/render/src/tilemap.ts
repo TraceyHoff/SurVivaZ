@@ -61,8 +61,16 @@ export function cliffShade(flag: number, view: number): number {
  *  the camera angle would otherwise hide behind the plateau. */
 export const LEDGE_LIP_SHADE = 0.72;
 export function ledgeLipShade(drop: boolean): number { return drop ? LEDGE_LIP_SHADE : 1; }
-const SIDE: Record<number, [number, number, number]> = {
+/** ADR-583: cliff-face colour per TileId. Dirt faces are brown dirt; every other tile's face
+ *  matches its own tile, deepened so it reads as a face (the shader shades it further). Before
+ *  ADR-583 only Grass/Sand/Water had entries: the mesh fell back to each tile's raw top colour
+ *  (snow cliffs at full top brightness read as sky), and Canvas2D — whose table had the same
+ *  three entries — fell back to magenta for dirt/stone/snow/forest/mud faces. Grass keeps its
+ *  long-standing dirt side. Canvas2D's C2D_SIDE mirrors this table exactly. */
+export const SIDE: Record<number, [number, number, number]> = {
   [TileId.Grass]: [112, 84, 56], [TileId.Sand]: [168, 140, 92], [TileId.Water]: [38, 92, 140],
+  [TileId.ShallowWater]: [38, 92, 140], [TileId.Dirt]: [128, 92, 58], [TileId.Stone]: [150, 144, 140],
+  [TileId.Snow]: [205, 219, 233], [TileId.Forest]: [74, 110, 52], [TileId.Mud]: [110, 84, 56],
 };
 
 const hash = (x: number, y: number): number => {

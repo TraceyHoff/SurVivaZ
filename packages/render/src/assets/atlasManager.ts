@@ -1611,9 +1611,17 @@ export class AtlasManager {
     // stable array: the tier-4 subset loop below reassigns baseCorePin, and tier 5 must not shrink with it.
     const creaturePin = list.map((a) => !a.cold && CREATURE_PIN_RE.test(a.key));
     const creatureTierPin = list.map((_, i) => corePin[i]! || basePin[i]! || creaturePin[i]!);
+    // ADR-584: at phone-class budgets (>= 256 MB) creature sheets are full-res BY CONSTRUCTION, not
+    // by winning a pin tier. ADR-573's tier 5 was validated on a 148-atlas subset; against the real
+    // boot registry (~378 resident atlases + the real pool reserve) it silently lost, every creature
+    // sheet landed at the halved hot scale, and ADR-574's re-tier re-ran the same losing plan.
+    // Measured on the real registry: creatures at 1.0 mixed into the winning (0.5, 0.125) pack cost
+    // the same 6 layers the phone already spends, so no other family pays for the guarantee.
+    // Below 256 MB the tier contest still applies (a 128 MB device cannot carry the creature set at 1x).
+    const creatureGuaranteed = this.textureBudgetMB >= 256;
     let pin = 0; // 2 = creature + visible + core pins, 1 = ADR-251 visible + ADR-438 core pins, 5 = ADR-573 core + base + creature pins, 4 = ADR-512 base + core pins, 3 = ADR-438 core pins only, 0 = none
     const pinSet = (): boolean[] | null => pin === 2 ? pinned : pin === 1 ? visCorePin : pin === 5 ? creatureTierPin : pin === 4 ? baseCorePin : pin === 3 ? corePin : null;
-    const scaleOf = (i: number, h: number, c: number): number => { const a = list[i]!; const p = pinSet()?.[i] ?? false; return Math.min(caps[i]!, a.cold ? c : p ? 1 : h); };
+    const scaleOf = (i: number, h: number, c: number): number => { const a = list[i]!; const p = (pinSet()?.[i] ?? false) || (creatureGuaranteed && creaturePin[i]!); return Math.min(caps[i]!, a.cold ? c : p ? 1 : h); };
     const dims = (h: number, c: number) => list.map((a, i) => { const k = scaleOf(i, h, c); return { ...a, img: { width: Math.max(1, Math.floor(a.img!.width * k)), height: Math.max(1, Math.floor(a.img!.height * k)) } as ImageLike }; });
     const fits1 = (h: number, budget: number): number | null => {
       const anyCold = list.some((a) => a.cold);
@@ -1706,6 +1714,7 @@ export class AtlasManager {
     this.downscale = h; this.coldDownscale = c;
     if (!best) pin = 0;
     this.pinnedKeys = new Set(pin ? list.filter((_, i) => pinSet()![i]).map((a) => a.key) : []);
+    if (creatureGuaranteed) for (let i = 0; i < list.length; i++) if (creaturePin[i]) this.pinnedKeys.add(list[i]!.key); // ADR-584: ?diag=1 and the runtime scaleOf report the guarantee truthfully
     this.fitInfo = { reserveMB: Math.round(keptReserve / 1048576), reserveWantedMB: Math.round(reserveBytes / 1048576), demoted, pinned: [...this.pinnedKeys], keepMB: Math.round(keepBytes / 1048576), floorMB: Math.round(floorBytes / 1048576) };
     this.pack(dims(h, c));
     if (h < 1) {

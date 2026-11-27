@@ -60,8 +60,13 @@ export function chooseRenderer(probe: ContextProbe, opts: { forceDebug?: boolean
 export const TILE_COLORS = ["#1b1f1a", "#2d5d8a", "#c8b47a", "#4f8a43", "#3f7a3a", "#6b6b6b", "#e8eef0", "#35552c", "#4f93bf", "#5e4a33"]; // [8] ADR-181 shallow water (lighter than deep [1]); ADR-246: [6] snow / [7] forest were swapped, [9] mud
 
 /** ADR-414: cliff-face base colours (tilemap.ts SIDE: the mesh cliff colour per material). */
-const C2D_SIDE: Record<number, [number, number, number]> = {
+/** ADR-583: cliff-face colours — mirrors tilemap.ts SIDE exactly (dirt faces brown, every other
+ *  tile's face matches its own tile deepened; before ADR-583 Dirt/Stone/Snow/Forest/Mud fell
+ *  back to magenta here). */
+export const C2D_SIDE: Record<number, [number, number, number]> = {
   [TileId.Grass]: [112, 84, 56], [TileId.Sand]: [168, 140, 92], [TileId.Water]: [38, 92, 140],
+  [TileId.ShallowWater]: [38, 92, 140], [TileId.Dirt]: [128, 92, 58], [TileId.Stone]: [150, 144, 140],
+  [TileId.Snow]: [205, 219, 233], [TileId.Forest]: [74, 110, 52], [TileId.Mud]: [110, 84, 56],
 };
 
 /** ADR-145: snap a sprite origin to a whole device pixel (x*s + o integer) so nearest-neighbour pixel art keeps even texel widths. */

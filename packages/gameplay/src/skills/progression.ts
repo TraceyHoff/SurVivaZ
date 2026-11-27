@@ -9,6 +9,8 @@ import { gameplayDefs, isAuthority } from "../config.js";
 import { CraftCompleted, Damaged, emit, ev, ItemConsumed, ItemGathered, PiecePlaced, WaterDrunk, XpActivity } from "../events.js";
 import { skillDescription, type SkillDescription } from "./describe.js";
 import { isAiHuman, killXpBase, pvpFactor, travelStep, victimType, XP } from "./xp.js";
+import { isCreativePlayer } from "../creative.js";
+import { worldRules } from "../hordes.js";
 import { ToolKind } from "../defs.js";
 import { countItem, removeItem } from "../inventory.js";
 import { setSkillLevelProvider, setUnlockProvider } from "../systems/crafting.js";
@@ -91,6 +93,42 @@ export function treesOf(world: World, e: Entity): TreeProgress[] | undefined {
 }
 /** Unspent points of tree `tree` (index or key). */
 export function treePoints(world: World, e: Entity, tree: number | string): number { const i = typeof tree === "string" ? treeIndex(tree) : tree; return treesOf(world, e)?.[i]?.points ?? 0; }
+/** ADR-582: per-tree points that buy every learnable node in the tree, summed from skills.json costs. */
+export const CREATIVE_TREE_POINTS: readonly number[] = (() => {
+  const tot = TREE_KEYS.map(() => 0);
+  for (let i = 0; i < SKILLS.nodes.length; i++) { const n = SKILLS.nodes[i]!; if (!n.retired) tot[SKILL_NODE_TREE[i]!]! += n.cost; }
+  return tot;
+})();
+/** True when a Progression row is still the untouched start: no XP, no levels, no points, no nodes. */
+export function isFreshProgression(world: World, e: Entity): boolean {
+  const p = world.get(e, Progression); if (!p) return false;
+  if (p.level > 1 || p.xp > 0 || p.points > 0) return false;
+  const t = treesOf(world, e); if (!t) return false;
+  return t.every((x) => x.level <= 1 && x.xp === 0 && x.points === 0) && ownedNodes(world, e).length === 0;
+}
+/**
+ * ADR-582: the Creative start — max character level, every tree at max level, and enough points in
+ * each tree to learn all of its skills (CREATIVE_TREE_POINTS; max level alone earns 71 per tree but
+ * the crafting tree costs 77, so the points come from the node costs, not the level curve).
+ */
+export function applyCreativeStart(world: World, e: Entity): boolean {
+  if (!world.has(e, Progression)) return false;
+  migrateProgression(world, e);
+  world.set(e, Progression, { xp: 0, level: SKILLS.levels.maxLevel, points: 0 });
+  for (let i = 0; i < TREE_SLOTS; i++) {
+    world.setElement(e, Progression, "txp", i, 0);
+    world.setElement(e, Progression, "tlevel", i, i < TREE_KEYS.length ? SKILLS.treeLevels.maxLevel : 1);
+    world.setElement(e, Progression, "tpoints", i, CREATIVE_TREE_POINTS[i] ?? 0);
+  }
+  return true;
+}
+/** ADR-582: grants the Creative start to fresh human players in a Creative world (AI humans are
+ *  excluded by isCreativePlayer, as with every ADR-581 waiver). The fresh check makes it fire once:
+ *  a restored character with any progress keeps it, and a granted character is no longer fresh. */
+export function creativeStartSystem(world: World): void {
+  if (!isAuthority(world) || world.isReplaying || !worldRules(world).creative) return;
+  for (const e of world.query([Progression])) if (isCreativePlayer(world, e) && isFreshProgression(world, e)) applyCreativeStart(world, e);
+}
 /** Authority/test/QA: add unspent points to one tree. */
 export function grantTreePoints(world: World, e: Entity, tree: number | string, n: number): void {
   const i = typeof tree === "string" ? treeIndex(tree) : tree; if (i < 0 || !world.has(e, Progression)) return; migrateProgression(world, e);
