@@ -15731,3 +15731,67 @@ geometry pins cover the new fields (slopeFaces strip quad; flat-top fillFaces qu
 beside water). Neighbours green: adr409, adr410, adr414, adr415, adr416, adr417,
 adr418 (both), adr195, adr562 (10 files / 67 tests). Render typecheck clean (pinned
 TS 5.9.3). Full gate NOT run (coordinator runs it). Nothing pushed.
+
+## ADR-576: Static resource-node instance-row cache (SurVivaZ)
+
+Render-only slice (dense-area sustained cost; prep §7 / measure-perf.md §1, §6). Measured
+context: in a 352-visible-sprite grove, SpriteBatch.prepare() costs 0.320 ms/frame sustained
+vs 0.018 ms sparse (~18x), and the resolve→false ablation puts ~74% of the dense cost in the
+frame resolve + instance-write path for sprites that never move — resource nodes were
+re-gathered, re-resolved and re-written every frame, while static build pieces already had
+the ADR-381 per-chunk cached path. Sort (~0), upload (~0), draw calls (flat), light and sim
+were all cleared by the same measurement.
+
+What shipped (packages/render/src/sprites.ts): a per-dense-slot row cache for STATIC
+resource-node sprites, modelled on ADR-381's pieceCache. The first time the full emitSprite
+path draws exactly one instance for a cacheable node, that instance — the full path's own
+40-float output — is captured as the node's row, keyed by a 20-field signature of every row
+input (entity index, sprite id/frame/flags/tint/scale, transform, season amounts + dominant
+art feeding seasonPick, view quarter, atlas layoutVersion, shadow alpha/length, style
+blob-shadow width). On later frames a signature match replays the row through the same
+pushOcc/sort pipeline instead of resolving. Eligibility is deliberately narrow, and every
+exclusion protects byte identity: no Appearance or AnimState, no transform-source override,
+no interpolation (PrevTransform absent or identical), no Occluder, lit-fire, SpriteAlpha,
+wetness, body-temp, exhaustion, dye/paint, equipment or off-hand bindings, no live hit
+flash, never the focus entity. Per-frame gates that can change outside the signature stay
+live on the hit path, in emitSprite's own order: story cutaway, margin cull, interior route,
+markUsed, and occlusion — any live occlusion fade state (occT > 0) or a fresh focus overlap
+hands the sprite back to the full path, which owns the fade smoothing, so faded trees are
+never frozen mid-fade. Stream-paged art is excluded outright: a stream page's residency
+flips outside the signature (poolOn/priority/residency are AtlasManager state, and the
+placeholder swap must stay exact) — the base resource atlases (resources, resources_tall)
+are resident, so ordinary trees/bushes/crops cache; season_* variant sprites are streamed,
+so season-swapped art keeps the dynamic path until it swaps back. Cache memory is bounded:
+one 40-float row + signature per cached slot, the map clears when it exceeds 2x live sprite
+slots + 64 (the pieceCache guard) and whenever the atlas registry identity changes.
+nodeCacheHits / nodeCacheBuilds counters sit on SpriteBatch beside the existing stats.
+
+Proof (packages/render/test/adr576_node_cache.test.ts, 7 tests): two batches — cache on vs
+nodeCacheEnabled=false — run the same scenes and compare the FULL drawn output (visible,
+interior and late/faded instance buffers) frame by frame: a 340-node shadowed grove,
+camera/season changes (fall swap included), view rotation, in-place node mutation (sprite
+swap, move, destroy — a stale row must never replay), an atlas layoutVersion bump (rows
+rebuild), moving sprites (PrevTransform != Transform: zero builds, zero hits), stream-paged
+sprites (never cached), and occlusion fade engagement over 90 frames. All identical.
+Bench (same file, PERF=1, stub atlas): dense grove prepare 0.339 ms cache-off -> 0.249 ms
+cache-on (ratio 0.73). The stub's resolve is a fixed frame fill, cheaper than the real
+registry/dirFrames resolve, so the harness understates the removed share; the phone number
+is owed from play, not claimed here. Canvas2D is out of scope: it has its own draw path and
+the indictment was measured on the WebGL2 prepare pipeline.
+
+## ADR-577: Chunk-build burst time-slicing (SurVivaZ) — scoped, not built
+
+Scoped as the second half of the dense-area batch and deliberately NOT built in it.
+Measured context (measure-perf.md §2): TilemapRenderer.sync() builds terrain at ~7 ms per
+chunk (VM scale); a 4-chunk phone-visible entry is a ~30 ms one-off, a 36-chunk teleport
+~224 ms, and steady-state sync is ~0.005 ms/frame — a pure entry cost, density-independent.
+On foot, ADR-546's player-first streaming limits the realistic worst entry frame to ~1–2
+chunks (~7–24 ms VM scale); spawn/teleport entries are separately gated by ADR-544's ready
+gate. Design constraints recorded for the build: time-slice chunk builds under a per-frame
+millisecond budget in ADR-546's priority order; the chunk the player is standing in always
+completes in its entry frame (no regression in time-to-first-correct-frame); coordinate
+with ADR-575's entry window rather than opening a second entry mechanism; before/after
+entry profiles (worst frame, total settle) from the harness are the acceptance evidence.
+Deferred because it touches the terrain renderer's staleness model and deserves its own
+batch and gate; ADR-576 (the sustained cost, the larger of the two in continuous play)
+shipped first.

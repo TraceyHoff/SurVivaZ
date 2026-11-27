@@ -39,6 +39,11 @@ import { clampGlassRectToRoofline } from "./vehicles/seats.js";
 export const INSTANCE_FLOATS = 40;
 /** ADR-381: per-part static-cache signature fields (see gatherPieces) — every input to a static part's instances. */
 export const PIECE_SIG_N = 35;
+/** ADR-576: per-sprite static-node cache signature fields (see emitStaticNode in prepare) — every input to a
+ *  static resource node's instance row: entity index, sprite id/frame/flags/tint/scale, transform, the season
+ *  amounts + dominant art that feed seasonPick, view quarter, atlas layout version, shadow alpha/length and
+ *  the style blob-shadow width factor. */
+export const NODE_SIG_N = 20;
 /**
  * ADR-195: Flat (deck) pieces take ground-plane depth, so two same-level neighbours have EXACTLY equal depth on
  * every pixel they share (an edge strip / thickness face of one over the other's top) and z-fight. Each Flat instance
@@ -646,6 +651,21 @@ export class SpriteBatch {
    *  index) guards slot reuse after swap-remove. */
   private pieceCache = new Map<number, { sig: Float64Array; tmp: Float32Array; len: number; hash: number; crack: boolean }>();
   private pieceSig = new Float64Array(PIECE_SIG_N);
+  /** ADR-576: resolved instance rows for static resource-node sprites, keyed by dense sprite slot (the
+   *  signature carries the entity index, guarding slot reuse after swap-remove — the ADR-381 pieceCache
+   *  pattern applied to the dynamic sprite loop). A node's row is a pure function of its signature while
+   *  its atlas page is resident art (non-streamed): on a hit, prepare() copies the row instead of paying
+   *  the per-frame resolve + writeOne the dense-area profiling indicted (~74% of dynamic prepare cost).
+   *  Anything that can vary per frame outside the signature — occlusion fade state, hit flash, movement
+   *  interpolation, appearance/anim/lit/fade bindings — makes the sprite ineligible or forces the full
+   *  emitSprite path for that frame, so output is byte-identical to the uncached pipeline. */
+  private nodeCache = new Map<number, { sig: Float64Array; row: Float32Array; w: number; atlas: number; crisp: boolean }>();
+  private nodeSig = new Float64Array(NODE_SIG_N);
+  private nodeCacheReg: unknown = null;
+  /** ?diag: static-node rows served from the ADR-576 cache / (re)built, cumulative. */
+  nodeCacheHits = 0; nodeCacheBuilds = 0;
+  /** ADR-576: bench/test switch — false takes the pre-576 dynamic path for every sprite. */
+  nodeCacheEnabled = true;
   /** ADR-381: per-frame chunk aggregates (chunk key -> xor of part hashes, total floats, static/dynamic part counts). */
   private chunkAgg = new Map<string, { xor: number; floats: number; statics: number; dynamics: number }>();
   /** ADR-381: per-frame static-part slots per chunk (packed slot*4+partIdx, dense order) — the rebuild list is built from these. */
@@ -898,6 +918,13 @@ export class SpriteBatch {
     const sa = world.isRegistered(SpriteAlpha) ? world.store(SpriteAlpha) : null; // ADR-238 despawn fade
     const apB = cx.bindings.appearance; const ap0 = apB && world.isRegistered(apB.def) ? world.store(apB.def) : null; const ap = ap0 && (ap0.data as Record<string, unknown>).version ? ap0 : null;
     atlas.beginFrame();
+    // ADR-576: static-node row cache housekeeping (lazy init: headless Object.create stubs skip the
+    // class-field initializers). A new registry (hot reload / test swap) invalidates every row; the size
+    // guard mirrors pieceCache's — slots recycle as entities die, so the map stays bounded by live sprites.
+    this.nodeCache ??= new Map(); this.nodeSig ??= new Float64Array(NODE_SIG_N);
+    this.nodeCacheHits ??= 0; this.nodeCacheBuilds ??= 0;
+    if (this.nodeCacheReg !== atlas.registry) { this.nodeCache.clear(); this.nodeCacheReg = atlas.registry; }
+    if (this.nodeCache.size > sp.size * 2 + 64) this.nodeCache.clear();
     if (apB && (!this.layerCache || this.layerCache.binding !== apB)) {
       this.layerCache?.clear();
       const lc = (this.layerCache = new LayerCache(apB));
@@ -1017,6 +1044,95 @@ export class SpriteBatch {
       const sid = this.seasonPick(atlas, sp.data.spriteId[k]!).sid;
       if (!atlas.isStreamSprite(sid)) return;
       ringPrefetch(i, sid, (vu - vv) * hw, (vu + vv) * hh - z * zs, hasFocus ? (x - fwx) * (x - fwx) + (y - fwy) * (y - fwy) : Infinity);
+    };
+
+    // ---- ADR-576: static resource-node row cache ----
+    /** If sprite slot k is a cacheable static node, fill this.nodeSig with its row signature and return the
+     *  season-picked sprite id; else return -1. Cacheable = nothing about the sprite can change outside the
+     *  signature: no Appearance (paper doll), no AnimState, no transform-source override, no interpolation
+     *  (PrevTransform absent or identical), no Occluder / lit-fire / SpriteAlpha / wetness / body-temp /
+     *  exhaustion / dye / paint / equipment / off-hand bindings, no live hit flash, not the focus entity,
+     *  and the picked art is NOT stream-paged (a stream page's residency flips outside the signature —
+     *  those sprites keep the dynamic path, placeholders and all). */
+    const staticNodeSig = (k: number): number => {
+      const e = sp.dense[k]!; const i = entityIndex(e);
+      if (e === this.focusEntity) return -1;
+      const ts = tr.slot(i); if (ts < 0) return -1;
+      if (ap && ap.slot(i) >= 0) return -1;
+      if (an && an.slot(i) >= 0) return -1;
+      if (src && src.entities.has(e)) return -1;
+      const x = tx[ts]!, y = ty[ts]!, z = tz[ts]!, f = tf[ts]!;
+      const ps = pv.slot(i);
+      if (ps >= 0 && (px[ps]! !== x || py[ps]! !== y || pz[ps]! !== z || pf[ps]! !== f)) return -1;
+      if (oc.slot(i) >= 0) return -1;
+      if (litSt && litSt.slot(i) >= 0) return -1;
+      if (sa && sa.slot(i) >= 0) return -1;
+      if (wet && wet.slot(i) >= 0) return -1;
+      if (bt && bt.slot(i) >= 0) return -1;
+      if (exh && exh.slot(i) >= 0) return -1;
+      if (t2s && t2s.slot(i) >= 0) return -1;
+      if (tns && tns.slot(i) >= 0) return -1;
+      if (eq && eq.slot(i) >= 0) return -1;
+      if (oh && oh.slot(i) >= 0) return -1;
+      if (hitOf && hitOf(e) > 0) return -1;
+      const picked = this.seasonPick(atlas, sp.data.spriteId[k]!).sid;
+      if (atlas.isStreamSprite(picked)) return -1;
+      const sg = this.nodeSig, ss = sh.slot(i), sn = this.season;
+      sg[0] = i; sg[1] = sp.data.spriteId[k]!; sg[2] = sp.data.frameId[k]!; sg[3] = sp.data.flags[k]!;
+      sg[4] = sp.data.tint[k]!; sg[5] = sp.data.scale[k]!; sg[6] = x; sg[7] = y; sg[8] = z; sg[9] = f;
+      sg[10] = sn.spring; sg[11] = sn.summer; sg[12] = sn.fall; sg[13] = sn.winter; sg[14] = sn.art;
+      sg[15] = vq; sg[16] = atlas.layoutVersion;
+      sg[17] = ss >= 0 ? sh.data.alpha[ss]! : -1; sg[18] = ss >= 0 ? sh.data.length[ss]! : 0; sg[19] = blobW;
+      return picked;
+    };
+    /** Serve sprite slot k from the ADR-576 row cache. Returns true when the sprite is fully handled
+     *  (drawn from its cached row, or correctly not drawn); false hands it to the full emitSprite path —
+     *  no cached row yet, a stale signature, or a per-frame gate (occlusion fade) only the full path may
+     *  advance. The gates below mirror emitSprite's order for an eligible sprite exactly: story cutaway,
+     *  margin cull, interior route, markUsed, occlusion. */
+    const emitStaticNode = (k: number): boolean => {
+      if (!this.nodeCacheEnabled) return false;
+      const picked = staticNodeSig(k); if (picked < 0) return false;
+      const entry = this.nodeCache.get(k); if (!entry) return false;
+      const sg = this.nodeSig;
+      for (let q = 0; q < NODE_SIG_N; q++) if (sg[q] !== entry.sig[q]) return false;
+      const x = sg[6]!, y = sg[7]!, z = sg[8]!;
+      if (hideOtherStory(x, y, z)) return true;
+      const row = entry.row, sx = row[0]!, sy = row[1]!;
+      if (sx < r0x || sx > r1x || sy < r0y || sy > r1y) return true;
+      this.curRoute = 0;
+      for (const rg of this.interiorRegions) if (inInteriorRegion(rg, x, y)) { this.curRoute = this.interiorFloorIds.has(picked) ? InteriorRoute.Floor : InteriorRoute.Occupant; break; }
+      atlas.markUsed(picked);
+      if (entry.crisp) atlas.markUsedAt(entry.atlas);
+      if (occOn) {
+        // any live fade state belongs to the full path (it owns the smoothing); a fresh overlap starts there too
+        if (this.occ.peek(sg[0]!) > 0) return false;
+        const scale = sg[5]! || 1;
+        if (row[9]! * scale >= occ.minHeightPx && !(sg[3]! & SpriteFlag.Footprint) && row[2]! > fk + 0.05) {
+          const left = sx - row[8]! * scale, top = sy - row[9]! * scale;
+          if (overlapsFocus(left, left + entry.w * scale, top, sy)) return false;
+        }
+      }
+      this.pushOcc(row, 0, 0, occ.mode);
+      this.nodeCacheHits++;
+      return true;
+    };
+    /** emitSprite with ADR-576 capture: when the full path draws exactly one instance for a cacheable
+     *  static node, keep that instance as the node's cached row for later frames. The row is the full
+     *  path's own output, so a warm cache can only ever replay what the dynamic path would have written. */
+    const emitWithCapture = (k: number): void => {
+      if (emitStaticNode(k)) return;
+      const n0 = this.n, late0 = this.late.length;
+      emitSprite(k);
+      if (!this.nodeCacheEnabled || this.n !== n0 + 1 || this.late.length !== late0) return;
+      if (staticNodeSig(k) < 0) return;
+      const rowOff = n0 * INSTANCE_FLOATS;
+      if (this.res.entry !== this.tmp[rowOff + 4]) return; // the frame's last resolve was not this sprite's
+      const row = new Float32Array(INSTANCE_FLOATS);
+      row.set(this.tmp.subarray(rowOff, rowOff + INSTANCE_FLOATS));
+      const sig = new Float64Array(NODE_SIG_N); sig.set(this.nodeSig);
+      this.nodeCache.set(k, { sig, row, w: this.res.w, atlas: this.res.atlas, crisp: atlas.isCrisp(this.res.atlas) });
+      this.nodeCacheBuilds++;
     };
 
     // ---- dynamic Sprite entities ----
@@ -1275,7 +1391,7 @@ export class SpriteBatch {
       const keySet = new Set(keys); this.chunkKeysPrev = keySet;
       for (const ck of keys) {
         if (cx.spatial.activeKeys && !cx.spatial.activeKeys.has(ck)) continue;
-        for (const e of cx.spatial.index.entitiesInChunk(ck)) { const s = sp.slot(entityIndex(e)); if (s >= 0) emitSprite(s); }
+        for (const e of cx.spatial.index.entitiesInChunk(ck)) { const s = sp.slot(entityIndex(e)); if (s >= 0) emitWithCapture(s); }
       }
       // ADR-575: chunks inside the prefetch ring but outside the draw set: visit their static stream
       // sprites (no drawing) so resource pages are requested ahead of entry.
@@ -1285,7 +1401,7 @@ export class SpriteBatch {
         if (cx.spatial.activeKeys && !cx.spatial.activeKeys.has(ck)) continue;
         for (const e of cx.spatial.index.entitiesInChunk(ck)) { const s = sp.slot(entityIndex(e)); if (s >= 0) ringVisit(s); }
       }
-    } else for (let k = 0; k < sp.size; k++) emitSprite(k);
+    } else for (let k = 0; k < sp.size; k++) emitWithCapture(k);
     this.curRoute = 0;
     // interior cutaway walls: Art wall pieces along both long sides of each open interior
     if (this.interiorWallSprite >= 0 && this.interiorRegions.length && atlas.resolve(this.interiorWallSprite, -1, 0, 0, 0, res)) {
