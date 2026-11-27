@@ -12,6 +12,12 @@ import { AtlasManager, packStats } from "../src/assets/atlasManager.js";
  * reordering, so no different atlas can blur.
  *
  * Pinned numbers below are the measured values on the real merged manifests (77 resident atlases).
+ *
+ * ADR-573 re-pin: the call counts rose by exactly +6 in both scenarios (190→196, 170→176;
+ * +3 real packings, +3 memo hits) — the new creature pin tier 5's trial packings in planFit's
+ * search. The fit OUTCOME is byte-identical in both scenarios (tier 5 is tried but does not win
+ * on this 77-atlas list, so the chosen scales, layers, demotions, pins and the final placement
+ * are exactly the pre-ADR-573 ones); only the search trace grew.
  */
 const MB = 1048576;
 
@@ -35,7 +41,7 @@ function residentList(): any[] {
 const WORLD = ["tiles", "decor", "resources", "resources_tall", "resources_huge", "nature_trees", "nature_crops", "nature_sprouts", "nature_saplings", "characters", "characters_b", "zombies", "zombies_brute", "zombies_runner", "zombies_mummy", "zombies_pumpkin", "animals_medium", "buildings", "furniture", "openings", "items", "equipment", "held"];
 
 describe("ADR-554(a): fitBudget pack memoisation", () => {
-  it("128 MB WORLD scenario: 190 pack calls run only 125 real packings; fit outcome byte-identical", async () => {
+  it("128 MB WORLD scenario: 196 pack calls run only 128 real packings; fit outcome byte-identical", async () => {
     const list = residentList(); expect(list.length).toBe(77);
     const a = am(128); for (const k of WORLD) a.recentlyUsed.add(k);
     let calls = 0; let lastPlacement = "";
@@ -44,9 +50,9 @@ describe("ADR-554(a): fitBudget pack memoisation", () => {
     const p0 = { ...packStats };
     await a.fitBudget(list, 0, 0);
     // The memo fires: a third of the trial packings are repeats of dims already packed.
-    expect(calls).toBe(190);
-    expect(packStats.runs - p0.runs).toBe(125);
-    expect(packStats.hits - p0.hits).toBe(65);
+    expect(calls).toBe(196);
+    expect(packStats.runs - p0.runs).toBe(128);
+    expect(packStats.hits - p0.hits).toBe(68);
     // The choice is unchanged: same scales, same layers, same demotions, same pins.
     expect(a.downscale).toBe(0.5);
     expect(a.coldDownscale).toBe(0.5);
@@ -59,7 +65,7 @@ describe("ADR-554(a): fitBudget pack memoisation", () => {
     expect(lastPlacement).toBe("[[\"characters\",2,1028,1220,0],[\"characters_b\",2,1028,1608,288],[\"characters_c\",3,0,1480,576],[\"zombies\",1,0,0,864],[\"zombies_brute\",0,0,0,1225],[\"zombies_runner\",1,916,0,1586],[\"zombies_mummy\",2,0,0,1947],[\"zombies_pumpkin\",2,916,0,2308],[\"held\",1,1832,0,2669],[\"critters\",0,1864,1304,2789],[\"tiles\",1,1736,1220,2981],[\"gt_summer_p0\",3,1096,332,3029],[\"gt_summer_p1\",3,1028,828,3314],[\"gt_summer_p2\",4,1536,820,3599],[\"gt_fall_p0\",3,1096,1324,3749],[\"gt_fall_p1\",4,0,1288,4034],[\"gt_fall_p2\",4,1536,1612,4319],[\"gt_winter_p0\",4,512,1288,4454],[\"gt_winter_p1\",4,1536,1084,4739],[\"gt_spring_p0\",4,1024,1288,4889],[\"gt_spring_p1\",4,1536,0,5174],[\"gt_spring_p2\",4,1536,1348,5459],[\"gt_grazed\",0,1800,2016,5609],[\"gt_waterfall\",0,1800,1816,5613],[\"resources_tall\",1,1544,1772,5614],[\"resources\",1,1028,1772,5624],[\"resources_huge\",1,1832,364,5656],[\"items\",1,1832,660,5657],[\"equipment\",1,1832,776,5713],[\"buildings_twig\",3,0,836,5737],[\"buildings\",2,0,1220,5897],[\"buildings_stone\",4,0,0,6073],[\"buildings_metal\",4,0,644,6233],[\"openings\",0,0,1524,6393],[\"furniture\",3,0,0,6521],[\"decor\",1,0,1220,6729],[\"vfx\",1,1832,528,6921],[\"vfx_fire_big\",0,1800,1752,6985],[\"vfx_fire_huge\",1,484,1992,6993],[\"fog\",1,1736,1368,7001],[\"ui\",0,1948,1996,7003],[\"animals_medium\",4,1028,0,7005],[\"animals_medium_sp\",2,1608,1220,7446],[\"animals_large\",3,580,1480,7542],[\"animals_large_sp\",2,1608,1516,7766],[\"se_death_bag\",0,1800,1788,7814],[\"se_fx_deathbag_drop\",1,744,1992,7822],[\"se_fx_gate_breach\",3,0,1868,7830],[\"se_fx_puff\",0,1996,1752,7846],[\"se_fx_respawn_poof\",1,0,1992,7850],[\"se_fx_splinter\",0,1976,2036,7860],[\"zombies_snuffer\",0,1220,0,7864],[\"defenses\",0,1028,1524,8136],[\"defenses_glow\",2,1608,1368,8232],[\"adr134_hurt\",4,1536,496,8256],[\"crops_task256\",1,1736,1500,8257],[\"nature_trees\",0,1220,1028,8289],[\"nature_bushes\",0,1800,1692,8305],[\"nature_sprouts\",0,1220,1304,8321],[\"nature_crops\",1,1028,1220,8385],[\"nature_saplings\",1,1028,1672,8497],[\"nature_ground\",0,1976,2016,8529],[\"nature_shoal\",0,1948,1924,8530],[\"nature_icons\",1,1736,1632,8534],[\"nature_roads\",2,0,1928,8662],[\"nature_roadicons\",0,1800,1996,8710],[\"nature_toolicons\",0,1932,1816,8719],[\"nature_placeholder\",1,1832,828,8726],[\"nature_adr128\",2,260,1996,8731],[\"nature_adr128_fx\",0,1940,2016,8763],[\"nature_adr128_hpbar\",0,2028,1028,8775],[\"nature_adr128_toast\",0,1984,1996,8776],[\"nature_adr134_hurt\",3,1096,0,8777],[\"nature_adr134_stumps\",0,1948,1888,8778],[\"nature_adr134_hpbar\",0,2028,1040,8790],[\"pets_trough\",0,1932,1944,8791],[\"pets_trough_crack\",0,1948,1836,8793]]");
   });
 
-  it("256 MB KEEP scenario: 170 pack calls run only 117 real packings; fit outcome byte-identical", async () => {
+  it("256 MB KEEP scenario: 176 pack calls run only 120 real packings; fit outcome byte-identical", async () => {
     const list = residentList(); expect(list.length).toBe(77);
     const a = am(256); for (const k of WORLD) a.recentlyUsed.add(k);
     let calls = 0;
@@ -67,9 +73,9 @@ describe("ADR-554(a): fitBudget pack memoisation", () => {
     a.pack = (l: any[]) => { calls++; return orig(l); };
     const p0 = { ...packStats };
     await a.fitBudget(list, 85 * MB, 85 * MB, 85 * MB);
-    expect(calls).toBe(170);
-    expect(packStats.runs - p0.runs).toBe(117);
-    expect(packStats.hits - p0.hits).toBe(53);
+    expect(calls).toBe(176);
+    expect(packStats.runs - p0.runs).toBe(120);
+    expect(packStats.hits - p0.hits).toBe(56);
     expect(a.downscale).toBe(0.5);
     expect(a.coldDownscale).toBe(0.5);
     expect(a.layers).toBe(7);

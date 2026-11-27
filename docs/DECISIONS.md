@@ -15490,3 +15490,244 @@ the within-envelope behaviour-preservation pins, as designed. Neighbours green:
 adr386, adr389, adr415, adr253, task35, adr414, adr529, adr182, adr184, adr567, adr568
 (12 files / 89 tests with the new file). Render typecheck clean (pinned TS 5.9.3).
 Full gate NOT run (coordinator runs it). Nothing pushed.
+
+## ADR-573: Creature pin tier — animals, pets and critters at full res on the phone plan (SurVivaZ)
+
+Render-only slice (batch: ADR-572 sky measurement/fix, ADR-573 creature pin tier, ADR-574
+drawn-creature fast re-tier, ADR-575 dense-area entry page-in; user ruling R2 — cold/hot
+non-fidelity atlases absorb the cost, no stream-pool shrink). ADR-570/571 remain allocated
+to the deferred falls-shaping/flow batch; this batch uses 572–575.
+
+**Mechanism A refuted by measurement.** The prep (sky-blur-perf-prep.md §2) blamed two
+mechanisms for the blurry pig/dog screenshot. The measurement pass (measure-animals.md,
+real merged manifests, `fitBudget` at 256 MB with keep = floor = 85 MB, sideShift 2,
+runtime-true resident list of 148 atlases) refuted the first: `animals_*` sheets have no
+manifest residency field at all — they are resident by default, never streamed — and
+pets/critters are already rescued from streaming by `atlasPoolSets()` at budgets
+>= 128 MB (the ADR-156 `residentCreatures` getter), so zero creature keys land in
+`streamKeys` at 256 MB. The pig is not even on an `animals_*` sheet: sprite `animal_pig`
+lives on `nature_critters_c_40x32`. No change was made to `atlasPoolSets` or to any
+manifest residency.
+
+**The only mechanism is the boot pin (mechanism B).** All 80 creature sheets
+(`animals_*` x4, `pets_*` x15, `nature_critters_*` x61) are resident but unpinned, so they
+boot at the halved hot scale x0.5. planFit's tier 2 (vis + core + base + all fidelity,
+107 pins) is judged on the SHELF estimate and misses the 171 MB resident allowance
+(256 MB budget − 85 MB reserve) by 117 MB at hot x0.5 (288 MB shelf; even packed it is
+200 MB); tier 4 (base + core, 20 pins, judged PACKED) won at 6 layers. The re-tier
+rebuild re-runs the same plan, lands tier 4 again, records x0.5 in `retierScale` and
+closes `retierOpen` — creatures stayed x0.5 forever. Creature family raw cost: 28.93 MB
+decoded RGBA at 1.0 vs 7.27 MB at x0.5.
+
+**Fix: pin tier 5.** `planFit` gains a tier whose pin set is core ∪ base ∪ creature
+(`CREATURE_PIN_RE = /^(animals|pets|nature_critters)(_|$)/` on non-cold atlases),
+computed once as a stable array (the tier-4 subset loop reassigns `baseCorePin`; tier 5
+never shrinks with it). Tier 5 is judged on the PACKED yardstick (`fitsPacked`), exactly
+like tiers 3/4 — the ADR-438 precedent: the shelf estimate is planning headroom and a
+small pin set may spend it. It is wired into both tier ladders: inside `fits()` after
+tier 1 and before tier 4, and in the halving loop's order [2, 1, 5, 4, 3, 0] via
+`fitsTier` (with the analogous h<1 / non-empty guard). `pinSet()` returns the tier-5 set
+for pin === 5, so `scaleOf` / `pinnedKeys` / `fitInfo` follow automatically. Hard limits
+held: `STREAM_BUDGET_SHARE`, pool sizes and the reserve parameters are untouched, no
+existing tier's set or yardstick changed, and tier 5 wins at the FULL reserve or not at
+all.
+
+**Winning plan (real manifests, 256 MB, keep = floor = 85 MB).** Tier 5 at hot x0.5,
+cold x0.5, 7 layers, residentBytes 149.3 MB <= the 171 MB allowance, reserve kept in full
+(85 MB). 99 pinned keys: the 20 tier-4 baseline keys plus 79 creature sheets
+(`pets_trough`, the 80th creature key, was already in the baseline 20). Who pays:
+**nobody** — the per-atlas fitK diff against the pre-fix tier-4 plan is 79 gains
+(0.5 -> 1.0, all creature sheets) and zero losses; the hot scale stays x0.5 and the cold
+scale stays x0.5 (the cold tier did NOT drop to fund the pin). The bill is absorbed by
+the shelf-vs-packed headroom ADR-438 already established: the plan spends one extra
+packed layer (6 -> 7) inside the allowance the shelf estimate had been holding back.
+
+**Tests.** `packages/render/test/adr573_creature_pin.test.ts` (ADR-438/512 harness style,
+runtime-true resident list): every creature atlas has fitK === 1; the 20 baseline pins
+stay at 1.0; residentBytes <= 171 MB and layers <= 7 at the full 85 MB reserve; hot and
+cold scales unchanged and no non-creature, non-baseline atlas above x0.5. Verified RED
+pre-fix (both tests fail on the unmodified code, creatures at 0.5). Neighbours green:
+adr237, adr251, adr407, adr438, adr449, adr503, adr510, adr512, adr545, adr558, adr559,
+charPin (12 files / 87 tests). Render typecheck clean (pinned TS 5.9.3). Full gate NOT
+run (coordinator runs it). Nothing pushed.
+
+## ADR-574: Drawn creatures re-tier on the first check (SurVivaZ)
+
+Render-only slice (batch: ADR-572–575; follows ADR-573's creature pin tier). The ADR-190
+re-tier hysteresis — `RETIER_CONFIRM` = 3 consecutive positive checks (the renderer checks
+every 30 frames) plus `RETIER_MIN_GAP_FRAMES` = 1800 (~30 s) between re-tiers — exists so a
+passing zoom or a momentarily drawn sprite never rebuilds the atlas set. Applied to
+creature sheets it meant a dog or pig that walked on screen below full res stayed visibly
+soft for tens of seconds; if any other atlas had re-tiered earlier in the session, the
+creature's first rebuild additionally waited out the whole 1800-frame gap. Pre-ADR-573
+that delayed rebuild was also the creature's only one: it landed the same losing tier-4
+plan, recorded x0.5 in `retierScale` and closed `retierOpen` behind itself. ADR-573 makes
+the rebuild worth having; this slice makes it prompt.
+
+**Fix.** `AtlasManager` gains a `creatureRetierDue` check: a resident atlas whose key
+matches `CREATURE_PIN_RE` (animals / pets / nature_critters), that is in `recentlyUsed`
+(i.e. actually drawn), still has `retierOpen`, and sits below scale 1. In `retier()`,
+when that check holds, the rebuild fires on the first call — both the `RETIER_CONFIRM`
+count and the min-gap are skipped for that rebuild. All other atlases keep the ADR-190
+hysteresis exactly (same confirm count, same gap, same blip reset). `retierOpen` /
+`retierScale` semantics are deliberately unchanged: a rebuild that still cannot lift the
+sheet (a budget that cannot hold it) records the scale it left and closes the door, so
+the fast path fires at most once per demotion — no rebuild thrash, no SettleHold loop.
+
+**Tests.** `packages/render/test/adr574_creature_fast_retier.test.ts`: (a) a drawn
+`pets_dog_lab` — and separately the pig's `nature_critters_c_40x32` — below 1.0 rebuilds
+on the first `retier()` call even with a re-tier just fired at frame 0 (gap barely
+started); (b) a non-creature fidelity atlas (`characters`) still needs all
+`RETIER_CONFIRM` checks and still waits out the full min-gap after confirming; (c) after
+a rebuild that leaves the creature at x0.5, repeated `retier()` calls across three gap
+lengths never rebuild again (count stays 1) and `needsRetier` is false. Verified RED
+pre-fix for (a): both fast-path tests fail on the unmodified code (the (b) hysteresis
+tests pass both ways, pinning the unchanged behaviour). Neighbours green: adr573,
+retier_sliced, seamless_retier, task17, adr237, adr251, adr407, adr438, adr449, adr503,
+adr510, adr512, adr545, adr558, adr559, charPin (17 files / 108 tests with the new file).
+Render typecheck clean (pinned TS 5.9.3). Full gate NOT run (coordinator runs it).
+Nothing pushed.
+
+## ADR-575: Entry-window stream boost + resource prefetch ring (SurVivaZ)
+
+Render-only slice (batch: ADR-572–575; dense-area entry page-in, prep §3 / measure-perf.md §3).
+Measured context, stated honestly: during normal play, stream sheets page in at 2/frame and
+ADR-545's boost to 6/frame fired only under the loading overlay or when frames were already
+≤ 8 ms — never while walking into a new area. The boost compresses a real but small placeholder
+trickle: at K=6 simultaneously-wanted stream sheets the base rate drains in ~2–3 frames with
+6 miss page-frames after frame 1, the boost in 1 frame with 0; at K=12, base ~5 frames / 30 miss
+page-frames vs boost ~1–2 frames / 6. That is ~17–67 ms of placeholder draws at realistic sheet
+counts — worth having, not the seconds-scale hitch. The dominant measured entry cost is the
+one-off chunk-build burst (~7 ms/chunk, ADR-546 chunk-streaming territory), which this slice
+deliberately does NOT touch; it is deferred, together with ADR-576 (restated scope: per-chunk
+cached resolved instance rows for static resource nodes — the sustained resolve+write cost,
+0.32 ms/frame at 352 visible sprites, ~74% resolve+write; sort and upload were measured
+innocent), to a follow-up batch. Above 12 simultaneously-wanted stream pages the pool is
+capacity-bound (no LRU victim at equal priority) — no rate change helps there and none is
+attempted; the ceiling is unchanged by design.
+
+**Entry window (AtlasManager).** A new trigger for the existing ADR-545 boost rate
+(`STREAM_UPLOADS_PER_FRAME_BOOST` = 6, uploads pair likewise): an entry window opens when
+(a) ≥ `ENTRY_MISS_TRIGGER` = 3 drawn stream misses land in one frame (`pageReadyA`, stream pool
+only — new-area sheets being drawn before they land), (b) ≥ `ENTRY_WANT_TRIGGER` = 7 new stream
+wants are enqueued in one frame (`request`, stream pool only — 7 sits above any single
+on-screen family's 6 sheets, so a small burst keeps ADR-545's base-rate contract; its suite
+stays green unmodified), or (c) `noteAreaEntry()` is called — SpriteBatch calls it when the
+visible chunk set changes materially (≥ `ENTRY_CHUNK_TRIGGER` = 2 chunks not visible last
+frame; one new chunk is ordinary edge-walking). The window closes as soon as no stream page is
+queued or loading (checked in `beginFrame`, so the typical window is a few frames) and is
+hard-capped at `ENTRY_WINDOW_FRAMES` = 180 (the measurement's 3 s entry window) — a stuck
+page-in cannot hold the boost. When it closes, rates return to the base 2/frame: steady-state
+streaming cost is identical to before.
+
+**Resource prefetch ring (sprites.ts).** What was missing: stream sprites requested pages only
+inside the 256 px load margin and were merely touched inside the 512 px keep margin — beyond
+that, nothing was ever requested, so a resource sheet started loading only once its sprite was
+~256 px from the view. The character wardrobe ring (ADR-188: `PREFETCH_RING_PX` = 768 beyond the
+draw margin, staggered every `PREFETCH_EVERY` = 8 frames, `PREFETCH_PRIO_PAD` = 64 behind
+on-screen needs) covered characters only. Now a static stream sprite — no Appearance (not a
+character), no AnimState (not an animal; animals keep their wider 640 px load margin) — outside
+the load margin but inside the same 768 px ring band requests its page ahead of entry through
+the same `streamNear` path at prio + pad, staggered identically. Missing pages only (via
+`pageInfo`): a resident page's LRU priority is never rewritten by a padded touch and a loading
+page is already on its way. On the spatial path, chunks inside the ring but outside the draw
+set are visited for this check only (no drawing); on the non-spatial path (the client's current
+configuration) `emitSprite` already visits every sprite, so the ring fires in the same pass.
+
+**Hard limits kept.** No change to `STREAM_BUDGET_SHARE` (0.25), pool sizes/slot counts,
+`STREAM_KEEP_FACTOR`, `STREAM_UNLOAD_FRAMES`, or the ADR-559 loading-screen decode cap (16,
+loading-only — in-play page-ins do not borrow it). No budget or VRAM growth; no chunk-build or
+chunk-streaming changes.
+
+**Tests.** `packages/render/test/adr575_entry_boost.test.ts` (7 tests, GL-free adr545 double +
+real SpriteBatch prepare with a stub atlas): (a) teleport-in K=6 — all 6 sheets start in
+frame 1, 0 miss page-frames after frame 1 (pre-fix: 2 started); K=12 — 6 start in frame 1, the
+rest in frame 2, 6 miss page-frames after frame 1 (pre-fix: 2 started, base column 30 total);
+(b) after the queue drains the window closes and a ≤2/frame trickle runs at the base rate, and
+a page stuck in state 1 cannot hold the boost past the 180-frame cap; (c) a resource sprite in
+the ring band (sx −1500: outside the 512 px keep margin, inside the ring) requests its page at
+prio = dist² + 64 before entering the margin, a sprite beyond the ring (sx −1900) never does
+(pre-fix: 0 ring requests); (d) eviction churn over four 120-frame area crossings (12 wanted
+pages, 9 slots): burst entry with the window open evicts no more than trickle entry — the
+window changes when pages start, never the LRU policy. Red pre-fix verified for (a), the
+window/cap assertions in (b), and (c); (d) is a no-regression guard (passes both ways with
+equal counts). Neighbours green: adr545, adr370_warmup, adr374_warmup_pump,
+adr267_prepare_view, adr573, adr574 (6 files / 39 tests) plus stalls, adr527, adr528,
+adr381_phases, adr270 (5 files / 43 tests). Render typecheck clean (pinned TS 5.9.3).
+Full gate NOT run (coordinator runs it). Nothing pushed.
+
+## ADR-572: Canvas2D gt 1-level faces get geometric fill under the art skirt (SurVivaZ)
+
+Render-only slice (batch: ADR-572–575; sky-through-tiles, prep §1 / measure-sky.md).
+C2D-only: no WebGL2 change, no art change, no shading change, no worldgen/save impact —
+every existing world is fixed on next load wherever the Canvas2D fallback runs (Xbox,
+or a phone after a WebGL2 context loss).
+
+**S1 CONVICTED (measured, real builders, software-rasterized coverage oracle).** On the
+Canvas2D gt-block path, every camera-facing 1-level face leaked the background through
+the gt art skirt: the skirt covers only 110/512 px (21%) of a 1-level face on every gt
+variant measured (grass/dirt, all seasons, grazed), and the geometric fill
+(`c2dGtFaceBelowSkirt`) started at z−1, i.e. a 1-level drop got no fill at all. Isolated
++1 tile: leak 268 px at zoom 0.709, worst column run 10 scaled px (~14 of the face's 16
+unscaled px — a whole side face), in every rotation, for grass and dirt, at a chunk
+border, and beside water. The screenshot arrangement under forced Canvas2D at the
+screenshot's own rotation/zoom leaks 414 px, worst run 10 — the photographed wedge
+reproduces on this path. Slope-to-flat leaks 579 px where the ramp side faces the camera
+(the gt path draws sloped tiles as flat art, leaving the flat->tilted strip bare).
+Plateau convex corner (diagonal lower): 724 px. The leak vanishes exactly when faces
+rotate to the far side — far faces were already filled geometrically in full.
+
+**Fix shape.** `Canvas2DRenderer.gtBlock` now fills ALL cliff faces in full, in the
+cell's cliff colour (the same `c2dCliffShade` logic the far faces already used), UNDER
+the cell art — subsuming the below-skirt fill, which is removed from the gt path (the
+helper stays for the ADR-418 geometry tests). A present skirt still wins visually; the
+fill shows only where the art is transparent. Two fill shapes in
+`canvasGroundHeight.ts`, both new fields on `C2DGroundGeom` (the flat path and mesh
+ignore them): (1) `fillFaces` — far faces fill with the face polygon as-is; near faces
+fill with the FLAT-TOP quad (the tile's flat height at both top corners down to the
+face's own bottom span). The ported oracle caught why the flat top matters: where a
+near face's top edge is tilted (one corner dropped, e.g. a +1 step beside water), the
+tilted top protrudes below the flat art diamond, and a fill starting at the tilted edge
+leaves that protruding sliver bare. (2) `slopeFaces` — the flat->neighbour quad on slope
+sides, filled under the art on camera-facing sides only, which is exactly the
+slope-to-flat strip. Cost: one extra polygon fill per stepped cell per block bake
+(blocks are cached; not per-frame).
+
+**Pins.** WebGL2 mesh leak = 0 in every configuration × rotation × zoom of the matrix
+(132 mesh cells), and the Canvas2D flat path = 0 everywhere — both are pinned by the
+permanent test below, so the mesh's sealed status is now regression-proof documentation
+(the S4 pin). S2 (rasterization seams) cleared as an area leak — bounded to sub-pixel
+pinholes at most by bit-identical shared vertices + fill-rule reasoning. S3 (stale chunk
+stamps) no evidence — the border configuration is byte-identical to the non-border one
+in every path. S5 (view-space neighbourhood mismatch at 90°/270°) cleared — the gt leak
+pattern rotates correctly with the view (convex corner leaks at 0°/90°/270°, exactly 0
+at 180° where its faces become far faces).
+
+**S4 — recorded, NOT acted on.** The photographed wedge itself was in all likelihood
+taken on WebGL2 (phone confirmed WebGL2 2026-11-25, no context-loss report), and on
+WebGL2 there is provably no hole: S4 — a legitimately drawn surface reading as sky
+(water side colour [38,92,140] × CLIFF_HIDDEN_SHADE 0.28 ≈ near-black-blue, beside an
+unshaded water top) — is the most likely account of that specific screenshot. It is
+unproven (the oracle proves a negative, not which drawn surface the user saw), and
+**no shading change was made in this slice**: no shade constant, no WebGL2 code. The
+shading question goes back to the user separately; if the wedge recurs on WebGL2, a
+?diag=1 capture (renderer + tile ids/heights around the camera) is the next evidence
+step, per prep R4.
+
+**Tests.** `packages/render/test/adr572_gt_face_coverage.test.ts` (82 tests): the
+measurement's oracle ported permanently — 12 configurations (isolated +1 grass/dirt,
+pair +1, plateau convex corner diagonal lower/equal, concave corner, slope-to-flat,
+{3,2,2,1} vertex, +1 beside water bed −1 and −71, screenshot arrangement, chunk-border
++1 at world 31,16) × both renderers + the flat path; the 4 key configurations run
+rotations 0/90/180/270 × zooms {0.557, 0.709, 1.10}, the other 8 run all rotations ×
+0.709. Drawn sets come from the real gtBlock op stream (art modelled as covering
+exactly its top diamond — conservative vs the real 21% skirt, so pre-fix leaks read
+larger here than in the measurement) and the real TilemapRenderer.build buffers.
+Post-fix: leak = 0 in every cell (gt, mesh, flat). Verified RED pre-fix by stashing the
+fix: gt leaks at the convicted configurations (screenshot arrangement 626 px @0.709,
+slope-to-flat 1139 px, chunk-border 381 px — diamond-model numbers), while the mesh
+and flat assertions pass on the unmodified code both ways, as the pin intends. Two
+geometry pins cover the new fields (slopeFaces strip quad; flat-top fillFaces quad
+beside water). Neighbours green: adr409, adr410, adr414, adr415, adr416, adr417,
+adr418 (both), adr195, adr562 (10 files / 67 tests). Render typecheck clean (pinned
+TS 5.9.3). Full gate NOT run (coordinator runs it). Nothing pushed.

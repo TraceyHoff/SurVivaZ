@@ -212,6 +212,16 @@ export const STREAM_UPLOADS_PER_FRAME_BOOST = 6, PAGE_UPLOADS_PER_FRAME_BOOST = 
  *  of a 16.7 ms budget, so 8 ms leaves about half the budget as headroom; a busy frame (sprint chunk-gen, heavy
  *  draws) measures above it and falls back to the base 2. Fed by IsoRenderer.stats.cpuMs via noteFrameTime. */
 export const PAGE_IN_FRAME_BUDGET_MS = 8;
+/** ADR-575: entry window — after an area entry, stream page-ins run at the ADR-545 boost rate until the
+ *  stream queue drains or the window cap passes. Opened by: a spike of >= ENTRY_MISS_TRIGGER drawn stream
+ *  misses in one frame (new-area sheets drawn before they land), a burst of >= ENTRY_WANT_TRIGGER new
+ *  stream wants in one frame (7 — above any single on-screen family's 6 sheets, so a small burst keeps
+ *  ADR-545's base-rate contract), or noteAreaEntry() (SpriteBatch: the visible chunk set changed
+ *  materially). 180 frames = the 3 s entry window of the dense-area measurement (measure-perf.md §3);
+ *  the drain-close makes the typical window a handful of frames. Rate only — pool slots,
+ *  STREAM_BUDGET_SHARE, STREAM_KEEP_FACTOR / STREAM_UNLOAD_FRAMES and the ADR-559 loading decode cap
+ *  are deliberately untouched (no VRAM or budget growth). */
+export const ENTRY_WINDOW_FRAMES = 180, ENTRY_MISS_TRIGGER = 3, ENTRY_WANT_TRIGGER = 7;
 /** ADR-314: stream pages larger than this (either side, 1x px) are planned in their own pool (see splitStreamPages). */
 export const STREAM_PAGE_MAX_PX = 1024;
 export const BIG_STREAM_SLOTS_DESKTOP = 2, BIG_STREAM_SLOTS_LOWMEM = 1;
@@ -367,6 +377,13 @@ export const RESIDENT_PLANT_RE = /^nature_(crops|sprouts|saplings)$/;
  *  resident plant sheets, and the zombie sheets. Small on purpose: the whole set packs into one
  *  extra real layer (see fitsPacked), so it fits where the FIDELITY + VISIBLE_PIN sets cannot. */
 export const CORE_PIN_RE = /^(resources(_tall|_huge)?|nature_(trees|crops|sprouts|saplings)|zombies(_|$))/;
+/** ADR-573: the creature sheets (farm/wild animals, pets, wild critters) that pin tier 5 keeps at 1x with the
+ *  core + base sets. Measured (measure-animals.md): at the 256 MB phone budget these 80 sheets are all resident
+ *  (animals_* by default, pets/critters via the ADR-156 rescue) but unpinned, so they boot at the halved hot
+ *  scale and the one re-tier they get re-runs the same losing plan and closes the door at x0.5 forever. The full
+ *  fidelity tier (pin=2, 107 pins) misses the 171 MB resident allowance by 117 MB on the shelf yardstick; the
+ *  narrower core + base + creature set fits on the PACKED yardstick (the ADR-438 precedent). */
+export const CREATURE_PIN_RE = /^(animals|pets|nature_critters)(_|$)/;
 /** ADR-237: creature, character and zombie sheets (small pixel art, magnified ~2-4x on a dpr-3 phone) keep x1 when the
  *  budget halves the hot tier: the rest of the hot art takes the x0.5, these never become 2x-magnified mush (mobile only
  *  ever ran them at x0.5 / the stream pool's x0.25 - "animals blurry on mobile, sharp on desktop"). */
@@ -908,13 +925,24 @@ export class AtlasManager {
     if (this.coldDownscale >= 1 && this.downscale >= 1) return false;
     return this.atlases.some((a) => !a.lazy && this.recentlyUsed.has(a.key) && this.retierOpen(a) && this.scaleOf(a) < 1);
   }
+  /** ADR-574: the re-tier need is driven by a CREATURE sheet (animals / pets / critters) that is actually
+   *  drawn (recentlyUsed), resident, still below full res and still allowed to ask (retierOpen). Such a sheet
+   *  is on screen in front of the player, so its rebuild skips the ADR-190 hysteresis below. */
+  private get creatureRetierDue(): boolean {
+    return this.atlases.some((a) => !a.lazy && CREATURE_PIN_RE.test(a.key) && this.recentlyUsed.has(a.key) && this.retierOpen(a) && this.scaleOf(a) < 1);
+  }
   /** Rebuild so recently drawn atlases move to the hot (full-res) tier; at most once per `minGap` frames. */
   async retier(frame: number, minGap = RETIER_MIN_GAP_FRAMES): Promise<boolean> {
     // ADR-190 hysteresis: the need must hold on RETIER_CONFIRM consecutive checks (a passing zoom / a sprite drawn
-    // for a moment never rebuilds), never while a rebuild is still in flight, and at most once per minGap frames
+    // for a moment never rebuilds), never while a rebuild is still in flight, and at most once per minGap frames.
+    // ADR-574: a drawn creature sheet below full res re-tiers on the FIRST check — no RETIER_CONFIRM, no
+    // min-gap — because the animal is visibly soft while it waits (and pre-ADR-573 the one delayed rebuild it
+    // got landed the same losing plan and closed retierOpen at x0.5). All other atlases keep the hysteresis
+    // exactly. retierOpen / retierScale semantics are unchanged: a rebuild that still cannot lift the sheet
+    // records its scale and closes the door, so the fast path cannot thrash rebuilds.
     if (!this.registry || this.retierBusy) return false;
     if (!this.needsRetier) { this.retierWant = 0; return false; }
-    if (++this.retierWant < RETIER_CONFIRM || frame - this.retierAt < minGap) return false;
+    if (!this.creatureRetierDue && (++this.retierWant < RETIER_CONFIRM || frame - this.retierAt < minGap)) return false;
     this.retierWant = 0; this.retierAt = frame; this.retierBusy = true;
     try { for (const k of this.recentlyUsed) this.retiered.add(k);
     await this.rebuild(this.registry, new Map(this.atlases.map((a) => [a.key, a.source] as [string, AtlasSource])));
@@ -1579,8 +1607,12 @@ export class AtlasManager {
     let baseCorePin = baseSub(BASE_PIN_RE);
     const pinned = list.map((a, i) => visPin[i]! || corePin[i]! || basePin[i]! || (!a.cold && FIDELITY_ATLAS_RE.test(a.key) && (this.recentlyUsed.size ? this.recentlyUsed.has(a.key) : !RESIDENT_CREATURE_RE.test(a.key))));
     const visCorePin = list.map((_, i) => visPin[i]! || corePin[i]! || basePin[i]!);
-    let pin = 0; // 2 = creature + visible + core pins, 1 = ADR-251 visible + ADR-438 core pins, 4 = ADR-512 base + core pins, 3 = ADR-438 core pins only, 0 = none
-    const pinSet = (): boolean[] | null => pin === 2 ? pinned : pin === 1 ? visCorePin : pin === 4 ? baseCorePin : pin === 3 ? corePin : null;
+    // ADR-573: pin tier 5 = core + base + every creature sheet, judged PACKED like tiers 3/4. Computed ONCE as a
+    // stable array: the tier-4 subset loop below reassigns baseCorePin, and tier 5 must not shrink with it.
+    const creaturePin = list.map((a) => !a.cold && CREATURE_PIN_RE.test(a.key));
+    const creatureTierPin = list.map((_, i) => corePin[i]! || basePin[i]! || creaturePin[i]!);
+    let pin = 0; // 2 = creature + visible + core pins, 1 = ADR-251 visible + ADR-438 core pins, 5 = ADR-573 core + base + creature pins, 4 = ADR-512 base + core pins, 3 = ADR-438 core pins only, 0 = none
+    const pinSet = (): boolean[] | null => pin === 2 ? pinned : pin === 1 ? visCorePin : pin === 5 ? creatureTierPin : pin === 4 ? baseCorePin : pin === 3 ? corePin : null;
     const scaleOf = (i: number, h: number, c: number): number => { const a = list[i]!; const p = pinSet()?.[i] ?? false; return Math.min(caps[i]!, a.cold ? c : p ? 1 : h); };
     const dims = (h: number, c: number) => list.map((a, i) => { const k = scaleOf(i, h, c); return { ...a, img: { width: Math.max(1, Math.floor(a.img!.width * k)), height: Math.max(1, Math.floor(a.img!.height * k)) } as ImageLike }; });
     const fits1 = (h: number, budget: number): number | null => {
@@ -1615,13 +1647,18 @@ export class AtlasManager {
     const fitsTier = (tier: number, h: number, budget: number): number | null => {
       if (tier === 2 && !(h < 1 && pinned.some(Boolean))) return null;
       if (tier === 1 && !(h < 1 && visCorePin.some(Boolean) && visCorePin.some((v, i) => v !== pinned[i]))) return null;
+      if (tier === 5 && !(h < 1 && creaturePin.some(Boolean))) return null;
       if (tier === 4 && !(h < 1 && basePin.some(Boolean))) return null;
       if (tier === 3 && !(h < 1 && corePin.some(Boolean))) return null;
-      pin = tier; return tier === 3 || tier === 4 ? fitsPacked(h, budget) : fits1(h, budget);
+      pin = tier; return tier === 3 || tier === 4 || tier === 5 ? fitsPacked(h, budget) : fits1(h, budget);
     };
     const fits = (h: number, budget: number): number | null => {
       if (h < 1 && pinned.some(Boolean)) { pin = 2; const c = fits1(h, budget); if (c !== null) return c; }
       if (h < 1 && visCorePin.some(Boolean) && visCorePin.some((v, i) => v !== pinned[i])) { pin = 1; const c = fits1(h, budget); if (c !== null) return c; }
+      // ADR-573: core + base + creatures, judged on the packed layer count like tiers 3/4 (ADR-438 precedent:
+      // the shelf estimate is planning headroom and a small pin set may spend it). Tried before tier 4 so the
+      // creature sheets are not left at the halved hot scale when the narrower set fits at the full reserve.
+      if (h < 1 && creaturePin.some(Boolean)) { pin = 5; const c = fitsPacked(h, budget); if (c !== null) return c; }
       // ADR-512: judged on the packed layer count like the core tier (the trimmed base sheets are small and pack tightly)
       if (h < 1 && basePin.some(Boolean)) { pin = 4; const c = fitsPacked(h, budget); if (c !== null) return c; }
       if (h < 1 && corePin.some(Boolean)) { pin = 3; const c = fitsPacked(h, budget); if (c !== null) return c; }
@@ -1645,7 +1682,7 @@ export class AtlasManager {
       // slots (planPool sizes the pools from the real remaining budget), while losing the tier drops doors, beds, trees and
       // zombies to the halved hot scale. The smaller reserve never drops below the pools' 1x floor (`floorBytes`: every
       // visible pool's 1x working set + the wear floor), so the resident art never takes the room a roof / stream page needs.
-      for (let h = 0.5; h >= MIN_ATLAS_DOWNSCALE && !best; h /= 2) for (const tier of [2, 1, 4, 3, 0]) for (const r of [keepBytes, Math.max(keepBytes / 2, Math.min(keepBytes, floorBytes))]) {
+      for (let h = 0.5; h >= MIN_ATLAS_DOWNSCALE && !best; h /= 2) for (const tier of [2, 1, 5, 4, 3, 0]) for (const r of [keepBytes, Math.max(keepBytes / 2, Math.min(keepBytes, floorBytes))]) {
         if (best) break; keptReserve = r; let c: number | null = null;
         if (tier !== 4) c = fitsTier(tier, h, full - r);
         // the base tier never drops the cold tier below the core tier's scale AND below BASE_PIN_COLD_FLOOR (the ADR-510
@@ -2006,6 +2043,11 @@ export class AtlasManager {
   /** Once per frame before drawing: advances the LRU clock and uploads frame-table rows patched by page-ins/evictions. */
   beginFrame(): void {
     this.frame++; this.streamStarts = 0; this.uploadsThisFrame = 0;
+    // ADR-575: reset the per-frame entry-burst counters; an open entry window closes early once no
+    // stream page is queued or loading (the drain it was opened for is done) — noteAreaEntry's frame
+    // cap bounds it otherwise, so a stuck page-in cannot hold the boost.
+    this.entryWants = 0; this.entryMisses = 0;
+    if (this.entryWindowOpen() && !this.queue.some((q) => this.poolOfA(q)?.cls === "stream") && !this.atlases.some((a) => a.lazy?.state === 1 && this.poolOfA(a)?.cls === "stream")) this.entryWindowEnd = 0;
     while (this.uploadWaiters?.length && this.uploadsThisFrame < this.pageUploadsPerFrame()) { this.uploadsThisFrame++; this.uploadWaiters.shift()!(); }
     if ((this.frame & 15) === 0) this.unloadIdleStream();
     if (this.queue.length) this.pump();
@@ -2062,8 +2104,23 @@ export class AtlasManager {
    *  phone). At or below PAGE_IN_FRAME_BUDGET_MS the boosted rates apply; above it, the base 2. Ignores
    *  non-finite / negative input, so a bad reading never changes the rate. */
   noteFrameTime(ms: number): void { if (Number.isFinite(ms) && ms >= 0) this.lastFrameMs = ms; }
-  /** ADR-545: boosted while the loading overlay is up or the last frame left headroom — never on a busy frame. */
-  private pageInBoosted(): boolean { return this.loadingBoost === true || this.lastFrameMs <= PAGE_IN_FRAME_BUDGET_MS; }
+  /** ADR-575: entry-window state. entryWindowEnd is the last frame (inclusive) the window covers;
+   *  entryWants / entryMisses are the per-frame burst counters, reset in beginFrame. All read through
+   *  ?? guards: prototype fakes (Object.create) never ran the field initializers, so undefined = closed. */
+  private entryWindowEnd = 0;
+  private entryWants = 0;
+  private entryMisses = 0;
+  /** ADR-575: open (or extend) the entry window — page-ins run at the boost rate until the stream queue
+   *  drains (beginFrame closes it) or ENTRY_WINDOW_FRAMES pass. SpriteBatch calls this when the visible
+   *  chunk set changes materially (area entry on foot / teleport); the miss/want burst counters below
+   *  open it automatically on paths without a chunk set. */
+  noteAreaEntry(): void { this.entryWindowEnd = Math.max(this.entryWindowEnd ?? 0, (this.frame ?? 1) + ENTRY_WINDOW_FRAMES); }
+  private entryWindowOpen(): boolean { return (this.entryWindowEnd ?? 0) >= (this.frame ?? 1) && (this.entryWindowEnd ?? 0) > 0; }
+  private noteEntryWant(): void { this.entryWants = (this.entryWants ?? 0) + 1; if (this.entryWants >= ENTRY_WANT_TRIGGER) this.noteAreaEntry(); }
+  private noteEntryMiss(): void { this.entryMisses = (this.entryMisses ?? 0) + 1; if (this.entryMisses >= ENTRY_MISS_TRIGGER) this.noteAreaEntry(); }
+  /** ADR-545: boosted while the loading overlay is up or the last frame left headroom — never on a busy frame.
+   *  ADR-575: or while an entry window is open (area entry is exactly when frames are busy). */
+  private pageInBoosted(): boolean { return this.loadingBoost === true || this.lastFrameMs <= PAGE_IN_FRAME_BUDGET_MS || this.entryWindowOpen(); }
   /** ADR-545: effective per-frame stream page-in starts (base 2, boosted 6). */
   streamUploadsPerFrame(): number { return this.pageInBoosted() ? STREAM_UPLOADS_PER_FRAME_BOOST : STREAM_UPLOADS_PER_FRAME; }
   /** ADR-545: effective per-frame GPU page uploads (base 2, boosted 6). */
@@ -2113,9 +2170,9 @@ export class AtlasManager {
   pageReadyAt(atlasIdx: number, prio = Infinity): boolean { const a = this.atlases[atlasIdx]; return this.pageReadyA(a?.lazy ? a : null, prio); }
   private pageReadyA(a: AtlasRT | null, prio: number): boolean {
     if (!a) return true;
-    const p = this.poolOfA(a); if (!p || !this.poolOn(p, prio)) { this.vram.misses++; return false; }
+    const p = this.poolOfA(a); if (!p || !this.poolOn(p, prio)) { this.vram.misses++; if (p?.cls === "stream") this.noteEntryMiss(); return false; }
     if (a.lazy!.state === 2 && p.lru.touch(a.key, this.frame, prio)) return true;
-    this.vram.misses++; this.request(a, prio); return false;
+    this.vram.misses++; if (p.cls === "stream") this.noteEntryMiss(); this.request(a, prio); return false;
   }
   /** Residency of a sprite's page for ?diag: "resident" | "loading" | "missing" | "resident" (non-streamed) + pool scale. */
   pageInfo(spriteId: number): { state: "resident" | "loading" | "missing"; scale: number; streamed: boolean } {
@@ -2268,6 +2325,7 @@ export class AtlasManager {
     const qi = this.queue.indexOf(a);
     if (qi >= 0) { if (prio < (a.lazy!.prio ?? Infinity)) { a.lazy!.prio = prio; this.queue.splice(qi, 1); this.enqueue(a); } return; }
     if (!p.lru.canAllocate(a.key, this.frame, prio)) return; // every slot holds a nearer page in use: keep the fallback, retry later
+    if (p.cls === "stream") this.noteEntryWant(); // ADR-575: a burst of new stream wants is an entry signature
     a.lazy!.prio = prio; this.enqueue(a); this.vram.pending = this.queue.length + this.inflight; this.pump();
   }
   /** Insert by priority (local player first, then by distance). */

@@ -71,6 +71,10 @@ export const PREFETCH_RING_PX = 768;
 const PREFETCH_EVERY = 8;
 /** ring requests rank just behind on-screen characters at the same distance */
 const PREFETCH_PRIO_PAD = 64;
+/** ADR-575: this many NEW chunks in the visible chunk set (vs last frame) is a material change —
+ *  an area entry — and opens the atlas entry window (AtlasManager.noteAreaEntry). One new chunk is
+ *  ordinary walking along an edge; two or more means a new area is streaming in. */
+const ENTRY_CHUNK_TRIGGER = 2;
 const OPEN = 1e5;
 /** Swim fallback (ADR-107): fraction of the pivot height hidden below the waterline, and the bob amplitude in sprite px. */
 const SWIM_CLIP = 0.45, SWIM_BOB_PX = 1.5;
@@ -682,6 +686,8 @@ export class SpriteBatch {
     return k;
   }
   private frameNo = 0;
+  /** ADR-575: last frame's visible chunk keys (spatial path), for the entry-window trigger. */
+  private chunkKeysPrev: Set<string> | null = null;
   private xf = new Float32Array(4);
   /** Seconds for newly streamed static chunks to fade in (0 = pop). */
   chunkFadeIn = 0.35;
@@ -985,6 +991,34 @@ export class SpriteBatch {
     this.silOn = false; this.late.length = 0;
     this.occ = { occAmount, peek: (i: number): number => this.occT[i] ?? 0, overlapsFocus, occOn, fk };
 
+    // ADR-575: resource prefetch ring — mirrors the character wardrobe ring in emitSprite (same
+    // PREFETCH_RING_PX band outside the draw margin, same PREFETCH_EVERY stagger, same priority pad):
+    // a STATIC stream sprite (no Appearance — characters have their own ring; no AnimState — animals
+    // already load at the wider STREAM_MARGIN_ANIMAL_PX) in the ring band requests its page ahead of
+    // entry, so the sheet is resident by the time the sprite is drawn. Missing pages only: a resident
+    // page's LRU priority is never rewritten by a padded touch, and a loading page is on its way.
+    // What the stream-margin resolve did NOT cover before this: beyond the keep margin (512 px for
+    // resources) nothing was ever requested — a page started loading only inside the 256 px load margin.
+    const ringPrefetch = (i: number, sid: number, sx: number, sy: number, prio: number): void => {
+      if (ap && ap.slot(i) >= 0) return;
+      if (an && an.slot(i) >= 0) return;
+      if (((this.frameNo + i) % PREFETCH_EVERY) !== 0) return;
+      if (sx < r0x - PREFETCH_RING_PX || sx > r1x + PREFETCH_RING_PX || sy < r0y - PREFETCH_RING_PX || sy > r1y + PREFETCH_RING_PX) return;
+      const info = atlas.pageInfo?.(sid); if (!info?.streamed || info.state !== "missing") return;
+      atlas.streamNear(sid, true, prio + PREFETCH_PRIO_PAD); this.prefetches++;
+    };
+    /** ADR-575: ring-band visit for a sprite in a chunk outside the draw set (spatial path): position
+     *  + stream check only, never a draw. Static nodes do not interpolate, so the current transform is
+     *  the drawn position. */
+    const ringVisit = (k: number): void => {
+      const i = entityIndex(sp.dense[k]!); const ts = tr.slot(i); if (ts < 0) return;
+      const x = tx[ts]!, y = ty[ts]!, z = tz[ts]!;
+      const vu = vc * x - vs * y, vv = vs * x + vc * y;
+      const sid = this.seasonPick(atlas, sp.data.spriteId[k]!).sid;
+      if (!atlas.isStreamSprite(sid)) return;
+      ringPrefetch(i, sid, (vu - vv) * hw, (vu + vv) * hh - z * zs, hasFocus ? (x - fwx) * (x - fwx) + (y - fwy) * (y - fwy) : Infinity);
+    };
+
     // ---- dynamic Sprite entities ----
     const emitSprite = (k: number): void => {
       const e = sp.dense[k]!; const i = entityIndex(e);
@@ -1003,8 +1037,12 @@ export class SpriteBatch {
       const sprio = hasFocus ? (x - fwx) * (x - fwx) + (y - fwy) * (y - fwy) : Infinity;
       if (atlas.isStreamSprite(sid)) {
         const m = an && an.slot(i) >= 0 ? STREAM_MARGIN_ANIMAL_PX : STREAM_MARGIN_PX; const km = m * STREAM_KEEP_FACTOR;
+        const inLoad = sx >= rect.x0 - m && sx <= rect.x1 + m && sy >= rect.y0 - m && sy <= rect.y1 + m;
         if (sx >= rect.x0 - km && sx <= rect.x1 + km && sy >= rect.y0 - km && sy <= rect.y1 + km)
-          atlas.streamNear(sid, sx >= rect.x0 - m && sx <= rect.x1 + m && sy >= rect.y0 - m && sy <= rect.y1 + m, sprio);
+          atlas.streamNear(sid, inLoad, sprio);
+        // ADR-575: outside the load margin, the prefetch ring still requests a missing page ahead of
+        // entry (staggered, padded priority); inside it, streamNear above already requested it.
+        if (!inLoad) ringPrefetch(i, sid, sx, sy, sprio);
       }
       if (sx < r0x || sx > r1x || sy < r0y || sy > r1y) {
         // ADR-188: wardrobe/hair prefetch ring: a character walking toward the view requests its layer pages before it is
@@ -1228,9 +1266,24 @@ export class SpriteBatch {
       // chunk-level culling through the shared spatial index
       // culled with the sprite margin too: a character standing just past a chunk's diamond edge was dropped with its chunk
       const keys = visibleChunkKeys({ x0: r0x, y0: r0y, x1: r1x, y1: r1y }, hw, hh, zs, 16, vq);
+      // ADR-575: a material change in the visible chunk set (ENTRY_CHUNK_TRIGGER or more chunks that
+      // were not visible last frame) is an area entry: open the atlas entry window so the new area's
+      // stream sheets page in at the boost rate while it streams in.
+      const prevKeys = this.chunkKeysPrev ?? null; let freshKeys = 0;
+      if (prevKeys) for (const k of keys) if (!prevKeys.has(k)) freshKeys++;
+      if (prevKeys && freshKeys >= ENTRY_CHUNK_TRIGGER) atlas.noteAreaEntry?.();
+      const keySet = new Set(keys); this.chunkKeysPrev = keySet;
       for (const ck of keys) {
         if (cx.spatial.activeKeys && !cx.spatial.activeKeys.has(ck)) continue;
         for (const e of cx.spatial.index.entitiesInChunk(ck)) { const s = sp.slot(entityIndex(e)); if (s >= 0) emitSprite(s); }
+      }
+      // ADR-575: chunks inside the prefetch ring but outside the draw set: visit their static stream
+      // sprites (no drawing) so resource pages are requested ahead of entry.
+      const ringKeys = visibleChunkKeys({ x0: r0x - PREFETCH_RING_PX, y0: r0y - PREFETCH_RING_PX, x1: r1x + PREFETCH_RING_PX, y1: r1y + PREFETCH_RING_PX }, hw, hh, zs, 16, vq);
+      for (const ck of ringKeys) {
+        if (keySet.has(ck)) continue;
+        if (cx.spatial.activeKeys && !cx.spatial.activeKeys.has(ck)) continue;
+        for (const e of cx.spatial.index.entitiesInChunk(ck)) { const s = sp.slot(entityIndex(e)); if (s >= 0) ringVisit(s); }
       }
     } else for (let k = 0; k < sp.size; k++) emitSprite(k);
     this.curRoute = 0;

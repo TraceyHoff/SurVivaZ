@@ -28,6 +28,24 @@ export interface C2DGroundGeom {
   top: [C2DVec, C2DVec, C2DVec, C2DVec];
   /** Cliff faces on sides whose neighbour is lower (and which are not slope sides — the tilted top meets the low neighbour there). */
   faces: { poly: C2DVec[]; side: C2DSide; /** neighbour render height the face drops to (fractional for water: the 0.25 inset). */ low: number }[];
+  /**
+   * ADR-572: full quads (this tile's flat height -> the neighbour height) on slope sides. These are
+   * NOT drawn as cliff faces (the tilted top meets the neighbour there, exactly like the mesh);
+   * they exist for the gt-block path only, which draws sloped tiles as flat art at full height:
+   * the strip between the flat art diamond's edge and the tilted top edge is precisely this quad,
+   * so the gt path fills it under the art on camera-facing slope sides. Flat-path / mesh callers
+   * ignore this field.
+   */
+  slopeFaces: { poly: C2DVec[]; side: C2DSide; low: number }[];
+  /**
+   * ADR-572: gt-block fill polygon per cliff face (parallel to `faces`). Far faces fill with
+   * the face polygon as-is. Near (camera-facing) faces fill with the FLAT-TOP quad — this
+   * tile's flat height at both top corners, down to the face's own bottom span: where a face's
+   * top edge is tilted (one corner dropped, e.g. a step beside water), the tilted top protrudes
+   * below the flat gt art diamond, and a fill that starts at the tilted edge leaves that
+   * protruding sliver bare; the flat-top quad subsumes it (and the whole face below it).
+   */
+  fillFaces: { poly: C2DVec[]; side: C2DSide; low: number }[];
   /** Lowest neighbour height among the drawn faces (the centre height when there are none). */
   minLow: number;
 }
@@ -71,6 +89,7 @@ export function c2dGroundGeometry(z: number, low: (dx: number, dy: number) => nu
   };
   const top: C2DGroundGeom["top"] = [corner(0, z - shape.cornerDrops[0]!), corner(1, z - shape.cornerDrops[1]!), corner(2, z - shape.cornerDrops[2]!), corner(3, z - shape.cornerDrops[3]!)];
   const faces: C2DGroundGeom["faces"] = [];
+  const fillFaces: C2DGroundGeom["fillFaces"] = [];
   // Edge -> its two top corners (T=0, R=1, B=2, L=3): +u is R-B, -u is T-L, +v is L-B, -v is T-R.
   const edgeCorners: readonly (readonly [0 | 1 | 2 | 3, 0 | 1 | 2 | 3])[] = [[1, 2], [0, 3], [3, 2], [0, 1]];
   // ADR-418: a cliff face follows both top faces, exactly like the mesh (cliffEdgeSpan): its top
@@ -103,8 +122,26 @@ export function c2dGroundGeometry(z: number, low: (dx: number, dy: number) => nu
       side: s as C2DSide,
       low: Math.min(span.bottom[0], span.bottom[1]),
     });
+    // ADR-572 gt fill for this face: far sides (1/3) as-is; near sides (0/2) as the flat-top
+    // quad (flat z at both top corners, the face's own bottom span) — see the fillFaces doc.
+    fillFaces.push({
+      poly: s === 0 || s === 2
+        ? [corner(c0, z), corner(c1, z), corner(c1, at(c1, span.bottom)), corner(c0, at(c0, span.bottom))]
+        : faces[faces.length - 1]!.poly,
+      side: s as C2DSide,
+      low: Math.min(span.bottom[0], span.bottom[1]),
+    });
   }
-  return { top, faces, minLow: faces.reduce((m, f) => Math.min(m, f.low), z) };
+  // ADR-572: slope-side quads for the gt-block path (see the slopeFaces field doc). A slope side's
+  // neighbour is exactly one level lower (classifyGroundShape only marks a side as a slope side
+  // when both its corners drop), so the quad runs flat z -> n on both ends.
+  const slopeFaces: C2DGroundGeom["slopeFaces"] = [];
+  for (const s of shape.slopeSides) {
+    const n = rawE[s]!; if (n === undefined || n >= z) continue;
+    const [c0, c1] = edgeCorners[s]!;
+    slopeFaces.push({ poly: [corner(c0, z), corner(c1, z), corner(c1, n), corner(c0, n)], side: s as C2DSide, low: n });
+  }
+  return { top, faces, slopeFaces, fillFaces, minLow: faces.reduce((m, f) => Math.min(m, f.low), z) };
 }
 
 /** Fill one polygon (tile-local coords + origin) in a flat colour. */
@@ -147,10 +184,12 @@ export function c2dGtPads(zHi: number, zLo: number): { topPad: number; botPad: n
 }
 
 /**
- * Near-face polygon below the gt art skirt: the cell's own 16 px skirt already covers the first level
- * of a camera-facing drop, so only the part from z - 1 down to the neighbour height is filled (a
- * 1-level drop needs no fill at all). The face polygon is [P1(z), P2(z), P2(low), P1(low)]: the top
- * two vertices move down one level.
+ * Near-face polygon below the gt art skirt (the pre-ADR-572 gt fill): the cell's own 16 px skirt was
+ * assumed to cover the first level of a camera-facing drop, so only the part from z - 1 down to the
+ * neighbour height was filled. ADR-572 measured that assumption false — the skirt covers only ~21%
+ * of a 1-level face — and gtBlock now fills the FULL near-face polygon under the art instead. This
+ * helper is kept for the ADR-418 geometry tests that pin its tilted-face shape.
+ * The face polygon is [P1(z), P2(z), P2(low), P1(low)]: the top two vertices move down one level.
  */
 export function c2dGtFaceBelowSkirt(poly: readonly (readonly [number, number])[]): [C2DVec, C2DVec, C2DVec, C2DVec] {
   const zs = DEFAULT_ISO.zStep;

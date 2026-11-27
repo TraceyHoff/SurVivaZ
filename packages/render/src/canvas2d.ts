@@ -19,7 +19,7 @@ import { GrazedTiles } from "./grazedTiles.js";
 import { fireAnimTime, hearthParticles, pieceFireFrame, isFireAnim, type HearthParticle } from "./fire-anim.js";
 import { previewLayers2D, tintPixels, type PreviewLayer2D } from "./character/preview2d.js";
 import { worldToScreen, toView, fromView, viewRect, DEFAULT_ISO, CHUNK_SIZE, floorToTerrainZ, terrainZToFloor, renderTileHeight, isWaterId, waterShoreTint, type TileMap, type Chunk } from "@engine/world";
-import { C2D_GT_Z_CLAMP, c2dClampHeight, c2dCliffShade, c2dGroundGeometry, c2dGtFaceBelowSkirt, c2dGtPads, c2dNeighbourLow, c2dTileHeight, drawC2DGroundCell, fillC2DPoly, offsetC2DPoly, type C2DGroundGeom, type C2DSide } from "./canvasGroundHeight.js";
+import { C2D_GT_Z_CLAMP, c2dClampHeight, c2dCliffShade, c2dGroundGeometry, c2dGtPads, c2dNeighbourLow, c2dTileHeight, drawC2DGroundCell, fillC2DPoly, offsetC2DPoly, type C2DGroundGeom, type C2DSide } from "./canvasGroundHeight.js";
 import { allWaterfallArtKeys, planWaterfallArt, WATERFALL_ANIM } from "./waterfallTiles.js";
 import type { AssetRegistry } from "@engine/assets";
 import { IsoCamera } from "./camera.js";
@@ -459,8 +459,23 @@ export class Canvas2DRenderer {
       const dx = (lx - (d - lx)) * 32 + GT_OX, dy = d * 16 + GT_OY - (cell?.z ?? 0) * 16 + topPad;
       const w = q === 0 ? null : fromView(x, y, q);
       const grazed = this.grazedAt ? (a: number, b: number): boolean => { const ww = q === 0 ? { x: a, y: b } : fromView(a, b, q); return this.grazedAt!(ww.x, ww.y); } : undefined;
-      // far faces first (the cell art paints over their overlap, as the mesh depth test does)
-      if (cell) for (const f of cell.geom.faces) if (f.side === 1 || f.side === 3)
+      // ALL cliff faces first, in full, under the cell art (the art paints over their overlap, as
+      // the mesh depth test does). ADR-572: near (camera-facing) faces used to be filled only
+      // below the art skirt (c2dGtFaceBelowSkirt, from z-1 down), on the assumption the skirt
+      // covers the first level — measured false: the skirt covers ~21% of a 1-level face, so
+      // every camera-facing 1-level face leaked the background through the art (268 px for an
+      // isolated +1 tile at zoom 0.709). The full near-face polygon in the same cliff colour the
+      // far faces use is drawn under the art instead, subsuming the below-skirt fill: a present
+      // skirt still wins visually, the fill shows only where the art is transparent. Near faces
+      // fill as geom.fillFaces' flat-top quads, which also subsume the sliver where a tilted
+      // top edge (one corner dropped, e.g. a step beside water) protrudes below the flat diamond.
+      if (cell) for (const f of cell.geom.fillFaces)
+        ops.push({ poly: offsetC2DPoly(f.poly, dx, d * 16 + GT_OY + topPad), style: this.cliffColor(cell.t, cell.wx, cell.wy, c2dCliffShade(f.side)) });
+      // ADR-572: camera-facing slope sides likewise — the gt path draws sloped tiles as flat art
+      // at full height, so the strip between the flat diamond's edge and the tilted top edge is
+      // an uncovered near face; fill its quad (geom.slopeFaces) under the art too. (Far slope
+      // sides need none: their strip is covered by the tiles behind, as the oracle measures 0.)
+      if (cell) for (const f of cell.geom.slopeFaces) if (f.side === 0 || f.side === 2)
         ops.push({ poly: offsetC2DPoly(f.poly, dx, d * 16 + GT_OY + topPad), style: this.cliffColor(cell.t, cell.wx, cell.wy, c2dCliffShade(f.side)) });
       groundLayers(at, x, y, season, tintAt, L, w ? groundHash(w.x, w.y) : undefined, grazed);
       for (const l of L) {
@@ -472,9 +487,6 @@ export class Canvas2DRenderer {
         const br = l.kind === GroundLayerKind.Water ? 0.80 + 0.26 * tintAt(x, y) : undefined;
         ops.push({ img, f, dx, dy, br });
       }
-      // near faces after the art; only the part below the 16 px skirt (1-level drops need no fill)
-      if (cell) for (const f of cell.geom.faces) if ((f.side === 0 || f.side === 2) && cell.z - f.low > 1)
-        ops.push({ poly: offsetC2DPoly(c2dGtFaceBelowSkirt(f.poly), dx, d * 16 + GT_OY + topPad), style: this.cliffColor(cell.t, cell.wx, cell.wy, c2dCliffShade(f.side)) });
     }
     const cv = hit?.cv ?? document.createElement("canvas"); cv.width = GT_W; cv.height = GT_H + topPad + botPad; const g = cv.getContext("2d"); if (!g) return null;
     g.clearRect(0, 0, GT_W, GT_H + topPad + botPad);
