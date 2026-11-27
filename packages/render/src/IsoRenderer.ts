@@ -17,7 +17,7 @@ import { reportRenderError } from "./report.js";
 import { buildSceneTarget, type SceneDepth } from "./gl/sceneTarget.js";
 import { formatSceneDiag, type SceneDiag } from "./sceneDiag.js";
 import { AssetManager, entityIndex, Transform, type World } from "@engine/core";
-import { DEFAULT_ISO, screenToWorld, toView, type BuildingGrid, type ChunkedSpatialIndex, type IsoConfig, type TileMap } from "@engine/world";
+import { DEFAULT_ISO, screenToWorld, tileToChunk, toView, type BuildingGrid, type ChunkedSpatialIndex, type IsoConfig, type TileMap } from "@engine/world";
 import { IsoCamera, type Rect } from "./camera.js";
 import { BloomPass } from "./bloom.js";
 import { lightningStrikeAnim } from "./frame-select.js";
@@ -592,7 +592,15 @@ export class IsoRenderer implements Renderer {
     // texel footprint from zoom x device DPR, not the governor's resScale: a quality tier change must never trigger an atlas re-tier
     this.atlas.setCharFootprint(atlasFootprint(this.camera.zoom, this.lastCss[2] || this.camera.dpr));
     if (this.totalFrames >= 30 && this.totalFrames % 30 === 0) void this.atlas.retier(this.totalFrames).then((r) => { if (r) { this.w = 0; console.info(`[render] re-tiered atlases: ${this.atlas.tiers.hot.length} hot x${this.atlas.tiers.hotScale}`); } }, (e: unknown) => reportRenderError("atlas retier", e));
-    if (this.tilemap) this.terrain.sync(this.tilemap);
+    if (this.tilemap) {
+      // ADR-577: the terrain build budget never defers the chunk the player is standing in.
+      const fe = this.sprites.focusEntity;
+      const trs = world.store(Transform);
+      const ts = fe >= 0 && world.isAlive(fe) ? trs.slot(entityIndex(fe)) : -1;
+      if (ts >= 0) this.terrain.setFocusChunk(tileToChunk(Math.floor(trs.data.x[ts]!)), tileToChunk(Math.floor(trs.data.y[ts]!)));
+      else this.terrain.clearFocusChunk();
+      this.terrain.sync(this.tilemap);
+    }
     this.camera.viewUniform(this.viewU);
     const rect = this.camera.visibleRect(0, this.rect);
     // Camera-relative depth range: precision independent of world size / streaming.

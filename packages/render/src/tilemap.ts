@@ -173,6 +173,25 @@ export class TilemapRenderer {
   private prog: Program;
   private meshes = new Map<Chunk, ChunkMesh>();
   maxZ = 1;
+  /** ADR-577: per-frame millisecond budget for terrain chunk (re)builds in sync(). The focus
+   *  chunk (setFocusChunk — the chunk the player is standing in) is always built in the frame
+   *  it goes stale, budget or not; every other stale chunk builds nearest-first until the
+   *  budget is spent, then stays pending — its old mesh (if any) keeps drawing — and the
+   *  stamp check re-queues it next frame. Infinity restores the pre-577 behaviour of
+   *  building everything in one frame (a 36-chunk entry burst measured ~224 ms). */
+  syncBudgetMs = 4;
+  /** ADR-577: injectable clock for the sync() budget (tests drive it deterministically). */
+  nowFn: () => number = () => performance.now();
+  private focusCX = 0;
+  private focusCY = 0;
+  private hasFocusChunk = false;
+  /** ADR-577: chunk builds performed by the latest sync() and chunks it left pending. */
+  syncBuilds = 0;
+  syncDeferred = 0;
+
+  /** ADR-577: mark the chunk whose build is never deferred (the player's own chunk). */
+  setFocusChunk(cx: number, cy: number): void { this.focusCX = cx; this.focusCY = cy; this.hasFocusChunk = true; }
+  clearFocusChunk(): void { this.hasFocusChunk = false; }
   /** ADR-389: Art's gt_waterfall frames are in the pack — skip procedural streaks on mesh faces. */
   waterfallArt = false;
 
@@ -313,15 +332,52 @@ export class TilemapRenderer {
     return { vao, vbo, ibo, count: idx.length, stamp: this.stamp(map, c), minZ, maxZ, cx: c.cx, cy: c.cy };
   }
 
-  /** Rebuild stale meshes; returns world-space bounds for the depth range. */
+  /** Rebuild stale meshes; returns world-space bounds for the depth range.
+   *  ADR-577: builds run in priority order under syncBudgetMs — the focus chunk first and
+   *  exempt, never-built chunks (holes) before rebuilds, then nearest-first; whatever the
+   *  budget does not reach stays pending with its old mesh still drawing. On pre-577 test
+   *  stubs (Object.create, fields undefined) the budget is unlimited: the old behaviour. */
   sync(map: TileMap): { minKey: number; maxKey: number } {
+    const budget = this.syncBudgetMs === undefined ? Number.POSITIVE_INFINITY : this.syncBudgetMs;
+    const now = this.nowFn ?? (() => performance.now());
+    const hasFocus = !!this.hasFocusChunk;
+    const fcx = this.focusCX | 0, fcy = this.focusCY | 0;
+    type Stale = { c: Chunk; m: ChunkMesh | undefined; focus: boolean; hole: boolean; dist: number };
+    const stale: Stale[] = [];
+    for (const c of map.loadedChunks()) {
+      const m = this.meshes.get(c);
+      if (m && m.stamp === this.stamp(map, c)) continue;
+      stale.push({
+        c, m,
+        focus: hasFocus && c.cx === fcx && c.cy === fcy,
+        hole: !m,
+        dist: hasFocus ? Math.max(Math.abs(c.cx - fcx), Math.abs(c.cy - fcy)) : 0,
+      });
+    }
+    stale.sort((a, b) => (a.focus === b.focus ? 0 : a.focus ? -1 : 1)
+      || (a.hole === b.hole ? 0 : a.hole ? -1 : 1)
+      || a.dist - b.dist || a.c.cx - b.c.cx || a.c.cy - b.c.cy);
+    const start = now();
+    let i = 0;
+    for (; i < stale.length; i++) {
+      const s = stale[i]!;
+      if (!s.focus && i > 0 && now() - start >= budget) break;
+      this.meshes.set(s.c, this.build(map, s.c, s.m));
+    }
+    this.syncBuilds = i;
+    this.syncDeferred = stale.length - i;
     let minKey = 1e9, maxKey = -1e9;
     for (const c of map.loadedChunks()) {
-      let m = this.meshes.get(c);
-      if (!m || m.stamp !== this.stamp(map, c)) { m = this.build(map, c, m); this.meshes.set(c, m); }
+      const m = this.meshes.get(c);
+      let cMaxZ: number;
+      if (m) cMaxZ = m.maxZ;
+      else { // ADR-577: pending its first build — bound the depth range from the raw heights
+        cMaxZ = 1;
+        for (let k = 0; k < c.tiles.length; k++) { const id = c.tiles[k]!; if (id !== 0) cMaxZ = Math.max(cMaxZ, renderTileHeight(id, c.height[k]!)); }
+      }
       const vr = viewRect(c.cx * CHUNK_SIZE, c.cy * CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE, this.iso.view ?? 0); // ADR-253 view-space keys
-      minKey = Math.min(minKey, vr.x + vr.y - 2); maxKey = Math.max(maxKey, vr.x + vr.y + 2 * CHUNK_SIZE + m.maxZ * this.zFactor);
-      this.maxZ = Math.max(this.maxZ, m.maxZ);
+      minKey = Math.min(minKey, vr.x + vr.y - 2); maxKey = Math.max(maxKey, vr.x + vr.y + 2 * CHUNK_SIZE + cMaxZ * this.zFactor);
+      this.maxZ = Math.max(this.maxZ, cMaxZ);
     }
     for (const [c, m] of this.meshes) if (map.getChunk(c.cx, c.cy) !== c) {
       this.gl.deleteVertexArray(m.vao); this.gl.deleteBuffer(m.vbo); this.gl.deleteBuffer(m.ibo); this.meshes.delete(c);

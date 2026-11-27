@@ -15795,3 +15795,43 @@ entry profiles (worst frame, total settle) from the harness are the acceptance e
 Deferred because it touches the terrain renderer's staleness model and deserves its own
 batch and gate; ADR-576 (the sustained cost, the larger of the two in continuous play)
 shipped first.
+
+## ADR-578: Chunk-build burst time-slicing — the ADR-577 scope, built (SurVivaZ)
+
+Implements the design ADR-577 scoped. Measured context (measure-perf.md §2): terrain chunk
+mesh builds cost ~7 ms per chunk (VM scale); sync() rebuilt every stale chunk in the
+caller's frame, so a 36-chunk entry/teleport burst was a single ~224 ms frame, while
+steady-state sync is ~0.005 ms/frame — a pure entry cost, density-independent.
+
+What shipped (packages/render/src/tilemap.ts, IsoRenderer.ts): TilemapRenderer.sync() now
+collects the stale set first, sorts it — the focus chunk first, never-built chunks (holes)
+before rebuilds, then Chebyshev distance from the focus, then chunk key — and builds under
+a per-frame budget (syncBudgetMs = 4) checked between builds. The focus chunk is exempt:
+IsoRenderer sets it every frame from the focus entity's Transform (the chunk the player is
+standing in), so it always completes in the frame it goes stale. Deferred chunks keep
+their old mesh drawing (a rebuild) or stay absent (a hole, filled nearest-first over the
+following frames) and are re-queued by the unchanged stamp check; a pending chunk's depth
+bounds come from a raw-height scan, so the returned minKey/maxKey and maxZ stay honest
+while it waits. syncBuilds / syncDeferred counters expose the latest sync's work, and the
+budget clock is injectable (nowFn). Pre-577 test stubs (Object.create, budget fields
+undefined) get an unlimited budget — the old build-everything behaviour — so the existing
+mesh-content harness is untouched; the ADR-386/389/480/569 tilemap tests (37) pass
+unmodified against the new sync.
+
+Proof (packages/render/test/adr577_chunk_build_budget.test.ts, 5 tests, deterministic
+injected clock — structural counts, not wall-clock): a 36-chunk burst at a 25 ms test
+budget builds at most 3 chunks per sync (focus + 2) and settles in 12 syncs, against
+36 builds in 1 sync unlimited; the settled mesh bytes are identical to the unlimited
+build (compared as a multiset, since build order differs); at budget 0 the focus chunk —
+placed last in key order — is the only build of its entry frame; a deferred rebuild keeps
+its exact old mesh object until its turn; a fresh hole outranks nearer rebuilds. The
+budget composes with the existing entry machinery instead of replacing it: ADR-544's
+ready gate still holds spawn until chunk data is in (mesh settle at 4 ms/frame drains a
+5x5 entry in well under the gate's cap), ADR-546's stream order decides which chunks
+exist, and ADR-575's entry window still drives atlas page-in.
+
+Honest bounds: a single chunk build is atomic, so the worst frame is the focus build plus
+about one budget overshoot, never the whole burst; on the phone the burst now settles
+outward over a few hundred milliseconds of frames instead of one freeze — the phone-side
+entry profile is owed from play, the harness evidence here is structural. Canvas2D draws
+tiles directly and has no chunk meshes, so there is nothing to slice on that path.
