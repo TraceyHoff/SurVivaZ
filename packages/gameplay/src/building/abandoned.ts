@@ -6,8 +6,8 @@
  */
 import roofFormsJson from "../../data/roof_forms.json";
 import { PlayerId, Transform, type Entity, type World } from "@engine/core";
-import { CHUNK_SIZE, isWaterId, parseChunkKey, waterDepthAt, WaterDepth, type ChunkKey } from "@engine/world";
-import { AbandonedSite, BuildPiece, PieceOwner, PieceSlot, ResourceNode, Tribe } from "../components.js";
+import { CHUNK_SIZE, installSpatialIndex, isWaterId, parseChunkKey, waterDepthAt, WaterDepth, type ChunkKey } from "@engine/world";
+import { AbandonedSite, BuildPiece, Health, PieceOwner, PieceSlot, ResourceNode, Tribe } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { defaultDefs } from "../data.js";
 import { BuildFail } from "../events.js";
@@ -16,10 +16,11 @@ import { indexEntity } from "../spawn.js";
 import { TerrainRes, addChunkLoadHook } from "../world.js";
 import { AttachKind } from "../components.js";
 import { resolveAttachment, unlinkPiece } from "./links.js";
-import { structures, unmarkLinked } from "./structure.js";
+import { gridRot, structures, unmarkLinked, type Slot } from "./structure.js";
+import type { PieceDef } from "../defs.js";
 import { damageStageFor, maxHpOf } from "./integrity.js";
 import { hasOwnClaim, placePiece, snapPlacement, tribeOf, validatePlacement } from "./place.js";
-import { exteriorStairsFor, STAIRS_DATA } from "./stairs.js";
+import { exteriorStairsFor } from "./stairs.js";
 import { ABANDONED_DATA } from "./abandoned_data.js";
 
 /**
@@ -158,6 +159,16 @@ export interface StampResult {
   pending: boolean;
 }
 
+/**
+ * ADR-594: roles whose placement can fail only for want of a neighbour that lands later in the same stamp (a first-tile upper
+ * floor, a wall beside a corner placed after it, a roof tile before its wall-anchored neighbour — ADR-311 did this for roofs
+ * alone). They are retried after the main queue, so a generated structure has every wall, floor, door, window and roof.
+ */
+const RETRY_ROLES: ReadonlySet<Role> = new Set<Role>(["deck", "wall", "opening", "stair", "roof"]);
+
+/** ADR-594: dependency chains (floor -> corner -> wall -> roof) can need several passes; a pass with no progress still ends them. */
+const RETRY_PASSES = 8;
+
 const PHASE: Record<Role, number> = { deck: 0, wall: 1, opening: 2, stair: 3, furniture: 4, loot: 4, fence: 4, garden: 4, roof: 5 };
 
 export function hashU32(seed: number, a: number, b = 0, c = 0): number {
@@ -286,9 +297,12 @@ function house(x0: number, y0: number, w: number, h: number, stories: number, fu
 function yard(out: Spec[], x0: number, y0: number, w: number, h: number, kind: "garden" | "pen"): void {
   fenceRect(out, x0, y0, w, h, kind === "pen" ? "fence_rail" : "fence_picket", kind === "pen" ? "n" : "w");
   if (kind === "garden") {
-    out.push({ key: "garden_bed", x: x0 + 1.5, y: y0 + 1.5, level: 0, rot: 0, role: "garden" });
-    if (w >= 4 && h >= 3) out.push({ key: "garden_bed", x: x0 + 1.5, y: y0 + 2.6, level: 0, rot: 0, role: "garden" });
+    // ADR-594: the fence ring takes the border cells, so the interior is (w-2) x (h-2). A garden_bed is 2x1: only plan it (and
+    // the second row) where it fits — it was silently dropped in the 3-wide yards before; a 1-tile yard gets a flower_bed.
+    // The 1x1 flower_bed goes first so a rotated yard's 2x1 beds settle around it (placeSpec re-seats a bed that overlaps).
     if (w >= 5) out.push({ key: "flower_bed", x: x0 + 3.5, y: y0 + 1.5, level: 0, rot: 0, role: "garden" });
+    out.push({ key: w >= 4 ? "garden_bed" : "flower_bed", x: x0 + 1.5, y: y0 + 1.5, level: 0, rot: 0, role: "garden" });
+    if (w >= 4 && h >= 4) out.push({ key: "garden_bed", x: x0 + 1.5, y: y0 + 2.6, level: 0, rot: 0, role: "garden" });
   } else {
     out.push({ key: "feeding_trough", x: x0 + 1.5, y: y0 + 1.5, level: 0, rot: 0, role: "furniture" });
   }
@@ -659,29 +673,10 @@ export function planAbandonedSite(seed: number, originX: number, originY: number
   const built = rotateBuilt(built0, rot);
   const ruin = opts.ruin ?? (0.18 + rand() * 0.62);
   const tier = opts.tier ?? (STONE_KINDS.has(kind) && rand() < 0.35 ? 2 : 1);
-  const pieces: PlannedPiece[] = built.pieces.map((s) => {
-    const omitable = s.role === "opening" || s.role === "furniture" || s.role === "loot" || s.role === "fence" || s.role === "garden" || s.role === "roof";
-    const omit = omitable && rand() < ruin * (s.role === "roof" ? 0.22 : 0.42);
-    const hpFrac = s.role === "opening" || s.role === "furniture" || s.role === "loot" || s.role === "fence" || s.role === "garden"
-      ? Math.max(0.25, 1 - ruin * (0.2 + rand() * 0.4))
-      : Math.max(0.22, 1 - ruin * (0.35 + rand() * 0.45));
-    return { ...s, x: originX + s.x, y: originY + s.y, tier, omit, hpFrac };
-  });
-  // ADR-372: broken / missing stairs. A two-story+ site can spawn with its ground flight missing (interior
-  // and/or exterior), so the upper floor is only reachable by building the stairs back — through the
-  // existing build system for players, and through the claim-build rebuild flow for AI humans (the missing
-  // stair is a structural piece in the plan, so ruinLayout + planClaimRuin already rebuild it). The roll is
-  // ruin-scaled (a ruin-0 site never loses its stairs) on its own seeded stream, so the main plan stream —
-  // layouts, loot, furnishing rolls — is untouched.
-  if (built.stories >= 2) {
-    const sr = rng(hashU32(seed >>> 0, originX, originY, 0x5A172));
-    const interiorMissing = sr() < STAIRS_DATA.brokenChance * ruin;
-    const exteriorMissing = sr() < STAIRS_DATA.brokenExteriorChance * ruin;
-    for (const p of pieces) {
-      if (p.role !== "stair" || p.level !== 0) continue; // only the ground flight goes missing
-      if (p.exterior ? exteriorMissing : interiorMissing) p.omit = true;
-    }
-  }
+  // ADR-594: abandoned structures spawn fully formed — every planned piece is placed at full HP (damage stage 0).
+  // The old ruin-scaled omission / HP / broken-stair rolls are gone; `ruin` stays on the plan only as the seeded
+  // value the chunk planner and the survey map already carry (it no longer changes a single piece).
+  const pieces: PlannedPiece[] = built.pieces.map((s) => ({ ...s, x: originX + s.x, y: originY + s.y, tier, omit: false, hpFrac: 1 }));
   return {
     kind, kindKey: ABANDONED_KIND_KEYS[kind] ?? "cottage", originX, originY,
     width: built.w, height: built.h, stories: built.stories, rot, ruin, tier,
@@ -833,16 +828,24 @@ function fillLoot(world: World, piece: Entity, rand: () => number, kind?: Abando
   }
 }
 
-function placeSpec(world: World, p: PlannedPiece): Entity | 0 {
-  if (p.omit) return 0;
+/**
+ * ADR-594: furniture, loot containers and garden beds are authored on 1-tile anchors, but many pieces are 2x1 / 1x2 (wardrobe, fireplace,
+ * bench, bed, workbench, large chest) and a rotated site puts some on a neighbour or a wall run. A spec that does not fit at
+ * its anchor is tried at the other three facings, then on the nearest tiles of the same floor — only tiles whose whole
+ * footprint stands on the site's own decks, and never beside a door or stair, so a doorway or flight is not blocked —
+ * so the furnished room keeps the piece instead of silently dropping it. Deterministic (fixed candidate order).
+ */
+const FALLBACK_ROLES: ReadonlySet<Role> = new Set<Role>(["furniture", "loot", "garden"]);
+const FALLBACK_OFFSETS: readonly (readonly [number, number])[] = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, 1], [1, -1], [-1, -1], [2, 0], [-2, 0], [0, 2], [0, -2]];
+
+function tryPlaceAt(world: World, p: PlannedPiece, pieceId: number, def: PieceDef, x: number, y: number, rot: number, plan?: PlannedSite, reseat = false): Entity | 0 {
   const defs = gameplayDefs(world);
-  let pieceId: number;
-  try { pieceId = defs.pieceId(p.key); } catch { return 0; }
-  const def = defs.pieces.get(pieceId); if (!def) return 0;
   const tier = def.tiered ? Math.max(def.minTier || 1, p.tier) : def.fixedTier;
-  const sn = snapPlacement(world, { piece: pieceId, x: p.x, y: p.y, level: p.level, rot: p.rot, tier, variant: 0 });
+  const sn = snapPlacement(world, { piece: pieceId, x, y, level: p.level, rot, tier, variant: 0 });
   if (typeof sn === "number") return 0;
-  const why = validatePlacement(world, 0 as Entity, sn, { ignoreCost: true, ignoreRange: true });
+  if (plan && reseat && !footprintOnDecks(world, def, sn.slot, p, plan)) return 0;
+  let why = validatePlacement(world, 0 as Entity, sn, { ignoreCost: true, ignoreRange: true });
+  if (why === BuildFail.Blocked && plan) { clearMobiles(world, sn.pos.x, sn.pos.y, plan); why = validatePlacement(world, 0 as Entity, sn, { ignoreCost: true, ignoreRange: true }); }
   if (why) return 0;
   const cap = def.tiered ? Math.min(0xffff, Math.round(def.hp * (defs.tiers[sn.tier]?.hpMul ?? 1))) : Math.min(0xffff, def.hp);
   const hp = Math.max(1, Math.round(cap * p.hpFrac));
@@ -850,6 +853,66 @@ function placeSpec(world: World, p: PlannedPiece): Entity | 0 {
   world.setField(e, BuildPiece, "hp", hp);
   world.setField(e, BuildPiece, "damageStage", damageStageFor(world, hp, cap));
   return e;
+}
+
+/**
+ * ADR-594: a creature standing where a wall, floor or post lands used to make that piece silently fail (placement refuses a
+ * solid piece on a creature), and the retry passes run inside one tick so it never moved — a random hole in a "fully formed"
+ * building. The site is world-generated, so the creature is stepped just outside the footprint (nearest side) and the
+ * placement retried once.
+ */
+function clearMobiles(world: World, x: number, y: number, plan: PlannedSite): void {
+  const x0 = plan.originX, x1 = x0 + plan.width, y0 = plan.originY, y1 = y0 + plan.height;
+  for (const c of [...installSpatialIndex(world).queryRect(x - 1.3, y - 1.3, x + 1.3, y + 1.3)]) {
+    if (!world.has(c, Health) || world.has(c, BuildPiece)) continue;
+    const t = world.get(c, Transform); if (!t) continue;
+    const opts: [number, number, number][] = [[t.x - x0 + 1.2, x0 - 1.2, t.y], [x1 - t.x + 1.2, x1 + 1.2, t.y], [t.y - y0 + 1.2, t.x, y0 - 1.2], [y1 - t.y + 1.2, t.x, y1 + 1.2]];
+    let best = opts[0]!; for (const o of opts) if (o[0] < best[0]) best = o;
+    world.set(c, Transform, { x: best[1], y: best[2] });
+  }
+}
+
+/**
+ * ADR-594 fallback guard. Indoors (furniture / loot): every footprint tile has one of the site's planned decks on this
+ * floor and clears doors and stairs. Garden beds: every footprint tile lies strictly inside the planned fence run
+ * (its bounding box) and clears the gate.
+ */
+function footprintOnDecks(world: World, def: PieceDef, slot: Slot, p: PlannedPiece, plan: PlannedSite): boolean {
+  const tiles = structures(world).grid.footprintTiles(def.id, slot.tx, slot.ty, gridRot(def, slot.rot));
+  if (p.role === "garden") {
+    const fences = plan.pieces.filter((q) => q.role === "fence");
+    if (fences.length === 0) return false;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const q of fences) { x0 = Math.min(x0, q.x); y0 = Math.min(y0, q.y); x1 = Math.max(x1, q.x); y1 = Math.max(y1, q.y); }
+    for (const [tx, ty] of tiles) {
+      if (tx + 0.5 < x0 || tx + 0.5 > x1 || ty + 0.5 < y0 || ty + 0.5 > y1) return false;
+      if (fences.some((q) => q.key === "garden_gate" && Math.abs(q.x - (tx + 0.5)) < 1 && Math.abs(q.y - (ty + 0.5)) < 1)) return false;
+    }
+    return true;
+  }
+  for (const [tx, ty] of tiles) {
+    if (!plan.pieces.some((q) => q.role === "deck" && q.level === p.level && Math.floor(q.x) === tx && Math.floor(q.y) === ty)) return false;
+    if (plan.pieces.some((q) => q.level === p.level && (q.role === "stair" || (q.role === "opening" && q.key.startsWith("door"))) && Math.abs(q.x - (tx + 0.5)) < 1 && Math.abs(q.y - (ty + 0.5)) < 1)) return false;
+  }
+  return true;
+}
+
+function placeSpec(world: World, p: PlannedPiece, plan?: PlannedSite): Entity | 0 {
+  if (p.omit) return 0;
+  const defs = gameplayDefs(world);
+  let pieceId: number;
+  try { pieceId = defs.pieceId(p.key); } catch { return 0; }
+  const def = defs.pieces.get(pieceId); if (!def) return 0;
+  const first = tryPlaceAt(world, p, pieceId, def, p.x, p.y, p.rot, plan);
+  if (first || !plan || !FALLBACK_ROLES.has(p.role)) return first;
+  const steps = def.rotSteps || defs.building.freeRotSteps;
+  const rots = [p.rot, ...[1, 2, 3].map((k) => (p.rot + Math.round(k * steps / 4)) % steps)];
+  for (const [dx, dy] of FALLBACK_OFFSETS) for (const rot of rots) {
+    if (dx === 0 && dy === 0 && rot === p.rot) continue;
+    const e = tryPlaceAt(world, p, pieceId, def, p.x + dx, p.y + dy, rot, plan, true);
+    if (e) return e;
+  }
+  return 0;
 }
 
 /**
@@ -896,6 +959,8 @@ interface PendingStamp {
   ordered: PlannedPiece[];
   next: number; placed: Entity[]; retry: PlannedPiece[]; retryPasses: number;
   lootRand: () => number;
+  /** ADR-594: a legacy-site restore — the site's marker already exists; finishing must not create another or touch nodes. */
+  restoreMarker?: Entity;
   /** Live handle returned by stampAbandonedSite: placed grows, marker is set on completion. */
   result: StampResult;
 }
@@ -942,6 +1007,7 @@ function rollbackStamp(world: World, entry: PendingStamp): void {
 function finishStamp(world: World, entry: PendingStamp): void {
   stampQueues.get(world)?.delete(entry.key);
   const result = entry.result;
+  if (entry.restoreMarker !== undefined) { result.marker = entry.restoreMarker; result.pending = false; return; }
   if (entry.placed.length === 0) { result.skipped = true; result.pending = false; return; }
   const plan = entry.plan;
   if (world.isRegistered(ResourceNode)) {
@@ -964,9 +1030,12 @@ function pieceMatches(world: World, e: Entity, spec: PlannedPiece): boolean {
   if (type === undefined || (defs.pieces.get(type)?.key ?? "") !== spec.key) return false;
   const t = world.get(e, Transform); if (!t) return false;
   if (Math.abs(t.x - spec.x) > 0.01 || Math.abs(t.y - spec.y) > 0.01) return false;
+  return pieceLevel(world, e) === spec.level;
+}
+
+function pieceLevel(world: World, e: Entity): number {
   const slot = world.has(e, PieceSlot) ? world.get(e, PieceSlot) : undefined;
-  const level = slot ? slot.z : Math.round((t.z ?? 0) / defs.building.levelHeight);
-  return level === spec.level;
+  return slot ? slot.z : Math.round((world.get(e, Transform)?.z ?? 0) / gameplayDefs(world).building.levelHeight);
 }
 
 /**
@@ -995,7 +1064,11 @@ function matchPartialStamp(world: World, plan: PlannedSite): { placed: Entity[];
   const placed: Entity[] = []; const placedSpecs = new Set<PlannedPiece>(); const pieceOf = new Map<PlannedPiece, Entity>();
   for (const spec of ordered) {
     if (spec.omit) continue;
-    const found = pieces.find((e) => !used.has(e) && pieceMatches(world, e, spec));
+    let found = pieces.find((e) => !used.has(e) && pieceMatches(world, e, spec));
+    if (!found && FALLBACK_ROLES.has(spec.role)) { // ADR-594: a furnishing re-seated off its slot by placeSpec still counts
+      let id = -1; try { id = gameplayDefs(world).pieceId(spec.key); } catch { /* renamed */ }
+      found = pieces.find((e) => !used.has(e) && world.getField(e, BuildPiece, "type") === id && pieceLevel(world, e) === spec.level);
+    }
     if (!found) continue; // not placed yet: the queue will place it
     used.add(found); placed.push(found); placedSpecs.add(spec); pieceOf.set(spec, found);
   }
@@ -1081,30 +1154,30 @@ export function pumpAbandonedStamps(world: World, maxPieces: number = ABANDONED_
     while (budget > 0 && entry.next < entry.ordered.length) {
       const spec = entry.ordered[entry.next++]!;
       if (spec.omit) continue;
-      const e = placeSpec(world, spec);
-      if (!e) { if (spec.role === "roof") entry.retry.push(spec); continue; }
+      const e = placeSpec(world, spec, entry.plan);
+      if (!e) { if (RETRY_ROLES.has(spec.role)) entry.retry.push(spec); continue; }
       entry.placed.push(e);
       if (spec.role === "loot") fillLoot(world, e, entry.lootRand, entry.plan.kind);
       placedThisCall++; budget--;
     }
     // ADR-311 roof retry passes, still inside this tick's budget. A pass only counts when
     // every spec in it was attempted; a pass that makes no progress ends retries.
-    while (entry.next >= entry.ordered.length && entry.retry.length > 0 && entry.retryPasses < 3 && budget > 0) {
+    while (entry.next >= entry.ordered.length && entry.retry.length > 0 && entry.retryPasses < RETRY_PASSES && budget > 0) {
       const pass = entry.retry; entry.retry = [];
       const failed: PlannedPiece[] = [];
       let attempted = 0;
       for (const spec of pass) {
         if (budget <= 0) { failed.push(spec); continue; }
         attempted++;
-        const e = placeSpec(world, spec);
-        if (e) { entry.placed.push(e); placedThisCall++; budget--; }
+        const e = placeSpec(world, spec, entry.plan);
+        if (e) { entry.placed.push(e); if (spec.role === "loot") fillLoot(world, e, entry.lootRand, entry.plan.kind); placedThisCall++; budget--; }
         else failed.push(spec);
       }
       if (attempted < pass.length) { entry.retry = failed; break; } // partial pass: resume next tick, not counted
-      if (failed.length === pass.length) { entry.retry = []; entry.retryPasses = 3; break; } // no progress: stop
+      if (failed.length === pass.length) { entry.retry = []; entry.retryPasses = RETRY_PASSES; break; } // no progress: stop
       entry.retry = failed; entry.retryPasses++;
     }
-    if (entry.next >= entry.ordered.length && (entry.retry.length === 0 || entry.retryPasses >= 3)) finishStamp(world, entry);
+    if (entry.next >= entry.ordered.length && (entry.retry.length === 0 || entry.retryPasses >= RETRY_PASSES)) finishStamp(world, entry);
   }
   return placedThisCall;
 }
@@ -1258,8 +1331,106 @@ export function mapAbandonedSites(seed: number, sampleAt: (x: number, y: number)
  */
 export function stampAbandonedChunk(world: World, key: ChunkKey | { cx: number; cy: number }): StampResult | undefined {
   const { cx, cy } = typeof key === "number" || typeof key === "string" ? parseChunkKey(key as ChunkKey) : key;
+  const legacy = takeLegacyChunk(world, cx, cy);
+  // ADR-594: the chunk's existing marker is the record of its site. A saved site is restored from its own marker (kind,
+  // origin), never re-planned: the kind table can grow, and a re-plan must not stamp a second site beside the saved one.
+  const existing = siteMarkerInChunk(world, cx, cy);
+  if (existing !== undefined) {
+    if (legacy) restoreIntactSite(world, existing);
+    const kind = (world.getField(existing, AbandonedSite, "kind") ?? 0) as AbandonedKindId;
+    return { marker: existing, placed: [], omitted: 0, skipped: true, kind, stories: 1, garden: false, pen: false, pending: false };
+  }
   const plan = planAbandonedChunk(world.seed, cx, cy); if (!plan) return undefined;
   return stampAbandonedSite(world, plan.originX, plan.originY, { kind: plan.kind, rot: plan.rot, ruin: plan.ruin });
+}
+
+function siteMarkerInChunk(world: World, cx: number, cy: number): Entity | undefined {
+  if (!world.isRegistered(AbandonedSite)) return undefined;
+  const x0 = cx * CHUNK_SIZE, y0 = cy * CHUNK_SIZE;
+  for (const e of world.query([AbandonedSite])) {
+    const ox = world.getField(e, AbandonedSite, "originX")!, oy = world.getField(e, AbandonedSite, "originY")!;
+    if (ox >= x0 && ox < x0 + CHUNK_SIZE && oy >= y0 && oy < y0 + CHUNK_SIZE) return e;
+  }
+  return undefined;
+}
+
+/**
+ * ADR-594: chunks loaded from a save written before abandoned structures spawned intact (persistence marks them via
+ * legacyChunk: record tick below the world's intact stamp). Consumed once, by the chunk-load hook.
+ */
+const legacyChunks = new WeakMap<World, Set<string>>();
+export function markLegacyAbandonedChunk(world: World, cx: number, cy: number): void {
+  let s = legacyChunks.get(world); if (!s) legacyChunks.set(world, (s = new Set()));
+  s.add(`${cx},${cy}`);
+}
+function takeLegacyChunk(world: World, cx: number, cy: number): boolean {
+  const s = legacyChunks.get(world); return !!s && s.delete(`${cx},${cy}`);
+}
+
+/**
+ * ADR-594: bring a site stamped by the old (ruined) generator up to the intact plan. Runs once per legacy chunk,
+ * and only for an unclaimed site (a claimed one is the player's, rebuilt however they chose). The plan is
+ * recomputed from the same (seed, origin, kind, rot, ruin) the original stamp used, so each unowned piece standing
+ * at a planned slot (same key, position, level) is healed to full HP / damage stage 0, and each missing slot is
+ * queued on the normal time-sliced pump (same ordering, roof retries, own seeded loot stream for new containers).
+ * Nothing standing is ever duplicated — matching is per slot — and existing containers keep whatever loot they hold.
+ * Player-owned pieces are never touched.
+ */
+function restoreIntactSite(world: World, marker: Entity): void {
+  if (!isAuthority(world) || (world.getField(marker, AbandonedSite, "claimed") ?? 0) !== 0) return;
+  const ox = world.getField(marker, AbandonedSite, "originX")!, oy = world.getField(marker, AbandonedSite, "originY")!;
+  const kind = (world.getField(marker, AbandonedSite, "kind") ?? 0) as AbandonedKindId;
+  const key = stampKey(ox, oy);
+  if (queueOf(world).has(key)) return;
+  // The marker keeps kind + origin; the rotation is the one whose plan matches the most standing pieces. `ruin` is passed
+  // (any value) because the original chunk stamp passed one, which is what fixes the tier roll on the plan stream.
+  let plan: PlannedSite | undefined; let best = -1;
+  for (let rot = 0; rot < 4; rot++) {
+    const cand = planAbandonedSite(world.seed, ox, oy, { kind, rot, ruin: 0.5 });
+    let score = 0;
+    for (const e of world.query([BuildPiece, Transform])) {
+      const x = world.getField(e, Transform, "x")!, y = world.getField(e, Transform, "y")!;
+      if (x < ox - 0.05 || x >= ox + cand.width + 0.05 || y < oy - 0.05 || y >= oy + cand.height + 0.05) continue;
+      if (cand.pieces.some((sp) => (sp.role === "deck" || sp.role === "wall") && pieceMatches(world, e, sp))) score++;
+    }
+    if (score > best) { best = score; plan = cand; }
+  }
+  if (!plan || best <= 0) return;
+  const live: Entity[] = [];
+  for (const e of world.query([BuildPiece, Transform])) {
+    const x = world.getField(e, Transform, "x")!, y = world.getField(e, Transform, "y")!;
+    if (x < plan.originX - 0.05 || x >= plan.originX + plan.width + 0.05 || y < plan.originY - 0.05 || y >= plan.originY + plan.height + 0.05) continue;
+    const owner = world.isRegistered(PieceOwner) ? world.getField(e, PieceOwner, "player") ?? 0 : 0;
+    const tribe = world.isRegistered(Tribe) ? world.getField(e, Tribe, "id") ?? 0 : 0;
+    if (owner === 0 && tribe === 0) live.push(e);
+  }
+  const used = new Set<Entity>(); const missing: PlannedPiece[] = [];
+  const heal = (e: Entity): void => {
+    used.add(e);
+    const cap = maxHpOf(world, e);
+    if (cap <= 0) return;
+    if ((world.getField(e, BuildPiece, "hp") ?? cap) !== cap) world.setField(e, BuildPiece, "hp", cap);
+    if ((world.getField(e, BuildPiece, "damageStage") ?? 0) !== 0) world.setField(e, BuildPiece, "damageStage", 0);
+  };
+  const unmatched: PlannedPiece[] = [];
+  for (const spec of plan.pieces) {
+    const found = live.find((e) => !used.has(e) && pieceMatches(world, e, spec));
+    if (found) heal(found); else unmatched.push(spec);
+  }
+  // A furnishing the stamp re-seated (placeSpec fallback) stands off its planned slot: it still counts as that spec's piece
+  // (same key, same floor), so it is healed, never duplicated.
+  for (const spec of unmatched) {
+    const typeId = (() => { try { return gameplayDefs(world).pieceId(spec.key); } catch { return -1; } })();
+    const moved = FALLBACK_ROLES.has(spec.role) ? live.find((e) => !used.has(e) && world.getField(e, BuildPiece, "type") === typeId && pieceLevel(world, e) === spec.level) : undefined;
+    if (moved) heal(moved); else missing.push(spec);
+  }
+  if (missing.length === 0) return;
+  const ordered = missing.sort((a, b) => a.level - b.level || PHASE[a.role] - PHASE[b.role]);
+  const result: StampResult = { marker, placed: [], omitted: 0, skipped: false, kind: plan.kind, stories: plan.stories, garden: plan.garden, pen: plan.pen, pending: true };
+  queueOf(world).set(key, {
+    key, originX: plan.originX, originY: plan.originY, plan, ordered, next: 0, placed: result.placed, retry: [], retryPasses: 0,
+    lootRand: rng(hashU32(world.seed, plan.originX, plan.originY, 0x1A7E590)), restoreMarker: marker, result,
+  });
 }
 
 export function siteOf(world: World, target: Entity): Entity | undefined {

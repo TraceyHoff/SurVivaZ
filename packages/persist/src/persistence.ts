@@ -77,6 +77,9 @@ export interface WorldPersistenceOptions {
   /** ADR-514: records saved at a tick below `beforeTick` predate the floor-height stamp; `fix` re-seats one loaded entity
    *  (chunk entity or restored player) and returns whether it changed it. */
   legacyZ?: { beforeTick: number; fix: (world: World, e: Entity) => boolean };
+  /** ADR-594: chunk records saved at a tick below `beforeTick` predate intact abandoned structures; `mark` is called once
+   *  per such chunk as it is loaded from storage, so gameplay can restore the site when the chunk's load hook runs. */
+  legacyChunk?: { beforeTick: number; mark: (world: World, cx: number, cy: number) => void };
   player?: PlayerCodecOptions;
   /**
    * Component schema migrations applied to stored chunk rows (and, unless `player.migrations` is set, player records)
@@ -313,6 +316,7 @@ export class WorldPersistence {
         // ADR-514: z of entities saved before the floor stamp (pre-ADR-511 3-level floors) -> the current floor
         const lz = this.opts.legacyZ; if (lz && rec.tick < lz.beforeTick) { let n = 0; for (const e of d.entities) if (lz.fix(this.world, e)) n++;
           if (n) { this.skinDirty.add(d.chunk.key); this.opts.log?.(`persist: ${rec.key}: ${n} legacy floor height(s) re-seated`); } }
+        const lc = this.opts.legacyChunk; if (lc && rec.tick < lc.beforeTick) lc.mark(this.world, cx, cy); // ADR-594
         this.savedVersion.set(d.chunk.key, d.chunk.version); this.stats.chunksLoadedFromStore++;
         this.loadSidecars(cx, cy, d.chunk.key, d.entities);
         const rg = this.opts.regenerateNodes;

@@ -82,7 +82,10 @@ export interface WorldMeta { seed: number; tick: number; schemaHash: number; cre
   floorLevels?: number;
   /** ADR-514: records (chunks / players) saved at a tick below this one predate the floor stamp and get the legacy z fix
    *  on load; 0 / absent with floorLevels set = none. */
-  floorStampTick?: number }
+  floorStampTick?: number;
+  /** ADR-594: chunk records saved at a tick below this one may hold ruined abandoned structures (before they spawned
+   *  intact); they are restored when loaded. 0 / absent on a stamped world = none; a save without it is legacy. */
+  intactStampTick?: number }
 
 /** Everything written in one transaction. Either all of it becomes durable or none of it does. */
 export interface SaveBatch {

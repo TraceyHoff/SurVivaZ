@@ -9,6 +9,7 @@ import * as G from "../src/index.js";
 import { fillClaimSensors, ruinHomeAnchor, type ClaimView } from "../src/ai/claim_build.js";
 import { aiMemoryOf, RUIN_DATA, scanBase } from "../src/ai/planner.js";
 import { makeWorld, plantClaim, spawnLearned, steps } from "./helpers.js";
+import { stripFurnishings } from "./weather_site.js";
 
 let nid = 9900;
 const net = (w: World, e: Entity): Entity => { if (!w.has(e, NetId)) w.add(e, NetId, { id: ++nid }); return e; };
@@ -36,10 +37,11 @@ const stock = (r: Rig, keys: readonly string[] = ["wood", "stone", "sticks", "pl
 const stubView = (r: Rig): G.AgentWorldView => ({ seen: [], home: { ...r.home }, playerName: "bot" }) as unknown as G.AgentWorldView;
 const viewOf = (r: Rig): G.AgentWorldView => G.buildAgentView(r.w, r.p, r.a, r.home)!.world;
 /** Stamp a Shed ruin at (8,8) and return its marker. */
-const stampRuin = (r: Rig, ox = 8, oy = 8, ruin = 0.1): Entity => {
+const stampRuin = (r: Rig, ox = 8, oy = 8, ruin = 0.1, bare = false): Entity => {
   const res = G.stampAbandonedSite(r.w, ox, oy, { kind: G.AbandonedKind.Shed, rot: 0, ruin, tier: 1 });
   G.drainAbandonedStamps(r.w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
   expect(res.skipped, `stamp at ${ox},${oy}`).toBe(false);
+  if (bare) stripFurnishings(r.w, res.placed); // ADR-594: sites spawn furnished; the bed / furnish-spot tests start from an empty ruin
   return res.marker as Entity;
 };
 const keyOf = (r: Rig, e: Entity): string => G.gameplayDefs(r.w).pieces.get(r.w.getField(e, G.BuildPiece, "type")!)?.key ?? "?";
@@ -229,7 +231,7 @@ describe("ADR-340 planner behaviour goals", () => {
   });
   it("a ruin bot gets the bed goal on a free spare spot, then furnishes", () => {
     const r = rig(); fed(r);
-    const marker = stampRuin(r);
+    const marker = stampRuin(r, 8, 8, 0.1, true);
     const anchor = adoptRuin(r, marker);
     giveTools(r); stock(r);
     const { plan, seen } = walkTo(r, anchor, "bed");
@@ -251,7 +253,7 @@ describe("ADR-340 planner behaviour goals", () => {
   });
   it("a standing table satisfies the furnish goal, so the bot moves on to the torch stand", () => {
     const r = rig(); fed(r);
-    const marker = stampRuin(r);
+    const marker = stampRuin(r, 8, 8, 0.1, true);
     const anchor = adoptRuin(r, marker);
     giveTools(r); stock(r);
     placeAt(r, "table", anchor.x + 1.5, anchor.y + 1.5);

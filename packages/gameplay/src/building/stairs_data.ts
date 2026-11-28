@@ -13,10 +13,6 @@
 import raw from "../../data/stairs.json";
 
 export interface StairsData {
-  /** Fraction (x ruin) of two-story+ sites whose interior stairs spawn missing. */
-  readonly brokenChance: number;
-  /** Fraction (x ruin) of exterior stair runs that spawn missing. */
-  readonly brokenExteriorChance: number;
   /** A* cost of one level change on a stair tile. */
   readonly pathStairCost: number;
   /** Highest level the level-aware pathfinders route to (townhouse = levels 0..2). */
@@ -27,7 +23,7 @@ export interface StairsData {
   readonly exteriorKinds: readonly string[];
 }
 const DEFAULTS: StairsData = {
-  brokenChance: 0.25, brokenExteriorChance: 0.2, pathStairCost: 2, maxPathLevel: 2,
+  pathStairCost: 2, maxPathLevel: 2,
   upDir: [0, -1], exteriorKinds: ["two_story_cottage", "two_story_farmhouse", "townhouse"],
 };
 export const STAIRS_DATA: StairsData = { ...DEFAULTS, ...(raw as unknown as Partial<StairsData>) };

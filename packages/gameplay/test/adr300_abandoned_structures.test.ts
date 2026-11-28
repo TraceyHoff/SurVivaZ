@@ -96,18 +96,17 @@ describe("ADR-300 abandoned structures", () => {
     expect(three.placed.some((e) => threeKeys[three.placed.indexOf(e)]!.startsWith("roof_") && zOf(w3, e) === 3)).toBe(true);
   });
 
-  it("applies disrepair without dropping load-bearing decks, walls, or stairs", () => {
+  it("ADR-594: spawns fully formed whatever the ruin value — nothing omitted, full HP, damage stage 0", () => {
     const w = makeWorld();
-    const intact = G.planAbandonedSite(w.seed, 8, 8, { kind: G.AbandonedKind.Cottage, rot: 0, ruin: 0 });
-    expect(intact.pieces.every((p) => !p.omit)).toBe(true);
-    const ruined = G.planAbandonedSite(w.seed, 8, 8, { kind: G.AbandonedKind.Cottage, rot: 0, ruin: 0.9 });
-    expect(ruined.pieces.some((p) => p.omit && (p.role === "opening" || p.role === "furniture" || p.role === "loot" || p.role === "roof"))).toBe(true);
-    expect(ruined.pieces.filter((p) => p.role === "deck" || p.role === "wall" || p.role === "stair").every((p) => !p.omit)).toBe(true);
+    for (const ruin of [0, 0.5, 0.9]) {
+      const plan = G.planAbandonedSite(w.seed, 8, 8, { kind: G.AbandonedKind.Cottage, rot: 0, ruin });
+      expect(plan.pieces.every((p) => !p.omit && p.hpFrac === 1)).toBe(true);
+    }
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Cottage, rot: 0, ruin: 0.9, tier: 1 });
     G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(r.skipped).toBe(false);
-    expect(r.omitted).toBeGreaterThan(0);
-    expect(r.placed.some((e) => w.getField(e, G.BuildPiece, "hp")! < G.maxHpOf(w, e))).toBe(true);
+    expect(r.omitted).toBe(0);
+    expect(r.placed.every((e) => w.getField(e, G.BuildPiece, "hp") === G.maxHpOf(w, e) && w.getField(e, G.BuildPiece, "damageStage") === 0)).toBe(true);
   });
 
   it("does not stamp the same origin twice", () => {

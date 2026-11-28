@@ -20,6 +20,7 @@ import { installPermissions, NetId, PlayerId, Transform, type Agent, type Entity
 import * as G from "../src/index.js";
 import { planClaimRuin, ruinLayout } from "../src/ai/claim_build.js";
 import { makeWorld, plantClaim, spawnLearned } from "./helpers.js";
+import { weatherSite } from "./weather_site.js";
 
 type W = ReturnType<typeof makeWorld>;
 
@@ -111,6 +112,7 @@ function stampRuin(r: Rig, ox: number, oy: number, kind: number, ruin: number): 
   const res = G.stampAbandonedSite(r.w, ox, oy, { kind: kind as never, rot: 0, ruin, tier: 1 });
   G.drainAbandonedStamps(r.w);
   expect(res.skipped, `stamp at ${ox},${oy}`).toBe(false);
+  weatherSite(r.w, res.placed, ruin); // ADR-594: sites spawn intact; damage by hand
   return { marker: res.marker as Entity, placed: res.placed };
 }
 const keyOf = (r: Rig, e: Entity): string => G.gameplayDefs(r.w).pieces.get(r.w.getField(e, G.BuildPiece, "type")!)?.key ?? "?";

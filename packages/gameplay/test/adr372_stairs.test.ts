@@ -198,16 +198,12 @@ describe("ADR-372 abandoned two-story kinds", () => {
       && Math.floor(p.x) === Math.floor(l1[0]!.x) && Math.floor(p.y) === Math.floor(l1[0]!.y))).toBe(true);
   });
 
-  it("a ruined site can spawn with its ground flight missing (ruin-scaled, never at ruin 0)", () => {
+  it("ADR-594: a generated site always keeps its ground flight, whatever the ruin value", () => {
     const w = makeWorld();
-    let found: { ox: number; oy: number } | undefined;
-    for (let oy = 8; oy <= 48 && !found; oy += 4) for (let ox = 8; ox <= 48 && !found; ox += 4) {
+    for (let oy = 8; oy <= 48; oy += 8) for (let ox = 8; ox <= 48; ox += 8) {
       const plan = G.planAbandonedSite(w.seed, ox, oy, { kind: G.AbandonedKind.TwoStoryCottage, rot: 0, ruin: 0.8 });
-      if (plan.pieces.some((p) => p.role === "stair" && p.level === 0 && !p.exterior && p.omit)) found = { ox, oy };
+      expect(plan.pieces.filter((p) => p.role === "stair").every((p) => !p.omit)).toBe(true);
     }
-    expect(found).toBeDefined();
-    const clean = G.planAbandonedSite(w.seed, found!.ox, found!.oy, { kind: G.AbandonedKind.TwoStoryCottage, rot: 0, ruin: 0 });
-    expect(clean.pieces.some((p) => p.role === "stair" && p.omit)).toBe(false);
   });
 });
 
@@ -217,7 +213,7 @@ describe("ADR-372 blocked / rebuilt stairs", () => {
     let site: { ox: number; oy: number } | undefined;
     for (let oy = 8; oy <= 48 && !site; oy += 4) for (let ox = 8; ox <= 48 && !site; ox += 4) {
       const plan = G.planAbandonedSite(w.seed, ox, oy, { kind: G.AbandonedKind.TwoStoryCottage, rot: 0, ruin: 0.8 });
-      if (plan.pieces.some((p) => p.role === "stair" && p.level === 0 && !p.exterior && p.omit)
+      if (plan.pieces.some((p) => p.role === "stair" && p.level === 0 && !p.exterior)
         && G.siteTerrainOk(w, ox, oy, plan.width, plan.height)) site = { ox, oy };
     }
     expect(site).toBeDefined();
@@ -225,6 +221,11 @@ describe("ADR-372 blocked / rebuilt stairs", () => {
     const r = G.stampAbandonedSite(w, ox, oy, { kind: G.AbandonedKind.TwoStoryCottage, rot: 0, ruin: 0.8, tier: 1 });
     G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
     expect(r.skipped).toBe(false);
+    // ADR-594: the site spawns with its flight; a collapse (raid / decay) takes it out, by hand here.
+    const stairKey = (e: Entity): boolean => G.gameplayDefs(w).pieces.get(w.getField(e, G.BuildPiece, "type")!)?.key === "stairs";
+    const flight = r.placed.find((e) => stairKey(e) && Math.floor(w.get(e, Transform)!.x) === ox + 1 && Math.floor(w.get(e, Transform)!.y) === oy + 3 && w.getField(e, G.PieceSlot, "z") === 0);
+    expect(flight).toBeDefined();
+    G.destroyPiece(w, flight!, 1 as never); // 1 = DestroyCause.Damage
     steps(w, 2);
     // The interior flight tile (local 1, 3) has a stairwell above it but no stairs below it.
     const sx = ox + 1, sy = oy + 3;

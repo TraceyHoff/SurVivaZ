@@ -16274,3 +16274,55 @@ Tests: adr592_hydroponics (two spots, night growth without water while powered +
   ships `building_t5` / `build_<key>_t5` (docs/ART_KEYS_ELECTRICITY.md); the client light table gains `powered_tier`.
 
 Tests: adr593_powered_tier (tier data + gate, allowed pieces, light / heat follow power, upgrade grant, build menu).
+
+## ADR-594: abandoned structures spawn fully formed; older saves restore them once (SurVivaZ)
+
+**Request.** "Make it so abandoned structures in the world are fully formed and not damaged."
+
+**Cause.** `planAbandonedSite` (packages/gameplay/src/building/abandoned.ts) rolled a seeded `ruin` value (0.18–0.80) per site
+and used it three ways: `omit` (doors, windows, furniture, loot containers, fences, garden beds and roof tiles dropped at
+`ruin x 0.42`, roofs `ruin x 0.22`), `hpFrac` (every piece stamped at 22–100% HP with the matching `damageStage`, which the
+renderer draws as cracked art), and the ADR-372 broken-stair roll (`stairs.json` `brokenChance`, ground flight missing on
+two-story sites). Nothing else in world generation damages a building: the generator, chunk manager and survey map only place
+the site's footprint. Separately, the stamp silently lost pieces that were never meant to be omitted: an upper floor, corner
+or wall that was tried before its neighbour (only roofs were retried, ADR-311), 2x1 furniture (wardrobe, fireplace, bench,
+bed, large chest) and 2x1 garden beds whose footprint hit a neighbour, wall run or fence ring, and any solid piece that landed
+on a creature standing there — so even `ruin 0` sites were not always whole.
+
+**Decision.** A site is a pure function of (seed, origin); the plan now always has every piece, at full HP, damage stage 0.
+- `planAbandonedSite`: `omit = false`, `hpFrac = 1` for every piece; no stair is ever omitted. `ruin` stays on the plan and the
+  chunk planner (the survey map and `planAbandonedChunk` stream are unchanged) but no longer changes a piece. Layouts, kinds,
+  rotations, roof styles, tiers, extras and the loot stream are untouched. `brokenChance` / `brokenExteriorChance` are removed.
+- Placement keeps every piece: deck / wall / opening / stair / roof specs that fail only for a missing neighbour are retried
+  after the main queue (up to 8 no-progress-bounded passes, same time-sliced budget); furniture, loot and garden specs that
+  do not fit at their anchor are tried at the other facings, then the nearest tiles whose whole footprint stands on the site's
+  own decks (garden beds: inside the fence run), never beside a door, stair or garden gate; a creature standing on a solid
+  piece's spot is stepped just outside the footprint and the placement retried. Garden yards plan only beds that fit (a 1-tile
+  yard gets a `flower_bed`; the second row needs 2 interior rows). Result: all 28 kinds x 4 rotations place every planned
+  piece (before: the upper-storey kinds lost a floor tile, corner, wall or roof tile at the first tile of every floor, and
+  most kinds lost a 2x1 furnishing or garden bed in some rotation).
+- Unchanged: the site is unowned and raidable (no `PieceOwner` / `Tribe`), claim and reclaim, demolish permission and refunds
+  (own = full, others = half, ADR-517 collapse refunds), raids and player-caused damage (HP / stage come from the same
+  fields), loot filling per container, the terrain / single-level / spawn gates, the time-sliced pump and its restart resume.
+
+**Old saves.** Chunk records keep their pieces, so a site stamped before this change stays ruined unless restored. The restore
+is safe because it is keyed to a stamp, as in ADR-514: the world meta carries `intactStampTick` (new worlds 0; a save without it
+gets `meta.tick + 1`, written with the next meta). A chunk loaded from storage with `tick < intactStampTick` is reported once
+to gameplay (`WorldPersistence` option `legacyChunk` -> `markLegacyAbandonedChunk`), and the chunk-load hook runs
+`restoreIntactSite` for the chunk's existing unclaimed site marker (never a re-plan, so a second site is never stamped
+beside a saved one): the plan is recomputed from the marker's (seed, origin, kind), with the rotation whose plan matches the
+most standing pieces; each unowned piece standing at a planned slot (or re-seated furnishing with the same key and floor) is healed to
+full HP / stage 0, each missing slot is queued on the normal pump, and new containers fill from their own seeded stream.
+Nothing standing is duplicated (matching is per slot), containers keep the loot they hold (a looted box is not refilled), a
+claimed site and any player-owned piece are never touched, and a re-load is a no-op. The restore dirties the chunk, so it saves
+past the stamp tick and runs once; a chunk the restore leaves unchanged was never edited since the old save, so running it again
+changes nothing. Pieces a player demolished in an unclaimed site before this version are restored once (the old save cannot tell
+a demolished piece from a generation omission) — a deliberate trade for existing worlds getting whole buildings. No schema or
+component change; the world schema hash is unchanged, so client and server need no lock-step deploy.
+
+**Tests.** `packages/gameplay/test/adr594_intact_structures.test.ts` (every kind at any ruin is whole; layout independent of ruin;
+every kind x 4 rotations places every piece at full HP, unowned; a creature on a wall slot; player damage still works; legacy
+restore heals + re-places without duplicates, idempotent, claimed / owned / looted left alone), `packages/persist/test/
+adr594_legacy_chunks.test.ts`, `apps/server/test/adr594_intact_stamp.test.ts`. The ruin-dependent claim / stairs / terrain-gate
+tests damage a stamped site by hand (`test/weather_site.ts`). Verified in a browser (WebGL2 and Canvas2D, before / after,
+`/workspace/share/intact_structures/before_after.png`): the farmhouse that had a roof hole and missing windows / door is complete.

@@ -99,9 +99,10 @@ describe("ADR-311 abandoned roof variety", () => {
     }
   });
 
-  it("disrepair still omits some styled roof tiles, and they stay repairable/reclaimable under ADR-310 rules", () => {
+  it("ADR-594: every styled roof tile is placed intact, and they stay repairable/reclaimable under ADR-310 rules", () => {
     const ruined = G.planAbandonedSite(42, 8, 8, { kind: G.AbandonedKind.Cottage, rot: 0, ruin: 0.9, roof: G.RoofStyle.Eaves });
-    expect(roofsOf(ruined).some((s) => s.omit)).toBe(true);
+    expect(roofsOf(ruined).length).toBeGreaterThan(0);
+    expect(roofsOf(ruined).every((s) => !s.omit && s.hpFrac === 1)).toBe(true);
     const w = makeWorld(); const d = G.gameplayDefs(w);
     const r = G.stampAbandonedSite(w, 8, 8, { kind: G.AbandonedKind.Cabin, rot: 0, ruin: 0.6, tier: 1, roof: G.RoofStyle.HipGable });
     G.drainAbandonedStamps(w); // ADR-382: the stamp completes over ticks; drain it for the assertions below

@@ -13,6 +13,7 @@ import {
 } from "../src/ai/claim_build.js";
 import { aiMemoryOf, claimBaseSite } from "../src/ai/planner.js";
 import { makeWorld, plantClaim, spawnLearned } from "./helpers.js";
+import { weatherSite } from "./weather_site.js";
 
 let nid = 9700;
 const net = (w: World, e: Entity): Entity => { if (!w.has(e, NetId)) w.add(e, NetId, { id: ++nid }); return e; };
@@ -38,6 +39,7 @@ function stampRuin(r: Rig, ox: number, oy: number, kind: number, ruin: number): 
   const res = G.stampAbandonedSite(r.w, ox, oy, { kind: kind as never, rot: 0, ruin, tier: 1 });
   G.drainAbandonedStamps(r.w); // ADR-382: the stamp completes over ticks; drain it for the assertions below
   expect(res.skipped, `stamp at ${ox},${oy}`).toBe(false);
+  weatherSite(r.w, res.placed, ruin); // ADR-594: sites spawn intact; damage by hand
   return { marker: res.marker as Entity, placed: res.placed };
 }
 const piecesIn = (r: Rig, ox: number, oy: number, w: number, h: number): Entity[] => {
@@ -140,7 +142,7 @@ describe("ADR-337 rebuild-vs-new choice", () => {
 describe("ADR-337 claim-before-build ordering", () => {
   it("a ruin plan emits the flag first, then reclaim, then repair, then rebuild", () => {
     const r = rig({ x: 10, y: 10 }); fed(r); stock(r);
-    const s = stampRuin(r, 8, 8, G.AbandonedKind.Cottage, 0.5);
+    const s = stampRuin(r, 8, 8, G.AbandonedKind.Cottage, 0); // ADR-594: spawns intact; the test damages and demolishes by hand
     // 1. flag first: no build step before it
     let plan = planClaimRuin(r.w, r.p, s.marker);
     expect(plan.target.stage).toBe("claim");
@@ -162,7 +164,7 @@ describe("ADR-337 claim-before-build ordering", () => {
     // rebuild is guaranteed regardless of the stamp's omit rolls)
     r.w.setField(wall, G.BuildPiece, "hp", G.gameplayDefs(r.w).pieces.get(r.w.getField(wall, G.BuildPiece, "type")!)!.hp);
     const roof = piecesIn(r, 8, 8, 5, 5).find((e) => keyOf(r, e).startsWith("roof_"))!;
-    expect(roof).toBeDefined(); r.w.destroy(roof); tick(r);
+    expect(roof).toBeDefined(); G.destroyPiece(r.w, roof, 1 as never); tick(r); // 1 = DestroyCause.Damage
     plan = planClaimRuin(r.w, r.p, s.marker);
     expect(plan.target.stage).toBe("rebuild");
     expect(plan.step?.k).toBe("build");
@@ -301,7 +303,7 @@ describe("ADR-337 own design", () => {
 describe("ADR-337 claim_build behavior", () => {
   it("drives the flag build step, then the reclaim step, then the repair step", () => {
     const r = rig({ x: 10, y: 10 }); fed(r); stock(r);
-    const s = stampRuin(r, 8, 8, G.AbandonedKind.Cottage, 0.5);
+    const s = stampRuin(r, 8, 8, G.AbandonedKind.Cottage, 0); // ADR-594: spawns intact; the test damages and demolishes by hand
     const b = claimBuildBehaviors()[0]!;
     // flag build
     let plan = planClaimRuin(r.w, r.p, s.marker);
