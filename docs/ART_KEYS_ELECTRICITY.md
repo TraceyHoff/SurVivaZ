@@ -144,3 +144,26 @@ Walls/floors with integrated LED light strips and radiant heating panels; they l
 - Live in data with placeholders: all 26 piece keys above (tinted neighbours via `sprite_fallbacks.json` `sprites`, marked `$placeholder`), kits and components use the generic placeable icon. The build menu shows the neighbour's tile until `build_<key>` ships (adr229 keeps these as "pending", never the glyph).
 - Skill nodes Electrician / Power Grid / Hydroponics reuse `skill_tinkerer` / `skill_grease_monkey` / `skill_master_farmer` until `skill_electrician` / `skill_power_grid` / `skill_hydroponics` ship; swap the three `icon` fields in `packages/gameplay/data/skills.json` when they land.
 - Active animation hook: the client plays `idle` only while the piece's replicated `Power.active` is 1 (powered AND in use) and `unlit` otherwise (apps/client/src/view.ts, FireState.Lit path — no hearth particles).
+
+## Art delivered (Art, Nov 27-28, 2026 CST)
+Dedicated art per key (no reuse / recolour / tint / shared frames), true scale 30.29 px/m, hearth convention
+(`idle` loop while `Power.active`, `unlit` 1 frame per painted facing, `building.states.unlit`, emissive mask page per
+atlas). Pages `elec_<class>` (+ `@2x`, `_emissive`, `_emissive@2x`; PNG oxipng + KTX2), `residency: stream`, in the
+existing building fragment (`manifest.building.json`), so no new fragment / manifest-index wiring was needed.
+Packer: `packages/assets/pack/building/src/add_electricity.py` (add-only, owns `elec_*` only; frame indices never move
+when later batches append), art kit `src/elec/` (`lib.py` + `pieces<batch>.py`), encode `src/elec_encode.py elec_`,
+preview `src/elec_preview.py`. Each delivered key's `$placeholder` entry is removed from `sprite_fallbacks.json`.
+Test: `packages/assets/test/adr590_electricity_art.test.ts` (layout, convention, pages, true-scale floor/ceiling, emissive
+only on active frames).
+
+| key | class / atlas | facings | measured top px (brief) | notes |
+|---|---|---|---|---|
+| `generator_fuel` | w / elec_w | 2 (rot 0, 1) | 51 (60) | genset on a skid, louvred enclosure, dark control panel (hour meter ticks, run LED), exhaust smoke + 1 px vibration |
+| `generator_solar` | s / elec_s | mirror | 43 (43) | power-station box + fold-out panel; glint sweep, charge bars |
+| `battery_small` | s / elec_s | mirror | 22 (34) | strap-handle pack, 4-segment gauge animates |
+| `battery_medium` | t / elec_t | mirror | 47 (55) | 4-module rack, bus bars, inverter on top, gauge + module LEDs |
+| `battery_large` | w / elec_w | 2 (rot 0, 1) | 82 (85) | two louvred cabinets + inverter, vertical gauges, inverter fan spins |
+| `power_pylon` | xt / elec_xt | mirror | 93 (107) | weighted base, mast, toroidal coil + dish; coil glow pulse + soft arc ring |
+
+Measured tops are below the brief's ceiling where the object does not fill its whole footprint (the brief's figure
+assumes the far corner reaches full height); every key stands at least round(height m x 30.29) px.

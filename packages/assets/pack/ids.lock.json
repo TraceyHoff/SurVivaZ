@@ -6330,7 +6330,13 @@
     "bld_stairs_t3": 6328,
     "bld_stairs_t4": 6329,
     "animal_cougar": 6330,
-    "animal_wolverine": 6331
+    "animal_wolverine": 6331,
+    "battery_large": 6332,
+    "battery_medium": 6333,
+    "battery_small": 6334,
+    "generator_fuel": 6335,
+    "generator_solar": 6336,
+    "power_pylon": 6337
   },
   "sounds": {
     "amb_rain": 1,

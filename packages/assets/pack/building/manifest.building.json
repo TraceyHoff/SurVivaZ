@@ -1578,6 +1578,110 @@
    "residency": "stream",
    "placeholder": null,
    "ktx2": "atlases/rfx_shk_t1.ktx2"
+  },
+  {
+   "key": "elec_s",
+   "image": "atlases/elec_s.png",
+   "frameW": 64,
+   "frameH": 88,
+   "columns": 10,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/elec_s@2x.png",
+     "ktx2": "atlases/elec_s@2x.ktx2",
+     "masksKtx2": {
+      "emissive": "atlases/elec_s_emissive@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "emissive": "atlases/elec_s_emissive.png"
+   },
+   "residency": "stream",
+   "ktx2": "atlases/elec_s.ktx2",
+   "masksKtx2": {
+    "emissive": "atlases/elec_s_emissive.ktx2"
+   }
+  },
+  {
+   "key": "elec_t",
+   "image": "atlases/elec_t.png",
+   "frameW": 72,
+   "frameH": 120,
+   "columns": 5,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/elec_t@2x.png",
+     "ktx2": "atlases/elec_t@2x.ktx2",
+     "masksKtx2": {
+      "emissive": "atlases/elec_t_emissive@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "emissive": "atlases/elec_t_emissive.png"
+   },
+   "residency": "stream",
+   "ktx2": "atlases/elec_t.ktx2",
+   "masksKtx2": {
+    "emissive": "atlases/elec_t_emissive.ktx2"
+   }
+  },
+  {
+   "key": "elec_w",
+   "image": "atlases/elec_w.png",
+   "frameW": 104,
+   "frameH": 120,
+   "columns": 9,
+   "rows": 3,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/elec_w@2x.png",
+     "ktx2": "atlases/elec_w@2x.ktx2",
+     "masksKtx2": {
+      "emissive": "atlases/elec_w_emissive@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "emissive": "atlases/elec_w_emissive.png"
+   },
+   "residency": "stream",
+   "ktx2": "atlases/elec_w.ktx2",
+   "masksKtx2": {
+    "emissive": "atlases/elec_w_emissive.ktx2"
+   }
+  },
+  {
+   "key": "elec_xt",
+   "image": "atlases/elec_xt.png",
+   "frameW": 72,
+   "frameH": 168,
+   "columns": 7,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/elec_xt@2x.png",
+     "ktx2": "atlases/elec_xt@2x.ktx2",
+     "masksKtx2": {
+      "emissive": "atlases/elec_xt_emissive@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "emissive": "atlases/elec_xt_emissive.png"
+   },
+   "residency": "stream",
+   "ktx2": "atlases/elec_xt.ktx2",
+   "masksKtx2": {
+    "emissive": "atlases/elec_xt_emissive.ktx2"
+   }
   }
  ],
  "sprites": [
@@ -85537,6 +85641,500 @@
      "y": -26.0
     }
    }
+  },
+  {
+   "key": "generator_solar",
+   "category": "building",
+   "atlas": "elec_s",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.7954545454545454
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "fps": 4,
+     "loop": true
+    },
+    "unlit": {
+     "frames": [
+      0
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "generator_solar",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      1,
+      1,
+      1,
+      1
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       0,
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "mirror"
+  },
+  {
+   "key": "battery_small",
+   "category": "building",
+   "atlas": "elec_s",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.7954545454545454
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      6,
+      7,
+      8,
+      9
+     ],
+     "fps": 2,
+     "loop": true
+    },
+    "unlit": {
+     "frames": [
+      5
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "battery_small",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      6,
+      6,
+      6,
+      6
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       5,
+       5,
+       5,
+       5
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "mirror"
+  },
+  {
+   "key": "battery_medium",
+   "category": "building",
+   "atlas": "elec_t",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.85
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1,
+      2,
+      3,
+      4
+     ],
+     "fps": 2,
+     "loop": true
+    },
+    "unlit": {
+     "frames": [
+      0
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "battery_medium",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      1,
+      1,
+      1,
+      1
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       0,
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "mirror"
+  },
+  {
+   "key": "generator_fuel",
+   "category": "building",
+   "atlas": "elec_w",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.7833333333333333
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "fps": 12,
+     "loop": true,
+     "rotations": [
+      [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      [
+       8,
+       9,
+       10,
+       11,
+       12,
+       13
+      ],
+      [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      [
+       8,
+       9,
+       10,
+       11,
+       12,
+       13
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       0
+      ],
+      [
+       7
+      ],
+      [
+       0
+      ],
+      [
+       7
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "generator_fuel",
+    "footprint": {
+     "w": 2,
+     "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      8,
+      8,
+      8,
+      8
+     ],
+     [
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      8,
+      8,
+      8,
+      8
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       7,
+       7,
+       7,
+       7
+      ],
+      [
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       7,
+       7,
+       7,
+       7
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "battery_large",
+   "category": "building",
+   "atlas": "elec_w",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.7833333333333333
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      15,
+      16,
+      17,
+      18
+     ],
+     "fps": 2,
+     "loop": true,
+     "rotations": [
+      [
+       15,
+       16,
+       17,
+       18
+      ],
+      [
+       20,
+       21,
+       22,
+       23
+      ],
+      [
+       15,
+       16,
+       17,
+       18
+      ],
+      [
+       20,
+       21,
+       22,
+       23
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      14
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       14
+      ],
+      [
+       19
+      ],
+      [
+       14
+      ],
+      [
+       19
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "battery_large",
+    "footprint": {
+     "w": 2,
+     "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      15,
+      15,
+      15,
+      15
+     ],
+     [
+      20,
+      20,
+      20,
+      20
+     ],
+     [
+      15,
+      15,
+      15,
+      15
+     ],
+     [
+      20,
+      20,
+      20,
+      20
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       14,
+       14,
+       14,
+       14
+      ],
+      [
+       19,
+       19,
+       19,
+       19
+      ],
+      [
+       14,
+       14,
+       14,
+       14
+      ],
+      [
+       19,
+       19,
+       19,
+       19
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "power_pylon",
+   "category": "building",
+   "atlas": "elec_xt",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.8571428571428571
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+     ],
+     "fps": 8,
+     "loop": true
+    },
+    "unlit": {
+     "frames": [
+      0
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "power_pylon",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      1,
+      1,
+      1,
+      1
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       0,
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "mirror"
   }
  ],
  "clanPalettes": [
