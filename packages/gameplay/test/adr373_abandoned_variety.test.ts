@@ -33,9 +33,11 @@ const SIGNATURES: Record<number, readonly string[]> = {
 
 describe("ADR-373 abandoned variety", () => {
   it("doubles the catalogue: 28 kinds, every kind id has a key and a weight", () => {
-    expect(G.ABANDONED_KIND_KEYS.length).toBe(28);
-    expect(new Set(G.ABANDONED_KIND_KEYS).size).toBe(28);
-    const ids = Object.values(G.AbandonedKind) as number[];
+    // ADR-595 appends the realistic settlement kinds after id 27; the 28 legacy ids, keys and weights are unchanged.
+    expect(G.REALISTIC_BASE).toBe(28);
+    expect(G.ABANDONED_KIND_KEYS.length).toBe(28 + G.REALISTIC_KINDS.length);
+    expect(new Set(G.ABANDONED_KIND_KEYS).size).toBe(G.ABANDONED_KIND_KEYS.length);
+    const ids = (Object.values(G.AbandonedKind) as number[]).filter((k) => k < G.REALISTIC_BASE);
     expect(ids.length).toBe(28);
     expect(Math.min(...ids)).toBe(0);
     expect(Math.max(...ids)).toBe(27);

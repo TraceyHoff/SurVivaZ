@@ -21,7 +21,7 @@
 import { entityIndex, type Entity, type World } from "@engine/core";
 import { CHUNK_SIZE, REGION_HALF, REGION_SIZE, waterFeatureAt, type WaterFeatureLayout } from "@engine/world";
 import { DISCOVERY_MAX, Discoveries } from "./components.js";
-import { ABANDONED_KIND_KEYS, planAbandonedChunk } from "./building/abandoned.js";
+import { ABANDONED_KIND_KEYS, planAbandonedChunk, settlementSiteInChunk } from "./building/abandoned.js";
 import { layoutForRegion } from "./river_current.js";
 
 /** Discovery kinds: 1 = a lake, 2 = a river, 3 + AbandonedKindId = a ruin of that kind. */
@@ -42,6 +42,7 @@ export function chunkDiscoveries(world: World, cx: number, cy: number): Discover
   const out: Discovery[] = [];
   const plan = planAbandonedChunk(world.seed, cx, cy);
   if (plan) out.push({ kind: DiscoveryKind.RuinBase + plan.kind, cx, cy });
+  else { const k = settlementSiteInChunk(world, cx, cy); if (k !== undefined) out.push({ kind: DiscoveryKind.RuinBase + k, cx, cy }); } // ADR-595
   // Lake/river: scan the chunk's tiles against the region layout (1,024 lookups, once per chunk per
   // player, at first-send time). A chunk can straddle a region boundary (1 in 48), so the region
   // is resolved per tile and cached while it stays the same.

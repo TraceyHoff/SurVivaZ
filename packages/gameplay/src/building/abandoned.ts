@@ -22,6 +22,7 @@ import { damageStageFor, maxHpOf } from "./integrity.js";
 import { hasOwnClaim, placePiece, snapPlacement, tribeOf, validatePlacement } from "./place.js";
 import { exteriorStairsFor } from "./stairs.js";
 import { ABANDONED_DATA } from "./abandoned_data.js";
+import { REALISTIC_KINDS, REALISTIC_KIND_KEYS, quarterToSteps, realisticBuilt, type KindDef, type RoofKind, type Setting } from "./realistic.js";
 
 /**
  * ADR-373: density raised 0.12 -> 0.15 per chunk (+25%): a chunk is 32x32 = 1024 tiles, so
@@ -71,6 +72,35 @@ export const AbandonedKind = {
   Granary: 25,
   FisherHut: 26,
   Barracks: 27,
+  // ADR-595: realistic buildings from real-world floor plans (building/realistic.ts), placed by the settlement layer.
+  RanchHouse: 28,
+  SuburbanHouse: 29,
+  Duplex: 30,
+  ApartmentBlock: 31,
+  GasStation: 32,
+  Diner: 33,
+  ConvenienceStore: 34,
+  GroceryStore: 35,
+  Motel: 36,
+  Church: 37,
+  School: 38,
+  FireStation: 39,
+  PoliceStation: 40,
+  Clinic: 41,
+  Pharmacy: 42,
+  HardwareStore: 43,
+  Bank: 44,
+  Library: 45,
+  AutoShop: 46,
+  DairyBarn: 47,
+  GrainSilo: 48,
+  Warehouse: 49,
+  Factory: 50,
+  RangerStation: 51,
+  HuntingLodge: 52,
+  Lighthouse: 53,
+  Bunker: 54,
+  RadioHut: 55,
 } as const;
 export type AbandonedKindId = (typeof AbandonedKind)[keyof typeof AbandonedKind];
 
@@ -79,7 +109,12 @@ export const ABANDONED_KIND_KEYS: readonly string[] = [
   "large_homestead", "two_story_cottage", "two_story_farmhouse", "two_story_homestead", "townhouse", "manor",
   "mill", "schoolhouse", "chapel", "trading_post", "smithy", "bakery", "stable", "watchtower",
   "bathhouse", "inn", "apiary", "granary", "fisher_hut", "barracks",
+  ...REALISTIC_KIND_KEYS,
 ];
+/** ADR-595: the first realistic kind id; every kind from here on is built by building/realistic.ts. */
+export const REALISTIC_BASE = 28;
+export const isRealisticKind = (kind: number): boolean => kind >= REALISTIC_BASE && kind < REALISTIC_BASE + REALISTIC_KINDS.length;
+const realisticDef = (kind: number): KindDef => REALISTIC_KINDS[kind - REALISTIC_BASE]!;
 
 // ADR-373: the fourteen old weights are unchanged (they summed to 100); the new kinds add 46,
 // so the catalogue total is 146 and every old kind keeps its relative order — each old kind's
@@ -164,7 +199,7 @@ export interface StampResult {
  * floor, a wall beside a corner placed after it, a roof tile before its wall-anchored neighbour — ADR-311 did this for roofs
  * alone). They are retried after the main queue, so a generated structure has every wall, floor, door, window and roof.
  */
-const RETRY_ROLES: ReadonlySet<Role> = new Set<Role>(["deck", "wall", "opening", "stair", "roof"]);
+const RETRY_ROLES: ReadonlySet<Role> = new Set<Role>(["deck", "wall", "opening", "stair", "roof", /** ADR-595: furnishings on an upper floor whose deck lands in a retry pass */ "furniture", "loot", "fence", "garden"]);
 
 /** ADR-594: dependency chains (floor -> corner -> wall -> roof) can need several passes; a pass with no progress still ends them. */
 const RETRY_PASSES = 8;
@@ -309,6 +344,10 @@ function yard(out: Spec[], x0: number, y0: number, w: number, h: number, kind: "
 }
 
 function buildKind(kind: AbandonedKindId): Built {
+  if (isRealisticKind(kind)) {
+    const b = realisticBuilt(realisticDef(kind).key);
+    return { w: b.w, h: b.h, stories: b.stories, garden: b.garden, pen: b.pen, pieces: b.pieces.map((q) => ({ ...q })) };
+  }
   const p: Spec[] = [];
   if (kind === AbandonedKind.Shed) {
     p.push(...house(0, 0, 3, 3, 1, [
@@ -651,12 +690,17 @@ function styleRoof(pieces: Spec[], style: RoofStyleId, rand: () => number): bool
   return true;
 }
 
-export interface AbandonedOpts { kind?: AbandonedKindId; rot?: number; ruin?: number; tier?: number; roof?: RoofStyleId }
+export interface AbandonedOpts {
+  kind?: AbandonedKindId; rot?: number; ruin?: number; tier?: number; roof?: RoofStyleId;
+  /** ADR-595: only finish a stamp a restart cut off (a stored chunk never gets a NEW settlement site). */
+  resumeOnly?: boolean;
+}
 export function planAbandonedSite(seed: number, originX: number, originY: number, opts: AbandonedOpts = {}): PlannedSite {
   const rand = rng(hashU32(seed >>> 0, originX, originY, 0xA5B30001));
   const kind = opts.kind ?? pickKind(rand);
   const rot = opts.rot ?? (rand() * 4 | 0);
   const built0 = buildKind(kind);
+  if (isRealisticKind(kind)) return planRealisticSite(seed, originX, originY, kind, rot, built0, rand, opts);
   const extraRand = rng(hashU32(seed >>> 0, originX, originY, 0x57A70001));
   for (const ex of extrasFor(kind)) {
     // ADR-372: a random extra never lands on a stair tile (a cook_range used to spawn on the townhouse
@@ -681,6 +725,29 @@ export function planAbandonedSite(seed: number, originX: number, originY: number
     kind, kindKey: ABANDONED_KIND_KEYS[kind] ?? "cottage", originX, originY,
     width: built.w, height: built.h, stories: built.stories, rot, ruin, tier,
     garden: built.garden, pen: built.pen, pieces, roofStyle, chimney,
+  };
+}
+
+const ROOF_OF: Record<RoofKind, RoofStyleId> = { flat: RoofStyle.Flat, eaves: RoofStyle.Eaves, gable: RoofStyle.Gable, hip: RoofStyle.HipGable, gambrel: RoofStyle.Gambrel, shed: RoofStyle.Shed };
+
+/**
+ * ADR-595: a realistic kind's plan. Its layout already carries its own roofs (styled per block), windows, doors and
+ * furnishings, so there are no random extras or roof restyle; specs carry quarter turns, converted here (after the site
+ * rotation) to each free piece's own rotation steps so a 2x1 piece keeps its footprint along its wall in every rotation.
+ */
+function planRealisticSite(seed: number, originX: number, originY: number, kind: AbandonedKindId, rot: number, built0: Built, rand: () => number, opts: AbandonedOpts): PlannedSite {
+  const def = realisticDef(kind);
+  const built = rotateBuilt(built0, rot);
+  const ruin = opts.ruin ?? (0.18 + rand() * 0.62);
+  // The material is part of the design: a steel-framed warehouse or a stone lighthouse is never built below its tier.
+  const tier = Math.max(opts.tier ?? def.tier, def.tier);
+  const pieces: PlannedPiece[] = built.pieces.map((s) => {
+    const free = s.role === "furniture" || s.role === "loot" || s.role === "garden" || s.role === "fence";
+    return { ...s, rot: free ? quarterToSteps(s.key, s.rot) : s.rot, x: originX + s.x, y: originY + s.y, tier, omit: false, hpFrac: 1 };
+  });
+  return {
+    kind, kindKey: def.key, originX, originY, width: built.w, height: built.h, stories: built.stories, rot, ruin, tier,
+    garden: built.garden, pen: built.pen, pieces, roofStyle: ROOF_OF[def.roof], chimney: false,
   };
 }
 
@@ -751,10 +818,10 @@ export function siteTerrainOk(world: World, ox: number, oy: number, w: number, h
   return footprintSpread(world, ox, oy, w, h, 0) === 0;
 }
 
-function nearSpawn(ox: number, oy: number, w: number, h: number): boolean {
+function nearSpawn(ox: number, oy: number, w: number, h: number, clear = 32): boolean {
   const cx = ox + w / 2, cy = oy + h / 2;
   for (const [sx, sy] of [[1, -1], [1, 1], [-1, 1], [-1, -1]] as const) {
-    if (Math.hypot(cx - sx * 96 - 0.5, cy - sy * 96 - 0.5) < 32) return true;
+    if (Math.hypot(cx - sx * 96 - 0.5, cy - sy * 96 - 0.5) < clear) return true;
   }
   return false;
 }
@@ -1092,6 +1159,7 @@ export function stampAbandonedSite(world: World, originX: number, originY: numbe
     resumed = matchPartialStamp(world, plan);
     if (!resumed) return skipped;
   }
+  if (opts.resumeOnly && !resumed) return skipped;
   if (nearSpawn(plan.originX, plan.originY, plan.width, plan.height)) return skipped;
   // ADR-384: a footprint straddling tile levels is SKIPPED, not stamped crooked and not
   // relocated (relocation was tried and removed — see siteTerrainOk). ADR-435: the gate
@@ -1235,6 +1303,115 @@ export function planAbandonedChunk(seed: number, cx: number, cy: number): { orig
   return { originX: ox, originY: oy, kind, rot, ruin };
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+// ADR-595 settlement layer: realistic buildings in the chunks the legacy planner leaves empty.
+
+/** Town cells are TOWN_CELL x TOWN_CELL chunks; a cell holds a town with TOWN_CHANCE, centred on one of its middle chunks. */
+export const TOWN_CELL = 4;
+export const TOWN_CHANCE = 0.18;
+/** A town covers its centre chunk and the 8 around it; each of those chunks (left empty by the legacy layer) builds with this chance. */
+export const TOWN_SITE_CHANCE = 0.85;
+/** Outside towns, an empty chunk gets a roadside / rural / wilderness building with this chance. */
+export const RURAL_SITE_CHANCE = 0.1;
+/** Origins tried per settlement chunk (first one on single-level, dry ground wins). */
+const SETTLE_TRIES = 6;
+/** Settlement buildings keep this far (tiles, footprint centre) from each spawn point, so new players and bots start in open country. */
+export const SETTLE_SPAWN_CLEAR = 72;
+
+export interface SiteEnv {
+  /** Terrain tile at a world tile (live world or the generator's sampler); undefined = unknown (plains). */
+  tileAt?: (x: number, y: number) => number | undefined;
+  /** The ADR-384 single-level footprint gate; omitted = every candidate passes (the first is used). */
+  terrainOk?: (ox: number, oy: number, w: number, h: number) => boolean;
+}
+export interface SettlementPlan { originX: number; originY: number; kind: AbandonedKindId; rot: number; ruin: number; width: number; height: number; town: boolean; setting: Setting }
+
+/** The town (centre chunk) whose 3x3 chunk footprint contains this chunk, if any. */
+export function townAt(seed: number, cx: number, cy: number): { cx: number; cy: number } | undefined {
+  const gx = Math.floor(cx / TOWN_CELL), gy = Math.floor(cy / TOWN_CELL);
+  const h = hashU32(seed, gx, gy, 0x70A11);
+  if (h / 4294967296 >= TOWN_CHANCE) return undefined;
+  const tcx = gx * TOWN_CELL + 1 + ((h >>> 8) & 1), tcy = gy * TOWN_CELL + 1 + ((h >>> 9) & 1);
+  return Math.abs(cx - tcx) <= 1 && Math.abs(cy - tcy) <= 1 ? { cx: tcx, cy: tcy } : undefined;
+}
+
+/** Worldgen bands (data/worldgen.json): 2 = sand / beach, 3 = grassland, 4 = forest, 5 = highland rock. */
+export function settingOfTile(tile: number | undefined): Setting {
+  return tile === 2 ? "coast" : tile === 4 ? "forest" : tile === 5 ? "mountain" : "plains";
+}
+
+const settleSizes = new Map<string, { w: number; h: number }>();
+function settleSize(kind: AbandonedKindId, rot: number): { w: number; h: number } {
+  const key = `${kind}:${rot}`; let s = settleSizes.get(key);
+  if (!s) { const b = rotateBuilt(buildKind(kind), rot); s = { w: b.w, h: b.h }; settleSizes.set(key, s); }
+  return s;
+}
+
+function pickSettlementKind(rand: () => number, setting: Setting | "town"): AbandonedKindId | undefined {
+  let total = 0; for (const d of REALISTIC_KINDS) total += d.where[setting] ?? 0;
+  if (total <= 0) return undefined;
+  let r = rand() * total;
+  for (let i = 0; i < REALISTIC_KINDS.length; i++) { r -= REALISTIC_KINDS[i]!.where[setting] ?? 0; if (r < 0) return (REALISTIC_BASE + i) as AbandonedKindId; }
+  return (REALISTIC_BASE + REALISTIC_KINDS.length - 1) as AbandonedKindId;
+}
+
+/**
+ * ADR-595: the settlement site for a chunk the legacy planner (planAbandonedChunk) leaves empty — pure in (seed, chunk,
+ * terrain). Town chunks pick from the town table and face their front door toward the town's centre chunk, seated
+ * against the chunk edge nearest it, so a town reads as buildings lining a square; elsewhere the biome under the chunk
+ * centre picks the table (farms and roadside stops on grassland, lodges and ranger stations in forest, bunkers and relay
+ * huts on highland, lighthouses and motels on the coast). Up to SETTLE_TRIES origins are tried against `terrainOk`.
+ */
+export function planSettlementChunk(seed: number, cx: number, cy: number, env: SiteEnv = {}): SettlementPlan | undefined {
+  if (planAbandonedChunkForMap(seed, cx, cy)) return undefined;
+  const town = townAt(seed, cx, cy);
+  if (hashU32(seed, cx, cy, 0x5E77) / 4294967296 >= (town ? TOWN_SITE_CHANCE : RURAL_SITE_CHANCE)) return undefined;
+  const rand = rng(hashU32(seed, cx, cy, 0x5E770001));
+  const setting = settingOfTile(env.tileAt?.(cx * CHUNK_SIZE + (CHUNK_SIZE >> 1), cy * CHUNK_SIZE + (CHUNK_SIZE >> 1)));
+  const kind = pickSettlementKind(rand, town ? "town" : setting); if (kind === undefined) return undefined;
+  let rot = rand() * 4 | 0;
+  let face: "s" | "w" | "n" | "e" | undefined;
+  if (town && (town.cx !== cx || town.cy !== cy)) {
+    const dx = town.cx - cx, dy = town.cy - cy;
+    // rot 0 puts the plan's front (south) door south, 1 west, 2 north, 3 east (rotPoint)
+    face = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "e" : "w") : (dy > 0 ? "s" : "n");
+    rot = face === "s" ? 0 : face === "w" ? 1 : face === "n" ? 2 : 3;
+  }
+  const { w, h } = settleSize(kind, rot);
+  const margin = 2;
+  if (w + margin * 2 > CHUNK_SIZE || h + margin * 2 > CHUNK_SIZE) return undefined;
+  const ruin = 0.18 + rand() * 0.62;
+  const spanX = CHUNK_SIZE - w - margin * 2 + 1, spanY = CHUNK_SIZE - h - margin * 2 + 1;
+  const x0 = cx * CHUNK_SIZE + margin, y0 = cy * CHUNK_SIZE + margin;
+  const cands: [number, number][] = [];
+  for (let i = 0; i < SETTLE_TRIES; i++) {
+    let ox = x0 + ((rand() * spanX) | 0), oy = y0 + ((rand() * spanY) | 0);
+    // town lots: the first tries hug the chunk edge facing the square (the "street" side)
+    if (face && i < 3) { if (face === "s") oy = y0 + spanY - 1; else if (face === "n") oy = y0; else if (face === "e") ox = x0 + spanX - 1; else ox = x0; }
+    cands.push([ox, oy]);
+  }
+  const pick = env.terrainOk ? cands.find(([ox, oy]) => env.terrainOk!(ox, oy, w, h)) ?? cands[0]! : cands[0]!;
+  // ADR-595: the start areas stay open country — no settlement building within SETTLE_SPAWN_CLEAR of a spawn point
+  if (nearSpawn(pick[0], pick[1], w, h, SETTLE_SPAWN_CLEAR)) return undefined;
+  return { originX: pick[0], originY: pick[1], kind, rot, ruin, width: w, height: h, town: !!town, setting: town ? "town" : setting };
+}
+
+/** ADR-595: the live world as a SiteEnv (tiles and the single-level gate from its terrain view). */
+export function worldSiteEnv(world: World): SiteEnv {
+  const terrain = world.getResource(TerrainRes);
+  if (!terrain) return {};
+  return { tileAt: (x, y) => terrain.tileAt(x, y), terrainOk: (ox, oy, w, h) => siteTerrainOk(world, ox, oy, w, h) };
+}
+
+/** ADR-595: a realistic (settlement) site standing or being stamped in this chunk — for discoveries. */
+export function settlementSiteInChunk(world: World, cx: number, cy: number): AbandonedKindId | undefined {
+  const m = siteMarkerInChunk(world, cx, cy);
+  if (m !== undefined) { const k = (world.getField(m, AbandonedSite, "kind") ?? 0) as AbandonedKindId; return isRealisticKind(k) ? k : undefined; }
+  const x0 = cx * CHUNK_SIZE, y0 = cy * CHUNK_SIZE;
+  for (const e of queueOf(world).values()) if (e.originX >= x0 && e.originX < x0 + CHUNK_SIZE && e.originY >= y0 && e.originY < y0 + CHUNK_SIZE && isRealisticKind(e.plan.kind)) return e.plan.kind;
+  return undefined;
+}
+
 /** ADR-586: one abandoned site as the maps show it — the site's footprint origin and size. */
 export interface MapAbandonedSite { originX: number; originY: number; kind: AbandonedKindId; width: number; height: number }
 
@@ -1313,6 +1490,13 @@ export function mapAbandonedSites(seed: number, sampleAt: (x: number, y: number)
     if (!mapSiteTerrainOk(sampleAt, planned.originX, planned.originY, planned.width, planned.height)) continue;
     out.push({ originX: planned.originX, originY: planned.originY, kind: planned.kind, width: planned.width, height: planned.height });
   }
+  // ADR-595: the settlement layer, with the same terrain gate the stamper applies
+  const terrainOk = (ox: number, oy: number, w: number, h: number): boolean => mapSiteTerrainOk(sampleAt, ox, oy, w, h);
+  for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) {
+    const sp = planSettlementChunk(seed, cx, cy, { tileAt: (x, y) => sampleAt(x, y).tile, terrainOk }); if (!sp) continue;
+    if (nearSpawn(sp.originX, sp.originY, sp.width, sp.height) || !terrainOk(sp.originX, sp.originY, sp.width, sp.height)) continue;
+    out.push({ originX: sp.originX, originY: sp.originY, kind: sp.kind, width: sp.width, height: sp.height });
+  }
   return out;
 }
 
@@ -1332,6 +1516,7 @@ export function mapAbandonedSites(seed: number, sampleAt: (x: number, y: number)
 export function stampAbandonedChunk(world: World, key: ChunkKey | { cx: number; cy: number }): StampResult | undefined {
   const { cx, cy } = typeof key === "number" || typeof key === "string" ? parseChunkKey(key as ChunkKey) : key;
   const legacy = takeLegacyChunk(world, cx, cy);
+  const stored = takeStoredChunk(world, cx, cy);
   // ADR-594: the chunk's existing marker is the record of its site. A saved site is restored from its own marker (kind,
   // origin), never re-planned: the kind table can grow, and a re-plan must not stamp a second site beside the saved one.
   const existing = siteMarkerInChunk(world, cx, cy);
@@ -1340,8 +1525,13 @@ export function stampAbandonedChunk(world: World, key: ChunkKey | { cx: number; 
     const kind = (world.getField(existing, AbandonedSite, "kind") ?? 0) as AbandonedKindId;
     return { marker: existing, placed: [], omitted: 0, skipped: true, kind, stories: 1, garden: false, pen: false, pending: false };
   }
-  const plan = planAbandonedChunk(world.seed, cx, cy); if (!plan) return undefined;
-  return stampAbandonedSite(world, plan.originX, plan.originY, { kind: plan.kind, rot: plan.rot, ruin: plan.ruin });
+  const plan = planAbandonedChunk(world.seed, cx, cy);
+  if (plan) return stampAbandonedSite(world, plan.originX, plan.originY, { kind: plan.kind, rot: plan.rot, ruin: plan.ruin });
+  // ADR-595: the settlement layer fills chunks the legacy planner leaves empty. A chunk read from a save only ever
+  // finishes a settlement stamp a restart cut off; it never grows a new building beside what players already know.
+  const sp = planSettlementChunk(world.seed, cx, cy, worldSiteEnv(world));
+  if (!sp) return undefined;
+  return stampAbandonedSite(world, sp.originX, sp.originY, { kind: sp.kind, rot: sp.rot, ruin: sp.ruin, ...(stored ? { resumeOnly: true } : {}) });
 }
 
 function siteMarkerInChunk(world: World, cx: number, cy: number): Entity | undefined {
@@ -1365,6 +1555,19 @@ export function markLegacyAbandonedChunk(world: World, cx: number, cy: number): 
 }
 function takeLegacyChunk(world: World, cx: number, cy: number): boolean {
   const s = legacyChunks.get(world); return !!s && s.delete(`${cx},${cy}`);
+}
+
+/**
+ * ADR-595: chunks loaded from storage (any save tick), reported by persistence (`WorldPersistence` option `storedChunk`)
+ * just before the chunk-load hook. Consumed once by stampAbandonedChunk: such a chunk gets no NEW settlement site.
+ */
+const storedChunks = new WeakMap<World, Set<string>>();
+export function markStoredChunk(world: World, cx: number, cy: number): void {
+  let s = storedChunks.get(world); if (!s) storedChunks.set(world, (s = new Set()));
+  s.add(`${cx},${cy}`);
+}
+function takeStoredChunk(world: World, cx: number, cy: number): boolean {
+  const s = storedChunks.get(world); return !!s && s.delete(`${cx},${cy}`);
 }
 
 /**

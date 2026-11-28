@@ -6,7 +6,8 @@ import { makeWorld, plantClaim, spawnLearned } from "./helpers.js";
 /** Eave direction per rot from the roof art (assets/tools/buildings2.py roof_d): S, W, N, E. */
 const EAVE: readonly (readonly [number, number])[] = [[0, 1], [-1, 0], [0, -1], [1, 0]];
 const ROOF_KEYS = ["roof_flat", "roof_slope", "roof_corner", "roof_gable", "roof_hip", "roof_chimney", "roof_gambrel", "roof_shed", "roof_cottage"]; // ADR-400: + the live ADR-398 forms
-const ALL_KINDS = Object.values(G.AbandonedKind) as G.AbandonedKindId[];
+// the ADR-595 realistic kinds carry their own roofs (no roof-style override), so this pins the legacy kinds
+const ALL_KINDS = (Object.values(G.AbandonedKind) as G.AbandonedKindId[]).filter((k) => !G.isRealisticKind(k));
 
 function roofsOf(p: G.PlannedSite) { return p.pieces.filter((s) => s.role === "roof"); }
 function bounds(p: G.PlannedSite) {

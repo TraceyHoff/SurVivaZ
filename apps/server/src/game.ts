@@ -2,7 +2,7 @@ import { dismountOnLeave, installMountCommands, installRopeCommands, MountEvent 
 import { MountEventEvt } from "./protocol.js";
 import { friendSpawn } from "./friend-spawn.js";
 import { giveSandboxKit, sandboxPetKit, sandboxPetCorner, sandboxSpawn } from "./sandbox.js";
-import { fixLegacyFloorZ, markLegacyAbandonedChunk, handLootTarget, Viewing, TerrainRes, terrainFromTileMap } from "@engine/gameplay";
+import { fixLegacyFloorZ, markLegacyAbandonedChunk, markStoredChunk, handLootTarget, Viewing, TerrainRes, terrainFromTileMap } from "@engine/gameplay";
 import { applyStanceInput, stanceBlocksActions, GameplayEdgeBits } from "@engine/gameplay"; // ADR-244
 import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSignCommands, installPetCommands, installReadyCommands, markReady, PlayerReady, PetEvent, setWorldRules, worldRules, type WorldRulesOpts, installAnimalSkillCommands, installWorkerCommands, installDyeCommands, WorkerEvent, installTerrainCommands, installRampCommands, installItemRepairCommands, recordChunkDiscoveries, installPowerCommands } from "@engine/gameplay";
 import { parseChunkKey } from "@engine/world";
@@ -204,6 +204,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
     topUpNodes: (w, chunk, ents) => computeWildCropTopUp(w, chunk, ents, generator.nodesInChunk(chunk.cx, chunk.cy)),
     ...(floorStampTick > 0 ? { legacyZ: { beforeTick: floorStampTick, fix: fixLegacyFloorZ } } : {}),
     ...(intactStampTick > 0 ? { legacyChunk: { beforeTick: intactStampTick, mark: markLegacyAbandonedChunk } } : {}),
+    storedChunk: markStoredChunk, // ADR-595: saved chunks never grow a new settlement building
     social: permissions,
     extraMeta: () => { const r = worldRules(world); return { hordes: r.hordes ? 1 : 0, hordeGraceDays: r.hordeGraceDays, aiHumans: r.aiHumans ? 1 : 0, zombies: r.zombies ? 1 : 0, creative: r.creative ? 1 : 0, floorLevels: defs.building.levelHeight, floorStampTick, intactStampTick }; },
     ...(o.catalog ? { appearance: { catalog: o.catalog } } : {}),

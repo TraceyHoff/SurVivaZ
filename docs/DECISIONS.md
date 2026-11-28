@@ -16326,3 +16326,49 @@ restore heals + re-places without duplicates, idempotent, claimed / owned / loot
 adr594_legacy_chunks.test.ts`, `apps/server/test/adr594_intact_stamp.test.ts`. The ruin-dependent claim / stairs / terrain-gate
 tests damage a stamped site by hand (`test/weather_site.ts`). Verified in a browser (WebGL2 and Canvas2D, before / after,
 `/workspace/share/intact_structures/before_after.png`): the farmhouse that had a roof hole and missing windows / door is complete.
+
+## ADR-595: realistic building variety — 28 real-world building types, towns and biome placement (SurVivaZ)
+
+**Request.** "Add a ton more variety to the types of buildings able to be generated that are formed realistically based on real
+world designs."
+
+**Decision.** A new catalogue, `packages/gameplay/src/building/realistic.ts`, describes buildings the way an architect's plan does —
+blocks (storeys, roof form, wall / window / door material, posts), rooms per floor (living, kitchen, bed, bath, shop, bay, nave,
+ward, cell, vault, stacks, plant, ...) and links between rooms (door, arch, metal door, open plan) — and `buildRealistic` turns
+a plan into pieces: foundations; upper floors with stairwell holes; an exterior shell with L corners, the entries and windows by
+room type (none in stores / vaults / silo bins, a full glazed front on shops and lobbies, every side of a lighthouse lamp
+room); partitions on every edge between two rooms; stairs; posts where a span needs them; the roof per block; furniture and
+loot by room programme (wall run, centre, shelving aisles, rows of pews / desks / beds) placed so every doorway, stair landing
+and open-plan walkway stays clear and every room is reachable; paving, fences and yard props. Existing piece art only.
+28 kinds (ids 28–55, appended — the 28 legacy kinds and their ids are unchanged):
+- **Homes:** ranch house, suburban two-storey house, duplex (two mirrored units, party wall), 3-storey apartment block.
+- **Roadside / town commerce:** gas station (kiosk + forecourt canopy), diner, convenience store, grocery store, motel,
+  pharmacy, hardware store, bank (teller line + vault), auto repair shop.
+- **Civic:** church (nave, chancel, vestry, narthex), school, fire station (apparatus bays, mess and bunks above), police
+  station (cells, armoury), clinic (wards), library.
+- **Farm / industry:** dairy barn (stalls + hay loft), grain silo (twin bins + office), warehouse, factory.
+- **Wilderness:** ranger station, hunting lodge, lighthouse + keeper's cottage, military bunker / outpost, radio relay hut.
+A kind's material is part of its design (a steel warehouse or stone lighthouse is never stamped below its tier). Every kind x 4
+rotations places every planned piece at full HP (ADR-594 rules: unowned, raidable, claimable, refunds unchanged).
+
+**Placement (settlement layer).** The legacy chunk planner and its roll streams are untouched (ai_spawn, discoveries, maps and
+the canary tests depend on it). `planSettlementChunk` fills only chunks it leaves empty, as a pure function of (seed, chunk,
+terrain): towns sit in 4x4-chunk cells (18% of cells), cover their centre chunk and the 8 around it, build in 85% of those
+chunks from the town table and turn each front door to face the centre, seated on the chunk edge nearest it; elsewhere 10% of
+empty chunks get a building from the biome table under the chunk centre (grass: ranch houses, dairy barns, silos, gas stations,
+diners, motels, warehouses; forest: ranger stations, hunting lodges; highland: bunkers, radio huts; coast: lighthouses,
+motels, gas stations). Up to 6 origins are tried against the ADR-384 single-level gate, and nothing is built within 72 tiles of
+a spawn point (start areas stay open country). `mapAbandonedSites` lists the same sites, so the maps match what stands.
+Planning costs < 1 µs per chunk; stamping rides the existing time-sliced pump (20 pieces per tick).
+
+**Old saves.** A chunk read from storage (any save tick; `WorldPersistence` option `storedChunk` -> `markStoredChunk`) never
+gets a new settlement building — it only finishes a settlement stamp that a restart cut off. New buildings appear in newly
+generated chunks only, so nothing appears inside or beside a base. Legacy sites keep ADR-594's one-time restore. Known gap: the
+in-game world map may show a settlement site in a chunk explored before this version where none was stamped. No schema change.
+
+**Tests.** `packages/gameplay/test/building_variety_layout.test.ts` (rooms tile every floor, every room reachable from an
+exterior door and stair landings, windows only in exterior walls, furnished), `adr594_intact_structures.test.ts` (all 56 kinds
+x 4 rotations place fully at full HP), `adr595_settlements.test.ts` (determinism, no legacy overlap, spawn clearance, towns and
+door orientation, biome tables, all kinds reachable, stored chunk gets nothing new, map = stamp, plan cost and pump budget),
+`packages/persist/test/adr595_stored_chunks.test.ts`. Art wish list (stand-ins named per row):
+`/workspace/share/building_variety/ART_NEEDS.md`.
