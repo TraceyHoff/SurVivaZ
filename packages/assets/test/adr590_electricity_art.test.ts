@@ -27,14 +27,14 @@ const P: Record<string, [number, string, number, number, number, number, number,
 const DELIVERED = Object.keys(P);
 const png = (p: string) => { const d = decodeRgba(readFileSync(root + p)); return { width: d.w, height: d.h, data: d.rgba }; };
 const PX_M = 53 / 1.75;
-const fallbacks = JSON.parse(readFileSync("packages/gameplay/data/sprite_fallbacks.json", "utf8")) as { sprites: Record<string, unknown> };
 
 describe("ADR-590 electricity-tier art", () => {
   it("every delivered key has its own sprite on an elec_<class> page with the hearth lit/unlit convention", () => {
     for (const k of DELIVERED) {
       const [, cls, rows, nf, fps, fw, fh] = P[k]!; const s = byKey.get(k)!;
       expect(s, k).toBeDefined(); expect(s.atlas, k).toMatch(new RegExp(`^elec_${cls}(_\\d+)?$`));
-      expect(fallbacks.sprites[k], `${k}: placeholder fallback removed once the art ships`).toBeUndefined();
+      // sprite_fallbacks keeps its $placeholder entry until build_<key> ships (the build tile borrows it, adr229); resolveSprite
+      // returns the key itself, untinted, whenever the pack has it, so the real art already wins in the world.
       const a = atlas.get(s.atlas)!; const [w, h, oy] = CLS[cls]!;
       expect([a.frameW, a.frameH], k).toEqual([w, h]); expect(s.anchor, k).toEqual({ x: 0.5, y: oy / h });
       expect(s.rotationArt, k).toBe(rows === 1 ? "mirror" : "unique4");
