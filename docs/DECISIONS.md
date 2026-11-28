@@ -16085,3 +16085,37 @@ Ground truth: adr586 (gameplay) stamps a real generator-backed world over chunks
 stamps, and requires mapAbandonedSites over the same range to equal the AbandonedSite
 marker set exactly. Caveat recorded: player terrain edits after a chunk first loads
 can change what a later re-stamp would do; the maps show the seed's sites.
+
+## ADR-587: notch-corner roof tiles pick the corner shape, so their walls stay covered (SurVivaZ)
+
+The user reported the roof-wall gap again and supplied a ?diag=1 structure dump of the
+house (single-storey 3x3, wood tier 1, roof 6 of 9 tiles placed: back row hip x3,
+middle row gable x2, front row hip x1). Rebuilt verbatim in the ADR-562 harness and
+measured in both renderers (agreeing exactly): the back wall's top stood bare in a
+4-9 px wedge rising toward the NE corner, and the NE corner post had sky above it in
+42 of 55 columns. Completing the roof in the harness closed everything (worst 5-7 px
+at single corner columns, the accepted corner fit), which isolated the cause: the two
+tiles beside the missing east-middle tile picked the 'h' hip-end shape. rfxShapeOf
+reads only the cardinal bits of the lower mask, so a band-0 tile with three open
+cardinal sides is always a hip end — but beside a notch the tile is a convex corner of
+the footprint whose region continues diagonally, and the 'h' end part pulls its
+silhouette inside the tile, leaving the walls below the PLACED tile uncovered.
+
+Fix (packages/assets roofRfx pickRegion, band 0, hip/cot only): when a tile picks 'h'
+and exactly one of the two diagonals beside its one present cardinal neighbour is
+filled (at band 0 a clear diagonal bit means a present tile), re-pick the 'o' corner
+over the two open cardinal sides away from the turn. A true 1-wide strip end (both
+diagonals open) and a both-diagonals-filled junction keep 'h'; upper bands are
+untouched (their diagonal bits mean lower band, not absent). No art, no seat or clip
+changes: the re-picked tiles draw the same corner parts a completed roof draws.
+
+Measured on the dump after the fix: back wall wedge 9 -> 0 px; NE corner 42 bare
+columns -> 1 column at 5 px (identical to the completed roof's profile). Tests:
+adr587 (assets) pins the re-pick, the strip-end and junction keeps, and the band
+guard; adr587 (client) rebuilds the user's dump and pins per-wall coverage in both
+renderers (red pre-fix verified for both). HONEST RESIDUAL: the SW corner post of
+that house stands below a roof tile that was never placed (front-left; the
+front-right and east-middle tiles are also unplaced) — no placed tile's part covers
+its north arm, and it stays bare until the tile is placed (pinned in the client
+test). That part is an unfinished roof, not a coverage defect; every wall below a
+placed tile is now covered.

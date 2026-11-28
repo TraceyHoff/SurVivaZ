@@ -168,6 +168,37 @@ function pickRegion(region: RfxTile[], group: string, level: number, regionId: n
     for (const [dx, dy, bit] of NB) { const nb = bandAt(t.x + dx, t.y + dy); if (nb === undefined || (form !== "flt" && nb < b)) lower |= bit; }
     if (form === "gab" || form === "gam") lower &= perp;
     let { shape, row } = rfxShapeOf(lower);
+    // ADR-587: a band-0 hip/cot tile with three open cardinal sides picks 'h' (a hip end) from
+    // the cardinal bits alone, but when the region continues diagonally beside its one present
+    // neighbour the tile is really a convex corner of the footprint with a notch on the third
+    // side. The 'h' end part pulls its silhouette inside the tile, so the corner post and wall
+    // ends below it stand proud of the roofline (measured on a player's house: back wall wedge
+    // 4-9 px, corner post bare in 42 of 55 columns). The diagonal bits of `lower` separate the
+    // cases (at band 0 a clear diagonal bit = a present tile): a true strip end has both
+    // diagonals beside the present neighbour open; a notch corner has exactly one filled, on
+    // the side the region turns toward. Re-pick the 'o' corner over the two open sides away
+    // from the turn; the notch side keeps no slope, exactly as the 'h' left it.
+    if (shape === "h" && b === 0 && (form === "hip" || form === "cot")) {
+      const c = lower & 15;
+      // present neighbour side P (the one clear cardinal bit), its two adjacent diagonals,
+      // and the open cardinal on each diagonal's far side (the notch candidate).
+      const ADJ: Record<number, readonly (readonly [number, number])[]> = {
+        [M_N]: [[M_NW, M_W], [M_NE, M_E]],
+        [M_E]: [[M_NE, M_N], [M_SE, M_S]],
+        [M_S]: [[M_SE, M_E], [M_SW, M_W]],
+        [M_W]: [[M_SW, M_S], [M_NW, M_N]],
+      };
+      const present = [M_N, M_E, M_S, M_W].find((bit) => !(c & bit));
+      const adj = present !== undefined ? ADJ[present] : undefined;
+      if (adj) {
+        const filled = adj.filter(([diag]) => !(lower & diag));
+        if (filled.length === 1) {
+          const notch = filled[0]![1];
+          const repick = rfxShapeOf(c & ~notch);
+          if (repick.shape === "o") { shape = repick.shape; row = repick.row; }
+        }
+      }
+    }
     let seg: RfxPick["seg"] = b === 0 ? "lo" : "up";
     const nbr = (d: number): [number, number] => [t.x + DIR_V[d]![0], t.y + DIR_V[d]![1]];
     const eqMember = (d: number): boolean => { const [x, y] = nbr(d); return bandAt(x, y) === b; };
