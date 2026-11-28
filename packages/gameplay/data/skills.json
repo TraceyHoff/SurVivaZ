@@ -3026,7 +3026,7 @@
     ]
    },
    "desc": "End game: build the electrician's workstation and craft generators, solar panels, wind turbines, water wheels, batteries, pylons and electric stations.",
-   "icon": "skill_tinkerer"
+   "icon": "skill_electrician"
   },
   {
    "key": "power_grid",
@@ -3053,7 +3053,7 @@
     ]
    },
    "desc": "Heavy power: large wind turbine, overshot water wheel, large battery, electric furnace, power hammer, chest freezer and flood light.",
-   "icon": "skill_grease_monkey"
+   "icon": "skill_power_grid"
   },
   {
    "key": "hydroponics",
@@ -3072,7 +3072,7 @@
     ]
    },
    "desc": "Craft powered hydroponic tables: grow any crop indoors all year, auto light and water, bigger harvests, no blight.",
-   "icon": "skill_master_farmer"
+   "icon": "skill_hydroponics"
   },
   {
    "key": "powered_tier",
@@ -3091,7 +3091,7 @@
     ]
    },
    "desc": "End game: walls, floors, foundations and pillars in the powered tier light and warm the room while the grid powers them.",
-   "icon": "skill_fortifier"
+   "icon": "skill_powered_tier"
   }
  ]
 }

@@ -1,32 +1,6 @@
 {
   "$comment": "ADR-110 sprite/icon fallbacks. A key is drawn as itself whenever the art pack has it (real art takes over automatically); otherwise the first resolvable `to` candidate is used (recursively), with `tint` (multiply #rrggbb) and `scale` applied. stages: crop_<plant>_<n> / sapling_<key>_<n> derive from the plant sprite scaled per stage. icons: per-item icon fallbacks, then per-category generic icons. Keys with no resolvable candidate are skipped (clutter only).",
   "sprites": {
-    "electrician_workstation": {"to": ["workbench"], "tint": "#d8dde4", "$placeholder": "electricity tier: until Art ships this key"},
-    "generator_fuel": {"to": ["garage", "workbench"], "tint": "#c9d6e8", "$placeholder": "electricity tier: until Art ships this key"},
-    "generator_solar": {"to": ["salt_barrel"], "tint": "#c9d6e8", "$placeholder": "electricity tier: until Art ships this key"},
-    "solar_panel": {"to": ["workbench"], "tint": "#c9d6e8", "$placeholder": "electricity tier: until Art ships this key"},
-    "wind_turbine": {"to": ["lamp_post"], "tint": "#c9d6e8", "$placeholder": "electricity tier: until Art ships this key"},
-    "wind_turbine_large": {"to": ["lamp_post"], "tint": "#c9d6e8", "$placeholder": "electricity tier: until Art ships this key"},
-    "water_wheel": {"to": ["workbench"], "tint": "#c9d6e8", "$placeholder": "electricity tier: until Art ships this key"},
-    "water_wheel_overshot": {"to": ["workbench"], "tint": "#c9d6e8", "$placeholder": "electricity tier: until Art ships this key"},
-    "water_turbine": {"to": ["salt_barrel"], "tint": "#c9d6e8", "$placeholder": "electricity tier: until Art ships this key"},
-    "battery_small": {"to": ["salt_barrel"], "tint": "#b8c4d0", "$placeholder": "electricity tier: until Art ships this key"},
-    "battery_medium": {"to": ["cold_store", "salt_barrel"], "tint": "#b8c4d0", "$placeholder": "electricity tier: until Art ships this key"},
-    "battery_large": {"to": ["cold_store", "salt_barrel"], "tint": "#b8c4d0", "$placeholder": "electricity tier: until Art ships this key"},
-    "power_pylon": {"to": ["lamp_post"], "tint": "#a8d0ff", "$placeholder": "electricity tier: until Art ships this key"},
-    "electric_stove": {"to": ["stove_iron", "wood_stove"], "tint": "#d8dde4", "$placeholder": "electricity tier: until Art ships this key"},
-    "electric_furnace": {"to": ["furnace"], "tint": "#d8dde4", "$placeholder": "electricity tier: until Art ships this key"},
-    "power_workbench": {"to": ["workbench"], "tint": "#d8dde4", "$placeholder": "electricity tier: until Art ships this key"},
-    "power_hammer": {"to": ["anvil"], "tint": "#d8dde4", "$placeholder": "electricity tier: until Art ships this key"},
-    "fridge": {"to": ["kitchen_cupboard"], "tint": "#eef2f6", "$placeholder": "electricity tier: until Art ships this key"},
-    "chest_freezer": {"to": ["cold_store", "salt_barrel"], "tint": "#eef2f6", "$placeholder": "electricity tier: until Art ships this key"},
-    "electric_floor_lamp": {"to": ["floor_lamp"], "tint": "#fff3d6", "$placeholder": "electricity tier: until Art ships this key"},
-    "electric_table_lamp": {"to": ["table_lamp"], "tint": "#fff3d6", "$placeholder": "electricity tier: until Art ships this key"},
-    "electric_wall_light": {"to": ["wall_sconce"], "tint": "#fff3d6", "$placeholder": "electricity tier: until Art ships this key"},
-    "ceiling_light": {"to": ["chandelier"], "tint": "#fff3d6", "$placeholder": "electricity tier: until Art ships this key"},
-    "flood_light": {"to": ["lamp_post"], "tint": "#fff3d6", "$placeholder": "electricity tier: until Art ships this key"},
-    "electric_heater": {"to": ["wood_stove"], "tint": "#fff3d6", "$placeholder": "electricity tier: until Art ships this key"},
-    "hydroponic_table": {"to": ["garden_bed"], "tint": "#d8f0d0", "$placeholder": "electricity tier: until Art ships this key"},
     "oak_tree": {
       "to": [
         "tree"

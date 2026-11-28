@@ -269,6 +269,40 @@
     }
    ],
    "ktx2": "atlases/items_build_rfx.ktx2"
+  },
+  {
+   "key": "items_build_elec",
+   "image": "atlases/items_build_elec.png",
+   "frameW": 32,
+   "frameH": 32,
+   "columns": 16,
+   "rows": 3,
+   "residency": "stream",
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/items_build_elec@2x.png",
+     "ktx2": "atlases/items_build_elec@2x.ktx2"
+    }
+   ],
+   "ktx2": "atlases/items_build_elec.ktx2"
+  },
+  {
+   "key": "items_elec",
+   "image": "atlases/items_elec.png",
+   "frameW": 32,
+   "frameH": 32,
+   "columns": 11,
+   "rows": 1,
+   "residency": "resident",
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/items_elec@2x.png",
+     "ktx2": "atlases/items_elec@2x.ktx2"
+    }
+   ],
+   "ktx2": "atlases/items_elec.ktx2"
   }
  ],
  "sprites": [
@@ -18167,6 +18201,1315 @@
     "idle": {
      "frames": [
       26
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_generator_fuel",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_generator_fuel",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_generator_solar",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_generator_solar",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_battery_small",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      2
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_battery_small",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      2
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_battery_medium",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      3
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_battery_medium",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      3
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_battery_large",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      4
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_battery_large",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      4
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_power_pylon",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      5
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_power_pylon",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      5
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_solar_panel",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      6
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_solar_panel",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      6
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_wind_turbine",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      7
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_wind_turbine",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      7
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_wind_turbine_large",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      8
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_wind_turbine_large",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      8
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_water_wheel",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      9
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_water_wheel",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      9
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_water_wheel_overshot",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      10
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_water_wheel_overshot",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      10
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_water_turbine",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      11
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_water_turbine",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      11
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_electrician_workstation",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      12
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_electric_stove",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      13
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_electric_stove",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      13
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_electric_furnace",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      14
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_electric_furnace",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      14
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_power_workbench",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      15
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_power_workbench",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      15
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_power_hammer",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      16
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_power_hammer",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      16
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_fridge",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      17
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_fridge",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      17
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_chest_freezer",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      18
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_chest_freezer",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      18
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_electric_floor_lamp",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      19
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_electric_floor_lamp",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      19
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_electric_table_lamp",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      20
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_electric_table_lamp",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      20
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_electric_wall_light",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      21
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_electric_wall_light",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      21
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_ceiling_light",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      22
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_ceiling_light",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      22
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_flood_light",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      23
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_flood_light",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      23
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_electric_heater",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      24
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_electric_heater",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      24
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_hydroponic_table",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      25
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "kit_hydroponic_table",
+   "category": "item",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      25
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_foundation_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      26
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_foundation_triangle_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      27
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_floor_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      28
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_floor_triangle_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      29
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_floor_hatch_frame_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      30
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_floor_stairwell_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      31
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_wall_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      32
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_wall_low_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      33
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_wall_window_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      34
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_wall_doorway_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      35
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_wall_arched_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      36
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_wall_corner_inner_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      37
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_wall_corner_outer_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      38
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_wall_corner_angled_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      39
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "build_pillar_t5",
+   "category": "ui",
+   "atlas": "items_build_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      40
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "circuit_board",
+   "category": "item",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "electric_motor",
+   "category": "item",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "solar_cell",
+   "category": "item",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      2
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "led_bulb",
+   "category": "item",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      3
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "skill_electrician",
+   "category": "ui",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      4
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "skill_power_grid",
+   "category": "ui",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      5
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "skill_powered_tier",
+   "category": "ui",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      6
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "skill_hydroponics",
+   "category": "ui",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      7
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "icon_power_on",
+   "category": "ui",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      8
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "icon_power_off",
+   "category": "ui",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      9
+     ],
+     "fps": 1
+    }
+   }
+  },
+  {
+   "key": "icon_battery",
+   "category": "ui",
+   "atlas": "items_elec",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.5
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      10
      ],
      "fps": 1
     }

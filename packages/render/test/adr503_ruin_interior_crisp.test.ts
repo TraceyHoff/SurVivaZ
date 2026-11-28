@@ -43,7 +43,7 @@ const decorPages = () => [...ALL.values()].filter((a) => a.residency === "stream
 
 describe("ADR-503: ruin interiors stay crisp when the pools are out of budget", () => {
   it("the real ruin pages: 4 building tiers (2016x2040 since ADR-504 84x120 cells, one per layer at 1x), rfx roofs, 19 rustic decor pages", () => {
-    const t = tierPages(); expect(t.map((p) => p.key).sort()).toEqual(["building_t1", "building_t2", "building_t3", "building_t4"]);
+    const t = tierPages(); expect(t.map((p) => p.key).sort()).toEqual(["building_t1", "building_t2", "building_t3", "building_t4", "building_t5"]); // ADR-593: powered tier page, same 24x17 grid
     for (const p of t) expect([p.lazy.w1, p.lazy.h1]).toEqual([2016, 2040]);
     expect(roofPages().length).toBeGreaterThanOrEqual(12);
     expect(decorPages().length).toBeGreaterThanOrEqual(19);

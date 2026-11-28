@@ -144,6 +144,7 @@ Walls/floors with integrated LED light strips and radiant heating panels; they l
 - Live in data with placeholders: all 26 piece keys above (tinted neighbours via `sprite_fallbacks.json` `sprites`, marked `$placeholder`), kits and components use the generic placeable icon. The build menu shows the neighbour's tile until `build_<key>` ships (adr229 keeps these as "pending", never the glyph).
 - Skill nodes Electrician / Power Grid / Hydroponics reuse `skill_tinkerer` / `skill_grease_monkey` / `skill_master_farmer` until `skill_electrician` / `skill_power_grid` / `skill_hydroponics` ship; swap the three `icon` fields in `packages/gameplay/data/skills.json` when they land.
 - Active animation hook: the client plays `idle` only while the piece's replicated `Power.active` is 1 (powered AND in use) and `unlit` otherwise (apps/client/src/view.ts, FireState.Lit path — no hearth particles).
+- Update (Art, batch 4, Nov 28, 2026 CST): all 26 `build_<key>` and 15 `build_<piece>_t5` icons shipped (`items_build_elec`), so the 26 `$placeholder` entries are removed from `sprite_fallbacks.json`; each of the 25 kit items has its own `kit_<key>` item sprite on the same `items_build_elec` cell as its `build_<key>` (brief: same object, no second painting). The four skill nodes now use `skill_electrician` / `skill_power_grid` / `skill_hydroponics` / `skill_powered_tier` (`items_elec`). Tier 5 has its own art (`bld_<piece>_t5`, `<piece>@tier5`), so the tier-4 borrow in `visual.ts` / `buildIconKey` no longer triggers for these 15 pieces.
 
 ## Art delivered (Art, Nov 27-28, 2026 CST)
 Dedicated art per key (no reuse / recolour / tint / shared frames), true scale 30.29 px/m, hearth convention
@@ -194,3 +195,43 @@ mapped to the nearest of 64 extra entries) to stay byte-lean.
 
 Measured tops are below the brief's ceiling where the object does not fill its whole footprint (the brief's figure
 assumes the far corner reaches full height); every key stands at least round(height m x 30.29) px.
+
+### Batch 4: powered building tier + icons (Nov 28, 2026 CST)
+**Powered tier** (`bld_<piece>_t5`, piece `<piece>@tier5`): packer `packages/assets/pack/building/src/add_tier5.py` (add-only,
+owns `building_t5` + `building_t5_floor` and their `_emissive` masks), art kit `src/elec/tier5.py`. Geometry = the shared
+tier builders (pieces.py / buildings2.py at the scale80 metric), so pivots, footprints and heights are exactly t4's; new
+material set (dark graphite composite panels, gunmetal posts / beams, brushed-steel plinth and trim, gunmetal deck plate,
+precast concrete footings) and a steel-and-glass upper band on every full wall face (glazed panel, brushed-steel mullions and
+sill), plus the powered parts painted on top: recessed warm-white LED strips (walls: under the cap beam
+at 72 px and a skirting strip at 8.5 px, both faces; pillars / corner posts: a vertical strip per face; decks: an inset
+perimeter ring, hole rims on hatch frame / stairwell, step lights round the foundation sides) and radiant heating panels
+(gunmetal grille + hot element line + status LED on each wall face, under-window radiator on the window wall, grille in
+every deck).
+- Layout = building_t4: 84x120 frames, anchor (0.5, 0.825), `unique4`, painted rows as t4 (2 for the straight walls and the
+  stairwell, 4 for the rest), `building.frames[rot][damage]` (4 baked damage stages, LED segments knock out with damage),
+  `crackOverlay: bld_crack`. `building.states.unlit[rot][damage]` = strips / elements dark. `animations.idle` = 4 frames
+  @ 4 fps per painted row (a slow shimmer pulse travels along the strips, glow halos breathe), `animations.unlit` = unlit d0.
+- 11 cells per painted row (4 powered + 4 unlit + 3 extra animation), 48 rows = 528 cells on two pages: `building_t5`
+  (walls + pillar, 286 cells on a 24x17 = 2016x2040 tier page like building_t1..t4, so the ADR-503 building stream pool
+  keeps one page geometry) and `building_t5_floor` (foundations + floors, 242 cells, 22x11, a plain stream page) - one
+  t4-size page cannot hold 528 cells.
+  1x only like building_t4, indexed PNG + KTX2, streamed. Measured rot-0 tops = t4's (walls 92, corners 87-88, pillar 91,
+  low wall 36, foundation 28, floor 20, stairwell 26, triangles 14 / 21; the 80-88 px brief band is the wall face, the
+  measured top includes the back corner of the cap).
+- Not a recolour of t4: own materials, own parts, own render (same procedural geometry as every tier).
+
+**Icons**
+- `items_build_elec` (stream, 32 px + @2x, CSS-only like items_build): `build_<key>` x 26 and `build_<piece>_t5` x 15, ADR-224
+  cel pass from each piece's own active frame (rot 0): figure crop, 2 px inset, own flat palette, bold outline ring.
+  `kit_<key>` (25 kit items, category item) share their piece's `build_<key>` cell.
+- Item defs checked (items.json + vehicle_items.json): every electricity ingredient already had its own icon (copper wire =
+  `item_copper_wire`, battery acid, battery, fuel tank, small engine, steel plate, iron pipe, glass); the 4 new components are
+  painted here. 15 older non-electricity items still have no icon of their own (wet_wood, reeds, flax, cured_venison,
+  cured_poultry, cured_prime_cut, smoked_fish, well_water_flask, well_canteen, well_water_bottle, well_waterskin, dung,
+  dung_fertilizer, harness, fishing_rod) - outside this drop.
+- `items_elec` (resident, 32 px + @2x): `circuit_board`, `electric_motor`, `solar_cell`, `led_bulb` (items), `skill_electrician`,
+  `skill_power_grid`, `skill_hydroponics` (crafting medallions), `skill_powered_tier` (building medallion), `icon_power_on`,
+  `icon_power_off`, `icon_battery` (interact-prompt glyphs), painted with draw.C in cel mode.
+- Generator `packages/assets/pack/items/src/elec_icons.py`; both atlases are in gen_icon_css.py (SRC + UI_OK) and the
+  stylesheet is regenerated (this also picked up `build_dock` / `build_shipyard`, which were in the manifest but missing
+  from the CSS).

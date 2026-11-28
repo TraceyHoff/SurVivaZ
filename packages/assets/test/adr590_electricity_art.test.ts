@@ -14,6 +14,7 @@ type Spr = { key: string; atlas: string; anchor: { x: number; y: number }; rotat
 type Atlas = { key: string; image: string; frameW: number; frameH: number; columns: number; rows: number; ktx2?: string; residency?: string;
   pages?: { scale: number; image: string; ktx2?: string; masksKtx2?: Record<string, string> }[]; masks?: Record<string, string>; masksKtx2?: Record<string, string> };
 const byKey = new Map<string, Spr>(man.sprites.map((s: Spr) => [s.key, s]));
+const FB = JSON.parse(readFileSync("packages/gameplay/data/sprite_fallbacks.json", "utf8")) as { sprites: Record<string, unknown>; icons: Record<string, string> };
 const atlas = new Map<string, Atlas>(man.atlases.map((a: Atlas) => [a.key, a]));
 // brief §2 / §4: class -> [frameW, frameH, pivot y]. Wider than the brief where a wheel overhangs its footprint in every
 // facing: wt 144 (2.4 m wheel on a 2 m footprint), xw 184 x 216 (3.4 m wheel on a 2x2 diamond, pivot 180 so the front
@@ -42,8 +43,8 @@ describe("ADR-590 electricity-tier art", () => {
     for (const k of DELIVERED) {
       const [, cls, rows, nf, fps, fw, fh] = P[k]!; const s = byKey.get(k)!;
       expect(s, k).toBeDefined(); expect(s.atlas, k).toMatch(new RegExp(`^elec_${cls}(_\\d+)?$`));
-      // sprite_fallbacks keeps its $placeholder entry until build_<key> ships (the build tile borrows it, adr229); resolveSprite
-      // returns the key itself, untinted, whenever the pack has it, so the real art already wins in the world.
+      // the placeholders are gone now that build_<key> ships too (items_build_elec): no tinted neighbour anywhere
+      expect(FB.sprites[k], k).toBeUndefined();
       const a = atlas.get(s.atlas)!; const [w, h, oy] = CLS[cls]!;
       expect([a.frameW, a.frameH], k).toEqual([w, h]); expect(s.anchor, k).toEqual({ x: 0.5, y: oy / h });
       expect(s.rotationArt, k).toBe(rows === 1 ? "mirror" : "unique4");
@@ -110,5 +111,92 @@ describe("ADR-590 mounted electric lights", () => {
     const cx0 = (ci % ca.columns) * ca.frameW, cy0 = Math.floor(ci / ca.columns) * ca.frameH; let cmax = 0;
     for (let y = 0; y < ca.frameH; y++) for (let x = 0; x < ca.frameW; x++) if (cc.data[((cy0 + y) * cc.width + cx0 + x) * 4 + 3]! >= 128) cmax = Math.max(cmax, y);
     expect(oy - cmax).toBeGreaterThanOrEqual(64);   // lowest solid pixel of the hanging body stays ~2.1 m+ up (no shadow on the floor)
+  });
+});
+
+// brief section 5 (ADR-593): powered building tier = building_t4 layout rules, own art. 15 pieces, painted rows as t4.
+const T5: Record<string, number> = { foundation: 4, foundation_triangle: 4, floor: 4, floor_triangle: 4, floor_hatch_frame: 4, floor_stairwell: 2,
+  wall: 2, wall_low: 2, wall_window: 2, wall_doorway: 2, wall_arched: 2, wall_corner_inner: 4, wall_corner_outer: 4, wall_corner_angled: 4, pillar: 4 };
+describe("ADR-593 powered building tier art (building_t5)", () => {
+  const topOf = (a: Atlas, img: { width: number; data: Uint8Array }, i: number): number => {
+    const x0 = (i % a.columns) * a.frameW, y0 = Math.floor(i / a.columns) * a.frameH;
+    for (let y = 0; y < a.frameH; y++) for (let x = 0; x < a.frameW; x++) if (img.data[((y0 + y) * img.width + x0 + x) * 4 + 3]! >= 128) return 99 - y;
+    return 0;
+  };
+  const glowOf = (a: Atlas, img: { width: number; data: Uint8Array }, i: number): number => {
+    const x0 = (i % a.columns) * a.frameW, y0 = Math.floor(i / a.columns) * a.frameH; let n = 0;
+    for (let y = 0; y < a.frameH; y++) for (let x = 0; x < a.frameW; x++) if (img.data[((y0 + y) * img.width + x0 + x) * 4 + 3]! > 0) n++;
+    return n;
+  };
+  it("15 bld_<piece>_t5 sprites: t4 layout (84x120, anchor .825, unique4, 4 damage stages, crack overlay) + lit / unlit / idle", () => {
+    expect(Object.keys(T5).sort()).toEqual([...JSON.parse(readFileSync("packages/gameplay/data/power.json", "utf8")).poweredTier.pieces].sort());
+    for (const [p, rows] of Object.entries(T5)) {
+      const k = `bld_${p}_t5`; const s = byKey.get(k)!; expect(s, k).toBeDefined();
+      expect(s.atlas, k).toMatch(/^building_t5(_floor)?$/); const a = atlas.get(s.atlas)!;
+      expect([a.frameW, a.frameH, a.residency], k).toEqual([84, 120, "stream"]); expect(s.anchor, k).toEqual({ x: 0.5, y: 0.825 });
+      expect(s.rotationArt, k).toBe("unique4"); expect(s.building!.piece, k).toBe(`${p}@tier5`); expect(s.building!.crackOverlay, k).toBe("bld_crack");
+      expect(s.building!.layer, k).toBe(byKey.get(`bld_${p}_t4`)!.building!.layer);
+      const fr = s.building!.frames, un = s.building!.states!.unlit!, idle = s.animations.idle!;
+      expect(fr.length, k).toBe(4); expect(un.length, k).toBe(4); expect(idle.fps, k).toBe(4); expect(idle.loop, k).toBe(true);
+      for (let r = 0; r < 4; r++) {
+        expect(fr[r]!.length, k).toBe(4); expect(un[r]!.length, k).toBe(4); expect(fr[r], k).toEqual(fr[r % rows]); expect(un[r], k).toEqual(un[r % rows]);
+        expect(idle.rotations![r]!.length, k).toBe(4); expect(idle.rotations![r]![0], k).toBe(fr[r]![0]);
+        expect(s.animations.unlit!.rotations![r]![0], k).toBe(un[r]![0]);
+      }
+      const cells = new Set([...fr.slice(0, rows).flat(), ...un.slice(0, rows).flat(), ...idle.rotations!.slice(0, rows).flat()]);
+      expect(cells.size, k).toBe(rows * 11);   // every painted cell its own (4 powered + 4 unlit damage stages + 3 extra animation frames)
+      expect(JSON.stringify(lock).includes(`"${k}"`), k).toBe(true);
+    }
+  });
+  it("pages: indexed PNG + KTX2 + emissive mask inside 2048 px (building_t5 = a 2016x2040 tier page); tops match t4 (80 px floor); glow only while powered", () => {
+    for (const ak of ["building_t5", "building_t5_floor"]) {
+      const a = atlas.get(ak)!; expect(a.masks?.emissive).toBe(`atlases/${ak}_emissive.png`);
+      for (const f of [a.image, a.ktx2!, a.masks!.emissive!, a.masksKtx2!.emissive!]) expect(statSync(root + f).size, f).toBeGreaterThan(0);
+      const im = png(a.image); expect([im.width, im.height]).toEqual([a.columns * 84, a.rows * 120]); expect(Math.max(im.width, im.height)).toBeLessThanOrEqual(2048);
+    }
+    expect([atlas.get("building_t5")!.columns, atlas.get("building_t5")!.rows]).toEqual([24, 17]);
+    const t4 = atlas.get("building_t4")!; const i4 = png(t4.image);
+    for (const [p, rows] of Object.entries(T5)) {
+      const s = byKey.get(`bld_${p}_t5`)!; const a = atlas.get(s.atlas)!; const col = png(a.image); const em = png(a.masks!.emissive!);
+      const s4 = byKey.get(`bld_${p}_t4`)!;
+      for (let r = 0; r < rows; r++) {
+        expect(Math.abs(topOf(a, col, s.building!.frames[r]![0]!) - topOf(t4, i4, s4.building!.frames[r]![0]!)), `${p} rot ${r}`).toBeLessThanOrEqual(1);
+        for (const i of s.animations.idle!.rotations![r]!) expect(glowOf(a, em, i), `${p} idle ${i}`).toBeGreaterThan(0);
+        for (const i of s.building!.states!.unlit![r]!) expect(glowOf(a, em, i), `${p} unlit ${i}`).toBe(0);
+      }
+    }
+  });
+});
+
+describe("ADR-590 / ADR-593 electricity icons", () => {
+  const items = JSON.parse(readFileSync("packages/assets/pack/items/manifest.items.json", "utf8")) as { atlases: Atlas[]; sprites: { key: string; atlas: string; category: string; animations: { idle: { frames: number[] } } }[] };
+  const ik = new Map(items.sprites.map((s) => [s.key, s]));
+  const css = readFileSync("apps/client/src/gameplay-panels.css", "utf8");
+  const ELEC = Object.keys(P);
+  it("build_<key> for the 26 pieces and build_<piece>_t5 for the 15 tier pieces, each its own cell; kits point at build_<key>", () => {
+    const keys = [...ELEC.map((k) => `build_${k}`), ...Object.keys(T5).map((p) => `build_${p}_t5`)]; expect(keys.length).toBe(41);
+    const cells = new Set<number>();
+    for (const k of keys) {
+      const s = ik.get(k)!; expect(s?.atlas, k).toBe("items_build_elec"); expect(s.category, k).toBe("ui"); cells.add(s.animations.idle.frames[0]!);
+      expect(css.includes(`[data-icon="${k}"]`), k).toBe(true);
+    }
+    expect(cells.size).toBe(41);
+    const kits = (JSON.parse(readFileSync("packages/gameplay/data/items.json", "utf8")).items as { key: string }[]).filter((i) => i.key.startsWith("kit_"));
+    expect(kits.length).toBe(25);
+    for (const it of kits) {   // the kit's inventory icon is its build_<key> cell (brief section 6: same object, no second painting)
+      expect(ELEC, it.key).toContain(it.key.slice(4)); const kit = ik.get(it.key)!; const b = ik.get(`build_${it.key.slice(4)}`)!;
+      expect([kit?.atlas, kit?.category], it.key).toEqual(["items_build_elec", "item"]); expect(kit.animations.idle.frames, it.key).toEqual(b.animations.idle.frames);
+      expect(css.includes(`[data-icon="${it.key}"]`), it.key).toBe(true); expect(FB.icons[it.key], it.key).toBeUndefined();
+    }
+  });
+  it("components, skill medallions and power-prompt glyphs on the resident items_elec page (32 px + @2x); skills.json uses them", () => {
+    const a = items.atlases.find((x) => x.key === "items_elec")!; expect(a.residency).toBe("resident"); expect([a.frameW, a.frameH]).toEqual([32, 32]);
+    expect(a.pages?.[0]?.scale).toBe(2);
+    const comp = ["circuit_board", "electric_motor", "solar_cell", "led_bulb"]; const ui = ["skill_electrician", "skill_power_grid", "skill_powered_tier", "skill_hydroponics", "icon_power_on", "icon_power_off", "icon_battery"];
+    for (const k of [...comp, ...ui]) { const s = ik.get(k)!; expect(s?.atlas, k).toBe("items_elec"); expect(s.category, k).toBe(comp.includes(k) ? "item" : "ui"); expect(css.includes(`[data-icon="${k}"]`), k).toBe(true); }
+    expect(new Set([...comp, ...ui].map((k) => ik.get(k)!.animations.idle.frames[0])).size).toBe(11);
+    const nodes = JSON.parse(readFileSync("packages/gameplay/data/skills.json", "utf8")).nodes as { key: string; icon: string }[];
+    const icon = (k: string) => nodes.find((n) => n.key === k)!.icon;
+    expect([icon("electrician_craft"), icon("power_grid"), icon("hydroponics"), icon("powered_tier")]).toEqual(["skill_electrician", "skill_power_grid", "skill_hydroponics", "skill_powered_tier"]);
   });
 });

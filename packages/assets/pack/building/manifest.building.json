@@ -1786,6 +1786,38 @@
    "masksKtx2": {
     "emissive": "atlases/elec_xxl_l_emissive.ktx2"
    }
+  },
+  {
+   "key": "building_t5",
+   "image": "atlases/building_t5.png",
+   "frameW": 84,
+   "frameH": 120,
+   "columns": 24,
+   "rows": 17,
+   "masks": {
+    "emissive": "atlases/building_t5_emissive.png"
+   },
+   "residency": "stream",
+   "ktx2": "atlases/building_t5.ktx2",
+   "masksKtx2": {
+    "emissive": "atlases/building_t5_emissive.ktx2"
+   }
+  },
+  {
+   "key": "building_t5_floor",
+   "image": "atlases/building_t5_floor.png",
+   "frameW": 84,
+   "frameH": 120,
+   "columns": 22,
+   "rows": 11,
+   "masks": {
+    "emissive": "atlases/building_t5_floor_emissive.png"
+   },
+   "residency": "stream",
+   "ktx2": "atlases/building_t5_floor.ktx2",
+   "masksKtx2": {
+    "emissive": "atlases/building_t5_floor_emissive.ktx2"
+   }
   }
  ],
  "sprites": [
@@ -88417,6 +88449,1971 @@
     "crackOverlay": "bld_crack"
    },
    "rotationArt": "mirror"
+  },
+  {
+   "key": "bld_wall_t5",
+   "category": "building",
+   "atlas": "building_t5",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0,
+      8,
+      9,
+      10
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       0,
+       8,
+       9,
+       10
+      ],
+      [
+       11,
+       19,
+       20,
+       21
+      ],
+      [
+       0,
+       8,
+       9,
+       10
+      ],
+      [
+       11,
+       19,
+       20,
+       21
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      4
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       4
+      ],
+      [
+       15
+      ],
+      [
+       4
+      ],
+      [
+       15
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "wall@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 1,
+    "frames": [
+     [
+      0,
+      1,
+      2,
+      3
+     ],
+     [
+      11,
+      12,
+      13,
+      14
+     ],
+     [
+      0,
+      1,
+      2,
+      3
+     ],
+     [
+      11,
+      12,
+      13,
+      14
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       4,
+       5,
+       6,
+       7
+      ],
+      [
+       15,
+       16,
+       17,
+       18
+      ],
+      [
+       4,
+       5,
+       6,
+       7
+      ],
+      [
+       15,
+       16,
+       17,
+       18
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_wall_low_t5",
+   "category": "building",
+   "atlas": "building_t5",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      22,
+      30,
+      31,
+      32
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       22,
+       30,
+       31,
+       32
+      ],
+      [
+       33,
+       41,
+       42,
+       43
+      ],
+      [
+       22,
+       30,
+       31,
+       32
+      ],
+      [
+       33,
+       41,
+       42,
+       43
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      26
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       26
+      ],
+      [
+       37
+      ],
+      [
+       26
+      ],
+      [
+       37
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "wall_low@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 1,
+    "frames": [
+     [
+      22,
+      23,
+      24,
+      25
+     ],
+     [
+      33,
+      34,
+      35,
+      36
+     ],
+     [
+      22,
+      23,
+      24,
+      25
+     ],
+     [
+      33,
+      34,
+      35,
+      36
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       26,
+       27,
+       28,
+       29
+      ],
+      [
+       37,
+       38,
+       39,
+       40
+      ],
+      [
+       26,
+       27,
+       28,
+       29
+      ],
+      [
+       37,
+       38,
+       39,
+       40
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_wall_window_t5",
+   "category": "building",
+   "atlas": "building_t5",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      44,
+      52,
+      53,
+      54
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       44,
+       52,
+       53,
+       54
+      ],
+      [
+       55,
+       63,
+       64,
+       65
+      ],
+      [
+       44,
+       52,
+       53,
+       54
+      ],
+      [
+       55,
+       63,
+       64,
+       65
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      48
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       48
+      ],
+      [
+       59
+      ],
+      [
+       48
+      ],
+      [
+       59
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "wall_window@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 1,
+    "frames": [
+     [
+      44,
+      45,
+      46,
+      47
+     ],
+     [
+      55,
+      56,
+      57,
+      58
+     ],
+     [
+      44,
+      45,
+      46,
+      47
+     ],
+     [
+      55,
+      56,
+      57,
+      58
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       48,
+       49,
+       50,
+       51
+      ],
+      [
+       59,
+       60,
+       61,
+       62
+      ],
+      [
+       48,
+       49,
+       50,
+       51
+      ],
+      [
+       59,
+       60,
+       61,
+       62
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_wall_doorway_t5",
+   "category": "building",
+   "atlas": "building_t5",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      66,
+      74,
+      75,
+      76
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       66,
+       74,
+       75,
+       76
+      ],
+      [
+       77,
+       85,
+       86,
+       87
+      ],
+      [
+       66,
+       74,
+       75,
+       76
+      ],
+      [
+       77,
+       85,
+       86,
+       87
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      70
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       70
+      ],
+      [
+       81
+      ],
+      [
+       70
+      ],
+      [
+       81
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "wall_doorway@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 1,
+    "frames": [
+     [
+      66,
+      67,
+      68,
+      69
+     ],
+     [
+      77,
+      78,
+      79,
+      80
+     ],
+     [
+      66,
+      67,
+      68,
+      69
+     ],
+     [
+      77,
+      78,
+      79,
+      80
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       70,
+       71,
+       72,
+       73
+      ],
+      [
+       81,
+       82,
+       83,
+       84
+      ],
+      [
+       70,
+       71,
+       72,
+       73
+      ],
+      [
+       81,
+       82,
+       83,
+       84
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_wall_arched_t5",
+   "category": "building",
+   "atlas": "building_t5",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      88,
+      96,
+      97,
+      98
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       88,
+       96,
+       97,
+       98
+      ],
+      [
+       99,
+       107,
+       108,
+       109
+      ],
+      [
+       88,
+       96,
+       97,
+       98
+      ],
+      [
+       99,
+       107,
+       108,
+       109
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      92
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       92
+      ],
+      [
+       103
+      ],
+      [
+       92
+      ],
+      [
+       103
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "wall_arched@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 1,
+    "frames": [
+     [
+      88,
+      89,
+      90,
+      91
+     ],
+     [
+      99,
+      100,
+      101,
+      102
+     ],
+     [
+      88,
+      89,
+      90,
+      91
+     ],
+     [
+      99,
+      100,
+      101,
+      102
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       92,
+       93,
+       94,
+       95
+      ],
+      [
+       103,
+       104,
+       105,
+       106
+      ],
+      [
+       92,
+       93,
+       94,
+       95
+      ],
+      [
+       103,
+       104,
+       105,
+       106
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_wall_corner_inner_t5",
+   "category": "building",
+   "atlas": "building_t5",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      110,
+      118,
+      119,
+      120
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       110,
+       118,
+       119,
+       120
+      ],
+      [
+       121,
+       129,
+       130,
+       131
+      ],
+      [
+       132,
+       140,
+       141,
+       142
+      ],
+      [
+       143,
+       151,
+       152,
+       153
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      114
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       114
+      ],
+      [
+       125
+      ],
+      [
+       136
+      ],
+      [
+       147
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "wall_corner_inner@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 1,
+    "frames": [
+     [
+      110,
+      111,
+      112,
+      113
+     ],
+     [
+      121,
+      122,
+      123,
+      124
+     ],
+     [
+      132,
+      133,
+      134,
+      135
+     ],
+     [
+      143,
+      144,
+      145,
+      146
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       114,
+       115,
+       116,
+       117
+      ],
+      [
+       125,
+       126,
+       127,
+       128
+      ],
+      [
+       136,
+       137,
+       138,
+       139
+      ],
+      [
+       147,
+       148,
+       149,
+       150
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_wall_corner_outer_t5",
+   "category": "building",
+   "atlas": "building_t5",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      154,
+      162,
+      163,
+      164
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       154,
+       162,
+       163,
+       164
+      ],
+      [
+       165,
+       173,
+       174,
+       175
+      ],
+      [
+       176,
+       184,
+       185,
+       186
+      ],
+      [
+       187,
+       195,
+       196,
+       197
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      158
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       158
+      ],
+      [
+       169
+      ],
+      [
+       180
+      ],
+      [
+       191
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "wall_corner_outer@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 1,
+    "frames": [
+     [
+      154,
+      155,
+      156,
+      157
+     ],
+     [
+      165,
+      166,
+      167,
+      168
+     ],
+     [
+      176,
+      177,
+      178,
+      179
+     ],
+     [
+      187,
+      188,
+      189,
+      190
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       158,
+       159,
+       160,
+       161
+      ],
+      [
+       169,
+       170,
+       171,
+       172
+      ],
+      [
+       180,
+       181,
+       182,
+       183
+      ],
+      [
+       191,
+       192,
+       193,
+       194
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_wall_corner_angled_t5",
+   "category": "building",
+   "atlas": "building_t5",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      198,
+      206,
+      207,
+      208
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       198,
+       206,
+       207,
+       208
+      ],
+      [
+       209,
+       217,
+       218,
+       219
+      ],
+      [
+       220,
+       228,
+       229,
+       230
+      ],
+      [
+       231,
+       239,
+       240,
+       241
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      202
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       202
+      ],
+      [
+       213
+      ],
+      [
+       224
+      ],
+      [
+       235
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "wall_corner_angled@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 1,
+    "frames": [
+     [
+      198,
+      199,
+      200,
+      201
+     ],
+     [
+      209,
+      210,
+      211,
+      212
+     ],
+     [
+      220,
+      221,
+      222,
+      223
+     ],
+     [
+      231,
+      232,
+      233,
+      234
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       202,
+       203,
+       204,
+       205
+      ],
+      [
+       213,
+       214,
+       215,
+       216
+      ],
+      [
+       224,
+       225,
+       226,
+       227
+      ],
+      [
+       235,
+       236,
+       237,
+       238
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_pillar_t5",
+   "category": "building",
+   "atlas": "building_t5",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      242,
+      250,
+      251,
+      252
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       242,
+       250,
+       251,
+       252
+      ],
+      [
+       253,
+       261,
+       262,
+       263
+      ],
+      [
+       264,
+       272,
+       273,
+       274
+      ],
+      [
+       275,
+       283,
+       284,
+       285
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      246
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       246
+      ],
+      [
+       257
+      ],
+      [
+       268
+      ],
+      [
+       279
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "pillar@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 1,
+    "frames": [
+     [
+      242,
+      243,
+      244,
+      245
+     ],
+     [
+      253,
+      254,
+      255,
+      256
+     ],
+     [
+      264,
+      265,
+      266,
+      267
+     ],
+     [
+      275,
+      276,
+      277,
+      278
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       246,
+       247,
+       248,
+       249
+      ],
+      [
+       257,
+       258,
+       259,
+       260
+      ],
+      [
+       268,
+       269,
+       270,
+       271
+      ],
+      [
+       279,
+       280,
+       281,
+       282
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_foundation_t5",
+   "category": "building",
+   "atlas": "building_t5_floor",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      0,
+      8,
+      9,
+      10
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       0,
+       8,
+       9,
+       10
+      ],
+      [
+       11,
+       19,
+       20,
+       21
+      ],
+      [
+       22,
+       30,
+       31,
+       32
+      ],
+      [
+       33,
+       41,
+       42,
+       43
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      4
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       4
+      ],
+      [
+       15
+      ],
+      [
+       26
+      ],
+      [
+       37
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "foundation@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      0,
+      1,
+      2,
+      3
+     ],
+     [
+      11,
+      12,
+      13,
+      14
+     ],
+     [
+      22,
+      23,
+      24,
+      25
+     ],
+     [
+      33,
+      34,
+      35,
+      36
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       4,
+       5,
+       6,
+       7
+      ],
+      [
+       15,
+       16,
+       17,
+       18
+      ],
+      [
+       26,
+       27,
+       28,
+       29
+      ],
+      [
+       37,
+       38,
+       39,
+       40
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_foundation_triangle_t5",
+   "category": "building",
+   "atlas": "building_t5_floor",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      44,
+      52,
+      53,
+      54
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       44,
+       52,
+       53,
+       54
+      ],
+      [
+       55,
+       63,
+       64,
+       65
+      ],
+      [
+       66,
+       74,
+       75,
+       76
+      ],
+      [
+       77,
+       85,
+       86,
+       87
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      48
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       48
+      ],
+      [
+       59
+      ],
+      [
+       70
+      ],
+      [
+       81
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "foundation_triangle@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      44,
+      45,
+      46,
+      47
+     ],
+     [
+      55,
+      56,
+      57,
+      58
+     ],
+     [
+      66,
+      67,
+      68,
+      69
+     ],
+     [
+      77,
+      78,
+      79,
+      80
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       48,
+       49,
+       50,
+       51
+      ],
+      [
+       59,
+       60,
+       61,
+       62
+      ],
+      [
+       70,
+       71,
+       72,
+       73
+      ],
+      [
+       81,
+       82,
+       83,
+       84
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_floor_t5",
+   "category": "building",
+   "atlas": "building_t5_floor",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      88,
+      96,
+      97,
+      98
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       88,
+       96,
+       97,
+       98
+      ],
+      [
+       99,
+       107,
+       108,
+       109
+      ],
+      [
+       110,
+       118,
+       119,
+       120
+      ],
+      [
+       121,
+       129,
+       130,
+       131
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      92
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       92
+      ],
+      [
+       103
+      ],
+      [
+       114
+      ],
+      [
+       125
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "floor@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      88,
+      89,
+      90,
+      91
+     ],
+     [
+      99,
+      100,
+      101,
+      102
+     ],
+     [
+      110,
+      111,
+      112,
+      113
+     ],
+     [
+      121,
+      122,
+      123,
+      124
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       92,
+       93,
+       94,
+       95
+      ],
+      [
+       103,
+       104,
+       105,
+       106
+      ],
+      [
+       114,
+       115,
+       116,
+       117
+      ],
+      [
+       125,
+       126,
+       127,
+       128
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_floor_triangle_t5",
+   "category": "building",
+   "atlas": "building_t5_floor",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      132,
+      140,
+      141,
+      142
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       132,
+       140,
+       141,
+       142
+      ],
+      [
+       143,
+       151,
+       152,
+       153
+      ],
+      [
+       154,
+       162,
+       163,
+       164
+      ],
+      [
+       165,
+       173,
+       174,
+       175
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      136
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       136
+      ],
+      [
+       147
+      ],
+      [
+       158
+      ],
+      [
+       169
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "floor_triangle@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      132,
+      133,
+      134,
+      135
+     ],
+     [
+      143,
+      144,
+      145,
+      146
+     ],
+     [
+      154,
+      155,
+      156,
+      157
+     ],
+     [
+      165,
+      166,
+      167,
+      168
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       136,
+       137,
+       138,
+       139
+      ],
+      [
+       147,
+       148,
+       149,
+       150
+      ],
+      [
+       158,
+       159,
+       160,
+       161
+      ],
+      [
+       169,
+       170,
+       171,
+       172
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_floor_hatch_frame_t5",
+   "category": "building",
+   "atlas": "building_t5_floor",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      176,
+      184,
+      185,
+      186
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       176,
+       184,
+       185,
+       186
+      ],
+      [
+       187,
+       195,
+       196,
+       197
+      ],
+      [
+       198,
+       206,
+       207,
+       208
+      ],
+      [
+       209,
+       217,
+       218,
+       219
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      180
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       180
+      ],
+      [
+       191
+      ],
+      [
+       202
+      ],
+      [
+       213
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "floor_hatch_frame@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      176,
+      177,
+      178,
+      179
+     ],
+     [
+      187,
+      188,
+      189,
+      190
+     ],
+     [
+      198,
+      199,
+      200,
+      201
+     ],
+     [
+      209,
+      210,
+      211,
+      212
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       180,
+       181,
+       182,
+       183
+      ],
+      [
+       191,
+       192,
+       193,
+       194
+      ],
+      [
+       202,
+       203,
+       204,
+       205
+      ],
+      [
+       213,
+       214,
+       215,
+       216
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "bld_floor_stairwell_t5",
+   "category": "building",
+   "atlas": "building_t5_floor",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.825
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      220,
+      228,
+      229,
+      230
+     ],
+     "fps": 4,
+     "loop": true,
+     "rotations": [
+      [
+       220,
+       228,
+       229,
+       230
+      ],
+      [
+       231,
+       239,
+       240,
+       241
+      ],
+      [
+       220,
+       228,
+       229,
+       230
+      ],
+      [
+       231,
+       239,
+       240,
+       241
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      224
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       224
+      ],
+      [
+       235
+      ],
+      [
+       224
+      ],
+      [
+       235
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "floor_stairwell@tier5",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 0,
+    "frames": [
+     [
+      220,
+      221,
+      222,
+      223
+     ],
+     [
+      231,
+      232,
+      233,
+      234
+     ],
+     [
+      220,
+      221,
+      222,
+      223
+     ],
+     [
+      231,
+      232,
+      233,
+      234
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       224,
+       225,
+       226,
+       227
+      ],
+      [
+       235,
+       236,
+       237,
+       238
+      ],
+      [
+       224,
+       225,
+       226,
+       227
+      ],
+      [
+       235,
+       236,
+       237,
+       238
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
   }
  ],
  "clanPalettes": [

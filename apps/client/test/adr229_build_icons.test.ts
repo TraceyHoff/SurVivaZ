@@ -11,7 +11,7 @@ import { buildIconKey, iconKeysFromCss, isClanTintedIcon, roadIconKey, signIconK
 
 const read = (p: string): string => readFileSync(resolve(__dirname, "../../..", p), "utf8");
 const manifest = JSON.parse(read("packages/assets/pack/items/manifest.items.json")) as { sprites: { key: string; atlas?: string }[] };
-const ART = new Set(manifest.sprites.filter((s) => s.atlas === "items_build" || s.atlas === "items_build_rfx").map((s) => s.key));
+const ART = new Set(manifest.sprites.filter((s) => s.atlas === "items_build" || s.atlas === "items_build_rfx" || s.atlas === "items_build_elec").map((s) => s.key));
 // Original standalone art may register dedicated build icons outside the legacy items_build sheet.
 const standalone = JSON.parse(read("packages/assets/pack/building/manifest.building.json")) as { sprites: { key: string }[] };
 for (const s of standalone.sprites) if (s.key.startsWith("build_")) ART.add(s.key);
@@ -40,8 +40,10 @@ describe("ADR-229 build window icons", () => {
       // below minTier the nearest tier's art is used, never the glyph
       if (p.tiered) expect(buildIconKey(p.key, 0, true, has), p.key).toBeDefined();
     }
-    expect(missing).toEqual([]); expect(pending.filter((k) => !(k in G.POWER.pieces))).toEqual([]); // ADR-590: electricity pieces borrow a neighbour's tile until Art ships build_<key> (docs/ART_KEYS_ELECTRICITY.md). ADR-250 art shipped: build_basic_storage_box (fallback path stays for future art-pending pieces)
+    expect(missing).toEqual([]); expect(pending).toEqual([]); // ADR-590: Art shipped build_<key> for every electricity piece (items_build_elec), so none borrows a neighbour's tile any more. ADR-250 art shipped: build_basic_storage_box (fallback path stays for future art-pending pieces)
     expect(buildIconKey("basic_storage_box", 0, false, has)).toBe("build_basic_storage_box");
+    // ADR-593: the powered tier (5) shows its own build_<piece>_t5 icon (items_build_elec), not tier 4's
+    for (const k of G.POWER.poweredTier.pieces) expect(buildIconKey(k, 5, true, has), k).toBe(`build_${k}_t5`);
     for (const s of ROADS.roads.surfaces) expect(has(roadIconKey(s.key)), s.key).toBe(true);
     for (const s of ROADS.signs) expect(has(signIconKey(s.key)), s.key).toBe(true);
     expect(has(SIGN_TOOL_ICON)).toBe(true);

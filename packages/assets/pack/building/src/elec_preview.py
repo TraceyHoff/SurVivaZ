@@ -1,6 +1,6 @@
 """Preview sheet for the electricity-tier art from the shipped pages (what the game loads), beside the 53 px player doll.
 python3 packages/assets/pack/building/src/elec_preview.py <out.png> <title> key1,key2,...
-Per piece: rot-0 unlit | two active frames | night view (base darkened + emissive mask + bloom) [| facing 2 active].
+Per piece: rot-0 unlit | two active frames | night view (base darkened + emissive mask + bloom) [| facing 2 active] [| damage 3].
 Yellow line = the doll's head (53 px = 1.75 m); cards at @2x (1x for the very tall classes)."""
 import json, sys
 from pathlib import Path
@@ -37,14 +37,20 @@ def night(col, em):
 cards = []
 for k in keys:
     s = S[k]; a = A[s['atlas']]; sc = 2 if a['frameW'] * 2 * 5 <= 1100 and a['frameH'] <= 200 else 1
-    col = Image.open(BLD / (a['pages'][0]['image'] if sc == 2 else a['image'])).convert('RGBA')
-    emp = (a['masks']['emissive'].replace('.png', '@2x.png') if sc == 2 else a['masks']['emissive'])
-    em = Image.open(BLD / emp).convert('RGBA')
+    if sc == 2 and not a.get('pages'):   # 1x-only pages (building_t5, like building_t4): nearest x2 for the cards
+        up = lambda im: im.resize((im.width * 2, im.height * 2), Image.NEAREST)
+        col = up(Image.open(BLD / a['image']).convert('RGBA')); em = up(Image.open(BLD / a['masks']['emissive']).convert('RGBA'))
+    else:
+        col = Image.open(BLD / (a['pages'][0]['image'] if sc == 2 else a['image'])).convert('RGBA')
+        emp = (a['masks']['emissive'].replace('.png', '@2x.png') if sc == 2 else a['masks']['emissive'])
+        em = Image.open(BLD / emp).convert('RGBA')
     idle = s['animations']['idle']; un = s['animations']['unlit']
     rots = idle.get('rotations', [idle['frames']]); unr = un.get('rotations', [un['frames']])
     lit0 = rots[0]; tiles = [frame(col, a, unr[0][0], sc), frame(col, a, lit0[0], sc), frame(col, a, lit0[len(lit0) // 2], sc),
                             night(frame(col, a, lit0[0], sc), frame(em, a, lit0[0], sc))]
     if len(rots) > 1: tiles.append(frame(col, a, rots[1][0], sc))
+    fr = (s.get('building') or {}).get('frames') or [[]]
+    if len(set(fr[0])) == 4: tiles.append(frame(col, a, fr[0][3], sc))   # baked damage stage 3 (tiered building pieces)
     fw, fh = a['frameW'] * sc, a['frameH'] * sc; oy = round(s['anchor']['y'] * a['frameH']) * sc
     dl = doll().resize((24 * sc, 54 * sc), Image.NEAREST)
     W = 10 + dl.width + 6 + len(tiles) * (fw + 4); H = fh + 34

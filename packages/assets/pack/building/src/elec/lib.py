@@ -76,7 +76,8 @@ def L(on, lit, off='off_led'):
 
 # ---------------------------------------------------------------- frame classes (w, h, ox, oy) at 1x
 CLS = {'S': (64, 88, 32, 70), 'T': (72, 120, 36, 102), 'W': (104, 120, 52, 94), 'WT': (144, 152, 72, 118),
-       'XT': (72, 168, 36, 144), 'XW': (184, 216, 92, 180), 'XXL_T': (112, 240, 56, 216), 'XXL_L': (176, 376, 88, 348)}
+       'XT': (72, 168, 36, 144), 'XW': (184, 216, 92, 180), 'XXL_T': (112, 240, 56, 216), 'XXL_L': (176, 376, 88, 348),
+       'BT': (84, 120, 42, 99)}   # BT = building_t* tier frame (ADR-504 84x120, pivot (42, 99)), used by the powered tier (tier5.py)
 
 class Geom:
     def __init__(self, bx, dec=(), soft=(), ramps=()):
@@ -241,10 +242,14 @@ def _glow_mask(im):
     gk = (GLOW_ARR[:, 0] << 16) | (GLOW_ARR[:, 1] << 8) | GLOW_ARR[:, 2]
     return np.isin(key, gk) & (a[..., 3] == 255)
 
-def _compose(g, rot, cls, fp, seed, shadow, shadow_rect):
+def _compose(g, rot, cls, fp, seed, shadow, shadow_rect, stage=0):
     w, h, ox, oy = CLS[cls]
     cv = _render(g, rot, seed, (w, h), (ox, oy))
-    img = add_outline(cv.img, 1.0, seed + rot)
+    img = cv.img
+    if stage:   # baked building damage stage (iso.damage: grime, cracks, chips), same seed for the key-colour render
+        from iso import damage
+        img = damage(img, stage, seed)
+    img = add_outline(img, 1.0, seed + rot)
     if shadow:
         fw, fh = (fp[1], fp[0]) if rot % 2 else fp
         x0, x1, y0, y1 = shadow_rect or (-fw / 2 + .04, fw / 2 - .04, -fh / 2 + .04, fh / 2 - .04)
@@ -253,7 +258,7 @@ def _compose(g, rot, cls, fp, seed, shadow, shadow_rect):
     return img
 
 KEYCOL = '#ff00fe'
-def render_frame(g, rot, cls, fp, seed, shadow=True, shadow_rect=None, geom=None):
+def render_frame(g, rot, cls, fp, seed, shadow=True, shadow_rect=None, geom=None, stage=0):
     """-> dict(col=(1x, 2x), em=(1x, 2x), clip=bool, top=px above pivot at 1x).
     Emissive: the frame is rendered twice, the second time with every lit_* ramp swapped to a key colour; pixels that
     differ and carry a lit_* colour are the glowing parts (exact even where body highlights snap close to a glow tint).
@@ -261,7 +266,7 @@ def render_frame(g, rot, cls, fp, seed, shadow=True, shadow_rect=None, geom=None
     w, h, ox, oy = CLS[cls]
     for b in g.bx + g.back:
         if min(b.v[1] - b.v[0], b.v[3] - b.v[2]) < .03: b.edge = False
-    img = _compose(g, rot, cls, fp, seed, shadow, shadow_rect)
+    img = _compose(g, rot, cls, fp, seed, shadow, shadow_rect, stage)
     rps = {b.rp for b in g.bx} | {b.rp for b in g.back} | g.ramps
     pal = _palette(rps)
     uses_lit = any(r.startswith('lit_') for r in rps)
@@ -273,7 +278,7 @@ def render_frame(g, rot, cls, fp, seed, shadow=True, shadow_rect=None, geom=None
             g2 = geom() if geom else g
             for b in g2.bx + g2.back:
                 if min(b.v[1] - b.v[0], b.v[3] - b.v[2]) < .03: b.edge = False
-            img_k = _compose(g2, rot, cls, fp, seed, shadow, shadow_rect)
+            img_k = _compose(g2, rot, cls, fp, seed, shadow, shadow_rect, stage)
         finally:
             RAMPS.update(saved)
     bb = img.getchannel('A').point(lambda a: 255 if a > 90 else 0).getbbox()
