@@ -18,6 +18,7 @@ it.each(["singleplayer", "host"] as const)("%s seed preview debounces typing/pas
   input.value = "abc"; input.dispatchEvent(new Event("input")); expect(img.hidden).toBe(true);
   input.focus(); const press = (key: string) => { for (const type of ["keydown", "keyup"]) document.activeElement!.dispatchEvent(new KeyboardEvent(type, { key, bubbles: true, cancelable: true })); };
   // ADR-585: the survey zoom buttons join the gamepad stop list (DOM order).
-  for (const text of ["Random", "Zoom out −", "Zoom in +", "Create world", "Back"]) { press("GamepadDPadDown"); expect(document.activeElement?.textContent).toBe(text); }
+  // ADR-588/589: the Spawn point and Structures buttons are stops too, after the zoom pair.
+  for (const text of ["Random", "Zoom out −", "Zoom in +", "Spawn point: east", "Structures: shown", "Create world", "Back"]) { press("GamepadDPadDown"); expect(document.activeElement?.textContent).toBe(text); }
   press("GamepadB"); expect(document.querySelector("[data-role=world-preview]")).toBeNull(); vi.advanceTimersByTime(100); expect(document.querySelector("[data-role=world-preview]")).toBeNull();
 });

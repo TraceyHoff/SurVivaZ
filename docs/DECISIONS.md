@@ -16119,3 +16119,64 @@ front-right and east-middle tiles are also unplaced) — no placed tile's part c
 its north arm, and it stays bare until the tile is placed (pinned in the client
 test). That part is an unfinished roof, not a coverage defect; every wall below a
 placed tile is now covered.
+
+## ADR-588: structure markers are a player choice, and the in-game map only shows discovered ruins (SurVivaZ)
+
+The user asked for three things of the maps: a choice to see structures at all, and
+in-game ruins only where the player has actually been. ADR-586 deliberately drew the
+in-game diamonds over unexplored dark areas ("which is the point of showing them");
+the user overruled that for the in-game map.
+
+- One remembered choice, shared by both maps: `apps/client/src/map-prefs.ts`
+  (`survivaz.showStructures` in localStorage, default on = the ADR-586 behaviour).
+  A "Structures: shown/hidden" button sits on the world-generation survey (menu.ts)
+  and in the in-game map's controls (world-map.ts). Hidden on the survey also skips
+  the ruin enumeration entirely; hidden in-game skips the overlay's enumeration too.
+- In-game discovered-only: the map already draws only terrain the client has received
+  (unknown tiles stay dark); the diamonds now follow the same rule via the exported
+  `discoveredRuins` filter — a site shows only when its centre tile has been received.
+  The seed-page survey is pre-game (nothing is discovered yet), so only the toggle
+  applies there. The map note now says so.
+- Scope: "structures" = the abandoned structures both maps already mark. Player-built
+  buildings are not marked on either map; that would be a separate feature.
+
+Tests: adr588_589 (client) pins the filter (centre tile received / not / no tile
+source), the preference default + round-trip, and both toggles flipping + persisting.
+
+## ADR-589: the player chooses their spawn point on the world-generation screen; the selected point is yellow (SurVivaZ)
+
+The user asked to choose their spawn location on the generation screen, with the
+selected spawn point yellow. The choice is among the seed's four ADR-106 points —
+the guaranteed-clear starter patches; arbitrary click-anywhere spawns would break
+that guarantee, so they are not offered.
+
+- Survey (menu.ts): the selected ring is overdrawn in yellow (#ffd23e) by
+  `worldPreviewSvg`'s new `selectedSpawn` marker (absent = byte-identical legacy
+  output). Selection by tapping a ring on the survey (single-pointer tap hit-test,
+  7 survey-px radius) or by the "Spawn point: <side>" button, which cycles the four
+  (a gamepad/keyboard stop, in DOM order after the zoom buttons). The points are
+  named by where they sit on the north-up survey — SPAWN_QUADRANTS order (NE, SE,
+  SW, NW) lands at the screen's east / south / west / north — and the survey note
+  names the current choice ("The yellow ○ is your spawn point (to the east)…").
+  Default selection is index 0 (east), so an untouched page behaves as before apart
+  from the highlight.
+- Flow: `MenuChoice.spawnIndex` → main.ts → startSingleplayer / startHost →
+  createLocalServer / startWorkerServer (+ worker protocol/init) / startP2PHost →
+  `GameServerOptions.spawnIndex`. In game.ts `onClientJoin`, the first human join
+  spawns at `spawnPointAt(world, index, "join", clientId)` (new in gameplay
+  spawn_points.ts: the specific installed point with pickSpawnPoint's jitter,
+  crowding ignored, index clamped) instead of the least-crowded pick. Consumed
+  once: a join later marked virtual (a singleplayer bot that connected first)
+  hands the choice back in markVirtual; friend-code guests (joinNearClient) and
+  the dev sandbox keep their own placement and never consume it. Respawns are
+  unchanged (bed → least-crowded as before), and continuing an existing world is
+  unaffected because the saved position restores over the join spawn.
+
+Tests: adr589 (world) pins the yellow overdraw + legacy byte-identity + off-survey
+selection; adr589 (gameplay) pins spawnPointAt (point, jitter bound, determinism,
+crowding ignored, clamping); adr589 (server) pins first-join-at-chosen-point and
+second-join-falls-back through a real LoopbackNetwork server; adr588_589 (client)
+pins the button cycle + labels, the yellow ring reaching the survey SVG, and the
+MenuChoice carrying spawnIndex. ADR-270's and ADR-273's seed-picker pins were
+extended for the two new gamepad stops and the new choice field (same treatment
+ADR-585 gave the zoom buttons).

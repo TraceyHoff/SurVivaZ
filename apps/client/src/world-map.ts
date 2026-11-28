@@ -17,6 +17,7 @@ import { TILE_COLORS } from "@engine/render";
 import { createIdleTracker, idleCompass } from "./compass-hud.js";
 import { CHUNK_SIZE, ProceduralGenerator, northUpToWorld, worldToNorthUp, type TileMap } from "@engine/world";
 import { iconImg } from "./game-icons.js";
+import { loadShowStructures, saveShowStructures } from "./map-prefs.js";
 
 export interface WorldMapSource {
   world(): World | undefined;
@@ -27,6 +28,14 @@ export interface WorldMapSource {
   /** ADR-586: the world seed, when the client knows it (singleplayer / hosting). Without it
    * the abandoned-structure overlay cannot be enumerated and simply does not draw. */
   seed?(): number | undefined;
+}
+/** ADR-588: the abandoned-structure sites the map may show — only those whose centre tile
+ * the client has actually received (discovered). The map never invents terrain, and the
+ * structure markers now follow the same rule: a ruin in a dark, unexplored area stays
+ * hidden until the player has been there. No tile source = nothing discovered. */
+export function discoveredRuins<T extends { originX: number; originY: number; width: number; height: number }>(sites: readonly T[], tiles: TileMap | undefined): T[] {
+  if (!tiles) return [];
+  return sites.filter((s) => !!tiles.getTile(Math.floor(s.originX + s.width / 2), Math.floor(s.originY + s.height / 2)));
 }
 /** Pin colour by MarkerVisibility (0 private, 1 party, 2 clan). */
 export const markerPinColor = (visibility: number): string => visibility === 1 ? "#7dff9b" : visibility === 2 ? "#ffb347" : "#7fb3ff";
@@ -73,7 +82,11 @@ export function createWorldMap(src: WorldMapSource, doc: Document = document): {
   btn("Mark here", () => { state.placed = { ...state.centre }; showForm(); }, { pad: "X", padLabel: "Mark here" });
   btn("Mark my location", () => { const w = src.world(), p = src.player(); if (!w || p === undefined) return; const t = w.get(p, Transform); if (!t) return; state.placed = { x: t.x, y: t.y }; showForm(); });
   btn("Zoom +", () => { state.scale = Math.min(32, state.scale * 1.5); draw(); }); btn("Zoom −", () => { state.scale = Math.max(2, state.scale / 1.5); draw(); });
-  const note = doc.createElement("p"); note.dataset["role"] = "map-note"; note.style.cssText = "margin:0;font-size:13px"; note.textContent = "North is up ↑. Dark areas are unexplored. Amber diamonds mark abandoned structures where they spawn. Tap a spot on the map (or use Mark here / Mark my location) to place a marker. Markers are small pins; tap one in the list to remove it.";
+  // ADR-588: structure markers toggle (shared with the world-generation survey).
+  let showStructures = loadShowStructures();
+  const structuresBtn = btn("", () => { showStructures = !showStructures; saveShowStructures(showStructures); structuresBtn.textContent = showStructures ? "Structures: shown" : "Structures: hidden"; draw(); }, { key: "structures" });
+  structuresBtn.textContent = showStructures ? "Structures: shown" : "Structures: hidden";
+  const note = doc.createElement("p"); note.dataset["role"] = "map-note"; note.style.cssText = "margin:0;font-size:13px"; note.textContent = "North is up ↑. Dark areas are unexplored. Amber diamonds mark abandoned structures in areas you have discovered (the Structures button shows or hides them). Tap a spot on the map (or use Mark here / Mark my location) to place a marker. Markers are small pins; tap one in the list to remove it.";
   // Marker creation form (hidden until a spot is picked).
   const form = doc.createElement("div"); form.dataset["role"] = "marker-form"; form.hidden = true; form.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;align-items:center";
   const labelInput = doc.createElement("input"); labelInput.type = "text"; labelInput.maxLength = 24; labelInput.placeholder = "Marker name"; labelInput.setAttribute("aria-label", "Marker name");
@@ -131,11 +144,13 @@ export function createWorldMap(src: WorldMapSource, doc: Document = document): {
   canvas.addEventListener("wheel", (e) => { e.preventDefault(); state.scale = Math.min(32, Math.max(2, state.scale * (e.deltaY < 0 ? 1.25 : 0.8))); draw(); }, { passive: false });
   // ADR-586: abandoned-structure sites for the visible chunk range, enumerated from the world
   // seed with the same plans and gates the server stamper applies (mapAbandonedSites), so the
-  // diamonds name the ruins that actually stand in the world — including in dark, unexplored
-  // areas, which is the point of showing them. Memoised per (seed, chunk range): panning
-  // inside a range is free, and the generator is built once per seed.
+  // diamonds name the ruins that actually stand in the world. ADR-588: the draw filters them
+  // to discovered tiles (discoveredRuins) and the Structures toggle hides them entirely.
+  // Memoised per (seed, chunk range): panning inside a range is free, and the generator is
+  // built once per seed.
   let ruinCache: { seed: number; key: string; gen: ProceduralGenerator; sites: MapAbandonedSite[] } | undefined;
   const ruinSites = (): MapAbandonedSite[] => {
+    if (!showStructures) return [];
     const seed = src.seed?.(); if (seed === undefined) return [];
     const b = mapWorldBounds(canvas.width, canvas.height, state.centre, state.scale);
     const cx0 = Math.floor(b.x0 / CHUNK_SIZE), cx1 = Math.floor(b.x1 / CHUNK_SIZE), cy0 = Math.floor(b.y0 / CHUNK_SIZE), cy1 = Math.floor(b.y1 / CHUNK_SIZE);
@@ -165,8 +180,8 @@ export function createWorldMap(src: WorldMapSource, doc: Document = document): {
       const getChunk = (tiles as { getChunk?: (cx: number, cy: number) => { version?: number } | undefined }).getChunk;
       if (getChunk) for (let cy = Math.floor(ty0 / 32); cy <= Math.floor(ty1 / 32); cy++) for (let cx = Math.floor(tx0 / 32); cx <= Math.floor(tx1 / 32); cx++) tv += getChunk.call(tiles, cx, cy)?.version ?? 0;
     }
-    const ruins = ruinSites();
-    const sig = [state.centre.x.toFixed(2), state.centre.y.toFixed(2), state.scale, t ? t.x.toFixed(2) : "", t ? t.y.toFixed(2) : "", facing ? Math.round(facing.heading / 2) : "", idle, markers.map((m) => `${m.entity}:${m.label}:${m.visibility}`).join("|"), tv, ruinCache ? `${ruinCache.seed}:${ruinCache.key}:${ruins.length}` : ""].join("|");
+    const ruins = discoveredRuins(ruinSites(), tiles);
+    const sig = [state.centre.x.toFixed(2), state.centre.y.toFixed(2), state.scale, t ? t.x.toFixed(2) : "", t ? t.y.toFixed(2) : "", facing ? Math.round(facing.heading / 2) : "", idle, markers.map((m) => `${m.entity}:${m.label}:${m.visibility}`).join("|"), tv, showStructures, ruinCache ? `${ruinCache.seed}:${ruinCache.key}:${ruins.length}` : ""].join("|");
     rebuildList(markers);
     if (sig === lastSig) return;
     lastSig = sig;
@@ -198,7 +213,8 @@ export function createWorldMap(src: WorldMapSource, doc: Document = document): {
     for (const m of markers) { const { px, py } = worldToCanvas(m.x, m.y, W, H, c, s); if (px < -20 || px > W + 20 || py < -20 || py > H + 20) continue;
       ctx.fillStyle = markerPinColor(m.visibility); ctx.beginPath(); ctx.arc(px, py - 4, 5, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(px - 1, py - 4, 2, 8);
       ctx.font = "bold 11px system-ui,sans-serif"; ctx.strokeStyle = "rgba(0,0,0,.8)"; ctx.lineWidth = 3; ctx.strokeText(m.label || "Marker", px + 8, py); ctx.fillStyle = "#FFFAF0"; ctx.fillText(m.label || "Marker", px + 8, py); }
-    // ADR-586: abandoned structures as amber diamonds at their footprint centres.
+    // ADR-586/588: abandoned structures as amber diamonds at their footprint centres —
+    // discovered areas only, and only while the Structures toggle is on.
     ctx.fillStyle = "#ffb347"; ctx.strokeStyle = "rgba(0,0,0,.65)"; ctx.lineWidth = 1;
     for (const site of ruins) { const { px, py } = worldToCanvas(site.originX + site.width / 2, site.originY + site.height / 2, W, H, c, s); if (px < -20 || px > W + 20 || py < -20 || py > H + 20) continue;
       ctx.beginPath(); ctx.moveTo(px, py - 5); ctx.lineTo(px + 5, py); ctx.lineTo(px, py + 5); ctx.lineTo(px - 5, py); ctx.closePath(); ctx.fill(); ctx.stroke(); }

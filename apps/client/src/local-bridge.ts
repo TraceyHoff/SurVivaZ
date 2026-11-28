@@ -31,7 +31,7 @@ class WorkerClientTransport implements ClientTransport {
   /** @internal */ closed(): void { if (!this.open) return; this.open = false; for (const f of this.closeFns) f(); }
 }
 
-export async function startWorkerServer(o: { dbName: string; bots: number; devSandbox?: boolean; worldRules?: { hordes: boolean; hordeGraceDays: number; aiHumans?: boolean; zombies?: boolean; creative?: boolean }; catalog?: CosmeticCatalogLike | undefined; status: WorkerStatusSink; log?: (s: string) => void; timeoutMs?: number; makeWorker?: () => Worker; /** ADR-254 */ seed?: number }): Promise<LocalServerHandle | undefined> {
+export async function startWorkerServer(o: { dbName: string; bots: number; devSandbox?: boolean; worldRules?: { hordes: boolean; hordeGraceDays: number; aiHumans?: boolean; zombies?: boolean; creative?: boolean }; catalog?: CosmeticCatalogLike | undefined; status: WorkerStatusSink; log?: (s: string) => void; timeoutMs?: number; makeWorker?: () => Worker; /** ADR-254 */ seed?: number; /** ADR-589: the creator's chosen spawn point index */ spawnIndex?: number }): Promise<LocalServerHandle | undefined> {
   if (!o.makeWorker && typeof Worker === "undefined") return undefined;
   let worker: Worker;
   try { worker = o.makeWorker ? o.makeWorker() : new Worker(new URL("./local-worker.ts", import.meta.url), { type: "module" }); } catch (e) { o.log?.(`worker unavailable: ${String(e)}`); return undefined; }
@@ -59,7 +59,7 @@ export async function startWorkerServer(o: { dbName: string; bots: number; devSa
     settle = (good, err) => { clearTimeout(to); settle = undefined; if (!good && err) o.log?.(`worker failed: ${err}`); resolve(good); };
     let catalog;
     try { catalog = o.catalog ? snapshotCatalog(o.catalog) : undefined; } catch (e) { o.log?.(`catalog snapshot failed: ${String(e)}`); }
-    post({ t: "init", init: { dbName: o.dbName, bots: o.bots, ...(o.devSandbox ? { devSandbox: true } : {}), ...(o.worldRules ? { worldRules: o.worldRules } : {}), ...(catalog ? { catalog } : {}), ...(o.seed !== undefined ? { seed: o.seed } : {}) } });
+    post({ t: "init", init: { dbName: o.dbName, bots: o.bots, ...(o.devSandbox ? { devSandbox: true } : {}), ...(o.worldRules ? { worldRules: o.worldRules } : {}), ...(catalog ? { catalog } : {}), ...(o.seed !== undefined ? { seed: o.seed } : {}), ...(o.spawnIndex !== undefined ? { spawnIndex: o.spawnIndex } : {}) } });
   });
   if (!ok) { worker.terminate(); return undefined; }
   return {

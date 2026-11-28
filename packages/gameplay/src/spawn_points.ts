@@ -142,3 +142,12 @@ export function pickSpawnPoint(world: World, key: string, salt = 0, o: { jitter?
   const a = rng.range(0, Math.PI * 2), r = j * Math.sqrt(rng.next());
   return { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r, index };
 }
+/** ADR-589: one specific installed spawn point by index — the world creator's chosen start,
+ * picked on the world-generation screen — with the same jitter pickSpawnPoint applies.
+ * Out-of-range indices clamp to the installed list. */
+export function spawnPointAt(world: World, index: number, key: string, salt = 0): SpawnPointXY & { index: number } {
+  const pts = spawnPoints(world); const i = Math.max(0, Math.min(pts.length - 1, Math.floor(index))); const p = pts[i]!;
+  const rng = world.rngFor(`spawn:${key}`, salt);
+  const a = rng.range(0, Math.PI * 2), r = SPAWN_JITTER * Math.sqrt(rng.next());
+  return { x: p.x + Math.cos(a) * r, y: p.y + Math.sin(a) * r, index: i };
+}

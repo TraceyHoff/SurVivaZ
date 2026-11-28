@@ -506,7 +506,7 @@ let pumpLocal: ((ms: number) => void) | undefined;
 let spStatus: { state: string; error: string | undefined } | undefined;
 const settings = loadSettings();
 /** Singleplayer: in-browser authoritative server (lazy chunk) in "singleplayer" mode; human bots spawn automatically. */
-async function startSingleplayer(chosenSeed?: number): Promise<void> {
+async function startSingleplayer(chosenSeed?: number, spawnIndex?: number): Promise<void> {
   const { createLocalServer, openBrowserStore, localStatus } = await import("./local.js");
   spStatus = localStatus;
   try {
@@ -528,11 +528,11 @@ async function startSingleplayer(chosenSeed?: number): Promise<void> {
     // ADR-254: ?seed=N forces a reproducible world; otherwise createLocalServer picks a random seed for a new save.
     const seedParam = params.get("seed"); const seedOpt = chosenSeed !== undefined ? { seed: chosenSeed } : seedParam != null && seedParam !== "" && Number.isFinite(Number(seedParam)) ? { seed: Number(seedParam) } : {};
     let local: import("./local-bridge.js").LocalServerHandle | undefined = params.get("worker") === "0" ? undefined
-      : await startWorkerServer({ dbName, bots, devSandbox, worldRules: newWorldRules(fresh), catalog, status: localStatus, log, timeoutMs: 15000, ...seedOpt });
+      : await startWorkerServer({ dbName, bots, devSandbox, worldRules: newWorldRules(fresh), catalog, status: localStatus, log, timeoutMs: 15000, ...seedOpt, ...(spawnIndex !== undefined ? { spawnIndex } : {}) });
     if (!local) {
       const store = await openBrowserStore(dbName);
       localStatus.state = "starting";
-      const inTab = await createLocalServer({ store, bots, devSandbox, worldRules: newWorldRules(fresh), ...seedOpt, ...(catalog ? { catalog } : {}), log });
+      const inTab = await createLocalServer({ store, bots, devSandbox, worldRules: newWorldRules(fresh), ...seedOpt, ...(spawnIndex !== undefined ? { spawnIndex } : {}), ...(catalog ? { catalog } : {}), log });
       pumpLocal = inTab.pump; if (devSandbox) (window as { __qaServer?: unknown }).__qaServer = inTab.game; // ADR-145 QA: in-tab server (?worker=0)
       local = { inWorker: false, createTransport: () => inTab.createTransport(), save: async () => { await inTab.game.persist?.saveAll(); }, stop: () => inTab.stop() };
     }
@@ -579,13 +579,13 @@ async function p2pSignaling(): Promise<import("./p2p.js").Signaling> {
   return new PeerJsSignaling({ iceServers: resolveIceServers(params.get("ice") ?? import.meta.env["VITE_ICE_SERVERS"]) });
 }
 /** Host game: authoritative server in this tab (mode "multiplayer"), guests over WebRTC, room code via signaling. */
-async function startHost(chosenSeed?: number): Promise<void> {
+async function startHost(chosenSeed?: number, spawnIndex?: number): Promise<void> {
   const [{ startP2PHost }, { openBrowserStore }, { hostPlayerCap, detectDevice }] = await Promise.all([import("./host.js"), import("./local.js"), import("./p2p.js")]);
   const cap = hostPlayerCap(detectDevice(), settings.hostCap);
   let host: import("./host.js").P2PHost;
   try {
     stampPlayed("hosted");
-    host = await startP2PHost({ ...(chosenSeed !== undefined ? { seed: chosenSeed } : {}), worldRules: newWorldRules(), signaling: await p2pSignaling(), store: await openBrowserStore(`engine-p2p-host-${params.get("player") ?? "1"}`), cap: cap.cap, capDetail: cap.detail,
+    host = await startP2PHost({ ...(chosenSeed !== undefined ? { seed: chosenSeed } : {}), ...(spawnIndex !== undefined ? { spawnIndex } : {}), worldRules: newWorldRules(), signaling: await p2pSignaling(), store: await openBrowserStore(`engine-p2p-host-${params.get("player") ?? "1"}`), cap: cap.cap, capDetail: cap.detail,
       ...(await isoReady, iso?.registry.cosmetics?.size ? { catalog: iso.registry.cosmetics } : {}), log: (m) => console.info(`[host] ${m}`) });
   } catch (e) { backToMenu(`Couldn't host: ${e instanceof Error ? e.message : String(e)}`, "multiplayer"); return; }
   pumpLocal = host.local.pump;
@@ -749,8 +749,8 @@ if (creatorShot) {
     }
     startMenus();
     await enterWorld(async () => {
-      if (choice.kind === "singleplayer") await startSingleplayer(choice.seed);
-      else if (choice.kind === "host") await startHost(choice.seed);
+      if (choice.kind === "singleplayer") await startSingleplayer(choice.seed, choice.spawnIndex);
+      else if (choice.kind === "host") await startHost(choice.seed, choice.spawnIndex);
       else if (choice.kind === "join") await startJoin(choice.code);
       else { // multiplayer: remote server, no local human bots. ADR-236: no box over the game; a failed first connect returns to the Multiplayer page
         netStatus ??= mountNetStatus(session, uiRoot());

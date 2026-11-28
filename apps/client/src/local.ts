@@ -27,6 +27,8 @@ export function defaultMaxBots(d: DeviceHints = detectDevice()): number { return
 
 export interface LocalServerOptions {
   store?: WorldStore; seed?: number;
+  /** ADR-589: the creator's chosen spawn point index (world-generation screen), forwarded to the game server. */
+  spawnIndex?: number;
   /** ADR-121: world rules for a new world (hordes on/off, grace days). */
   worldRules?: { hordes?: boolean; hordeGraceDays?: number; /** Task 22: AI humans spawn / are recruitable (default on). */ aiHumans?: boolean; /** ADR-535: ambient zombies (default on). */ zombies?: boolean; /** ADR-580: Creative mode (default off). */ creative?: boolean };
   /** Default "singleplayer". "multiplayer" allows human bots only when AI humans are on (Task 22). */
@@ -143,7 +145,7 @@ export async function createLocalServer(o: LocalServerOptions = {}): Promise<Loc
   const connectBot = (x: number, y: number): boolean => { if (bots.length + queued.length + inflight >= maxBots) return false; queued.push({ x, y }); return true; };
   const game = createGameServer({
     animalCapMul: animalCapMulFor(maxBots, o.lowEnd ?? lowEndQuery()),
-    transport: serverTransport, ...(store ? { store } : {}), seed, mode, ...(o.devSandbox ? { devSandbox: true } : {}), ...(o.worldRules ? { worldRules: o.worldRules } : {}),
+    transport: serverTransport, ...(store ? { store } : {}), seed, mode, ...(o.devSandbox ? { devSandbox: true } : {}), ...(o.worldRules ? { worldRules: o.worldRules } : {}), ...(o.spawnIndex !== undefined ? { spawnIndex: o.spawnIndex } : {}),
     ...(o.maxClients !== undefined ? { maxClients: o.maxClients } : {}), ...(o.serverFullDetail ? { serverFullDetail: o.serverFullDetail } : {}), ...(o.log ? { log: o.log } : {}), ...(o.catalog ? { catalog: o.catalog, randomAppearance: true } : {}),
     ...(o.joinNearClient ? { joinNearClient: o.joinNearClient } : {}), ...(o.aiSpawn ? { aiSpawn: o.aiSpawn } : {}),
     ...(o.population === false ? { population: false } : {}), ...(o.distantThrottle ? { distantThrottle: o.distantThrottle } : {}),

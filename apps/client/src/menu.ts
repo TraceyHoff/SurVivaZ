@@ -6,6 +6,7 @@
 import { CHUNK_SIZE, PREVIEW, ProceduralGenerator, SURVEY_STRIDES, computeSpawnPoints, northUpToWorld, sampleWorldSurvey, worldPreviewSvg, worldToSurveyPixel, randomWorldSeed } from "@engine/world";
 import { defaultDefs, mapAbandonedSites, type MapAbandonedSite } from "@engine/gameplay";
 import { parseWorldSeed } from "./world-seed.js";
+import { loadShowStructures, saveShowStructures } from "./map-prefs.js";
 import { localizeTemps, saveTempUnit } from "./hud-temp.js";
 import { deleteConfirm, deleteLocalProgress, listLocalSaves, type LocalSaveKind } from "./delete-progress.js";
 import { BUILD_HASH } from "./error-log.js";
@@ -28,7 +29,7 @@ declare const __BRANDING__: Branding | undefined;
 const BR: Branding = (typeof __BRANDING__ !== "undefined" && __BRANDING__) || { title: "Cozy Wild", tagline: "survival", logo: "", bg: "", plates: false, icons: false, loading: false, loadingAnim: false };
 /** {app.title}: Art's branding.json title (placeholder until the game is named). */
 export const APP_TITLE = BR.title;
-export type MenuChoice = { kind: "singleplayer"; seed?: number } | { kind: "multiplayer"; url: string } | { kind: "host"; seed?: number } | { kind: "join"; code: string };
+export type MenuChoice = { kind: "singleplayer"; seed?: number; /** ADR-589: chosen spawn point index */ spawnIndex?: number } | { kind: "multiplayer"; url: string } | { kind: "host"; seed?: number; /** ADR-589: chosen spawn point index */ spawnIndex?: number } | { kind: "join"; code: string };
 /** hostCap: desktop P2P host player cap incl. the host (mobile hosts are fixed at 6, see p2p.ts). */
 export interface Settings { bots: number; showHud: boolean; fullscreen: boolean; hostCap: number; /** ADR-121: new-world rules */ hordes: boolean; hordeGraceDays: number; /** Task 22: AI humans in multiplayer (new worlds) */ aiHumans?: boolean; /** ADR-535: ambient zombies in new worlds (default on; off also stops hordes) */ zombies?: boolean; /** ADR-580: Creative mode in new worlds (default OFF; free craft/build, no vitals drain or damage for human players) */ creative?: boolean; /** ADR-126: tool symbol near resource nodes */ toolHints: boolean; /** ADR-173: name tags over other players */ nameTags?: boolean; /** ADR-306: hidden-ledge drop arrows (on by default; off for a harder run) */ ledgeWarnings?: boolean; /** ADR-239/243: HUD temperature units (default F; C only with tempUnitChosen) */ tempUnit?: "C" | "F"; /** ADR-243: the player picked tempUnit themselves */ tempUnitChosen?: boolean }
 /** ADR-121: the world rules a NEW local / hosted world is created with (an existing save keeps its own). */
@@ -314,16 +315,46 @@ export class BootUI {
         // metres-per-tile constant anywhere in the game, so no distance in metres is claimed.
         // The survey is one window on an endless world: it streams on beyond it, no fixed edge.
         let strideIdx = 3; // SURVEY_STRIDES[3] = 24 → 3,072 tiles across by default
+        // ADR-589: the player's chosen spawn point (index into the seed's four). The selected
+        // ring paints yellow; the choice rides the MenuChoice into world creation.
+        let selectedSpawn = 0;
+        let lastSpawnPx: { px: number; py: number }[] = [];
+        let lastRuinsPx: readonly { px: number; py: number }[] = [];
+        let paintLatest: (ruins: readonly { px: number; py: number }[]) => void = () => {};
+        // ADR-588: abandoned-structure markers can be hidden (shared with the in-game map).
+        let showStructures = loadShowStructures();
+        // Name by where the marker sits on the north-up survey: computeSpawnPoints keeps
+        // SPAWN_QUADRANTS order (NE, SE, SW, NW) and never flips a point's signs, and on the
+        // north-up survey those land at the screen's right / bottom / left / top.
+        const SPAWN_NAMES = ["east", "south", "west", "north"] as const;
+        const spawnName = (i: number): string => SPAWN_NAMES[i] ?? "east";
         const surveyNote = (stride: number): string => {
           const extent = PREVIEW.width * stride;
           const walkMinutes = Math.max(1, Math.round(extent / defaultDefs().movement.walkSpeed / 60));
-          return `World survey · ${extent} × ${extent} tiles around the spawn area · about ${walkMinutes} minutes' walk across · North ↑. ○ marks a spawn point — you start at one of the four. ◆ marks an abandoned structure. Shading shows relief. The world is endless — it streams on beyond the surveyed area, with no fixed edge. Zoom in for detail, out for more of the map.`;
+          return `World survey · ${extent} × ${extent} tiles around the spawn area · about ${walkMinutes} minutes' walk across · North ↑. The yellow ○ is your spawn point (to the ${spawnName(selectedSpawn)}) — tap another ○ or use the Spawn point button to pick a different start. ◆ marks an abandoned structure. Shading shows relief. The world is endless — it streams on beyond the surveyed area, with no fixed edge. Zoom in for detail, out for more of the map.`;
         };
         note.textContent = surveyNote(SURVEY_STRIDES[strideIdx]!);
         let previewTimer = 0, surveyTimer = 0, surveyRun = 0;
         let surveyGen: { seed: number; gen: ProceduralGenerator; spawns: { x: number; y: number }[] } | undefined;
         const zoomIn = mpButton("Zoom in +", "survey-zoom-in", () => setStride(strideIdx - 1));
         const zoomOut = mpButton("Zoom out −", "survey-zoom-out", () => setStride(strideIdx + 1));
+        // ADR-589: cycle the chosen spawn point (gamepad/keyboard path; tapping a ring on the
+        // survey does the same). The label names the point's side of the survey.
+        const spawnBtn = mpButton("", "survey-spawn", () => selectSpawn((selectedSpawn + 1) % 4));
+        const refreshSpawnBtn = (): void => { spawnBtn.textContent = `Spawn point: ${spawnName(selectedSpawn)}`; };
+        // ADR-588: show/hide the abandoned-structure diamonds (shared with the in-game map).
+        const structuresBtn = mpButton("", "survey-structures", () => {
+          showStructures = !showStructures; saveShowStructures(showStructures); refreshStructuresBtn();
+          if (!showStructures) { clearTimeout(surveyTimer); surveyRun++; paintLatest([]); }
+          else { const v = parseWorldSeed(seed.value, generated); if (v !== undefined) draw(v); }
+        });
+        const refreshStructuresBtn = (): void => { structuresBtn.textContent = showStructures ? "Structures: shown" : "Structures: hidden"; };
+        refreshSpawnBtn(); refreshStructuresBtn();
+        function selectSpawn(i: number): void {
+          selectedSpawn = i; refreshSpawnBtn();
+          note.textContent = surveyNote(SURVEY_STRIDES[strideIdx]!);
+          paintLatest(showStructures ? lastRuinsPx : []);
+        }
         function setStride(i: number): void {
           const n = Math.max(0, Math.min(SURVEY_STRIDES.length - 1, i));
           if (n === strideIdx) return;
@@ -337,7 +368,9 @@ export class BootUI {
           const { gen, spawns } = surveyGen;
           const survey = sampleWorldSurvey(gen, stride);
           const spawnPx = spawns.map((p) => worldToSurveyPixel(survey, p.x, p.y));
-          const paint = (ruins: readonly { px: number; py: number }[]): void => { preview.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(worldPreviewSvg(survey, { spawns: spawnPx, ruins }))}`; };
+          lastSpawnPx = spawnPx;
+          const paint = (ruins: readonly { px: number; py: number }[]): void => { lastRuinsPx = ruins; preview.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(worldPreviewSvg(survey, { spawns: spawnPx, ruins, selectedSpawn }))}`; };
+          paintLatest = paint;
           paint([]);
           preview.dataset["seed"] = String(value); preview.setAttribute("aria-busy", "false");
           note.textContent = surveyNote(stride);
@@ -353,7 +386,7 @@ export class BootUI {
           const sites: MapAbandonedSite[] = [];
           let cy = cy0;
           const step = (): void => {
-            if (run !== surveyRun) return;
+            if (run !== surveyRun || !showStructures) return; // ADR-588: hidden = never enumerated
             const t0 = performance.now();
             // Bounded by rows as well as time, so the slice terminates even on a frozen clock.
             let rows = 0;
@@ -361,7 +394,7 @@ export class BootUI {
             paint(sites.map((s) => worldToSurveyPixel(survey, s.originX + s.width / 2, s.originY + s.height / 2)));
             if (cy <= cy1) surveyTimer = window.setTimeout(step, 0);
           };
-          surveyTimer = window.setTimeout(step, 0);
+          if (showStructures) surveyTimer = window.setTimeout(step, 0);
         };
         preview.addEventListener("wheel", (e) => { e.preventDefault(); setStride(strideIdx + (e.deltaY > 0 ? 1 : -1)); }, { passive: false });
         const pinchPts = new Map<number, { x: number; y: number }>(); let pinchD = 0;
@@ -369,6 +402,20 @@ export class BootUI {
         preview.addEventListener("pointermove", (e) => { if (!pinchPts.has(e.pointerId)) return; pinchPts.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (pinchPts.size === 2 && pinchD > 0) { const [a, b] = [...pinchPts.values()] as [{ x: number; y: number }, { x: number; y: number }]; const d = Math.hypot(a.x - b.x, a.y - b.y); if (Math.abs(d - pinchD) > 48) { setStride(strideIdx + (d > pinchD ? -1 : 1)); pinchD = d; } } });
         const pinchEnd = (e: PointerEvent): void => { pinchPts.delete(e.pointerId); if (pinchPts.size < 2) pinchD = 0; };
         preview.addEventListener("pointerup", pinchEnd); preview.addEventListener("pointercancel", pinchEnd);
+        // ADR-589: a tap (single pointer, barely moved) on a spawn ring selects that point.
+        let tapCand: { id: number; x: number; y: number; pinched: boolean } | undefined;
+        preview.addEventListener("pointerdown", (e) => { if (tapCand) tapCand.pinched = true; else tapCand = { id: e.pointerId, x: e.clientX, y: e.clientY, pinched: false }; });
+        preview.addEventListener("pointermove", (e) => { if (tapCand && e.pointerId === tapCand.id && Math.hypot(e.clientX - tapCand.x, e.clientY - tapCand.y) >= 6) tapCand = undefined; });
+        preview.addEventListener("pointerup", (e) => {
+          const t = tapCand; tapCand = undefined;
+          if (!t || t.pinched || e.pointerId !== t.id || lastSpawnPx.length === 0) return;
+          const r = preview.getBoundingClientRect(); if (r.width < 1 || r.height < 1) return;
+          const px = (e.clientX - r.left) * PREVIEW.width / r.width, py = (e.clientY - r.top) * PREVIEW.height / r.height;
+          let best = -1, bestD = 7; // survey pixels: the ring radius is 3.4, so 7 is a forgiving tap target
+          lastSpawnPx.forEach((m, i) => { const d = Math.hypot(m.px - px, m.py - py); if (d < bestD) { bestD = d; best = i; } });
+          if (best >= 0) selectSpawn(best);
+        });
+        preview.addEventListener("pointercancel", () => { tapCand = undefined; });
         const update = (): void => {
           const value = parseWorldSeed(seed.value, generated); clearTimeout(previewTimer);
           // ADR-585: typing supersedes the shown survey — stop its ruin fill-in at once, so
@@ -380,11 +427,11 @@ export class BootUI {
           if (value !== undefined) previewTimer = window.setTimeout(() => draw(value), 100);
         };
         seed.addEventListener("input", update); update();
-        const next = (): void => { const value = parseWorldSeed(seed.value, generated); if (value === undefined) { seed.focus(); return; } enterFullscreen(); finish({ kind, seed: value }); };
+        const next = (): void => { const value = parseWorldSeed(seed.value, generated); if (value === undefined) { seed.focus(); return; } enterFullscreen(); finish({ kind, seed: value, spawnIndex: selectedSpawn }); };
         const random = mpButton("Random", "random-seed", () => { generated = randomWorldSeed(); seed.value = String(generated); update(); });
         seed.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); next(); } });
         const footer = document.createElement("div"); footer.className = "sticky-footer"; footer.dataset["role"] = "sticky-footer";
-        this.screen([["Create world", next], ["Back", back, "alt"]], back, "<h2>New world</h2>", label, mpRow(seed, random), preview, mpRow(zoomOut, zoomIn), note, chosen, footer);
+        this.screen([["Create world", next], ["Back", back, "alt"]], back, "<h2>New world</h2>", label, mpRow(seed, random), preview, mpRow(zoomOut, zoomIn), mpRow(spawnBtn, structuresBtn), note, chosen, footer);
         this.root.dataset["page"] = "world-seed";
         this.cleanup = () => { clearTimeout(previewTimer); clearTimeout(surveyTimer); surveyRun++; delete this.root.dataset["page"]; };
       };

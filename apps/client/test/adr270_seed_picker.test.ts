@@ -28,7 +28,7 @@ describe("ADR-270: world seed before character creation", () => {
     input.value = " 424242 "; input.dispatchEvent(new Event("input"));
     expect(document.querySelector("[data-role=chosen-seed]")?.textContent).toContain("424242");
     button("Create world").click();
-    await expect(choice).resolves.toEqual({ kind: mode, seed: 424242 });
+    await expect(choice).resolves.toEqual({ kind: mode, seed: 424242, spawnIndex: 0 }); // ADR-589: default spawn choice
   });
   it("blank uses the displayed generated seed; Random chooses a valid reusable seed", async () => {
     const { choice } = open(); button("Singleplayer").click(); await flush();
@@ -37,7 +37,7 @@ describe("ADR-270: world seed before character creation", () => {
     input.value = ""; input.dispatchEvent(new Event("input"));
     expect(document.querySelector("[data-role=chosen-seed]")?.textContent).toContain(String(generated));
     input.focus(); input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-    await expect(choice).resolves.toEqual({ kind: "singleplayer", seed: generated });
+    await expect(choice).resolves.toEqual({ kind: "singleplayer", seed: generated, spawnIndex: 0 });
   });
   it("invalid seeds do not proceed; unsigned zero is valid", () => {
     for (const text of ["abc", "-1", "1.5", "4294967296", "Infinity"]) expect(parseWorldSeed(text, 1)).toBeUndefined();
@@ -60,6 +60,9 @@ describe("ADR-270: world seed before character creation", () => {
     // ADR-585: the survey zoom buttons are gamepad-reachable stops between Random and Create.
     press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Zoom out −"));
     press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Zoom in +"));
+    // ADR-588/589: the Spawn point and Structures buttons are stops too, in DOM order.
+    press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Spawn point: east"));
+    press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Structures: shown"));
     press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Create world"));
     press("GamepadDPadDown"); expect(document.activeElement).toBe(button("Back"));
     press("GamepadB"); expect(document.querySelector("[data-role=world-seed]")).toBeNull(); expect(button("Singleplayer")).toBeDefined();
@@ -67,7 +70,7 @@ describe("ADR-270: world seed before character creation", () => {
   it("production waits for the picker before the creator, forwards the same seed to worker/fallback and host, and displays it in Session", () => {
     const main = readFileSync(resolve(__dirname, "../src/main.ts"), "utf8");
     expect(main.indexOf("const choice = await boot.menu")).toBeLessThan(main.indexOf("activeChar = await ensureCharacter(kind)"));
-    expect(main).toContain("await startSingleplayer(choice.seed)"); expect(main).toContain("await startHost(choice.seed)");
+    expect(main).toContain("await startSingleplayer(choice.seed, choice.spawnIndex)"); expect(main).toContain("await startHost(choice.seed, choice.spawnIndex)");
     expect(main).toContain("...seedOpt"); expect(main).toContain("World seed:");
   });
 });

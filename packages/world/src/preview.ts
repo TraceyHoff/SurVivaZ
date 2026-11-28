@@ -61,8 +61,10 @@ export function sampleWorldSurvey(source: number | ProceduralGenerator, stride: 
   return p;
 }
 /** ADR-585: map markers in survey pixels (see worldToSurveyPixel). Spawns = the seed's spawn
- * points; ruins = abandoned-structure sites (ADR-586). Drawn over the relief. */
-export interface PreviewMarkers { spawns?: readonly { px: number; py: number }[]; ruins?: readonly { px: number; py: number }[] }
+ * points; ruins = abandoned-structure sites (ADR-586). Drawn over the relief.
+ * ADR-589: selectedSpawn = index into spawns of the player's chosen start; it is overdrawn
+ * in yellow so the choice reads at a glance. Absent = no selection shown (legacy output). */
+export interface PreviewMarkers { spawns?: readonly { px: number; py: number }[]; ruins?: readonly { px: number; py: number }[]; selectedSpawn?: number }
 /** Compact SVG relief image; dedicated data visualization, no borrowed item/terrain sprites or external assets. */
 export function worldPreviewSvg(p: WorldPreview, markers?: PreviewMarkers): string {
   const palette: Record<number, readonly [number, number, number]> = { 1: [36, 102, 149], 2: [201, 180, 117], 3: [106, 147, 69], 4: [85, 114, 58], 5: [137, 137, 130], 6: [220, 229, 230], 7: [50, 89, 53], 8: [67, 153, 177], 9: [116, 99, 65] };
@@ -94,9 +96,14 @@ export function worldPreviewSvg(p: WorldPreview, markers?: PreviewMarkers): stri
   const spawns = (markers.spawns ?? []).filter(on);
   const rings = spawns.map((m) => `<circle cx="${r1(m.px)}" cy="${r1(m.py)}" r="3.4"/>`).join("");
   const dots = spawns.map((m) => `<circle cx="${r1(m.px)}" cy="${r1(m.py)}" r="1.1"/>`).join("");
+  const selRaw = markers.selectedSpawn !== undefined ? (markers.spawns ?? [])[markers.selectedSpawn] : undefined;
+  const sel = selRaw && on(selRaw) ? selRaw : undefined;
+  const selRing = sel ? `<circle cx="${r1(sel.px)}" cy="${r1(sel.py)}" r="3.4"/>` : "";
+  const selDot = sel ? `<circle cx="${r1(sel.px)}" cy="${r1(sel.py)}" r="1.1"/>` : "";
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${PREVIEW.width} ${PREVIEW.height}" shape-rendering="crispEdges">${relief}`
     + (ruinPath ? `<path fill="#ffb347" stroke="rgba(20,16,8,.6)" stroke-width=".3" d="${ruinPath}"/>` : "")
     + (rings ? `<g fill="none" stroke="rgba(20,16,8,.75)" stroke-width="1.1">${rings}</g><g fill="none" stroke="#fff8d5" stroke-width=".7">${rings}</g>` : "")
     + (dots ? `<g fill="#fff8d5">${dots}</g>` : "")
+    + (sel ? `<g fill="none" stroke="#ffd23e" stroke-width="1.1">${selRing}</g><g fill="#ffd23e">${selDot}</g>` : "")
     + `</svg>`;
 }

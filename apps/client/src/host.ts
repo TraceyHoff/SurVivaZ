@@ -12,6 +12,8 @@ import { hostRoom, type Signaling, type SignalingRoom } from "./p2p.js";
 
 export interface P2PHostOptions {
   signaling: Signaling; store?: WorldStore; seed?: number;
+  /** ADR-589: the host's chosen spawn point index (world-generation screen). */
+  spawnIndex?: number;
   worldRules?: { hordes: boolean; hordeGraceDays: number; aiHumans?: boolean };
   /** Player cap including the host (see p2p.hostPlayerCap). */
   cap: number; capDetail?: string;
@@ -40,7 +42,7 @@ export async function startP2PHost(o: P2PHostOptions): Promise<P2PHost> {
   const local = await createLocalServer({
     joinNearClient: () => host?.hostClientId,
     mode: "multiplayer", extraTransports: [rtc], maxClients: o.cap, serverFullDetail: o.capDetail ?? `the host's game is full (${o.cap} players max)`,
-    ...(o.store ? { store: o.store } : {}), ...(o.seed !== undefined ? { seed: o.seed } : {}), ...(o.population === false ? { population: false } : {}),
+    ...(o.store ? { store: o.store } : {}), ...(o.seed !== undefined ? { seed: o.seed } : {}), ...(o.spawnIndex !== undefined ? { spawnIndex: o.spawnIndex } : {}), ...(o.population === false ? { population: false } : {}),
     ...(o.catalog ? { catalog: o.catalog } : {}), ...(o.log ? { log: o.log } : {}),
     distantThrottle: P2P_DISTANT_THROTTLE, ...(o.worldRules ? { worldRules: o.worldRules } : {}),
   });

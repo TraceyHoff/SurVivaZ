@@ -9,7 +9,7 @@ import { parseChunkKey } from "@engine/world";
 /** Authoritative game server: world + gameplay + streaming chunks + persistence + NetServer sessions. */
 import { ChannelRegistry, CommandRejected, DEFAULT_TICK_HZ, FixedLoop, installCommandHandlers, cosmeticsHashes, type CosmeticCatalogLike, Membership, Owner, PlayerId, Season, SEASON_COUNT, TimeOfDay, Transform, World, type Entity, type PermissionsRes } from "@engine/core";
 import { CHUNK_SIZE, ChunkManager, DEFAULT_PLAYER_CHUNKS_PER_BOT_CHUNK, ProceduralGenerator, computeSpawnPoints, chunkKeyOf, type BuildingGrid, type PopulationSpawner } from "@engine/world";
-import { computeAiSpawnPoints, pickAiSpawnPoint, setAiSpawnPoints, spawnPoints, addTemporarySafeSpawnPoint, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, drainAbandonedStamps, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, isSunkenCacheNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, gameplayDefs, worldgenBands, computeWildCropTopUp, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
+import { computeAiSpawnPoints, pickAiSpawnPoint, setAiSpawnPoints, spawnPoints, addTemporarySafeSpawnPoint, GAMEPLAY_COMMANDS, ARMS_COMMANDS, DISEASE_COMMANDS, HOTBAR_COMMANDS, RECLAIM_COMMANDS, MOVE_COMMANDS, stampAbandonedChunk, drainAbandonedStamps, ARMS_EVENT_RELIABILITY, Exploded, Reloaded, VehicleStationOpened, installPartyCommands, PartyInvitePending, installClanCommands, ClanInvitePending, ClanStatus, syncSocialMembership, clanState, encodeClanState, decodeClanState, loadClanState, queueCommand, edgeCommands, spawnPlayer, spawnResourceNode, isSunkenCacheNode, setSpawnPoints, spawnPoints as worldSpawnPoints, pickSpawnPoint, spawnPointAt, gameplayDefs, worldgenBands, computeWildCropTopUp, setIntent, IntentAction, nearestMeleeTarget, ResourceNode, PlayerIntent, registerGameplayCommands, installEconomy, installPopulation, installCustomization,
   appearanceServerHooks, applyReplication, installStallBuyHook, installViewBonus, setHitValidator, installPvp, PVP, installBedRespawn, installCraftQueue, installExpressionCommands, installVehicleCommands, installVehicleCraftCommands, installVehicleGuard, requestEmote, CraftQueue, CraftQueuesRes, playerNames, stallListing, listingRevision, stallOf, tillOf, StallHeader, StallOwnerKind, installMapMarkerCommands, MapMarker } from "@engine/gameplay";
 import { AppearanceServer, ChatServer, NameSync, NetServer, StallResult, StallServer, TileSync, validateHit, type ClientSession, type ServerTransport, type StallHooks } from "@engine/net";
 import { createAgentStore, type AgentIdentityStore } from "./agents.js";
@@ -79,6 +79,11 @@ export interface GameServerOptions {
   virtualPlayers?: VirtualPlayerHost;
   /** Override the seed's four spawn points (tests / dev: e.g. [SPAWN] keeps every join co-located). */
   spawnPoints?: readonly { x: number; y: number }[];
+  /** ADR-589: the world creator's chosen spawn point (index into the seed's four, picked on the
+   * world-generation screen). The first human join spawns there instead of at the least-crowded
+   * point; consumed once — a join later marked virtual (a bot) hands it back, and friend-code
+   * guests (joinNearClient) and the dev sandbox keep their own placement. */
+  spawnIndex?: number;
   /** Ambient population (zombies, animals, bots via PopulationSpawner). Default true. */
   population?: boolean;
   /** ADR-110: animal spawn-cap multiplier (mobile / lowend local hosts). */
@@ -218,6 +223,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   const mode = gameModeConfig(o.mode ?? "multiplayer", !!o.virtualPlayers, worldRules(world).aiHumans);
   const players = new Map<number, Player>();
   let petCorner = false; // ADR-145 sandbox pet corner placed
+  let creatorSpawnClient: number | undefined; // ADR-589: client that consumed o.spawnIndex (markVirtual hands it back for bots)
   // Spawn points chosen by the population spawner for virtual players still connecting. Always empty in multiplayer.
   const pendingSpots: { x: number; y: number }[] = []; let botSpawnN = 0; // ADR-325 pick salt
   const agents = createAgentStore(o.store, { tick: () => world.tick, log });
@@ -260,7 +266,10 @@ export function createGameServer(o: GameServerOptions): GameServer {
       const at0 = pickSpawnPoint(w, "join", s.clientId); // least crowded of the 4 (+ jitter)
       const hostId = o.joinNearClient?.(), friend = hostId !== undefined && hostId !== s.clientId ? players.get(hostId)?.entity : undefined;
       const near = friend !== undefined ? friendSpawn(w, friend) : undefined;
-      const at = near ?? (o.devSandbox ? sandboxSpawn(spawnPoints(w)[0] ?? at0, s.clientId) : at0);
+      // ADR-589: the creator's chosen point, for the first human join only (see spawnIndex).
+      let chosen: ReturnType<typeof spawnPointAt> | undefined;
+      if (near === undefined && !o.devSandbox && o.spawnIndex !== undefined && creatorSpawnClient === undefined) { creatorSpawnClient = s.clientId; chosen = spawnPointAt(w, o.spawnIndex, "join", s.clientId); }
+      const at = near ?? (o.devSandbox ? sandboxSpawn(spawnPoints(w)[0] ?? at0, s.clientId) : chosen ?? at0);
       const e = spawnPlayer(w, { x: at.x, y: at.y, clientId: s.clientId });
       if (near) w.set(e, Transform, { z: near.z }); // saved-account restore below still wins
       // ADR-348: a friend-code guest arrives at a one-shot point near the host, far from any installed
@@ -565,6 +574,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   const markVirtual = (clientId: number): boolean => {
     const p = players.get(clientId); if (!mode.humanBots || !p || p.bot) return false;
     p.bot = true; markReady(world, p.entity); // bots perceive the authoritative world directly: never "loading"
+    if (creatorSpawnClient === clientId) creatorSpawnClient = undefined; // ADR-589: a bot that joined first hands the creator's chosen point back
     const spot = pendingSpots.shift() ?? (worldAiSpawn ? pickAiSpawnPoint(world, "bot.host", botSpawnN++, { exclude: p.entity }) : undefined); // ADR-325: host-added bots too
     if (spot) { world.setField(p.entity, Transform, "x", spot.x); world.setField(p.entity, Transform, "y", spot.y); }
     population?.adopt(p.entity, "human_bot"); return true;
