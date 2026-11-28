@@ -6342,7 +6342,21 @@
     "water_wheel": 6340,
     "water_wheel_overshot": 6341,
     "wind_turbine": 6342,
-    "wind_turbine_large": 6343
+    "wind_turbine_large": 6343,
+    "ceiling_light": 6344,
+    "chest_freezer": 6345,
+    "electric_floor_lamp": 6346,
+    "electric_furnace": 6347,
+    "electric_heater": 6348,
+    "electric_stove": 6349,
+    "electric_table_lamp": 6350,
+    "electric_wall_light": 6351,
+    "electrician_workstation": 6352,
+    "flood_light": 6353,
+    "fridge": 6354,
+    "hydroponic_table": 6355,
+    "power_hammer": 6356,
+    "power_workbench": 6357
   },
   "sounds": {
     "amb_rain": 1,

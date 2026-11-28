@@ -170,6 +170,20 @@ only on active frames).
 | `water_wheel` | wt / elec_wt (**144x152**) | 2 (rot 0, 3) | 101 (103) | 2.4 m undershot wheel overhanging the water side, axle trestles, gearbox, shed + cable pole; 8 frames = one paddle pitch, foam + splash |
 | `water_wheel_overshot` | xw / elec_xw (**184x216**, pivot 180) | 2 (rot 0, 3) | 148 (153) | 3.4 m shrouded bucket wheel, flume on trestles, stone mill house; water pours from the flume, splash, wheel turns |
 | `water_turbine` | s / elec_s | mirror | 32 (46) | ducted turbine on a skid in the water, trash rack, generator cap, cable mast; spinning collar mark, outlet churn |
+| `electrician_workstation` | wt / elec_wt | 2 (rot 0, 1) | 84 (85) | steel bench at 0.9 m, pegboard with cable spools, oscilloscope (moving trace), soldering station (sparks), multimeter, bench lamp flicker |
+| `electric_stove` | s / elec_s | 2 (rot 0, 1) | 45 (49) | enamel range, worktop 28 px, 4 ceramic hobs cycling red, oven window lit, backsplash dials + clock |
+| `electric_furnace` | t / elec_t | 2 (rot 0, 1) | 57 (64) | insulated body, refractory rim, crucible with molten surface (glow cycle), flue, control box, coolant pipes, heat shimmer |
+| `power_workbench` | w / elec_w | 2 (rot 0, 1) | 53 (72) | heavy bench, table saw (blade spins, sawdust), bench drill (chuck runs), vice, tool rack, switch LED |
+| `power_hammer` | t / elec_t | 2 (rot 0, 1) | 76 (83) | C-frame, motor + belt guard (belt moves), ram down/up cycle with sparks on the strike, foot pedal |
+| `fridge` | t / elec_t | 2 (rot 0, 1) | 66 (71) | two-door fridge-freezer, LED display digits cycle, note under a magnet, condenser shimmer |
+| `chest_freezer` | w / elec_w | 2 (rot 0, 1) | 44 (50) | chest freezer, lid handle, grille, thermostat LEDs, frost wisps at the lid seal |
+| `electric_floor_lamp` | t / elec_t | mirror | 53 (64) | weighted base, pole, drum shade glowing warm (breathe), cord + plug |
+| `electric_table_lamp` | s / elec_s | mirror | 16 (31) | articulated desk lamp drawn at z 0 (the engine lifts it onto tables like table_lamp), warm glow breathe |
+| `electric_wall_light` | t / elec_t | **4** (rot 0-3) | 70 (fixture 55-64 px) | LED sconce on a backplate on the wall face, wall wash up/down; no shadow. 4 painted facings like `dec_wall_sconce` (the fixture must sit on the room side) |
+| `ceiling_light` | t / elec_t | mirror | 83 (canopy at the 80 px ceiling, body 70-76 px) | canopy, stem, dome shade, lit diffuser ring, glow; no shadow |
+| `flood_light` | xt / elec_xt | mirror | 94 (107) | concrete footing, 3 m pole, crossarm with two LED flood heads, junction box LED, soft light cones |
+| `electric_heater` | s / elec_s | 2 (rot 0, 1) | 29 (36) | fan heater on feet, coil bars glowing behind the grille, dial, pilot light, heat shimmer |
+| `hydroponic_table` | w / elec_w | 2 (rot 0, 1) | 68 (75) | steel table, nutrient tray surface at 27 px left empty (12 net pots in 2 rows, ripple), reservoir + pump LED, grow-light bar at 1.7 m (pink pulse) |
 
 Facings: `(rot 0, 1)` = the true rotations; `(rot 0, 3)` = parts that must face the camera (panel cells, the wheel on
 the water side) use the rot 3 geometry for the second painted facing (`rotations` stays [r0, r1, r0, r1]). Water mills

@@ -66,8 +66,9 @@ def job(args):
     b, v = _REG[upto][key]; fn, fp, cls, rows, nf, fps = v[:6]
     row, r = r, rot_of(v, r)
     seed = zlib.crc32(key.encode()) % 1000
-    if f == 'unlit': g = fn(False, 0.0); out = lib.render_frame(g, r, cls, fp, seed)
-    else: out = lib.render_frame(fn(True, f / nf), r, cls, fp, seed, geom=lambda: fn(True, f / nf))
+    sh = not getattr(fn, 'no_shadow', False)   # wall / ceiling mounts cast no ground shadow
+    if f == 'unlit': g = fn(False, 0.0); out = lib.render_frame(g, r, cls, fp, seed, shadow=sh)
+    else: out = lib.render_frame(fn(True, f / nf), r, cls, fp, seed, shadow=sh, geom=lambda: fn(True, f / nf))
     return (key, row, f), out
 
 def layer_of(key):

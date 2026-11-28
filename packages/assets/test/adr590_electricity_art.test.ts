@@ -25,6 +25,13 @@ const P: Record<string, [number, string, number, number, number, number, number,
   battery_medium: [1, "t", 1, 4, 2, 1, 1, 1.3, 55], battery_large: [1, "w", 2, 4, 2, 2, 1, 2.0, 85], power_pylon: [1, "xt", 1, 6, 8, 1, 1, 3.0, 107],
   solar_panel: [2, "w", 2, 4, 3, 2, 1, 1.4, 66], wind_turbine: [2, "xxl_t", 1, 8, 12, 1, 1, 6.2, 204], wind_turbine_large: [2, "xxl_l", 1, 8, 10, 2, 2, 10.2, 341],
   water_wheel: [2, "wt", 2, 8, 8, 2, 1, 2.6, 103], water_wheel_overshot: [2, "xw", 2, 8, 8, 2, 2, 4.0, 153], water_turbine: [2, "s", 1, 6, 12, 1, 1, 1.0, 46],
+  electrician_workstation: [3, "wt", 2, 6, 10, 2, 1, 2.0, 85], electric_stove: [3, "s", 2, 4, 6, 1, 1, 1.1, 49], electric_furnace: [3, "t", 2, 6, 10, 1, 1, 1.6, 64],
+  power_workbench: [3, "w", 2, 6, 10, 2, 1, 1.6, 72], power_hammer: [3, "t", 2, 6, 10, 1, 1, 2.2, 83], fridge: [3, "t", 2, 4, 4, 1, 1, 1.8, 71],
+  chest_freezer: [3, "w", 2, 4, 4, 2, 1, 0.85, 50], electric_floor_lamp: [3, "t", 1, 4, 4, 1, 1, 1.6, 64], electric_table_lamp: [3, "s", 1, 4, 4, 1, 1, 0.5, 31],
+  // mounted: the wall light's fixture band is 55-64 px above the edge pivot (rot 0; the back facings sit on the far wall
+  // face, +5 px), the ceiling light hangs from the 80 px ceiling (body 70-79 px) -> ceiling = mount height, not the brief's object size
+  electric_wall_light: [3, "t", 4, 4, 4, 1, 1, 0.3, 70], ceiling_light: [3, "t", 1, 4, 4, 1, 1, 0.25, 80],
+  flood_light: [3, "xt", 1, 4, 4, 1, 1, 3.0, 107], electric_heater: [3, "s", 2, 4, 4, 1, 1, 0.65, 36], hydroponic_table: [3, "w", 2, 4, 6, 2, 1, 1.7, 75],
 };
 const DELIVERED = Object.keys(P);
 const png = (p: string) => { const d = decodeRgba(readFileSync(root + p)); return { width: d.w, height: d.h, data: d.rgba }; };
@@ -89,5 +96,19 @@ describe("ADR-590 electricity-tier art", () => {
       expect(top, k).toBeGreaterThanOrEqual(Math.round(hm * PX_M)); expect(top, k).toBeLessThanOrEqual(briefTop + 4);
       expect(nf).toBeGreaterThan(1);
     }
+  });
+});
+
+describe("ADR-590 mounted electric lights", () => {
+  it("wall light: 4 painted facings, fixture 55-64 px above the edge pivot at rot 0; ceiling light body under the 80 px ceiling", () => {
+    const s = byKey.get("electric_wall_light")!; const a = atlas.get(s.atlas)!; const col = png(a.image); const oy = CLS.t![2];
+    const rows = s.animations.idle!.rotations!; expect(new Set(rows.map((r) => r[0])).size).toBe(4);
+    const i = rows[0]![0]!; const x0 = (i % a.columns) * a.frameW, y0 = Math.floor(i / a.columns) * a.frameH; let minY = a.frameH, maxY = 0;
+    for (let y = 0; y < a.frameH; y++) for (let x = 0; x < a.frameW; x++) if (col.data[((y0 + y) * col.width + x0 + x) * 4 + 3]! >= 128) { minY = Math.min(minY, y); maxY = Math.max(maxY, y); }
+    expect(oy - minY).toBeGreaterThanOrEqual(60); expect(oy - minY).toBeLessThanOrEqual(68); expect(oy - maxY).toBeGreaterThanOrEqual(40);   // no ground parts
+    const c = byKey.get("ceiling_light")!; const ca = atlas.get(c.atlas)!; const cc = png(ca.image); const ci = c.animations.unlit!.frames[0]!;
+    const cx0 = (ci % ca.columns) * ca.frameW, cy0 = Math.floor(ci / ca.columns) * ca.frameH; let cmax = 0;
+    for (let y = 0; y < ca.frameH; y++) for (let x = 0; x < ca.frameW; x++) if (cc.data[((cy0 + y) * cc.width + cx0 + x) * 4 + 3]! >= 128) cmax = Math.max(cmax, y);
+    expect(oy - cmax).toBeGreaterThanOrEqual(64);   // lowest solid pixel of the hanging body stays ~2.1 m+ up (no shadow on the floor)
   });
 });
