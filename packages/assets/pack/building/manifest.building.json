@@ -1584,8 +1584,8 @@
    "image": "atlases/elec_s.png",
    "frameW": 64,
    "frameH": 88,
-   "columns": 10,
-   "rows": 1,
+   "columns": 16,
+   "rows": 2,
    "pages": [
     {
      "scale": 2,
@@ -1637,7 +1637,7 @@
    "frameW": 104,
    "frameH": 120,
    "columns": 9,
-   "rows": 3,
+   "rows": 4,
    "pages": [
     {
      "scale": 2,
@@ -1655,6 +1655,32 @@
    "ktx2": "atlases/elec_w.ktx2",
    "masksKtx2": {
     "emissive": "atlases/elec_w_emissive.ktx2"
+   }
+  },
+  {
+   "key": "elec_wt",
+   "image": "atlases/elec_wt.png",
+   "frameW": 144,
+   "frameH": 152,
+   "columns": 7,
+   "rows": 3,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/elec_wt@2x.png",
+     "ktx2": "atlases/elec_wt@2x.ktx2",
+     "masksKtx2": {
+      "emissive": "atlases/elec_wt_emissive@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "emissive": "atlases/elec_wt_emissive.png"
+   },
+   "residency": "stream",
+   "ktx2": "atlases/elec_wt.ktx2",
+   "masksKtx2": {
+    "emissive": "atlases/elec_wt_emissive.ktx2"
    }
   },
   {
@@ -1681,6 +1707,84 @@
    "ktx2": "atlases/elec_xt.ktx2",
    "masksKtx2": {
     "emissive": "atlases/elec_xt_emissive.ktx2"
+   }
+  },
+  {
+   "key": "elec_xw",
+   "image": "atlases/elec_xw.png",
+   "frameW": 184,
+   "frameH": 216,
+   "columns": 5,
+   "rows": 4,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/elec_xw@2x.png",
+     "ktx2": "atlases/elec_xw@2x.ktx2",
+     "masksKtx2": {
+      "emissive": "atlases/elec_xw_emissive@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "emissive": "atlases/elec_xw_emissive.png"
+   },
+   "residency": "stream",
+   "ktx2": "atlases/elec_xw.ktx2",
+   "masksKtx2": {
+    "emissive": "atlases/elec_xw_emissive.ktx2"
+   }
+  },
+  {
+   "key": "elec_xxl_t",
+   "image": "atlases/elec_xxl_t.png",
+   "frameW": 112,
+   "frameH": 240,
+   "columns": 9,
+   "rows": 1,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/elec_xxl_t@2x.png",
+     "ktx2": "atlases/elec_xxl_t@2x.ktx2",
+     "masksKtx2": {
+      "emissive": "atlases/elec_xxl_t_emissive@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "emissive": "atlases/elec_xxl_t_emissive.png"
+   },
+   "residency": "stream",
+   "ktx2": "atlases/elec_xxl_t.ktx2",
+   "masksKtx2": {
+    "emissive": "atlases/elec_xxl_t_emissive.ktx2"
+   }
+  },
+  {
+   "key": "elec_xxl_l",
+   "image": "atlases/elec_xxl_l.png",
+   "frameW": 176,
+   "frameH": 376,
+   "columns": 5,
+   "rows": 2,
+   "pages": [
+    {
+     "scale": 2,
+     "image": "atlases/elec_xxl_l@2x.png",
+     "ktx2": "atlases/elec_xxl_l@2x.ktx2",
+     "masksKtx2": {
+      "emissive": "atlases/elec_xxl_l_emissive@2x.ktx2"
+     }
+    }
+   ],
+   "masks": {
+    "emissive": "atlases/elec_xxl_l_emissive.png"
+   },
+   "residency": "stream",
+   "ktx2": "atlases/elec_xxl_l.ktx2",
+   "masksKtx2": {
+    "emissive": "atlases/elec_xxl_l_emissive.ktx2"
    }
   }
  ],
@@ -85753,6 +85857,63 @@
    "rotationArt": "mirror"
   },
   {
+   "key": "water_turbine",
+   "category": "building",
+   "atlas": "elec_s",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.7954545454545454
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      11,
+      12,
+      13,
+      14,
+      15,
+      16
+     ],
+     "fps": 12,
+     "loop": true
+    },
+    "unlit": {
+     "frames": [
+      10
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "water_turbine",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      11,
+      11,
+      11,
+      11
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       10,
+       10,
+       10,
+       10
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "mirror"
+  },
+  {
    "key": "battery_medium",
    "category": "building",
    "atlas": "elec_t",
@@ -86080,6 +86241,288 @@
    "rotationArt": "unique4"
   },
   {
+   "key": "solar_panel",
+   "category": "building",
+   "atlas": "elec_w",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.7833333333333333
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      25,
+      26,
+      27,
+      28
+     ],
+     "fps": 3,
+     "loop": true,
+     "rotations": [
+      [
+       25,
+       26,
+       27,
+       28
+      ],
+      [
+       30,
+       31,
+       32,
+       33
+      ],
+      [
+       25,
+       26,
+       27,
+       28
+      ],
+      [
+       30,
+       31,
+       32,
+       33
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      24
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       24
+      ],
+      [
+       29
+      ],
+      [
+       24
+      ],
+      [
+       29
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "solar_panel",
+    "footprint": {
+     "w": 2,
+     "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      25,
+      25,
+      25,
+      25
+     ],
+     [
+      30,
+      30,
+      30,
+      30
+     ],
+     [
+      25,
+      25,
+      25,
+      25
+     ],
+     [
+      30,
+      30,
+      30,
+      30
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       24,
+       24,
+       24,
+       24
+      ],
+      [
+       29,
+       29,
+       29,
+       29
+      ],
+      [
+       24,
+       24,
+       24,
+       24
+      ],
+      [
+       29,
+       29,
+       29,
+       29
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "water_wheel",
+   "category": "building",
+   "atlas": "elec_wt",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.7763157894736842
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "fps": 8,
+     "loop": true,
+     "rotations": [
+      [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8
+      ],
+      [
+       10,
+       11,
+       12,
+       13,
+       14,
+       15,
+       16,
+       17
+      ],
+      [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8
+      ],
+      [
+       10,
+       11,
+       12,
+       13,
+       14,
+       15,
+       16,
+       17
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       0
+      ],
+      [
+       9
+      ],
+      [
+       0
+      ],
+      [
+       9
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "water_wheel",
+    "footprint": {
+     "w": 2,
+     "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      10,
+      10,
+      10,
+      10
+     ],
+     [
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      10,
+      10,
+      10,
+      10
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       9,
+       9,
+       9,
+       9
+      ],
+      [
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       9,
+       9,
+       9,
+       9
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
    "key": "power_pylon",
    "category": "building",
    "atlas": "elec_xt",
@@ -86112,6 +86555,275 @@
     "footprint": {
      "w": 1,
      "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      1,
+      1,
+      1,
+      1
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       0,
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "mirror"
+  },
+  {
+   "key": "water_wheel_overshot",
+   "category": "building",
+   "atlas": "elec_xw",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.8333333333333334
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "fps": 8,
+     "loop": true,
+     "rotations": [
+      [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8
+      ],
+      [
+       10,
+       11,
+       12,
+       13,
+       14,
+       15,
+       16,
+       17
+      ],
+      [
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8
+      ],
+      [
+       10,
+       11,
+       12,
+       13,
+       14,
+       15,
+       16,
+       17
+      ]
+     ]
+    },
+    "unlit": {
+     "frames": [
+      0
+     ],
+     "fps": 1,
+     "rotations": [
+      [
+       0
+      ],
+      [
+       9
+      ],
+      [
+       0
+      ],
+      [
+       9
+      ]
+     ]
+    }
+   },
+   "building": {
+    "piece": "water_wheel_overshot",
+    "footprint": {
+     "w": 2,
+     "h": 2
+    },
+    "layer": 2,
+    "frames": [
+     [
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      10,
+      10,
+      10,
+      10
+     ],
+     [
+      1,
+      1,
+      1,
+      1
+     ],
+     [
+      10,
+      10,
+      10,
+      10
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       9,
+       9,
+       9,
+       9
+      ],
+      [
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       9,
+       9,
+       9,
+       9
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "unique4"
+  },
+  {
+   "key": "wind_turbine",
+   "category": "building",
+   "atlas": "elec_xxl_t",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.9
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "fps": 12,
+     "loop": true
+    },
+    "unlit": {
+     "frames": [
+      0
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "wind_turbine",
+    "footprint": {
+     "w": 1,
+     "h": 1
+    },
+    "layer": 2,
+    "frames": [
+     [
+      1,
+      1,
+      1,
+      1
+     ]
+    ],
+    "states": {
+     "unlit": [
+      [
+       0,
+       0,
+       0,
+       0
+      ]
+     ]
+    },
+    "crackOverlay": "bld_crack"
+   },
+   "rotationArt": "mirror"
+  },
+  {
+   "key": "wind_turbine_large",
+   "category": "building",
+   "atlas": "elec_xxl_l",
+   "anchor": {
+    "x": 0.5,
+    "y": 0.925531914893617
+   },
+   "animations": {
+    "idle": {
+     "frames": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8
+     ],
+     "fps": 10,
+     "loop": true
+    },
+    "unlit": {
+     "frames": [
+      0
+     ],
+     "fps": 1
+    }
+   },
+   "building": {
+    "piece": "wind_turbine_large",
+    "footprint": {
+     "w": 2,
+     "h": 2
     },
     "layer": 2,
     "frames": [

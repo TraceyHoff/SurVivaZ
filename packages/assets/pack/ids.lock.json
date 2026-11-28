@@ -6336,7 +6336,13 @@
     "battery_small": 6334,
     "generator_fuel": 6335,
     "generator_solar": 6336,
-    "power_pylon": 6337
+    "power_pylon": 6337,
+    "solar_panel": 6338,
+    "water_turbine": 6339,
+    "water_wheel": 6340,
+    "water_wheel_overshot": 6341,
+    "wind_turbine": 6342,
+    "wind_turbine_large": 6343
   },
   "sounds": {
     "amb_rain": 1,

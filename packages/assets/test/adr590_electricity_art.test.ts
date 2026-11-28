@@ -18,11 +18,13 @@ const atlas = new Map<string, Atlas>(man.atlases.map((a: Atlas) => [a.key, a]));
 // brief §2 / §4: class -> [frameW, frameH, pivot y]. Wider than the brief where a wheel overhangs its footprint in every
 // facing: wt 144 (2.4 m wheel on a 2 m footprint), xw 184 x 216 (3.4 m wheel on a 2x2 diamond, pivot 180 so the front
 // corner of the 128 px diamond fits under it).
-const CLS: Record<string, [number, number, number]> = { s: [64, 88, 70], t: [72, 120, 102], w: [104, 120, 94], wt: [144, 144, 118], xt: [72, 168, 144], xw: [184, 216, 180], xxl_t: [112, 240, 216], xxl_l: [176, 376, 348] };
+const CLS: Record<string, [number, number, number]> = { s: [64, 88, 70], t: [72, 120, 102], w: [104, 120, 94], wt: [144, 152, 118], xt: [72, 168, 144], xw: [184, 216, 180], xxl_t: [112, 240, 216], xxl_l: [176, 376, 348] };
 // key: [batch, class, rows (1 mirror / 2 or 4 unique4), active frames, fps, footprint w, h, height m, brief top px]
 const P: Record<string, [number, string, number, number, number, number, number, number, number]> = {
   generator_fuel: [1, "w", 2, 6, 12, 2, 1, 1.2, 60], generator_solar: [1, "s", 1, 4, 4, 1, 1, 0.9, 43], battery_small: [1, "s", 1, 4, 2, 1, 1, 0.6, 34],
   battery_medium: [1, "t", 1, 4, 2, 1, 1, 1.3, 55], battery_large: [1, "w", 2, 4, 2, 2, 1, 2.0, 85], power_pylon: [1, "xt", 1, 6, 8, 1, 1, 3.0, 107],
+  solar_panel: [2, "w", 2, 4, 3, 2, 1, 1.4, 66], wind_turbine: [2, "xxl_t", 1, 8, 12, 1, 1, 6.2, 204], wind_turbine_large: [2, "xxl_l", 1, 8, 10, 2, 2, 10.2, 341],
+  water_wheel: [2, "wt", 2, 8, 8, 2, 1, 2.6, 103], water_wheel_overshot: [2, "xw", 2, 8, 8, 2, 2, 4.0, 153], water_turbine: [2, "s", 1, 6, 12, 1, 1, 1.0, 46],
 };
 const DELIVERED = Object.keys(P);
 const png = (p: string) => { const d = decodeRgba(readFileSync(root + p)); return { width: d.w, height: d.h, data: d.rgba }; };

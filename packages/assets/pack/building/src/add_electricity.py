@@ -28,6 +28,32 @@ def registry(upto):
         for k, v in mod.PIECES.items(): reg[k] = (b, v)
     return reg
 
+def save_page(im, path):
+    """Byte-lean page: indexed PNG + tRNS. Exact when the page has <= 256 RGBA colours (masks, small pages); else the 192
+    most-used colours (the cel palette: flat faces, ink, glow) stay exact and the remaining 64 entries cover the
+    anti-aliased edges / soft smoke + glow (octree), every pixel mapped to its nearest entry in RGBA (no dither)."""
+    import numpy as np
+    a = np.asarray(im.convert('RGBA')); flat = a.reshape(-1, 4); key = flat.astype(np.uint32) @ np.array([1 << 24, 1 << 16, 1 << 8, 1], np.uint32)
+    key[flat[:, 3] == 0] = 0
+    uq, inv, cnt = np.unique(key, return_inverse=True, return_counts=True)
+    dec = lambda k: np.stack([(k >> 24) & 255, (k >> 16) & 255, (k >> 8) & 255, k & 255], -1).astype(np.int32)
+    if len(uq) <= 256:
+        pal = dec(uq); idx = inv.astype(np.uint8)
+    else:
+        order = np.argsort(-cnt); keep = uq[order[:192]]
+        if 0 not in keep: keep = np.concatenate([[0], keep[:191]])
+        rest = np.isin(key, keep, invert=True)
+        rp = Image.fromarray(flat[rest].reshape(1, -1, 4), 'RGBA').quantize(64, method=Image.Quantize.FASTOCTREE, dither=Image.Dither.NONE)
+        extra = np.asarray(rp.convert('RGBA')).reshape(-1, 4)
+        ex = np.unique(extra.astype(np.uint32) @ np.array([1 << 24, 1 << 16, 1 << 8, 1], np.uint32))
+        pal = dec(np.unique(np.concatenate([keep, ex])))[:256]
+        idx = np.zeros(len(uq), np.uint8); U = dec(uq); w = np.array([1, 1, 1, 2], np.int32)
+        for i in range(0, len(uq), 4096):   # nearest palette entry per unique colour
+            d = (((U[i:i + 4096, None, :] - pal[None, :, :]) ** 2) * w).sum(-1); idx[i:i + 4096] = d.argmin(1)
+        idx = idx[inv]
+    p = Image.fromarray(idx.reshape(a.shape[:2]), 'P'); p.putpalette([int(v) for c in pal for v in c[:3]] + [0] * (768 - 3 * len(pal)))
+    p.save(path, optimize=True, transparency=bytes(int(c[3]) for c in pal))
+
 def rot_of(v, row):
     """painted row -> render rotation: PIECES entries may carry a 7th field (rotation per row), e.g. (0, 3) for parts
     that must face the camera in both painted facings (panels, wall fixtures)."""
@@ -38,11 +64,11 @@ def job(args):
     upto, key, r, f = args
     if upto not in _REG: _REG[upto] = registry(upto)
     b, v = _REG[upto][key]; fn, fp, cls, rows, nf, fps = v[:6]
-    r = rot_of(v, r)
+    row, r = r, rot_of(v, r)
     seed = zlib.crc32(key.encode()) % 1000
     if f == 'unlit': g = fn(False, 0.0); out = lib.render_frame(g, r, cls, fp, seed)
     else: out = lib.render_frame(fn(True, f / nf), r, cls, fp, seed, geom=lambda: fn(True, f / nf))
-    return (key, r, f), out
+    return (key, row, f), out
 
 def layer_of(key):
     p = json.load(open(ROOT / 'packages/gameplay/data/pieces.json'))['pieces']
@@ -83,7 +109,7 @@ def main():
                 o = R[c]; x, y = i % cols, i // cols; idx[c] = i
                 for suf, im, s in (('', o['col'][0], 1), ('@2x', o['col'][1], 2), ('_emissive', o['em'][0], 1), ('_emissive@2x', o['em'][1], 2)):
                     pages[suf].paste(im, (x * w * s, y * h * s))
-            for suf, im in pages.items(): im.save(BLD / f'atlases/{akey}{suf}.png', optimize=True)
+            for suf, im in pages.items(): save_page(im, BLD / f'atlases/{akey}{suf}.png')
             man['atlases'].append({'key': akey, 'image': f'atlases/{akey}.png', 'frameW': w, 'frameH': h, 'columns': cols, 'rows': nrows,
                                    'pages': [{'scale': 2, 'image': f'atlases/{akey}@2x.png'}],
                                    'masks': {'emissive': f'atlases/{akey}_emissive.png'}, 'residency': 'stream'})

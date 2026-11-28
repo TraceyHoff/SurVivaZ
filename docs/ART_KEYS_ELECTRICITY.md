@@ -152,7 +152,7 @@ atlas). Pages `elec_<class>` (+ `@2x`, `_emissive`, `_emissive@2x`; PNG oxipng +
 existing building fragment (`manifest.building.json`), so no new fragment / manifest-index wiring was needed.
 Packer: `packages/assets/pack/building/src/add_electricity.py` (add-only, owns `elec_*` only; frame indices never move
 when later batches append), art kit `src/elec/` (`lib.py` + `pieces<batch>.py`), encode `src/elec_encode.py elec_`,
-preview `src/elec_preview.py`. Each delivered key's `$placeholder` entry is removed from `sprite_fallbacks.json`.
+preview `src/elec_preview.py`. The `$placeholder` entries in `sprite_fallbacks.json` stay until each key's `build_<key>` icon ships (the build tile borrows them, adr229); real art already wins in the world (resolveSprite returns the key itself, untinted).
 Test: `packages/assets/test/adr590_electricity_art.test.ts` (layout, convention, pages, true-scale floor/ceiling, emissive
 only on active frames).
 
@@ -164,6 +164,19 @@ only on active frames).
 | `battery_medium` | t / elec_t | mirror | 47 (55) | 4-module rack, bus bars, inverter on top, gauge + module LEDs |
 | `battery_large` | w / elec_w | 2 (rot 0, 1) | 82 (85) | two louvred cabinets + inverter, vertical gauges, inverter fan spins |
 | `power_pylon` | xt / elec_xt | mirror | 93 (107) | weighted base, mast, toroidal coil + dish; coil glow pulse + soft arc ring |
+| `solar_panel` | w / elec_w | 2 (rot 0, 3) | 67 (66, +4 ok) | two modules on a ground-mount frame, combiner box (charge + MPPT LEDs); glint sweep. Both painted facings show the cells |
+| `wind_turbine` | xxl_t / elec_xxl_t | mirror | 189 (204) | guyed tube mast, nacelle + tail vane, hub 151 px, 2.4 m rotor as a true iso disc; 8 frames = 120 deg, soft motion disc, controller LEDs |
+| `wind_turbine_large` | xxl_l / elec_xxl_l | mirror | 313 (341) | tapered can-section tower, door, transformer cabinet, nacelle with anemometer + aviation light, hub 242 px, 4.4 m rotor |
+| `water_wheel` | wt / elec_wt (**144x152**) | 2 (rot 0, 3) | 101 (103) | 2.4 m undershot wheel overhanging the water side, axle trestles, gearbox, shed + cable pole; 8 frames = one paddle pitch, foam + splash |
+| `water_wheel_overshot` | xw / elec_xw (**184x216**, pivot 180) | 2 (rot 0, 3) | 148 (153) | 3.4 m shrouded bucket wheel, flume on trestles, stone mill house; water pours from the flume, splash, wheel turns |
+| `water_turbine` | s / elec_s | mirror | 32 (46) | ducted turbine on a skid in the water, trash rack, generator cap, cable mast; spinning collar mark, outlet churn |
+
+Facings: `(rot 0, 1)` = the true rotations; `(rot 0, 3)` = parts that must face the camera (panel cells, the wheel on
+the water side) use the rot 3 geometry for the second painted facing (`rotations` stays [r0, r1, r0, r1]). Water mills
+need only *a* water tile beside them (`besideWater`), so the player turns the wheel to it.
+Wider frames than the brief where a wheel overhangs its footprint in every facing: wt 144x152 (brief 104x144), xw
+184x216 pivot 180 (brief 104x200 pivot 176). Pages are indexed PNG + tRNS (exact cel palette; anti-aliased / soft pixels
+mapped to the nearest of 64 extra entries) to stay byte-lean.
 
 Measured tops are below the brief's ceiling where the object does not fill its whole footprint (the brief's figure
 assumes the far corner reaches full height); every key stands at least round(height m x 30.29) px.
