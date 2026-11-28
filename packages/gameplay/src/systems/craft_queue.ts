@@ -14,11 +14,11 @@ import { defineCommand, defineResource, installScheduler, JobQueues, JobState, t
 import { CRAFT_OWED_SLOTS, CraftOwed, CraftQueue, Dead, Inventory } from "../components.js";
 export { CraftOwed, CraftQueue };
 import { gameplayDefs, isAuthority } from "../config.js";
-import { secondsToTicks } from "../defs.js";
+import { secondsToTicks, StationKind } from "../defs.js";
 import { skillMul } from "../skills/tree.js";
 import { CraftCompleted, CraftFail, CraftFailed, CraftStarted, emit } from "../events.js";
 import { crafterIdFor } from "../economy/provenance.js";
-import { meetsSkill, recipeOutputUnlocked, recipeStationOk, stationInRange, stationUnlocked, torchCraftable } from "./crafting.js";
+import { craftSpeedMul, meetsSkill, recipeOutputUnlocked, recipeStationOk, stationInRange, stationUnlocked, torchCraftable } from "./crafting.js";
 import { recordRecentCraft } from "../recent.js";
 import { isCreativePlayer } from "../creative.js";
 
@@ -66,7 +66,7 @@ export function installCraftQueue(world: World, handlers?: CommandHandlers): Job
       // ADR-477: a practiced crafter works faster — the queue duration is divided by the speed
       // multiplier (1.0 without speed nodes, 1.2 with all four practice nodes); the recipe, the
       // ingredients and the output are unchanged.
-      duration: (w, _e, id) => Math.max(1, secondsToTicks((recipeOf(w, id)?.seconds ?? 1) / skillMul(w, _e, "speed"), DT)),
+      duration: (w, _e, id) => Math.max(1, secondsToTicks((recipeOf(w, id)?.seconds ?? 1) / craftSpeedMul(w, _e, recipeOf(w, id)?.station ?? 0), DT)),
       onComplete: (w, e, job: JobInfo) => {
         const o = outputFor(w, e, job.recipeId); if (!o) return;
         if (!addOutput(w, e, o) && !oweCraftOutput(w, e, o)) { emit(w, CraftFailed, { entity: e, recipe: job.recipeId, reason: CraftFail.InventoryFull }); return; }
@@ -117,7 +117,7 @@ export function enqueueCraft(world: World, e: Entity, recipe: number, count = 1)
   }
   const slot = q.enqueue(e, recipe, count);
   if (slot < 0) { if (!isCreativePlayer(world, e)) transaction(world, (t) => { for (const i of r.ingredients) { const a = t.add(e, i.item, i.count * count); if (!a.ok) return a; } return { ok: true }; }, e); return "queue_full"; } // ADR-581: no refund of ingredients a creative craft never paid
-  emit(world, CraftStarted, { entity: e, recipe, totalTicks: Math.max(1, secondsToTicks(r.seconds / skillMul(world, e, "speed"), DT)) }); // ADR-477: the announced total matches the sped-up duration
+  emit(world, CraftStarted, { entity: e, recipe, totalTicks: Math.max(1, secondsToTicks(r.seconds / craftSpeedMul(world, e, r.station), DT)) }); // ADR-477: the announced total matches the sped-up duration
   return slot;
 }
 /** Does one unit of the recipe's output fit right now (dry-run transaction)? */
@@ -143,4 +143,9 @@ export function craftQueueSystem(world: World): void {
     if (h.state === JobState.Running && !ok) q.pause(e);
     else if (h.state === JobState.Paused && ok && outputFits(world, e, h.recipeId)) q.resume(e);
   }
+}
+/** ADR-590: station kind of e's running queued craft (StationKind.None = no running queue job). The power grid reads it for "in use". */
+export function runningQueueStation(world: World, e: Entity): StationKind {
+  const q = world.getResource(CraftQueuesRes); if (!q || !world.has(e, CraftQueue)) return StationKind.None;
+  const h = q.info(e, 0); return h.state === JobState.Running ? recipeOf(world, h.recipeId)?.station ?? StationKind.None : StationKind.None;
 }

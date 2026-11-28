@@ -31,6 +31,7 @@ import { VEHICLE_CRAFT_COMMANDS, VEHICLE_CRAFT_ENTITY_FIELDS } from "./vehicle_c
 import { driveFromBits, setDriveInput, VEHICLE_COMMANDS, VEHICLE_STATE_COMMANDS, VEHICLE_ENTITY_FIELDS } from "./vehicles.js";
 import { MOUNT_COMMANDS } from "./mount_commands.js";
 import { ITEM_REPAIR_COMMANDS } from "./item_repair_commands.js"; // ADR-474
+import { POWER_COMMANDS, PowerToggleCmd } from "./power/commands.js"; // ADR-590
 import { ROPE_COMMANDS, ROPE_ENTITY_FIELDS } from "./rope_commands.js";
 import { analogMoving, GameplayEdgeBits, GameplayHoldBits, hotbarSlotFromEdges, runInputHooks } from "./input_hooks.js";
 import { DrawnDriveRes } from "./systems/movement.js";
@@ -100,6 +101,7 @@ export const COMMAND_ENTITY_FIELDS: Readonly<Record<string, readonly string[]>> 
   ...MAP_MARKER_ENTITY_FIELDS,
   ...WORKER_ENTITY_FIELDS,
   ...ROPE_ENTITY_FIELDS,
+  [PowerToggleCmd.name]: ["target"], // ADR-590
 };
 /** Suggested per-command rate limits (per second) for net's limiter; gameplay still enforces cooldowns. */
 export const COMMAND_RATES: Readonly<Record<string, number>> = {
@@ -112,6 +114,7 @@ export const COMMAND_RATES: Readonly<Record<string, number>> = {
   [MoveCmd.name]: 8,
   /** ADR-419: one ramp (up to 16 tiles / 96 edits) per command — 2/s is generous for a bulk edit. */
   [TerrainRampCmd.name]: 2,
+  [PowerToggleCmd.name]: 10, // ADR-590
 };
 
 export function registerGameplayCommands(reg: CommandRegistry = new CommandRegistry()): CommandRegistry {
@@ -146,7 +149,8 @@ export function registerGameplayCommands(reg: CommandRegistry = new CommandRegis
   for (const d of MOUNT_COMMANDS) reg.register(d); // ADR-319 / ADR-320: append-only mounts + saddles
   for (const d of ROPE_COMMANDS) reg.register(d); // ADR-351: append-only rope leading
   for (const d of RAMP_COMMANDS) reg.register(d); // ADR-419: append-only ramp grading
-  for (const d of ITEM_REPAIR_COMMANDS) reg.register(d); // ADR-474: append-only tool / weapon repair (last: older ids keep their wire index)
+  for (const d of ITEM_REPAIR_COMMANDS) reg.register(d); // ADR-474: append-only tool / weapon repair
+  for (const d of POWER_COMMANDS) reg.register(d); // ADR-590: append-only power switch (last: older ids keep their wire index)
   return reg;
 }
 

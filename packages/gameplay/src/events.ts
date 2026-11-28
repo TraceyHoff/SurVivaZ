@@ -52,6 +52,8 @@ export const enum BuildFail {
   WrongStorage = 34,
   /** ADR-420: a water-required piece (dock / shipyard) needs deep water under every footprint tile. */
   NeedsDeepWater = 35,
+  /** ADR-590: a water wheel must stand on land beside a water tile (river for full output). */
+  NeedsWaterEdge = 36,
 }
 export const enum DestroyCause { Damage = 1, Collapse = 2, Demolish = 3 }
 

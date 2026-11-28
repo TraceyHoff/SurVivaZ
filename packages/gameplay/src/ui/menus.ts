@@ -26,6 +26,8 @@ import { BuyFromStallCmd, OpenStallCmd, CollectTillCmd, SetListingCmd, SetStallN
 import { holdingTorch, stationInRange } from "../systems/crafting.js";
 import { checkItemRepair, isRepairableSlot, itemRepairCost, itemRepairTier } from "../item_repair.js";
 import { ItemRepairCmd } from "../item_repair_commands.js";
+import { PowerToggleCmd } from "../power/commands.js";
+import { POWER } from "../power/data.js";
 import { CancelQueuedCraftCmd, MAX_CRAFT_COUNT, QueueCraftCmd, craftQueueReason, owedOf } from "../systems/craft_queue.js";
 import { pieceCost, pieceGates, zonesAt } from "../building/place.js";
 import { isCreativePlayer } from "../creative.js";
@@ -33,7 +35,7 @@ import { hasSkillUnlock, unlockRequirement, xpToNext } from "../skills/tree.js";
 import { activeDiseases, careStatus, diseasePresentation, CARE_DRY_MAX } from "../diseases.js";
 import { ambientTemperature, effectiveInsulation, heatAt, shelteredAirTemp, weatherDef, worldSeason } from "../systems/environment.js";
 import { BoilCmd, DepositCmd, EquipCmd, PaintCmd, PlaceCmd, ToggleDoorCmd, ToggleFireCmd, UseCmd, WearCmd, WithdrawCmd } from "../input.js";
-import { Equipment, Worn } from "../components.js";
+import { Equipment, Power, Worn } from "../components.js";
 import { ItemCategory, StationKind, WEAR_SLOTS, WeatherKind } from "../defs.js";
 import { entityIndex } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
@@ -45,7 +47,7 @@ import { KEY_ITEM, keyTooltip } from "../vehicle_keys.js";
 const itemDefKey = (w: World, item: number): string => gameplayDefs(w).items.get(item)?.key ?? "";
 import { COSMETICS, EquipCosmeticCmd, SetAppearanceCmd, canEditAppearance, hasCreatedLook, unlocksOf } from "../customization.js";
 import { canLootBagAt } from "../combat/pvp.js";
-import { isBaseStoragePiece } from "../ai/storage_api.js";
+import { isContainerPiece } from "../ai/storage_api.js";
 import { inFrontOf } from "../compass.js";
 import { PartyAcceptCmd, PartyDeclineCmd, PartyInviteCmd, PartyKickCmd, PartyLeaveCmd, PARTY_RULES } from "../party.js";
 import { PlaceMapMarkerCmd, RemoveMapMarkerCmd } from "../map_marker_commands.js";
@@ -181,7 +183,7 @@ export interface OwedView { item: number; name: string; count: number; crafterNa
 /** ADR-136: `station` = which list this is (0 = on your person / hand only); `elsewhere` = recipes hidden here, per station kind (hint text). */
 export interface CraftingView { station: number; stationName: string; recipes: RecipeView[]; queue: QueueJobView[]; owed: OwedView[]; maxCount: number; elsewhere: { station: number; name: string; count: number }[] }
 /** Display names per StationKind (0 hand … 5 garage, 6 dock, 7 shipyard). */
-export const STATION_NAMES: Readonly<Record<number, string>> = { 0: "By hand", 1: "Campfire / stove", 2: "Workbench", 3: "Furnace", 4: "Anvil / forge", 5: "Garage", 6: "Dock", 7: "Shipyard" };
+export const STATION_NAMES: Readonly<Record<number, string>> = { 0: "By hand", 1: "Campfire / stove", 2: "Workbench", 3: "Furnace", 4: "Anvil / forge", 5: "Garage", 6: "Dock", 7: "Shipyard", 8: "Electrician's workstation" };
 // ---- container panel (ADR-098: up to 96 slots, paged) ------------------------------------------------
 /** Slots per page in the container panel (one page = the old 24-slot box). */
 export const CONTAINER_PAGE_SIZE = 24;
@@ -542,7 +544,9 @@ export type InteractPanel =
   | { panel: "storage"; piece: Entity }
   | { panel: "door"; piece: Entity }
   /** ADR-315: Use on a Claim Flag toggles this player's view of its claim radius (client-local; never a panel). */
-  | { panel: "claim"; piece: Entity };
+  | { panel: "claim"; piece: Entity }
+  /** ADR-590: Use on a switchable powered piece (lamp, heater, solar / wind / water source, pylon) flips its switch — never a panel. */
+  | { panel: "power"; piece: Entity; on: boolean };
 /** What Interact / Use should do: the closest eligible target. Doors compete by distance with storage, loot,
  *  stations, wardrobes, pets and workers so standing at a house door opens the door instead of a chest through
  *  the wall (ADR-303). Use never opens inventory unless that closest target is a container, loot bag, death bag,
@@ -559,6 +563,7 @@ export function interactPanel(c: MenuCtx): InteractPanel | undefined {
   const st = nearestStation(c); const pet = nearestPet(c.world, c.player); const worker = nearestWorker(c.world, c.player);
   const bag = nearestLootBag(c);
   const storage = nearestStoragePiece(c);
+  const power = nearestPowerSwitch(c);
   type Cand = { d: number; pri: number; pick: InteractPanel };
   const cands: Cand[] = [];
   if (door && front(door.entity)) cands.push({ d: door.d, pri: 0, pick: { panel: "door", piece: door.entity } });
@@ -568,6 +573,7 @@ export function interactPanel(c: MenuCtx): InteractPanel | undefined {
     cands.push({ d: bag.d, pri: 1, pick: locked ? { panel: "lootLocked", bag: bag.entity } : { panel: "loot", bag: bag.entity } });
   }
   if (storage && front(storage.entity)) cands.push({ d: storage.d, pri: 2, pick: { panel: "storage", piece: storage.entity } });
+  if (power && front(power.entity)) cands.push({ d: power.d, pri: 2.5, pick: { panel: "power", piece: power.entity, on: (w.getField(power.entity, Power, "on") ?? 1) !== 0 } });
   if (wardrobe && front(wardrobe.entity)) cands.push({ d: wardrobe.d, pri: 3, pick: { panel: "wardrobe" } });
   if (pet && front(pet.entity) && !(nearestOpenable(c, pet.d) < pet.d)) cands.push({ d: pet.d, pri: 4, pick: { panel: "pet", pet: pet.entity } });
   if (worker && front(worker.entity) && !(nearestOpenable(c, worker.d) < worker.d)) cands.push({ d: worker.d, pri: 5, pick: { panel: "worker", worker: worker.entity } });
@@ -575,6 +581,36 @@ export function interactPanel(c: MenuCtx): InteractPanel | undefined {
   if (!cands.length) return undefined;
   cands.sort((a, b) => a.d - b.d || a.pri - b.pri);
   return cands[0]!.pick;
+}
+/**
+ * ADR-590: nearest powered piece whose Use is its switch (within build reach): not a container (fridge, generator tank,
+ * hydroponic tray open as storage), not a crafting station (opens the station), not a battery, not a building-tier piece.
+ */
+export function nearestPowerSwitch(c: MenuCtx, r = gameplayDefs(c.world).building.buildReach): { entity: Entity; d: number } | undefined {
+  const w = c.world; const me = w.get(c.player, Transform); if (!me || !w.isRegistered(Power)) return undefined;
+  const defs = gameplayDefs(w); let best: { entity: Entity; d: number } | undefined;
+  for (const e of w.query([Power, BuildPiece, Transform])) {
+    if (w.has(e, Dead)) continue;
+    const def = defs.pieces.get(w.getField(e, BuildPiece, "type") ?? 0); const spec = def ? POWER.pieces[def.key] : undefined;
+    if (!def || !spec || def.container > 0 || def.station !== StationKind.None || spec.role === "battery") continue;
+    const t = w.get(e, Transform)!; const d = Math.hypot(t.x - me.x, t.y - me.y);
+    if (d <= r && (!best || d < best.d)) best = { entity: e, d };
+  }
+  return best;
+}
+/** ADR-590: flip a powered piece's switch (PowerToggleCmd; the server checks reach and build privilege). */
+export const powerToggleIntent = (target: Entity, on: boolean): MenuIntent => intent(PowerToggleCmd, { target, on: on ? 1 : 0 }, ["target"]);
+/** ADR-590: one short status line for a powered piece (hint pill / panels): "On · 60 W", "No power", "Off", "Battery 80%". */
+export function powerStatusText(w: World, piece: Entity): string {
+  if (!w.isRegistered(Power) || !w.has(piece, Power)) return "";
+  const p = w.get(piece, Power)!; const defs = gameplayDefs(w);
+  const key = defs.pieces.get(w.getField(piece, BuildPiece, "type") ?? 0)?.key ?? ""; const spec = POWER.pieces[key];
+  const kw = (tens: number): string => tens >= 100 ? `${(tens / 100).toFixed(1)} kW` : `${tens * 10} W`;
+  if (spec?.role === "battery") return `Battery ${p.level}%`;
+  if (!p.on) return "Off";
+  if (spec?.role === "source") return p.active ? `On · grid ${kw(p.supply)} / ${kw(p.demand)}` : spec.kind === "fuel" ? "Idle" : "No output";
+  if (!p.powered) return "No power";
+  return p.active ? `On · ${kw(Math.round((spec?.watts ?? 0) / 10))}` : "Standby";
 }
 /** ADR-303: nearest door or gate (`def.door`) within build reach — the same range `doorSystem` accepts. */
 export function nearestDoor(c: MenuCtx, r = gameplayDefs(c.world).building.buildReach): { entity: Entity; d: number } | undefined {
@@ -618,7 +654,7 @@ export function nearestWardrobePiece(c: MenuCtx, r = COSMETICS.wardrobeRange): {
  *  server resolves it to its Storage attachment, so the client needs no replicated Container to offer it. */
 export function nearestStoragePiece(c: MenuCtx, r = gameplayDefs(c.world).building.containerReach): { entity: Entity; d: number } | undefined {
   const w = c.world; const me = w.get(c.player, Transform); if (!me || !w.isRegistered(BuildPiece)) return undefined; let best: { entity: Entity; d: number } | undefined;
-  for (const e of w.query([BuildPiece, Transform])) { if (w.has(e, Dead)) continue; const def = gameplayDefs(w).pieces.get(w.getField(e, BuildPiece, "type") ?? 0); if (!isBaseStoragePiece(def)) continue; const t = w.get(e, Transform)!; const d = Math.hypot(t.x - me.x, t.y - me.y); if (d <= r && (!best || d < best.d)) best = { entity: e, d }; }
+  for (const e of w.query([BuildPiece, Transform])) { if (w.has(e, Dead)) continue; const def = gameplayDefs(w).pieces.get(w.getField(e, BuildPiece, "type") ?? 0); if (!isContainerPiece(def)) continue; const t = w.get(e, Transform)!; const d = Math.hypot(t.x - me.x, t.y - me.y); if (d <= r && (!best || d < best.d)) best = { entity: e, d }; }
   return best;
 }
 /** ADR-160: nearest LootBag within container reach of the player (hand loot; no tool needed), with its distance. */

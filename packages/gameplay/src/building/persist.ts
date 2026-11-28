@@ -15,6 +15,7 @@
  * ADR-259 v5: flag 32 adds an f64 persistent worker-target identity after exact position.
  * ADR-317 v6: flag 64 adds u32 owner (PieceOwner) + u32 builder (PieceBuilder) after the worker target. Pieces from
  * older blobs load without a PieceBuilder (builder unknown: Demolish falls back to the piece's tribe, see building/edit.ts).
+ * ADR-590 v7: flag 128 (powered piece) adds u8 on, f32 stored Wh, f32 fuel seconds at the END of the record (after the stall).
  * v1 blobs (no crafterId, no stall block) and v2 blobs (no sign text) still decode.
  * Records are sorted (decks, structure cells, edges, furniture, openings; then level, y, x, type, rot) so hosts
  * decode before openings and re-encoding a decoded chunk is byte-identical. Times are relative to the save tick.
@@ -22,7 +23,7 @@
 import { BinaryReader, BinaryWriter, entityIndex, Transform, type Entity, type World } from "@engine/core";
 import { refreshSoldOut, stallName, writeStallName } from "../economy/stall.js";
 import { CHUNK_SIZE, chunkKey, type ChunkKey } from "@engine/world";
-import { AttachKind, BuildPiece, Container, DoorState, Fuel, LEDGER_SIZE, Listings, PieceBuilder, PieceLink, PieceOwner, PieceSlot, PieceStability, StallHeader, StallLedger, Tribe, WorkerTarget } from "../components.js";
+import { AttachKind, BuildPiece, Container, DoorState, Fuel, LEDGER_SIZE, Listings, PieceBuilder, PieceLink, PieceOwner, PieceSlot, PieceStability, Power, PowerStore, StallHeader, StallLedger, Tribe, WorkerTarget } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { Placement, type PieceDef } from "../defs.js";
 import { attachmentsOf, unlinkPiece } from "./links.js";
@@ -32,7 +33,7 @@ import { edgeKey, isFineRot, lCornerArms, openingParent, slotFromPos, slotTransf
 import { setEmittersLit } from "../systems/fuel.js";
 import { setStallOwnership } from "../economy/stall.js";
 
-export const STRC_VERSION = 6;
+export const STRC_VERSION = 7;
 const MAGIC = [0x53, 0x54, 0x52, 0x43];
 export class StructureCodecError extends Error {}
 
@@ -63,7 +64,7 @@ export function encodeStructures(world: World, cx: number, cy: number): Uint8Arr
     const stall = store !== undefined && world.has(store, StallHeader) ? store : undefined;
     const exact = r.def.placement === Placement.Tri || isFineRot(r.def, bp.rot); // ADR-174: off-grid free pieces keep their exact x/y too
     const owner = world.isRegistered(PieceOwner) ? world.getField(r.e, PieceOwner, "player") ?? 0 : 0, builder = world.isRegistered(PieceBuilder) ? world.getField(r.e, PieceBuilder, "player") ?? 0 : 0;
-    w.write("u8", (door !== undefined ? 1 : 0) | (fire !== undefined ? 2 : 0) | (store !== undefined ? 4 : 0) | (stall !== undefined ? 8 : 0) | (exact ? 16 : 0) | (world.has(r.e, WorkerTarget) ? 32 : 0) | (owner || builder ? 64 : 0));
+    w.write("u8", (door !== undefined ? 1 : 0) | (fire !== undefined ? 2 : 0) | (store !== undefined ? 4 : 0) | (stall !== undefined ? 8 : 0) | (exact ? 16 : 0) | (world.has(r.e, WorkerTarget) ? 32 : 0) | (owner || builder ? 64 : 0) | (world.has(r.e, Power) ? 128 : 0));
     if (exact) { const s = idx.slotOf(r.e); const t = world.get(r.e, Transform)!; w.write("f64", s?.fx ?? t.x); w.write("f64", s?.fy ?? t.y); }
     if (world.has(r.e, WorkerTarget)) w.write("f64", world.getField(r.e, WorkerTarget, "id")!);
     if (owner || builder) { w.write("u32", owner); w.write("u32", builder); } // ADR-317 (v6)
@@ -71,6 +72,7 @@ export function encodeStructures(world: World, cx: number, cy: number): Uint8Arr
     if (fire !== undefined) { const f = world.get(fire, Fuel)!; w.write("u8", f.lit); w.write("u32", Math.max(0, f.burnUntilTick - world.tick)); }
     for (const c of [fire, store]) if (c !== undefined) writeContainer(world, w, c);
     if (stall !== undefined) writeStall(world, w, stall, atts.find((a) => world.getField(a, PieceLink, "kind") === AttachKind.Till));
+    if (world.has(r.e, Power)) { w.write("u8", world.getField(r.e, Power, "on") ?? 1); w.write("f32", world.getField(r.e, PowerStore, "stored") ?? 0); w.write("f32", world.getField(r.e, PowerStore, "fuel") ?? 0); } // ADR-590 (v7)
   }
   return w.finish();
 }
@@ -128,7 +130,7 @@ export interface DecodedStructures { cx: number; cy: number; pieces: Entity[]; h
 export function decodeStructures(world: World, bytes: Uint8Array, opts: { strictHashes?: boolean } = {}): DecodedStructures {
   const defs = gameplayDefs(world); const idx = structures(world); const r = new BinaryReader(bytes); const lh = defs.building.levelHeight;
   for (const m of MAGIC) if (r.read("u8") !== m) throw new StructureCodecError("not a structure blob (bad magic)");
-  const version = r.read("u16"); if (version !== STRC_VERSION && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5) throw new StructureCodecError(`unsupported structure blob version ${version} (expected ${STRC_VERSION})`);
+  const version = r.read("u16"); if (version !== STRC_VERSION && version !== 1 && version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6) throw new StructureCodecError(`unsupported structure blob version ${version} (expected ${STRC_VERSION})`);
   const cx = r.read("i32"), cy = r.read("i32"); const ph = r.read("u32"), ih = r.read("u32");
   const hashMismatch = ph !== defs.hashes.pieces || ih !== defs.hashes.items;
   if (hashMismatch && opts.strictHashes) throw new StructureCodecError("structure blob was written with different piece/item ids");
@@ -162,6 +164,11 @@ export function decodeStructures(world: World, bytes: Uint8Array, opts: { strict
     if (fire) readContainer(world, r, fireA, version);
     if (flags & 4) readContainer(world, r, storeA, version);
     if (flags & 8) readStall(world, r, storeA !== undefined && world.has(storeA, StallHeader) ? storeA : undefined, atts.find((a) => world.getField(a, PieceLink, "kind") === AttachKind.Till), version);
+    if (flags & 128) { // ADR-590 (v7): powered piece switch + exact store
+      const on = r.read("u8"), stored = r.read("f32"), fuel = r.read("f32");
+      if (e !== undefined && world.has(e, Power)) world.setField(e, Power, "on", on);
+      if (e !== undefined && world.has(e, PowerStore)) { world.setField(e, PowerStore, "stored", stored); world.setField(e, PowerStore, "fuel", fuel); }
+    }
   }
   if (isAuthority(world)) migrateWallPairsToCorners(world, idx, pieces);
   if (isAuthority(world) && pieces.length) { recomputeRegion(world, idx, new Set(pieces)); idx.dirty.clear(); }

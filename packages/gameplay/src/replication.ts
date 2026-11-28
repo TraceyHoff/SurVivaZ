@@ -43,6 +43,7 @@ export const GAMEPLAY_REPLICATION: readonly Replication[] = [
   r(C.Mount, "all"), r(C.Riding, "all"), r(C.MountTaming, "all"), // ADR-319: every peer draws the rider seated on the mount
   r(C.MountHarness, "all"), // ADR-359: every peer sees which mounts are harnessed (mount panel + riding HUD)
   r(C.RopeLead, "all"), // ADR-351: every peer draws the rope between holder and led animal
+  r(C.Power, "all"), r(C.PowerStore, "server"), // ADR-590: grid state on the piece (static channel); exact store server-only
   r(C.StoreFill, "all"), // ADR-356: every peer draws the store's fill state (rides the static channel with BuildPiece)
 ];
 export function replicationOf(def: ComponentDef): Replication | undefined { return GAMEPLAY_REPLICATION.find((x) => x.def === def); }

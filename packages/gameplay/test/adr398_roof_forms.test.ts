@@ -5,7 +5,7 @@ import { defaultDefs } from "../src/data.js";
 describe("ADR-398 continuous-roof forms on abandoned sites", () => {
   it("the new pieces exist as tiered cell roofs (appended, so older piece ids are unchanged)", () => {
     const d = defaultDefs(); const keys = [...d.pieces.values()].map((p) => p.key);
-    expect(keys.slice(-5, -2)).toEqual(["roof_cottage", "roof_gambrel", "roof_shed"]); // ADR-420: dock + shipyard appended after the roof trio
+    expect(keys.slice(-31, -28)).toEqual(["roof_cottage", "roof_gambrel", "roof_shed"]); // ADR-590: 26 electricity pieces appended after dock + shipyard // ADR-420: dock + shipyard appended after the roof trio
     for (const k of ["roof_cottage", "roof_gambrel", "roof_shed"]) { const p = d.pieces.get(d.pieceId(k))!; expect(p.roof).toBe(true); expect(p.tiered).toBe(true); }
   });
   it("ADR-400: live with Art's rfx pages; mapped kinds get their form, the others keep their ADR-311 pick", () => {

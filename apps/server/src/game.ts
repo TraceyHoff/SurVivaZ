@@ -4,7 +4,7 @@ import { friendSpawn } from "./friend-spawn.js";
 import { giveSandboxKit, sandboxPetKit, sandboxPetCorner, sandboxSpawn } from "./sandbox.js";
 import { fixLegacyFloorZ, handLootTarget, Viewing, TerrainRes, terrainFromTileMap } from "@engine/gameplay";
 import { applyStanceInput, stanceBlocksActions, GameplayEdgeBits } from "@engine/gameplay"; // ADR-244
-import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSignCommands, installPetCommands, installReadyCommands, markReady, PlayerReady, PetEvent, setWorldRules, worldRules, type WorldRulesOpts, installAnimalSkillCommands, installWorkerCommands, installDyeCommands, WorkerEvent, installTerrainCommands, installRampCommands, installItemRepairCommands, recordChunkDiscoveries } from "@engine/gameplay";
+import { installInventoryOpCommands, installRoadCommands, NodeRegrow, installSignCommands, installPetCommands, installReadyCommands, markReady, PlayerReady, PetEvent, setWorldRules, worldRules, type WorldRulesOpts, installAnimalSkillCommands, installWorkerCommands, installDyeCommands, WorkerEvent, installTerrainCommands, installRampCommands, installItemRepairCommands, recordChunkDiscoveries, installPowerCommands } from "@engine/gameplay";
 import { parseChunkKey } from "@engine/world";
 /** Authoritative game server: world + gameplay + streaming chunks + persistence + NetServer sessions. */
 import { ChannelRegistry, CommandRejected, DEFAULT_TICK_HZ, FixedLoop, installCommandHandlers, cosmeticsHashes, type CosmeticCatalogLike, Membership, Owner, PlayerId, Season, SEASON_COUNT, TimeOfDay, Transform, World, type Entity, type PermissionsRes } from "@engine/core";
@@ -319,6 +319,7 @@ export function createGameServer(o: GameServerOptions): GameServer {
   installMountCommands(world, handlers); // gameplay.mountFeed / Ride / Dismount / Saddle / Unsaddle / Repair / Rename (ADR-319 / ADR-320)
   installRopeCommands(world, handlers); // gameplay.ropeLead (ADR-351)
   installItemRepairCommands(world, handlers); // gameplay.itemRepair (ADR-474)
+  installPowerCommands(world, handlers); // gameplay.powerToggle (ADR-590)
   installAnimalSkillCommands(world, handlers); // gameplay.animalSkill (Task 15)
   installWorkerCommands(world, handlers); // gameplay.hireWorker / setWorkerJob / dismissWorker (Task 22)
   installDyeCommands(world, handlers); // gameplay.dye — hair / worn / held (Task 25)

@@ -342,7 +342,7 @@ describe("ADR-362 guide content + data", () => {
     expect(resolveGuideFact("building.claimCost", "cost")).toBe("10 Pine Log, 10 Stone, 2 Dye");
     expect(resolveGuideFact("safety.safeRadiusTiles", "tiles")).toBe("20 tiles");
     expect(resolveGuideFact("inventory.totalSlots", "count")).toBe("24");
-    expect(resolveGuideFact("cooking.recipeCount", "count")).toBe("407"); // ADR-493: fishing_rod recipe // ADR-479: sailboat kit recipe // ADR-449–463: +5 recipes (cured_venison, cured_poultry, cured_prime_cut, smoked_fish, dry_wet_wood)
+    expect(resolveGuideFact("cooking.recipeCount", "count")).toBe("436"); // ADR-590: +29 electrician recipes // ADR-493: fishing_rod recipe // ADR-479: sailboat kit recipe // ADR-449–463: +5 recipes (cured_venison, cured_poultry, cured_prime_cut, smoked_fish, dry_wet_wood)
     expect(resolveGuideFact("temperature.fireHeatMaxC", "tempDelta")).toBe("+15 °C (+27 °F)");
   });
 

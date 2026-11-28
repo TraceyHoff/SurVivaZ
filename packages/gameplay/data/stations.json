@@ -8,6 +8,7 @@
     "anvil": 4,
     "garage": 5,
     "dock": 6,
-    "shipyard": 7
+    "shipyard": 7,
+    "electrician": 8
   }
 }

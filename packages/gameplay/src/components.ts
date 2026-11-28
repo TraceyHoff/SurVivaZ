@@ -157,7 +157,7 @@ export const NoiseLevel = defineComponent("NoiseLevel", { value: "f32" });
  * without entity references. Attachments are separate entities because BuildPiece entities use net's static class
  * (all their components ride the static channel, scopes don't apply).
  */
-export const enum AttachKind { Door = 1, Fire = 2, Storage = 3, Light = 4, Till = 5, Smell = 6 }
+export const enum AttachKind { Door = 1, Fire = 2, Storage = 3, Light = 4, Till = 5, Smell = 6, /** ADR-590: powered piece heat emitter (heater, powered building tier) */ Heat = 7 }
 export const PieceLink = defineComponent("PieceLink", { tx: "i32", ty: "i32", z: "u8", side: "u8", layer: "u8", kind: "u8" }, { networked: true, persistent: true });
 /** Render-facing (renderer contract): wetness 0..255 on characters and zombies, replicated to all. */
 export const Wetness = defineComponent("Wetness", { level: "u8" }, { networked: true });
@@ -579,6 +579,16 @@ export const Well = defineComponent("Well", { level: "u8" }, { networked: true, 
  * rng stream, so it is neither networked nor persistent. */
 export const Fishing = defineComponent("Fishing", { waitUntilTick: "u32", castX: "f32", castY: "f32" });
 
+/**
+ * ADR-590 electricity tier: grid state on a powered build piece (rides the piece's static channel). on = player switch
+ * (default 1), powered = its network meets its draw, active = powered AND in use (drives the active animation, light and
+ * heat), level = battery / solar-store / fuel percent, supply / demand = its network's totals in 10 W steps (UI).
+ * Written by the authority's power grid only when a value changes (1 Hz solve; supply/demand rewritten on a >= 50 W move).
+ */
+export const Power = defineComponent("Power", { on: "u8", powered: "u8", active: "u8", level: "u8", supply: "u16", demand: "u16" }, { networked: true });
+/** ADR-590: server-only exact energy state (stored Wh for batteries / solar generator, fuel seconds left for a fuel generator); saved via STRC v7. */
+export const PowerStore = defineComponent("PowerStore", { stored: "f32", fuel: "f32" });
+
 export const GAMEPLAY_COMPONENTS = [
   Emitter, Buffs,
   Health, ResourceNode, Survival, VitalsState, Exposure, Dead,
@@ -644,4 +654,5 @@ export const GAMEPLAY_COMPONENTS = [
   Discoveries, // append-only (ADR-498 first-visit discoveries per player; networked + persistent)
   Fishing, // append-only (ADR-493 per-fisher cast state; transient, derived — not networked, not persistent)
   PackMember, // append-only (ADR-539 predator pack member; server-only)
+  Power, PowerStore, // append-only (ADR-590 electricity tier: grid state networked; exact store server-only, saved via STRC v7)
 ] as const;

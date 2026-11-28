@@ -20,6 +20,8 @@ import { recomputeRegion } from "./integrity.js";
 import { pieceOf } from "./links.js";
 import { LoadedQueueRes, structures } from "./structure.js";
 import { Transform } from "@engine/core";
+import { POWER, powerSpecFor } from "../power/data.js";
+import { addPowerState } from "../power/state.js";
 import { invalidateZoneGrid, zonesNear, zonesShareOwner } from "./zones.js";
 
 export function rehydrateLoadedStructures(world: World): void {
@@ -33,6 +35,7 @@ export function rehydrateLoadedStructures(world: World): void {
     if (def.privilegeRadius > 0 && (world.getField(e, PrivilegeZone, "radius") ?? def.privilegeRadius) < def.privilegeRadius) legacy.push([e, def.privilegeRadius]);
     world.add(e, PieceStability, { value: 0, placedTick: world.tick });
     if (def.station !== StationKind.None && !def.fired && !world.has(e, CraftingStation)) world.add(e, CraftingStation, { kind: def.station });
+    const power = powerSpecFor(def, world.getField(e, BuildPiece, "tier") ?? 0, defs.tiers); if (power) addPowerState(world, e, power); // ADR-590 (grid writes the rest)
     loaded.add(e);
   }
   if (legacy.length) growLegacyClaims(world, legacy);
@@ -48,7 +51,7 @@ export function rehydrateLoadedStructures(world: World): void {
       if (def.station !== StationKind.None && !world.has(a, CraftingStation)) world.add(a, CraftingStation, { kind: def.station });
     } else if (kind === AttachKind.Light) {
       const light = specs.find((s) => s.kind === 2);
-      if (light && !world.has(a, Emitter)) world.add(a, Emitter, { kind: light.kind, radius: light.radius, strength: def.fired ? 0 : light.strength, falloff: Falloff.Quadratic });
+      if (light && !world.has(a, Emitter)) world.add(a, Emitter, { kind: light.kind, radius: light.radius, strength: def.fired || def.key in POWER.pieces ? 0 : light.strength, falloff: Falloff.Quadratic });
       else if (light && world.getField(a, Emitter, "radius") !== light.radius) world.setField(a, Emitter, "radius", light.radius); // ADR-216: saves keep the old radius
     } else if (kind === AttachKind.Smell) {
       // ADR-486: a loaded Smell sibling keeps its Emitter (re-added when the save predates the
@@ -57,6 +60,10 @@ export function rehydrateLoadedStructures(world: World): void {
       const smell = specs.find((s) => s.kind === EmitterKind.Smell);
       if (smell && !world.has(a, Emitter)) world.add(a, Emitter, { kind: smell.kind, radius: smell.radius, strength: 0, falloff: Falloff.Linear });
       else if (smell && world.getField(a, Emitter, "radius") !== smell.radius) world.setField(a, Emitter, "radius", smell.radius);
+    } else if (kind === AttachKind.Heat) {
+      // ADR-590: powered heat sibling (heater / powered tier) — starts cold; the grid sets it from Power.active
+      const ps = powerSpecFor(def, world.getField(p, BuildPiece, "tier") ?? 0, defs.tiers);
+      if (ps?.heat && !world.has(a, Emitter)) world.add(a, Emitter, { kind: EmitterKind.Heat, radius: ps.heatRadius ?? 3, strength: 0, falloff: Falloff.Linear });
     } else if (kind === AttachKind.Storage && world.has(a, StallHeader) && !world.has(a, StallSign)) world.add(a, StallSign, { soldOut: 1 });
   }
   for (const a of atts) if (world.isAlive(a) && world.getField(a, Fuel, "lit")) setEmittersLit(world, a, 1);

@@ -5069,6 +5069,35 @@
   ,{"key": "dung", "name": "Dung", "category": "resource", "maxStack": 50, "weight": 0.1}
   ,{"key": "dung_fertilizer", "name": "Dung Fertilizer", "category": "resource", "maxStack": 30, "weight": 0.3}
   ,{"key": "harness", "name": "Harness", "category": "resource", "maxStack": 1, "weight": 4, "family": "harness"}
-  ,{"key": "fishing_rod", "name": "Fishing Rod", "category": "tool", "maxStack": 1, "weight": 1.0, "tool": {"kind": "fishing", "tier": 1}, "tier": 1, "family": "fishing_rod", "durability": 150}
+  ,{"key": "fishing_rod", "name": "Fishing Rod", "category": "tool", "maxStack": 1, "weight": 1.0, "tool": {"kind": "fishing", "tier": 1}, "tier": 1, "family": "fishing_rod", "durability": 150},
+    {"key": "circuit_board", "name": "Circuit Board", "category": "resource", "maxStack": 20, "weight": 0.3},
+    {"key": "electric_motor", "name": "Electric Motor", "category": "resource", "maxStack": 20, "weight": 4.0},
+    {"key": "solar_cell", "name": "Solar Cell", "category": "resource", "maxStack": 20, "weight": 0.3},
+    {"key": "led_bulb", "name": "LED Bulb", "category": "resource", "maxStack": 20, "weight": 0.3},
+    {"key": "kit_generator_fuel", "name": "Fuel Generator Kit", "category": "placeable", "maxStack": 1, "weight": 60},
+    {"key": "kit_generator_solar", "name": "Solar Generator Kit", "category": "placeable", "maxStack": 1, "weight": 60},
+    {"key": "kit_solar_panel", "name": "Solar Panel Kit", "category": "placeable", "maxStack": 1, "weight": 60},
+    {"key": "kit_wind_turbine", "name": "Wind Turbine Kit", "category": "placeable", "maxStack": 1, "weight": 60},
+    {"key": "kit_wind_turbine_large", "name": "Large Wind Turbine Kit", "category": "placeable", "maxStack": 1, "weight": 60},
+    {"key": "kit_water_wheel", "name": "Water Wheel Kit", "category": "placeable", "maxStack": 1, "weight": 60},
+    {"key": "kit_water_wheel_overshot", "name": "Overshot Water Mill Kit", "category": "placeable", "maxStack": 1, "weight": 60},
+    {"key": "kit_water_turbine", "name": "Micro Hydro Turbine Kit", "category": "placeable", "maxStack": 1, "weight": 60},
+    {"key": "kit_battery_small", "name": "Small Battery Kit", "category": "placeable", "maxStack": 1, "weight": 30},
+    {"key": "kit_battery_medium", "name": "Battery Bank Kit", "category": "placeable", "maxStack": 1, "weight": 30},
+    {"key": "kit_battery_large", "name": "Large Battery Array Kit", "category": "placeable", "maxStack": 1, "weight": 30},
+    {"key": "kit_power_pylon", "name": "Wireless Power Extender Pylon Kit", "category": "placeable", "maxStack": 1, "weight": 25},
+    {"key": "kit_electric_stove", "name": "Electric Stove Kit", "category": "placeable", "maxStack": 1, "weight": 40},
+    {"key": "kit_electric_furnace", "name": "Electric Furnace Kit", "category": "placeable", "maxStack": 1, "weight": 40},
+    {"key": "kit_power_workbench", "name": "Power Tool Workbench Kit", "category": "placeable", "maxStack": 1, "weight": 40},
+    {"key": "kit_power_hammer", "name": "Power Hammer Kit", "category": "placeable", "maxStack": 1, "weight": 40},
+    {"key": "kit_fridge", "name": "Refrigerator Kit", "category": "placeable", "maxStack": 1, "weight": 45},
+    {"key": "kit_chest_freezer", "name": "Chest Freezer Kit", "category": "placeable", "maxStack": 1, "weight": 45},
+    {"key": "kit_electric_floor_lamp", "name": "Electric Floor Lamp Kit", "category": "placeable", "maxStack": 5, "weight": 4},
+    {"key": "kit_electric_table_lamp", "name": "Electric Table Lamp Kit", "category": "placeable", "maxStack": 5, "weight": 4},
+    {"key": "kit_electric_wall_light", "name": "Electric Wall Light Kit", "category": "placeable", "maxStack": 5, "weight": 4},
+    {"key": "kit_ceiling_light", "name": "Ceiling Light Kit", "category": "placeable", "maxStack": 5, "weight": 4},
+    {"key": "kit_flood_light", "name": "Flood Light Kit", "category": "placeable", "maxStack": 5, "weight": 4},
+    {"key": "kit_electric_heater", "name": "Electric Heater Kit", "category": "placeable", "maxStack": 5, "weight": 4},
+    {"key": "kit_hydroponic_table", "name": "Hydroponic Table Kit", "category": "placeable", "maxStack": 1, "weight": 35}
   ]
 }

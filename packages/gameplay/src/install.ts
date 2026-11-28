@@ -1,6 +1,8 @@
 import { wearSystem } from "./combat/arms.js";
 import { installVehicleCraft, VEHICLE_CRAFT_HASH } from "./vehicle_craft.js";
 import { CROP_EVERY, cropGrowthSystem, farmUseSystem } from "./farming.js";
+import { powerGridSystem } from "./power/grid.js";
+import { POWER } from "./power/data.js";
 import { TERRAIN, terrainFlowSystem } from "./terrain.js";
 import { HUSBANDRY_EVERY, husbandrySystem, husbandryUseSystem } from "./skills/husbandry.js";
 import { creativeStartSystem, installProgression, progressionMigrateSystem, xpTravelSystem } from "./skills/progression.js";
@@ -84,6 +86,7 @@ export const GAMEPLAY_SYSTEM_ORDER: readonly (readonly [Phase, string, number?])
   ...COMBAT_SYSTEMS.sim,
   ...BUILDING_SYSTEMS.post,
   ["simulation", "gameplay.consume"],
+  ["simulation", "gameplay.power", POWER.everyTicks], // ADR-590: power grid solve (1 Hz; after craft so running jobs count as in use, before crops / spoilage)
   ["simulation", "gameplay.farmUse"], // ADR-110
   ["simulation", "gameplay.crops", CROP_EVERY], // ADR-110
   ["simulation", "gameplay.terrainFlow", TERRAIN.flowEveryTicks], // ADR-263: water flows into shovel-dug channels (authority)
@@ -156,7 +159,7 @@ export function installGameplay(world: World, options: GameplayOptions | number 
     "gameplay.spoilage": spoilageSystem, "gameplay.chunkSurface": chunkSurfaceSystem,
     "gameplay.recruitment": recruitmentSystem,
     "gameplay.clearIntents": clearIntentsSystem, "gameplay.equipmentSync": equipmentSyncSystem, "gameplay.noiseDecay": noiseDecaySystem,
-    "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.storeFill": storeFillSystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.abandonedStamps": (w) => { pumpAbandonedStamps(w); }, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.flood": floodSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
+    "gameplay.pruneBuffs": (w) => pruneModifiers(w, Buffs), "gameplay.stallDisplay": stallDisplaySystem, "gameplay.storeFill": storeFillSystem, "gameplay.expression": expressionSystem, "gameplay.vehicles": vehicleSystem, "gameplay.mountGate": mountGateSystem, "gameplay.mounts": mountSystem, "gameplay.vehicleGuard": vehicleGuardSystem, "gameplay.animSettle": animSettleSystem, "gameplay.abandonedStamps": (w) => { pumpAbandonedStamps(w); }, "gameplay.farmUse": farmUseSystem, "gameplay.crops": cropGrowthSystem, "gameplay.power": powerGridSystem, "gameplay.terrainFlow": terrainFlowSystem, "gameplay.flood": floodSystem, "gameplay.husbandryUse": husbandryUseSystem, "gameplay.husbandry": husbandrySystem,
     "gameplay.hordes": hordeDirectorSystem, "gameplay.packs": packDirectorSystem, "gameplay.xpTravel": xpTravelSystem, "gameplay.progressionMigrate": progressionMigrateSystem, "gameplay.creativeStart": creativeStartSystem, "gameplay.equip": equipSystem, "gameplay.stance": stanceSystem, "gameplay.pets": petSystem, "gameplay.rope": ropeSystem, "gameplay.dung": dungSystem,
     ...installBuildingSystems(world), ...installCombatSystems(world),
   };

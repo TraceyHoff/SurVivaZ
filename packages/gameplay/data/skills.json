@@ -3006,6 +3006,73 @@
    },
    "desc": "Build a shipyard in deep water and craft motorboats, pontoons and speedboats.",
    "icon": "skill_grease_monkey"
+  },
+  {
+   "key": "electrician_craft",
+   "name": "Electrician",
+   "branch": "crafting",
+   "tier": 4,
+   "x": 1000,
+   "y": 440,
+   "cost": 3,
+   "requires": [
+    "garage_craft"
+   ],
+   "effects": {
+    "unlock": [
+     "piece:electrician_workstation",
+     "piece:electric_stove",
+     "piece:power_workbench"
+    ]
+   },
+   "desc": "End game: build the electrician's workstation and craft generators, solar panels, wind turbines, water wheels, batteries, pylons and electric stations.",
+   "icon": "skill_tinkerer"
+  },
+  {
+   "key": "power_grid",
+   "name": "Power Grid",
+   "branch": "crafting",
+   "tier": 5,
+   "x": 1000,
+   "y": 550,
+   "cost": 3,
+   "requires": [
+    "electrician_craft"
+   ],
+   "effects": {
+    "unlock": [
+     "piece:electric_furnace",
+    "piece:power_hammer",
+    "item:kit_wind_turbine_large",
+     "item:kit_water_wheel_overshot",
+     "item:kit_battery_large",
+     "item:kit_electric_furnace",
+     "item:kit_power_hammer",
+     "item:kit_chest_freezer",
+     "item:kit_flood_light"
+    ]
+   },
+   "desc": "Heavy power: large wind turbine, overshot water wheel, large battery, electric furnace, power hammer, chest freezer and flood light.",
+   "icon": "skill_grease_monkey"
+  },
+  {
+   "key": "hydroponics",
+   "name": "Hydroponics",
+   "branch": "crafting",
+   "tier": 5,
+   "x": 1080,
+   "y": 550,
+   "cost": 3,
+   "requires": [
+    "electrician_craft"
+   ],
+   "effects": {
+    "unlock": [
+     "item:kit_hydroponic_table"
+    ]
+   },
+   "desc": "Craft powered hydroponic tables: grow any crop indoors all year, auto light and water, bigger harvests, no blight.",
+   "icon": "skill_master_farmer"
   }
  ]
 }

@@ -37,7 +37,7 @@ import { HitReact, NodeRegrow, hitDirRad, Equipment, Worn, SlotDye, INVENTORY_SL
 import { Mount, Riding, isHarnessed } from "@engine/gameplay";
 import { harnessOverlayKey, idleGrazing, LAYER_KEY, MOUNT_GAIT_ANIM, MOUNT_SHEET_WILD, mountActOf, mountForeKey, mountGait, mountSpriteKeyOf, riderPose, riderStartTick, saddleOverlayKey, screenNeutralShift, swimClipPx, type MountAct } from "./mount-render.js";
 import { AssetRegistry as AssetRegistryClass } from "@engine/assets";
-import { gameplayDefs, rotationSteps, rotParts, animalDefs, animalDrawScale, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, StoreFill, isStorePieceKey, type ResolvedSprite } from "@engine/gameplay";
+import { gameplayDefs, rotationSteps, rotParts, animalDefs, animalDrawScale, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, StoreFill, isStorePieceKey, Power as GPower, type ResolvedSprite } from "@engine/gameplay";
 
 /** Render-side schemas the renderer's bindings expect (view World only). */
 const VAnim = defineComponent("ViewAnimState", { state: "u8", startTick: "u32" });
@@ -1268,6 +1268,13 @@ export class IsoView {
       const p = net.get(e, GPiece)!;
       const vis = buildPieceVisual(this.registry, { type: p.type, ...pieceArt(net, p.type, p.rot), tint: p.tint, paint: p.paint, damageStage: p.damageStage, state: level }, { tier: p0.tier, pieceKey: (typ) => this.pk(defs.pieces.get(typ)?.key), ...pieceVariantOpts(pieceDef?.variantNames, p0.variant) });
       this.pieceStates.set(ve, vis.stateIndex);
+      return;
+    }
+    if (net.isRegistered(GPower) && net.has(e, GPower)) { // ADR-590: powered pieces play their `idle` loop only while powered AND in use (Power.active), else `unlit`
+      if ((net.tick + entityIndex(e)) % 10 !== 0 && this.pieceStates.has(ve)) return; // cheap: active flips at most once per 1 Hz grid solve
+      const active = net.getField(e, GPower, "active") === 1; const p = net.get(e, GPiece)!;
+      const vis = buildPieceVisual(this.registry, { type: p.type, ...pieceArt(net, p.type, p.rot), tint: p.tint, paint: p.paint, damageStage: p.damageStage, state: active ? "idle" : "unlit" }, { tier: p0.tier, pieceKey: (t) => this.pk(defs.pieces.get(t)?.key), ...pieceVariantOpts(pieceDef?.variantNames, p.variant) });
+      this.pieceStates.set(ve, vis.stateIndex); this.pieceLit.set(ve, active ? 1 : 0); // FireState.Lit = idle loop, no hearth particles
       return;
     }
     if (!def?.fired) return;

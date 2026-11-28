@@ -26,6 +26,9 @@ export const DEFAULT_LIGHTS: Record<string, LightSpec> = {
   furnace: mk(6, 1.1, "#ff7a30", 0.4), heat_brazier: mk(6.5, 1.2, "#ff9a4a", 0.5),
   glow_mushrooms: mk(2.5, 0.55, "#7ff0d8", 0.1), "prop_glow_mushroom_*": mk(2.5, 0.55, "#7ff0d8", 0.1),
   mirror: mk(1.5, 0.4, "#cfe8ff", 0.05),
+  // ADR-590 electricity tier: steady (no flicker) warm-white LEDs; on only while powered (Emitter strength follows Power.active)
+  electric_floor_lamp: mk(7, 1.0, "#fff1d6", 0), electric_table_lamp: mk(5, 0.9, "#fff1d6", 0), electric_wall_light: mk(6, 0.95, "#fff1d6", 0),
+  ceiling_light: mk(8, 1.0, "#fff6e8", 0), flood_light: mk(12, 1.15, "#f4f8ff", 0),
 };
 /** Item keys whose held light is looked up as `held_<key>` (main hand or off hand). Visual only (ADR-216). */
 export const HELD_LIGHT_ITEMS: readonly string[] = ["torch", "lantern", "tallow_candle", "candle"];

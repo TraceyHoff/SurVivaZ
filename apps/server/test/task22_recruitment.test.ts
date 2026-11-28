@@ -22,8 +22,8 @@ describe("Task 22: AI-human recruitment (server)", () => {
     // worker commands sit just before the dye commands at the tail (append-only, wire indices stable);
     // Task 25 appended DyeCmd after them, so the tail is worker + dye, in that order. ADR-351 appended
     // the rope command after the mount commands.
-    const tail = GAMEPLAY_NET_COMMANDS.slice(-(G.WORKER_COMMANDS.length + G.DYE_COMMANDS.length + G.TERRAIN_COMMANDS.length + G.HOTBAR_COMMANDS.length + G.RECLAIM_COMMANDS.length + G.MOVE_COMMANDS.length + G.MOUNT_COMMANDS.length + G.ROPE_COMMANDS.length + G.RAMP_COMMANDS.length + G.ITEM_REPAIR_COMMANDS.length));
-    expect(tail.map((x) => x.core)).toEqual([...G.WORKER_COMMANDS, ...G.DYE_COMMANDS, ...G.TERRAIN_COMMANDS, ...G.HOTBAR_COMMANDS.map(([d]) => d), ...G.RECLAIM_COMMANDS.map(([d]) => d), ...G.MOVE_COMMANDS.map(([d]) => d), ...G.MOUNT_COMMANDS, ...G.ROPE_COMMANDS, ...G.RAMP_COMMANDS, ...G.ITEM_REPAIR_COMMANDS]); // ADR-419 appended the ramp command after the rope command; ADR-474 appended the repair command after the ramp command
+    const tail = GAMEPLAY_NET_COMMANDS.slice(-(G.WORKER_COMMANDS.length + G.DYE_COMMANDS.length + G.TERRAIN_COMMANDS.length + G.HOTBAR_COMMANDS.length + G.RECLAIM_COMMANDS.length + G.MOVE_COMMANDS.length + G.MOUNT_COMMANDS.length + G.ROPE_COMMANDS.length + G.RAMP_COMMANDS.length + G.ITEM_REPAIR_COMMANDS.length + G.POWER_COMMANDS.length));
+    expect(tail.map((x) => x.core)).toEqual([...G.WORKER_COMMANDS, ...G.DYE_COMMANDS, ...G.TERRAIN_COMMANDS, ...G.HOTBAR_COMMANDS.map(([d]) => d), ...G.RECLAIM_COMMANDS.map(([d]) => d), ...G.MOVE_COMMANDS.map(([d]) => d), ...G.MOUNT_COMMANDS, ...G.ROPE_COMMANDS, ...G.RAMP_COMMANDS, ...G.ITEM_REPAIR_COMMANDS, ...G.POWER_COMMANDS]); // ADR-590 appended the power switch; ADR-419 appended the ramp command after the rope command; ADR-474 appended the repair command after the ramp command
   });
   it("gameModeConfig: human bots in singleplayer, and in multiplayer only when AI humans are on", () => {
     expect(gameModeConfig("singleplayer", true, true).humanBots).toBe(true);

@@ -17,11 +17,16 @@ import { listSlots } from "../inventory.js";
 import { resolveAttachment } from "../building/links.js";
 import { zoneOwnedBy, zonesAt } from "../building/place.js";
 import { canUseBaseStorage } from "../building/actions.js";
+import { POWER } from "../power/data.js";
 
 /** Plain base storage: a container piece that is not a stall, a fire/fuel slot, a station, a turret (ammo) or a feeding trough.
  *  basic_storage_box is the starter one; storage_box / large_chest / shelves / cabinets / barrels count too. */
 export const isBaseStoragePiece = (def: PieceDef | undefined): boolean =>
-  !!def && def.container > 0 && !def.stall && !def.fired && def.station === StationKind.None && !def.features.turret && !def.key.endsWith("_trough");
+  !!def && def.container > 0 && !def.stall && !def.fired && def.station === StationKind.None && !def.features.turret && !def.key.endsWith("_trough") && !POWER_SLOT_PIECES.has(def.key);
+/** ADR-590: a fuel generator's tank and a hydroponic table's fertilizer tray are slots, not storage (fridges / freezers are storage). */
+const POWER_SLOT_PIECES = new Set(Object.entries(POWER.pieces).filter(([, s]) => s.kind === "fuel" || s.use === "grow").map(([k]) => k));
+/** Use opens it as a container: base storage plus the ADR-590 power slot pieces (generator tank, hydroponic tray). */
+export const isContainerPiece = (def: PieceDef | undefined): boolean => isBaseStoragePiece(def) || (!!def && POWER_SLOT_PIECES.has(def.key));
 /** Starter storage piece key (never skill-gated, hand-built). */
 export const STARTER_STORAGE_PIECE = "basic_storage_box";
 

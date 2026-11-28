@@ -27,6 +27,8 @@ import { makeNoise } from "../systems/noise.js";
 import { recordRecentBuild } from "../recent.js";
 import { isCreativePlayer } from "../creative.js";
 import { TerrainRes } from "../world.js";
+import { POWER, poweredTierAllowed, poweredTierIndex, powerSpecFor } from "../power/data.js";
+import { addPowerState } from "../power/state.js";
 import { MIN_SHAFT_DROP, shaftDrop, shaftSidesLevel } from "./terrain-hatch.js";
 import { linkAttachment } from "./links.js";
 import { reseatSmallOn, smallPieceZ, surfaceHeightAt } from "./surface.js";
@@ -100,6 +102,7 @@ export function snapPlacement(world: World, req: PlaceRequest): Snapped | BuildF
   if (!def) return BuildFail.UnknownPiece;
   const tier = def.tiered ? req.tier : def.fixedTier;
   if (def.tiered && !(tier >= def.minTier && tier < defs.tiers.length)) return BuildFail.BadTier;
+  if (def.tiered && tier === poweredTierIndex(defs.tiers) && !poweredTierAllowed(def.key)) return BuildFail.BadTier; // ADR-590: powered tier = walls / floors / foundations / pillars only
   const variant = req.variant < def.variants ? req.variant : 0;
   const idx = structures(world); const z = def.requiresWater ? WATER_SURFACE_HEIGHT : req.level; const lh = defs.building.levelHeight;
   let slot: Slot; let parent: Entity | 0 = 0; let px: number | undefined, py: number | undefined;
@@ -361,6 +364,8 @@ export function validatePlacement(world: World, builder: Entity, sn: Snapped, op
         const h = terrain.heightAt(x, y); lo = Math.min(lo, h); hi = Math.max(hi, h);
       }
       if (hi - lo > (def.maxSlope >= 0 ? def.maxSlope : b.maxSlope)) return BuildFail.Terrain;
+      // ADR-590: a water wheel stands on the bank — at least one tile beside its footprint must be water
+      if (POWER.pieces[def.key]?.water === "adjacent" && !besideWater(terrain.tileAt, tiles)) return BuildFail.NeedsWaterEdge;
     }
   }
   // ADR-265: terrain face, not a wall socket. Check BOTH landing tiles and their claims.
@@ -431,6 +436,15 @@ export function validatePlacement(world: World, builder: Entity, sn: Snapped, op
  * and its non-static attachment entities (door state, fire/fuel/emitters, storage), indexes everything.
  */
 /** ADR-162: a small piece whose every tile has a surface piece (table, shelf...) under it at this level. */
+/** ADR-590: any 8-neighbour of the footprint (outside it) is a water tile. */
+function besideWater(tileAt: (x: number, y: number) => number, tiles: readonly (readonly [number, number])[]): boolean {
+  const own = new Set(tiles.map(([x, y]) => `${x},${y}`));
+  for (const [x, y] of tiles) for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+    if (own.has(`${x + dx},${y + dy}`)) continue;
+    if (isWaterId(tileAt(x + dx, y + dy))) return true;
+  }
+  return false;
+}
 function onSurface(world: World, def: PieceDef, tiles: readonly (readonly [number, number])[], z: number): boolean {
   return def.small && tiles.length > 0 && tiles.every(([x, y]) => surfaceHeightAt(world, x + 0.5, y + 0.5, z) > 0);
 }
@@ -462,6 +476,7 @@ export function placePiece(world: World, builder: Entity | 0, sn: Snapped, opts:
     world.setField(e, PieceStability, "value", Math.max(0, Math.min(255, candidateStability(world, sn))));
     idx.dirty.add(e);
     spawnAttachments(world, e, def, sn);
+    const power = powerSpecFor(def, sn.tier, defs.tiers); if (power) addPowerState(world, e, power); // ADR-590
     if (def.stall && builder) assignStallOwner(world, e, builder);
     initDefense(world, e, def, builder);
     if (def.features.planter) spawnCrop(world, sn.pos.x, sn.pos.y, 0); // ADR-112 planter soil
@@ -498,7 +513,12 @@ export function spawnAttachments(world: World, piece: Entity, def: PieceDef, sn:
     world.add(link(AttachKind.Till), Container, { slotCount: tillSlots() });
   } else if (def.container > 0) world.add(link(AttachKind.Storage), Container, { slotCount: def.container }).add(out[out.length - 1]!, ContainerViewers);
   const light = specs.find((s) => s.kind === 2);
-  if (light) world.add(link(AttachKind.Light), Emitter, { kind: light.kind, radius: light.radius, strength: def.fired ? 0 : light.strength, falloff: Falloff.Quadratic });
+  // ADR-590: a powered piece's light / heat start dark and follow Power.active (power/grid.ts setPowerEmitters);
+  // the powered building tier (walls / floors...) carries a light + heat pair while its def has neither.
+  const power = powerSpecFor(def, sn.tier, gameplayDefs(world).tiers);
+  if (light) world.add(link(AttachKind.Light), Emitter, { kind: light.kind, radius: light.radius, strength: def.fired || power ? 0 : light.strength, falloff: Falloff.Quadratic });
+  else if (power && def.tiered) world.add(link(AttachKind.Light), Emitter, { kind: EmitterKind.Light, radius: POWER.poweredTier.lightRadius, strength: 0, falloff: Falloff.Quadratic });
+  if (power?.heat) world.add(link(AttachKind.Heat), Emitter, { kind: EmitterKind.Heat, radius: power.heatRadius ?? 3, strength: 0, falloff: Falloff.Linear });
   // ADR-486: a fired piece smokes — a Smell sibling beside the fire and light attachments, starting
   // unlit (strength 0); setEmittersLit turns it on with the fire and off when the fire goes out.
   const smell = specs.find((s) => s.kind === EmitterKind.Smell);

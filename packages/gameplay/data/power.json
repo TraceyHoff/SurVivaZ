@@ -1,0 +1,257 @@
+{
+ "$comment": "Electricity tier power grid (ADR-590). Pieces by key: role source|battery|consumer|pylon. Watts are steady draw/output; store = battery capacity in Wh of sim time (UI shows %), rate = max charge/discharge W. reach (tiles) = how far this node links to others: two nodes of the same tribe link when their distance <= max(reachA, reachB) (consumers reach 0, so they must sit inside a source / battery / pylon reach). use: when a consumer is 'in use' (draws full watts and plays its active animation): switch = player toggle (default on), craft = someone crafting at it, food = container holds items, grow = a crop is growing on it, always = whenever powered. Not in use = standbyFraction of watts. Grid solve every everyTicks; topology rebuilt only when the node set changes (or topologyEveryTicks as a safety net). coldC (fridge / freezer): while powered the container's food sits at this temperature (a freezer at or below 0 C holds food age still, like frozen ground storage); unpowered it is ordinary storage.",
+ "everyTicks": 20,
+ "topologyEveryTicks": 600,
+ "standbyFraction": 0.05,
+ "solar": {
+  "seasonMul": {
+   "summer": 1.0,
+   "fall": 0.7,
+   "winter": 0.45,
+   "spring": 0.85
+  },
+  "weatherMul": {
+   "0": 1.0,
+   "1": 0.35,
+   "2": 0.15,
+   "3": 0.25,
+   "4": 0.4,
+   "5": 0.5,
+   "6": 1.05,
+   "7": 0.1,
+   "8": 0.95
+  }
+ },
+ "wind": {
+  "cutIn": 1.5,
+  "rated": 12,
+  "cutOut": 30,
+  "largeHubMul": 1.2
+ },
+ "water": {
+  "riverMul": 1.0,
+  "shallowRiverMul": 0.7,
+  "stillMul": 0.15
+ },
+ "fuel": {
+  "liquidSeconds": {
+   "lamp_oil": 600,
+   "crude_oil": 240
+  },
+  "solidMul": 2.0,
+  "minLoad": 0.25,
+  "$comment": "Seconds of full-load running per fuel item: liquidSeconds by item key; any other fuel item (fuelSeconds > 0: wood, coal, charcoal...) runs fuelSeconds x solidMul. A running generator burns at max(minLoad, output / produce) of full rate."
+ },
+ "hydroponics": {
+  "growMul": 1.25,
+  "yieldMul": 1.5,
+  "tempMinC": 10,
+  "tempMaxC": 35,
+  "diseaseResist": 1.0,
+  "spots": 2,
+  "fertilizerItems": {
+   "fertilizer": 600,
+   "dung_fertilizer": 600
+  }
+ },
+ "poweredTier": {
+  "tier": "powered",
+  "watts": {
+   "wall": 20,
+   "floor": 30,
+   "foundation": 30,
+   "pillar": 10
+  },
+  "lightRadius": 6,
+  "heat": 5,
+  "heatRadius": 3,
+  "pieces": [
+   "foundation",
+   "foundation_triangle",
+   "floor",
+   "floor_triangle",
+   "floor_hatch_frame",
+   "floor_stairwell",
+   "wall",
+   "wall_low",
+   "wall_window",
+   "wall_doorway",
+   "wall_arched",
+   "wall_corner_inner",
+   "wall_corner_outer",
+   "wall_corner_angled",
+   "pillar"
+  ]
+ },
+ "pieces": {
+  "electrician_workstation": {
+   "role": "consumer",
+   "watts": 150,
+   "reach": 0,
+   "use": "craft"
+  },
+  "generator_fuel": {
+   "role": "source",
+   "kind": "fuel",
+   "produce": 3000,
+   "reach": 8
+  },
+  "generator_solar": {
+   "role": "source",
+   "kind": "solar",
+   "produce": 250,
+   "reach": 6,
+   "store": 40,
+   "rate": 400
+  },
+  "solar_panel": {
+   "role": "source",
+   "kind": "solar",
+   "produce": 400,
+   "reach": 6
+  },
+  "wind_turbine": {
+   "role": "source",
+   "kind": "wind",
+   "produce": 800,
+   "reach": 8
+  },
+  "wind_turbine_large": {
+   "role": "source",
+   "kind": "wind",
+   "produce": 3000,
+   "reach": 10
+  },
+  "water_wheel": {
+   "role": "source",
+   "kind": "water",
+   "produce": 900,
+   "reach": 8,
+   "water": "adjacent"
+  },
+  "water_wheel_overshot": {
+   "role": "source",
+   "kind": "water",
+   "produce": 1800,
+   "reach": 10,
+   "water": "adjacent"
+  },
+  "water_turbine": {
+   "role": "source",
+   "kind": "water",
+   "produce": 500,
+   "reach": 6,
+   "water": "on"
+  },
+  "battery_small": {
+   "role": "battery",
+   "store": 60,
+   "rate": 500,
+   "reach": 4
+  },
+  "battery_medium": {
+   "role": "battery",
+   "store": 250,
+   "rate": 1500,
+   "reach": 6
+  },
+  "battery_large": {
+   "role": "battery",
+   "store": 1000,
+   "rate": 5000,
+   "reach": 8
+  },
+  "power_pylon": {
+   "role": "pylon",
+   "reach": 16,
+   "watts": 20,
+   "use": "always"
+  },
+  "electric_stove": {
+   "role": "consumer",
+   "watts": 1800,
+   "reach": 0,
+   "use": "craft",
+   "speed": 1.6
+  },
+  "electric_furnace": {
+   "role": "consumer",
+   "watts": 2500,
+   "reach": 0,
+   "use": "craft",
+   "speed": 1.6
+  },
+  "power_workbench": {
+   "role": "consumer",
+   "watts": 1200,
+   "reach": 0,
+   "use": "craft",
+   "speed": 1.6
+  },
+  "power_hammer": {
+   "role": "consumer",
+   "watts": 2200,
+   "reach": 0,
+   "use": "craft",
+   "speed": 1.6
+  },
+  "fridge": {
+   "role": "consumer",
+   "watts": 150,
+   "reach": 0,
+   "use": "food",
+   "coldC": 3
+  },
+  "chest_freezer": {
+   "role": "consumer",
+   "watts": 200,
+   "reach": 0,
+   "use": "food",
+   "coldC": -18
+  },
+  "electric_floor_lamp": {
+   "role": "consumer",
+   "watts": 60,
+   "reach": 0,
+   "use": "switch"
+  },
+  "electric_table_lamp": {
+   "role": "consumer",
+   "watts": 40,
+   "reach": 0,
+   "use": "switch"
+  },
+  "electric_wall_light": {
+   "role": "consumer",
+   "watts": 30,
+   "reach": 0,
+   "use": "switch"
+  },
+  "ceiling_light": {
+   "role": "consumer",
+   "watts": 40,
+   "reach": 0,
+   "use": "switch"
+  },
+  "flood_light": {
+   "role": "consumer",
+   "watts": 150,
+   "reach": 0,
+   "use": "switch"
+  },
+  "electric_heater": {
+   "role": "consumer",
+   "watts": 1500,
+   "reach": 0,
+   "use": "switch",
+   "heat": 16,
+   "heatRadius": 4
+  },
+  "hydroponic_table": {
+   "role": "consumer",
+   "watts": 300,
+   "reach": 0,
+   "use": "grow"
+  }
+ }
+}

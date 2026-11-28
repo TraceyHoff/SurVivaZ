@@ -39,7 +39,7 @@ const fakeRecipe = (station: number): G.RecipeDef => ({ id: 0, key: "fake_boat_k
 
 describe("ADR-420 dock + shipyard: data", () => {
   it("adds two pieces (198 total) with the fixed ids, stations, footprints and deep-water rule", () => {
-    expect(d.pieces.size).toBe(198);
+    expect(d.pieces.size).toBe(224); // ADR-590: +26 electricity pieces appended after the shipyard
     expect((ids.pieces as Record<string, number>).dock).toBe(197);
     expect((ids.pieces as Record<string, number>).shipyard).toBe(198);
     expect((stations as { stations: Record<string, number> }).stations).toMatchObject({ dock: 6, shipyard: 7 });

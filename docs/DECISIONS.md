@@ -16180,3 +16180,66 @@ pins the button cycle + labels, the yellow ring reaching the survey SVG, and the
 MenuChoice carrying spawnIndex. ADR-270's and ADR-273's seed-picker pins were
 extended for the two new gamepad stops and the new choice field (same treatment
 ADR-585 gave the zoom buttons).
+
+## ADR-590: electricity tier, part 1 — the power grid: sources, batteries, pylons, the electrician's workstation (SurVivaZ)
+
+Tracey asked for an end-game electricity tier. This ADR is the grid and its producers; ADR-591 is what the grid
+powers. Data: `packages/gameplay/data/power.json` (one spec per piece key + tuning); code: `src/power/` (data.ts
+lookups, state.ts placement helper, grid.ts system + toggle handler, commands.ts definitions).
+
+- **Pieces (26, appended; ids 528+)**: electrician_workstation (station `electrician` = StationKind 8, crafts every
+  other piece as a `kit_<key>` placeable plus four components: circuit_board, electric_motor, solar_cell, led_bulb);
+  sources generator_fuel (3 kW, burns fuel from its 4-slot tank), generator_solar (250 W panel + 40 Wh store),
+  solar_panel (400 W), wind_turbine (800 W) and wind_turbine_large (3 kW), water_wheel (900 W, on the bank),
+  water_wheel_overshot (1.8 kW), water_turbine (500 W, stands in water); battery_small / medium / large
+  (60 / 250 / 1000 Wh, 0.5 / 1.5 / 5 kW); power_pylon (16-tile reach, 20 W). Category `power` (build-menu tab is
+  derived); art keys and scale in docs/ART_KEYS_ELECTRICITY.md (placeholders are sprite_fallbacks neighbours only, no
+  files ship).
+- **Gating (end game)**: skill nodes appended to skills.json (crafting tab): Electrician (tier 4, requires Garage;
+  unlocks the workstation, electric stove, power workbench), Power Grid (tier 5; electric furnace, power hammer and the
+  heavy kits: large turbine, overshot wheel, large battery, chest freezer, flood light), Hydroponics (tier 5; the
+  hydroponic table kit). Icons reuse existing art until Art ships theirs.
+- **Grid (authority, `gameplay.power`, every 20 ticks = 1 Hz, after craft)**: nodes are pieces with a `Power`
+  component; two nodes of one tribe link when their distance <= max(reachA, reachB) (consumers reach 0, so they sit
+  inside a source / battery / pylon reach). Topology is a union-find over a 16-tile spatial hash, rebuilt only when
+  the node set changes (id signature) or every 600 ticks. Per network: renewables are summed (solar = sun elevation
+  sin curve x season mix x weather/intensity, 0 underground; wind = (v - cutIn)^2 ramp to rated 12 tiles/s, 0 above
+  30, large hub x1.2; water = site factor at topology build: deep river 1.0, shallow river 0.7, still water 0.15);
+  fuel generators follow load (cover the deficit, plus battery headroom while the bank is under half) and burn
+  max(0.25, load) of full rate, pulling the next fuel item (lamp_oil 600 s, crude_oil 240 s, other fuels
+  fuelSeconds x 2) from the tank. Surplus charges batteries, a deficit discharges them (rate and capacity capped,
+  entity order); anything still short browns out consumers in entity order (whole loads only).
+- **State**: `Power {on, powered, active, level %, supply, demand (10 W units)}` networked on the piece (static
+  channel); `PowerStore {stored Wh, fuel s}` server-only. Fields are written only on change; network totals only on
+  a >= 50 W move. STRC v7: flag 128 appends u8 on + f32 stored + f32 fuel to the record (v1-v6 still decode).
+- **Switch**: `gameplay.powerToggle {target, on}` (appended after the repair command; reject `not_powered_piece`
+  appended; needs build privilege and 4 tiles). Water wheels need a water tile beside the footprint
+  (BuildFail.NeedsWaterEdge = 36).
+
+Tests: adr590_power_grid (fuel + reach, pylon, battery carry, brownout order, STRC v7 round trip byte-identical,
+toggle checks, wind curve, data wiring). Pinned counts / hashes / wire tails updated (pieces 224, recipes 436, skill
+nodes 145, schema hash, command tails, container delta 32 B for one more mask bit).
+
+## ADR-591: electricity tier, part 1b — electric stations, fridge / freezer, powered lights and heater, Use = switch (SurVivaZ)
+
+- **Electric stations** (electric_stove = campfire kind, electric_furnace = furnace, power_workbench = workbench,
+  power_hammer = anvil): a station piece with a `Power` component counts for `stationInRange` only while powered
+  (fired kinds no longer need a lit fire for them), and crafts 1.6x faster: `craftSpeedMul = skill speed x
+  electricStationSpeed` replaces the bare skill divisor in craftingSystem and both craft-queue durations. A station is
+  "in use" (full draw, active animation) while someone in its range has a running job of its kind; otherwise it
+  draws the 5 % standby.
+- **Fridge / chest freezer**: while powered the container's food sits at power.json `coldC` (3 C / -18 C, so the
+  freezer holds age still like frozen storage) and the fridge keeps its 0.25 spoilMul; unpowered both are plain
+  boxes (spoilMul 1, ambient temperature). In use = holds anything.
+- **Lights / heat**: lamps' Light attachment and the heater's new `AttachKind.Heat` (7) sibling start at strength 0
+  and follow `Power.active` (setPowerEmitters on flips), so zombie light-avoidance, room heat and the client light
+  all see the real state. Client light table entries for the five electric lights (steady, no flicker).
+- **Use**: a switchable powered piece (not a container, not a station, not a battery) is an interact candidate
+  `{panel: "power"}` that sends the toggle — never a panel, never the inventory. The station-hint pill shows one short
+  status ("[E] On · 60 W", "No power", "Off"; same on gamepad / touch). The fuel generator's tank and the hydroponic
+  tray open as containers (Use), and are excluded from AI base storage.
+- **Active animation**: client view plays the piece's `idle` loop while `Power.active`, `unlit` otherwise (the
+  FireState.Lit path, no hearth particles); re-checked every 10 ticks.
+
+Tests: adr590_power_grid (stove station gate + 1.6x, interact pick + status text, fridge cold); adr229 / adr216 /
+decor pins extended for the pending art.

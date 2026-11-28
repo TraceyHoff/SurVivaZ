@@ -7,7 +7,8 @@
  */
 import { entityIndex, Transform, type Entity, type World } from "@engine/core";
 import { ClimateRes, climateAt } from "@engine/world";
-import { BuildPiece, Container, Exposure, Inventory, LootBag, type InvSchema } from "../components.js";
+import { BuildPiece, Container, Exposure, Inventory, LootBag, Power, type InvSchema } from "../components.js";
+import { POWER } from "../power/data.js";
 import { setSmellEmitter } from "../realism.js";
 import { pieceOf } from "../building/links.js";
 import { gameplayDefs, isAuthority } from "../config.js";
@@ -40,8 +41,15 @@ function baseMul(world: World, e: Entity): number {
   const p = pieceOf(world, e); if (p === undefined) return 1;
   const t = world.getField(p, BuildPiece, "type"); const def = t !== undefined ? gameplayDefs(world).pieces.get(t) : undefined;
   if (!def) return 1;
+  if (world.has(p, Power) && !world.getField(p, Power, "powered")) return 1; // ADR-590: an unpowered fridge / freezer is a plain box
   if (def.saltFuel) return saltCount(world, e) > 0 ? def.spoilMul : 1;
   return def.spoilMul || 1;
+}
+/** ADR-590: food temperature inside a powered fridge / freezer (undefined = not one, or unpowered). */
+function poweredColdC(world: World, e: Entity): number | undefined {
+  const p = pieceOf(world, e); if (p === undefined || !world.has(p, Power) || !world.getField(p, Power, "powered")) return undefined;
+  const key = gameplayDefs(world).pieces.get(world.getField(p, BuildPiece, "type") ?? 0)?.key;
+  return key ? POWER.pieces[key]?.coldC : undefined;
 }
 /** Burn one salt from a salt-fuelled container when due (called from the Container pass, before `want` is read).
  * ADR-368: the holdsSpoilable scan is gone — the pass only calls this for holders it already gated on
@@ -111,7 +119,8 @@ export function spoilageSystem(world: World, dt: number): void {
       const px = world.has(e, Transform) ? world.getField(e, Transform, "x")! : undefined;
       const py = px !== undefined ? world.getField(e, Transform, "y")! : undefined;
       const sample = px !== undefined && hasClimate ? climateAt(world, px, py!) : undefined;
-      const temp = world.has(e, Exposure) ? world.getField(e, Exposure, "feltTemp")!
+      const cold = def === Container ? poweredColdC(world, e) : undefined;
+      const temp = cold !== undefined ? cold : world.has(e, Exposure) ? world.getField(e, Exposure, "feltTemp")!
         : px !== undefined ? (isUnderground(world, px, py!) ? TERRAIN.undergroundTempC : surface0 ?? sample!.temperature)
         : sp.tempRefC;
       const humidity = sample?.humidity ?? 0.5;

@@ -40,7 +40,7 @@ describe("ADR-229 build window icons", () => {
       // below minTier the nearest tier's art is used, never the glyph
       if (p.tiered) expect(buildIconKey(p.key, 0, true, has), p.key).toBeDefined();
     }
-    expect(missing).toEqual([]); expect(pending).toEqual([]); // ADR-250 art shipped: build_basic_storage_box (fallback path stays for future art-pending pieces)
+    expect(missing).toEqual([]); expect(pending.filter((k) => !(k in G.POWER.pieces))).toEqual([]); // ADR-590: electricity pieces borrow a neighbour's tile until Art ships build_<key> (docs/ART_KEYS_ELECTRICITY.md). ADR-250 art shipped: build_basic_storage_box (fallback path stays for future art-pending pieces)
     expect(buildIconKey("basic_storage_box", 0, false, has)).toBe("build_basic_storage_box");
     for (const s of ROADS.roads.surfaces) expect(has(roadIconKey(s.key)), s.key).toBe(true);
     for (const s of ROADS.signs) expect(has(signIconKey(s.key)), s.key).toBe(true);

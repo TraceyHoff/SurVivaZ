@@ -8,7 +8,7 @@
  */
 import { defineResource, entityIndex, Transform, type Entity, type World } from "@engine/core";
 import { installSpatialIndex } from "@engine/world";
-import { CraftingStation, Crafter, Dead, Equipment, Fuel, Worn, IntentAction, Inventory, PlayerIntent, WorkerOrder, Worker, WorkerJob } from "../components.js";
+import { BuildPiece, CraftingStation, Crafter, Dead, Power, Equipment, Fuel, Worn, IntentAction, Inventory, PlayerIntent, WorkerOrder, Worker, WorkerJob } from "../components.js";
 import { gameplayDefs, isAuthority } from "../config.js";
 import { secondsToTicks, StationKind, WearSlot, type RecipeDef } from "../defs.js";
 import { skillMul } from "../skills/tree.js";
@@ -18,6 +18,7 @@ import { crafterIdFor } from "../economy/provenance.js";
 import { recordRecentCraft } from "../recent.js";
 import { isCreativePlayer } from "../creative.js";
 import stationsRaw from "../../data/stations.json";
+import { POWER } from "../power/data.js";
 
 /** Stations are looked up in the shared spatial index within this radius (>= any CraftingStation.range). */
 export const MAX_STATION_RANGE = 4;
@@ -45,12 +46,37 @@ function pieceStationInRange(world: World, e: Entity, kind: StationKind): boolea
   for (const st of installSpatialIndex(world).queryRadius(x, y, MAX_STATION_RANGE, near)) {
     const i = entityIndex(st); const s = cs.slot(i);
     if (s < 0 || cs.data.kind[s] !== kind || world.has(st, Dead)) continue;
-    if (FIRED.has(kind) && !isLit(world, st)) continue;
+    if (!stationUsable(world, st, kind)) continue;
     const b = tf.slot(i);
     if (Math.hypot(tf.data.x[b]! - x, tf.data.y[b]! - y) <= cs.data.range[s]!) return true;
   }
   return false;
 }
+/** A station entity can serve now: ADR-590 electric pieces (Power) must be powered; fired kinds (campfire, furnace) must be lit. */
+function stationUsable(world: World, st: Entity, kind: StationKind): boolean {
+  if (world.isRegistered(Power) && world.has(st, Power)) return (world.getField(st, Power, "powered") ?? 0) !== 0;
+  return !FIRED.has(kind) || isLit(world, st);
+}
+/**
+ * ADR-590: speed multiplier from a powered electric station of `kind` in range of e (1 = none; electric stove /
+ * furnace / workbench / power hammer = power.json speed, 1.6). The best one in range counts.
+ */
+export function electricStationSpeed(world: World, e: Entity, kind: StationKind): number {
+  if (kind === StationKind.None || !world.isRegistered(Power) || !world.has(e, Transform)) return 1;
+  const tf = world.store(Transform); const cs = world.store(CraftingStation); const defs = gameplayDefs(world);
+  const a = tf.slot(entityIndex(e)); const x = tf.data.x[a]!, y = tf.data.y[a]!;
+  let best = 1; const found: Entity[] = [];
+  for (const st of installSpatialIndex(world).queryRadius(x, y, MAX_STATION_RANGE, found)) {
+    const i = entityIndex(st); const s = cs.slot(i);
+    if (s < 0 || cs.data.kind[s] !== kind || !world.has(st, Power) || !world.getField(st, Power, "powered") || world.has(st, Dead)) continue;
+    const key = defs.pieces.get(world.getField(st, BuildPiece, "type") ?? 0)?.key; const sp = key ? POWER.pieces[key]?.speed ?? 1 : 1;
+    const b = tf.slot(i);
+    if (sp > best && Math.hypot(tf.data.x[b]! - x, tf.data.y[b]! - y) <= cs.data.range[s]!) best = sp;
+  }
+  return best;
+}
+/** ADR-477 + ADR-590: craft duration divisor = practice skill speed × powered electric station speed. */
+export const craftSpeedMul = (world: World, e: Entity, station: StationKind): number => skillMul(world, e, "speed") * electricStationSpeed(world, e, station);
 /** ADR-262: the character holds the beginning torch (items.json "torch") in the main hand or off hand. Lanterns/candles do not count. */
 export function holdingTorch(world: World, e: Entity): boolean {
   if (world.has(e, Dead)) return false;
@@ -118,7 +144,7 @@ export function craftingSystem(world: World, dt: number): void {
       // ADR-477: a practiced crafter works faster — the timed job is divided by the speed
       // multiplier (1.0 without speed nodes, 1.2 with all four practice nodes). totalTicks is a
       // replicated Crafter field, so the client reads the sped-up total from the component.
-      const total = Math.min(0xffff, secondsToTicks(r.seconds / skillMul(world, e, "speed"), dt));
+      const total = Math.min(0xffff, secondsToTicks(r.seconds / craftSpeedMul(world, e, r.station), dt));
       cr.data.recipe[cs] = id; cr.data.startTick[cs] = world.tick + 1; cr.data.totalTicks[cs] = total; cr.markChanged(idx);
       emit(world, CraftStarted, { entity: e, recipe: id, totalTicks: total });
       continue; // progress starts next tick

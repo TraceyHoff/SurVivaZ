@@ -10,7 +10,7 @@
  * DOM hook: `#station-hint[data-show][data-kind][data-device]`.
  */
 import { Transform, type Entity, type World } from "@engine/core";
-import { CraftingStation, STATION_NAMES } from "@engine/gameplay";
+import { CraftingStation, powerStatusText, STATION_NAMES } from "@engine/gameplay";
 import { worldToScreen } from "@engine/world";
 import { setAttr, setData } from "./dom-diff.js";
 import { drawToolPlaceholder, type ArtFrame } from "./tool-hint.js";
@@ -25,7 +25,9 @@ export const STATION_HINT_LIFT = 64;
 export const DOOR_HINT_KIND = -1;
 /** ADR-315: the hand over a Claim Flag (Use toggles its claim border). */
 export const CLAIM_HINT_KIND = -2;
-export type InteractPick = { station: Entity; kind: number } | { door: Entity } | { claim: Entity } | "other" | undefined;
+/** ADR-590: the hand over a switchable powered piece (Use flips its switch; the pill shows its status). */
+export const POWER_HINT_KIND = -3;
+export type InteractPick = { station: Entity; kind: number } | { door: Entity } | { claim: Entity } | { power: Entity } | "other" | undefined;
 export interface HintHold { station?: Entity; kind: number; lostAt: number }
 
 /** Pure hysteresis step (tested). `near(e)`: the held target is still within range + exitSlack. */
@@ -33,6 +35,7 @@ export function holdStation(prev: HintHold, pick: InteractPick, near: (e: Entity
   if (pick === "other") return { kind: 0, lostAt: 0 };
   if (pick && "door" in pick) return { station: pick.door, kind: DOOR_HINT_KIND, lostAt: 0 };
   if (pick && "claim" in pick) return { station: pick.claim, kind: CLAIM_HINT_KIND, lostAt: 0 };
+  if (pick && "power" in pick) return { station: pick.power, kind: POWER_HINT_KIND, lostAt: 0 };
   if (pick) return { station: pick.station, kind: pick.kind, lostAt: 0 };
   if (prev.station === undefined) return prev;
   if (!near(prev.station)) return { kind: 0, lostAt: 0 };
@@ -91,7 +94,9 @@ export function mountStationHint(root: HTMLElement, d: StationHintDeps): { destr
       const w = d.world(); const tx = w.getField(shown.station, Transform, "x"), ty = w.getField(shown.station, Transform, "y"); if (tx === undefined || ty === undefined) return;
       const dev = d.device(); const size = dev === "touch" ? 44 : 34; draw(size);
       setData(el, "kind", String(shown.kind)); setData(el, "device", dev);
-      const name = shown.kind === DOOR_HINT_KIND ? "Door" : shown.kind === CLAIM_HINT_KIND ? "Claim border" : (STATION_NAMES[shown.kind] ?? "Station"); const txt = stationPrompt(dev, d.key());
+      const status = shown.kind === POWER_HINT_KIND ? powerStatusText(w, shown.station) : "";
+      const name = shown.kind === DOOR_HINT_KIND ? "Door" : shown.kind === CLAIM_HINT_KIND ? "Claim border" : shown.kind === POWER_HINT_KIND ? `Switch (${status})` : (STATION_NAMES[shown.kind] ?? "Station");
+      const txt = shown.kind === POWER_HINT_KIND ? `${stationPrompt(dev, d.key())} ${status}` : stationPrompt(dev, d.key()); // ADR-590: one short pill, e.g. "[E] On · 60 W"
       if (pill.textContent !== txt) pill.textContent = txt;
       setAttr(el, "aria-label", `${txt} ${name}`); setAttr(el, "title", name);
       const s = worldToScreen(tx, ty, w.getField(shown.station, Transform, "z") ?? 0, camIso(cam)); const z = cam.drawZoom;
