@@ -29,6 +29,8 @@ export const DEFAULT_LIGHTS: Record<string, LightSpec> = {
   // ADR-590 electricity tier: steady (no flicker) warm-white LEDs; on only while powered (Emitter strength follows Power.active)
   electric_floor_lamp: mk(7, 1.0, "#fff1d6", 0), electric_table_lamp: mk(5, 0.9, "#fff1d6", 0), electric_wall_light: mk(6, 0.95, "#fff1d6", 0),
   ceiling_light: mk(8, 1.0, "#fff6e8", 0), flood_light: mk(12, 1.15, "#f4f8ff", 0),
+  // ADR-593: powered building tier (walls / floors / foundations / pillars glow while powered)
+  powered_tier: mk(6, 0.85, "#fff1d6", 0),
 };
 /** Item keys whose held light is looked up as `held_<key>` (main hand or off hand). Visual only (ADR-216). */
 export const HELD_LIGHT_ITEMS: readonly string[] = ["torch", "lantern", "tallow_candle", "candle"];

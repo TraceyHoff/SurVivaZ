@@ -22,9 +22,10 @@ import { distance } from "../systems/fuel.js";
 import { destroyPiece, maxHpOf } from "./integrity.js";
 import { isShaftHatchPiece, useShaftHatch } from "./terrain-hatch.js";
 import { pieceOf, resolveAttachment } from "./links.js";
-import { hasOwnClaim, hasPrivilege, pieceCost, pieceUnlocked, tribeOf, tryPlace } from "./place.js";
+import { grantPoweredTier, hasOwnClaim, hasPrivilege, pieceCost, pieceUnlocked, tribeOf, tryPlace } from "./place.js";
 import { reclaimAbandonedSite } from "./abandoned.js";
 import { structures } from "./structure.js";
+import { poweredTierAllowed, poweredTierIndex } from "../power/data.js";
 import { demolishPermission, demolishRefundAll, movePiece } from "./edit.js";
 
 type Fail = (reason: BuildFail) => void;
@@ -85,11 +86,12 @@ export function buildActionSystem(world: World, dt: number): void {
     switch (action) {
       case IntentAction.Upgrade: {
         const tier = it.data.tier[s]!;
-        if (!def.tiered || tier <= bp.tier || tier >= defs.tiers.length) { fail(BuildFail.BadTier); continue; }
+        if (!def.tiered || tier <= bp.tier || tier >= defs.tiers.length || (tier === poweredTierIndex(defs.tiers) && !poweredTierAllowed(def.key))) { fail(BuildFail.BadTier); continue; } // ADR-593
         if (!pieceUnlocked(world, e, def, tier)) { fail(BuildFail.SkillLocked); continue; } // ADR-221
         if (!exchangeItems(world, e, pieceCost(defs, def, tier), [])) { fail(BuildFail.CannotAfford); continue; }
         const oldMax = maxHpOf(world, p); world.setField(p, BuildPiece, "tier", tier); const newMax = maxHpOf(world, p);
         world.set(p, BuildPiece, { hp: Math.max(1, Math.round((bp.hp / Math.max(1, oldMax)) * newMax)) });
+        if (tier === poweredTierIndex(defs.tiers)) grantPoweredTier(world, p); // ADR-593: grid state + light / heat siblings
         idx.dirty.add(p); emit(world, PieceUpgraded, { piece: p, tier }); makeNoise(world, e, defs.noise.build);
         break;
       }

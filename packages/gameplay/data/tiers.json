@@ -5,7 +5,8 @@
     { "key": "wood",       "hpMul": 1.0, "vertLoss": 10, "horizLoss": 30, "repairMul": 0.3, "cost": [{ "item": "planks", "count": 6 }, { "item": "rope", "count": 1 }], "raid": { "melee": 1, "explosive": 1, "fire": 1.5 } },
     { "key": "stone",      "hpMul": 2.5, "vertLoss": 6,  "horizLoss": 22, "repairMul": 0.3, "cost": [{ "item": "stone_brick", "count": 6 }, { "item": "mortar", "count": 2 }], "raid": { "melee": 0.5, "explosive": 1, "fire": 0.25 } },
     { "key": "metal",      "hpMul": 5.0, "vertLoss": 4,  "horizLoss": 16, "repairMul": 0.3, "cost": [{ "item": "iron_plate", "count": 3 }, { "item": "nails", "count": 6 }], "raid": { "melee": 0.25, "explosive": 0.8, "fire": 0 } },
-    { "key": "reinforced", "hpMul": 8.0, "vertLoss": 3,  "horizLoss": 12, "repairMul": 0.3, "cost": [{ "item": "steel_plate", "count": 3 }, { "item": "nails", "count": 6 }, { "item": "clay_brick", "count": 2 }], "raid": { "melee": 0.1, "explosive": 0.6, "fire": 0 } }
+    { "key": "reinforced", "hpMul": 8.0, "vertLoss": 3,  "horizLoss": 12, "repairMul": 0.3, "cost": [{ "item": "steel_plate", "count": 3 }, { "item": "nails", "count": 6 }, { "item": "clay_brick", "count": 2 }], "raid": { "melee": 0.1, "explosive": 0.6, "fire": 0 } },
+    { "key": "powered",    "hpMul": 9.0, "vertLoss": 3,  "horizLoss": 12, "repairMul": 0.3, "cost": [{ "item": "steel_plate", "count": 3 }, { "item": "copper_wire", "count": 2 }, { "item": "glass", "count": 1 }, { "item": "nails", "count": 6 }], "raid": { "melee": 0.1, "explosive": 0.55, "fire": 0 } }
   ],
   "building": {
     "buildReach": 4,

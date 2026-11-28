@@ -3073,6 +3073,25 @@
    },
    "desc": "Craft powered hydroponic tables: grow any crop indoors all year, auto light and water, bigger harvests, no blight.",
    "icon": "skill_master_farmer"
+  },
+  {
+   "key": "powered_tier",
+   "name": "Powered Building",
+   "branch": "building",
+   "tier": 4,
+   "x": 2140,
+   "y": 440,
+   "cost": 3,
+   "requires": [
+    "reinforcement"
+   ],
+   "effects": {
+    "unlock": [
+     "tier:powered"
+    ]
+   },
+   "desc": "End game: walls, floors, foundations and pillars in the powered tier light and warm the room while the grid powers them.",
+   "icon": "skill_fortifier"
   }
  ]
 }

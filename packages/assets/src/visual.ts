@@ -63,7 +63,9 @@ export function buildPieceVisual(registry: AssetRegistry, piece: BuildPieceIn, o
   const key = opts.pieceKey?.(piece.type);
   const vname = key === undefined || opts.variant === undefined || opts.variant === "" ? undefined : typeof opts.variant === "number" ? opts.variantName?.(key, opts.variant) : opts.variant;
   const vid = key !== undefined && vname ? variantSprite(registry, key, vname) : undefined;
-  const tid = vid === undefined && key !== undefined && opts.tier !== undefined && opts.tier >= 0 ? variantSprite(registry, key, `tier${opts.tier}`) : undefined;
+  // ADR-593: tiers above the four with shipped art (the powered tier, 5) borrow tier 4's art until their own lands
+  const tierArt = (t: number): number | undefined => variantSprite(registry, key!, `tier${t}`) ?? (t > 4 ? variantSprite(registry, key!, "tier4") : undefined);
+  const tid = vid === undefined && key !== undefined && opts.tier !== undefined && opts.tier >= 0 ? tierArt(opts.tier) : undefined;
   const visualId = vid ?? tid ?? (key === undefined ? 0 : registry.spriteForPiece(key) ?? 0);
   const base = { rotation, damageStage, level, ghost, tintIndex, ...(palette ? { palette } : {}) };
   if (!visualId) return { visualId: 0, stateIndex: -1, layer: 0, ...base };

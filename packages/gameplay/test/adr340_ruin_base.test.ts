@@ -326,7 +326,7 @@ describe("ADR-340 planner behaviour goals", () => {
     expect(plan.goal).toBe("upgrade");
     expect(plan.step?.k).toBe("upgrade");
     if (plan.step?.k !== "upgrade") throw new Error("expected an upgrade step");
-    const maxTier = G.gameplayDefs(r.w).tiers.length - 1;
+    const maxTier = G.poweredTierIndex(G.gameplayDefs(r.w).tiers) - 1; // ADR-593: AI stops at reinforced (powered needs the grid)
     expect(plan.step.tier).toBe(maxTier);
     const def = G.gameplayDefs(r.w).pieces.get(r.w.getField(plan.step.piece, G.BuildPiece, "type")!)!;
     expect(def.tiered).toBe(true);

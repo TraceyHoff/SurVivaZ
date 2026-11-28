@@ -67,12 +67,12 @@ describe("Task 28: bot homesteading — furnish + upgrade goals", () => {
   });
   it("the upgrade goal picks the lowest-tier hut piece and sends it straight to the max tier", () => {
     const { w, p } = fresh(); completeHut(w, p);
-    give(w, p, "foundation", d.tiers.length - 1); give(w, p, "wall", d.tiers.length - 1);
+    give(w, p, "foundation", G.poweredTierIndex(d.tiers) - 1); give(w, p, "wall", G.poweredTierIndex(d.tiers) - 1); // ADR-593: reinforced materials (the AI max tier)
     const s = plan(w, p, { snooze: snoozeAllBut("upgrade") });
     expect(s.goal).toBe("upgrade");
     expect(s.step?.k).toBe("upgrade");
     if (s.step?.k === "upgrade") {
-      expect(s.step.tier).toBe(d.tiers.length - 1); // reinforced, the max tier
+      expect(s.step.tier).toBe(G.poweredTierIndex(d.tiers) - 1); // reinforced, the AI max tier (ADR-593: powered needs the grid)
       const type = w.getField(s.step.piece, G.BuildPiece, "type")!;
       expect(["foundation", "wall", "wall_window", "doorway", "door"]).toContain(d.pieces.get(type)!.key);
       expect(w.getField(s.step.piece, G.BuildPiece, "tier")).toBe(0);

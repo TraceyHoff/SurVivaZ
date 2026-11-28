@@ -142,6 +142,7 @@ export * from "./item_repair.js"; // ADR-474: tool / weapon repair (cost / check
 export * from "./power/data.js"; // ADR-590: electricity tier data
 export * from "./power/commands.js"; // ADR-590: power switch command
 export * from "./power/grid.js"; // ADR-590: power grid (solve, toggle handler)
+export * from "./power/hydro.js"; // ADR-592: hydroponic tables
 export * from "./rope_defs.js"; // ADR-351: rope data + leadable-species helpers
 export * from "./tameable_defs.js"; // ADR-354: the single tameable-species list
 export * from "./rope_commands.js";

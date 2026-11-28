@@ -27,7 +27,7 @@ import { holdingTorch, stationInRange } from "../systems/crafting.js";
 import { checkItemRepair, isRepairableSlot, itemRepairCost, itemRepairTier } from "../item_repair.js";
 import { ItemRepairCmd } from "../item_repair_commands.js";
 import { PowerToggleCmd } from "../power/commands.js";
-import { POWER } from "../power/data.js";
+import { POWER, poweredTierAllowed, poweredTierIndex } from "../power/data.js";
 import { CancelQueuedCraftCmd, MAX_CRAFT_COUNT, QueueCraftCmd, craftQueueReason, owedOf } from "../systems/craft_queue.js";
 import { pieceCost, pieceGates, zonesAt } from "../building/place.js";
 import { isCreativePlayer } from "../creative.js";
@@ -287,7 +287,7 @@ export interface BuildSelection { piece: number; tier: number; variant: number; 
 export function buildView(c: MenuCtx): BuildPieceView[] {
   const w = c.world; const defs = gameplayDefs(w);
   return [...defs.pieces.values()].map((p) => {
-    const tierIds = p.tiered ? defs.tiers.map((t) => t.id) : [p.fixedTier];
+    const tierIds = p.tiered ? defs.tiers.map((t) => t.id).filter((t) => t !== poweredTierIndex(defs.tiers) || poweredTierAllowed((p as { key: string }).key)) : [p.fixedTier]; // ADR-593: powered tier only for its pieces
     const tiers = tierIds.map((t) => { const cost = withNames(w, pieceCost(defs, p, t), c.player); const miss = pieceGates(defs, p, t).filter((k) => !hasSkillUnlock(w, c.player, k)).map(unlockRequirement).filter((r) => !!r);
       return { tier: t, key: defs.tiers.find((d) => d.id === t)?.key ?? String(t), cost, affordable: isCreativePlayer(w, c.player) || cost.every((x) => x.have >= x.count), locked: miss.length > 0, // ADR-581: creative builders can afford every piece
         ...(miss.length ? { requirement: `Requires ${miss.map((r) => `${r!.name} (${r!.tree})`).join(" + ")}` } : {}) }; });

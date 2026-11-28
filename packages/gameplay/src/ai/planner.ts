@@ -21,6 +21,7 @@ import { maxHpOf } from "../building/integrity.js";
 import { hasOwnClaim, pieceCost, pieceUnlocked, snapPlacement, tribeOf, validatePlacement, zoneOwnedBy, zonesAt } from "../building/place.js";
 import { PrivilegeZone } from "../components.js";
 import { isBaseStoragePiece, STARTER_STORAGE_PIECE } from "./storage_api.js";
+import { poweredTierIndex } from "../power/data.js";
 import { bedSpots } from "../stance.js";
 import { StationKind, ToolKind, type GameDefs, type ItemDef, type PieceDef, type RecipeDef, type ResourceDef } from "../defs.js";
 import { bareHandsCan } from "../systems/gathering.js";
@@ -593,7 +594,7 @@ export function makePlan(p: PlanInput): Plan {
     else if (g.k === "upgrade") { name = "upgrade"; if (!home || !p.bs) continue;
       // Task 28: the lowest-tier tiered hut piece, straight to the max tier (reinforced). One piece per pass;
       // the skill gate (tier token) holds the goal via Resolver.unlocked, like any locked build goal.
-      const maxTier = defs.tiers.length - 1; let target: { e: Entity; def: PieceDef; tier: number } | undefined;
+      const pt = poweredTierIndex(defs.tiers); const maxTier = pt > 0 ? pt - 1 : defs.tiers.length - 1; let target: { e: Entity; def: PieceDef; tier: number } | undefined; // ADR-593: AI stops at reinforced (powered needs the grid)
       const consider = (e: Entity): void => {
         const t = world.getField(e, BuildPiece, "type"); const df = t !== undefined ? defs.pieces.get(t) : undefined;
         const tier = world.getField(e, BuildPiece, "tier") ?? 0;

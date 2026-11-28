@@ -16243,3 +16243,34 @@ nodes 145, schema hash, command tails, container delta 32 B for one more mask bi
 
 Tests: adr590_power_grid (stove station gate + 1.6x, interact pick + status text, fridge cold); adr229 / adr216 /
 decor pins extended for the pending art.
+
+## ADR-592: electricity tier, part 2 — hydroponic tables (SurVivaZ)
+
+- `hydroponic_table` (2x1, 300 W, 4-slot fertilizer tray, kit gated by the Hydroponics node) spawns **two** soil
+  spots along its long side (`hydroSpots`, 1 tile apart, both inside the ADR-112 planter radius).
+- **Live table** = powered AND table air (sheltered temperature + heat emitters: heaters, powered walls, fires) within
+  power.json `hydroponics.tempMinC..tempMaxC` (10-35 C). A crop on a live table (`power/hydro.ts`, read once per
+  crop pass) ignores season dormancy, frost kill, drought and the daylight rule (the table waters and lights it), grows
+  x1.25, auto-doses from tray fertilizer (fertilizer / dung_fertilizer, one item per normal dose) and its ripe node
+  amount is x1.5. `plantNeed` reports "growing". Not live = an ordinary planter.
+- Disease: the game has no crop disease yet, so resistance is an immunity hook (`hydroDiseaseResist()` = 1) for
+  the first blight system to read.
+- In use (full draw, active animation) = a planted crop on the table; otherwise 5 % standby.
+
+Tests: adr592_hydroponics (two spots, night growth without water while powered + tray dose, unpowered = planter, data).
+
+## ADR-593: electricity tier, part 2b — the powered building tier (SurVivaZ)
+
+- tiers.json appends tier 5 `powered` (hpMul 9, reinforced stability / raid, cost steel_plate 3 + copper_wire 2 +
+  glass 1 + nails 6), unlocked by the Powered Building node (building tab, requires Reinforced Steel). Built and
+  upgraded through the normal build menu; NOT crafted at the workstation.
+- Only walls (all wall forms + corners), floors (incl. hatch frame / stairwell), foundations and pillars take it
+  (power.json `poweredTier.pieces`): snap refuses others (BadTier), the build menu hides it on them, Upgrade refuses
+  it, the upgrade hint skips it, the AI planner caps upgrades at reinforced.
+- A powered piece is an always-in-use grid consumer (wall 20 W, floor / foundation 30 W, pillar 10 W) with a Light
+  (radius 6) and Heat (5 C, radius 3) sibling, dark until the grid powers it. Upgrading into the tier calls
+  `grantPoweredTier` (grid state + siblings, idempotent).
+- Art: `buildPieceVisual` borrows tier-4 art for tiers above 4, and `buildIconKey` tries `_t5` then `_t4`, until Art
+  ships `building_t5` / `build_<key>_t5` (docs/ART_KEYS_ELECTRICITY.md); the client light table gains `powered_tier`.
+
+Tests: adr593_powered_tier (tier data + gate, allowed pieces, light / heat follow power, upgrade grant, build menu).

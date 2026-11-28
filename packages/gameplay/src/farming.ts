@@ -18,6 +18,7 @@ import { indexEntity, spawnResourceNode } from "./spawn.js";
 import { hasPrivilege } from "./building/place.js";
 import { populationTile } from "./population.js";
 import { nearWater, tileIsWater } from "./systems/vitals.js";
+import { HYDRO, hydroTableAt, hydroTables, takeTrayFertilizer } from "./power/hydro.js";
 import { surfaceTemperature } from "./systems/environment.js";
 import { isRaining } from "./realism.js";
 import { isUnderground } from "./terrain_depth.js";
@@ -181,6 +182,7 @@ export type PlantNeed = "growing" | "water" | "dark" | "dormant";
 /** ADR-286: why a plant is (not) growing now: pure read, used by prompts, QA and tests. */
 export function plantNeed(world: World, e: Entity): PlantNeed | undefined {
   const c = world.get(e, Crop); const t = world.get(e, Transform); if (!c || !t || !plantableOf(c.kind)) return undefined;
+  if (hydroTableAt(hydroTables(world), t.x, t.y)?.live) return "growing"; // ADR-592: the table lights and waters it
   const under = isUnderground(world, t.x, t.y);
   if (!under && isCropDormant(world)) return "dormant";
   if (!(c.waterUntilTick > world.tick || (!under && isRaining(world.env(Weather).kind)) || nearWater(world, t.x, t.y))) return "water";
@@ -257,9 +259,12 @@ export function cropGrowthSystem(world: World): void {
       if (frostKillsNode(key)) world.set(e, ResourceNode, { amount: 0 });
     }
   }
+  const tables = hydroTables(world); // ADR-592: powered hydroponic tables this pass (usually none)
   for (const e of [...world.query([Crop, Transform])].sort((a, b) => a - b)) {
     const c = world.get(e, Crop)!; const p = plantableOf(c.kind); if (!p) continue;
     const tf = world.get(e, Transform)!; const under = isUnderground(world, tf.x, tf.y); // ADR-263: no seasons underground
+    const hydro = tables.length ? hydroTableAt(tables, tf.x, tf.y) : undefined;
+    if (hydro?.live) { hydroGrow(world, e, c, p, tf.x, tf.y, hydro.e, dt); continue; }
     if (frost && p.type === "crop" && !under) { world.set(e, Crop, { kind: 0, stage: 0, growth: 0 }); continue; } // ADR-263: 60°F underground
     // Migrate legacy permanent fertilizer once; expired doses can be reapplied.
     let fertilizerUntilTick = c.fertilizerUntilTick;
@@ -295,6 +300,28 @@ export function cropGrowthSystem(world: World): void {
   }
 }
 
+/**
+ * ADR-592: one crop tick on a live (powered, warm) hydroponic table: always watered, no season / frost / drought /
+ * daylight rule, auto fertilizer from the tray, growth x growMul, ripe node amount x yieldMul.
+ */
+function hydroGrow(world: World, e: Entity, c: { kind: number; growth: number; stage: number; fertilized: number; fertilizerUntilTick: number }, p: Plantable, x: number, y: number, table: Entity, dt: number): void {
+  const wut = world.tick + Math.round(FARMING.wateredSeconds * DEFAULT_TICK_HZ);
+  let fertilized = c.fertilized && c.fertilizerUntilTick > world.tick ? 1 : 0; let fut = fertilized ? c.fertilizerUntilTick : 0;
+  if (!fertilized && takeTrayFertilizer(world, table)) { fertilized = 1; fut = world.tick + fertilizerTicks(); }
+  world.set(e, Crop, { waterUntilTick: wut, fertilized, fertilizerUntilTick: fut });
+  const mul = FARMING.wateredMul * (fertilized ? FARMING.fertilizerMul : 1) * HYDRO.growMul;
+  const growth = Math.min(1, c.growth + (dt / p.growSeconds) * mul);
+  if (growth >= 1) {
+    const targetId = world.getField(e, WorkerTarget, "id");
+    world.destroy(e); const node = spawnResourceNode(world, p.becomes, x, y);
+    const amt = world.getField(node, ResourceNode, "amount"); if (amt !== undefined) world.setField(node, ResourceNode, "amount", Math.round(amt * HYDRO.yieldMul));
+    world.add(node, GrownPlant, { kind: c.kind, waterUntilTick: wut, fertilizerUntilTick: fertilized ? fut : 0 });
+    if (targetId) world.add(node, WorkerTarget, { id: targetId });
+    return;
+  }
+  world.setField(e, Crop, "growth", growth);
+  const stage = Math.min(p.stages - 1, Math.floor(growth * p.stages)); if (stage !== c.stage) world.setField(e, Crop, "stage", stage);
+}
 /** Short toast text per failure (ADR-110 follow-up). */
 export const FARM_FAIL_TEXT: Readonly<Record<number, string>> = {
   [FarmFail.NoPrivilege]: "Inside someone else's claim", [FarmFail.BadTile]: "Can't farm on this ground", [FarmFail.Occupied]: "Too close to another plant",

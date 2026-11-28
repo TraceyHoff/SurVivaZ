@@ -29,8 +29,9 @@ import { isCreativePlayer } from "../creative.js";
 import { TerrainRes } from "../world.js";
 import { POWER, poweredTierAllowed, poweredTierIndex, powerSpecFor } from "../power/data.js";
 import { addPowerState } from "../power/state.js";
+import { hydroSpots } from "../power/hydro.js";
 import { MIN_SHAFT_DROP, shaftDrop, shaftSidesLevel } from "./terrain-hatch.js";
-import { linkAttachment } from "./links.js";
+import { attachmentsOf, linkAttachment } from "./links.js";
 import { reseatSmallOn, smallPieceZ, surfaceHeightAt } from "./surface.js";
 import { TRI_INRADIUS, triEdges } from "./modular.js";
 import { anchorFor, edgeKey, isLCorner, lCornerArms, lCornerTile, StructureIndex as SIdx, FINE_POS_STEP, FINE_ROT, FINE_ROT_STEPS, gridRot, LAYER_DECK, LAYER_OPENING, markLinked, slotTransform, structures, type Slot } from "./structure.js";
@@ -479,7 +480,10 @@ export function placePiece(world: World, builder: Entity | 0, sn: Snapped, opts:
     const power = powerSpecFor(def, sn.tier, defs.tiers); if (power) addPowerState(world, e, power); // ADR-590
     if (def.stall && builder) assignStallOwner(world, e, builder);
     initDefense(world, e, def, builder);
-    if (def.features.planter) spawnCrop(world, sn.pos.x, sn.pos.y, 0); // ADR-112 planter soil
+    if (def.features.planter) { // ADR-112 planter soil; ADR-592: a hydroponic table carries two spots along its long side
+      if (POWER.pieces[def.key]?.use === "grow") for (const [ox, oy] of hydroSpots(gridRot(def, slot.rot))) spawnCrop(world, sn.pos.x + ox, sn.pos.y + oy, 0);
+      else spawnCrop(world, sn.pos.x, sn.pos.y, 0);
+    }
   }
   if (builder) recordRecentBuild(world, builder, def.id); // Task 33: a placed piece joins the builder's Recently Crafted list
   return e;
@@ -526,6 +530,24 @@ export function spawnAttachments(world: World, piece: Entity, def: PieceDef, sn:
   return out;
 }
 
+/**
+ * ADR-593: a tiered piece upgraded INTO the powered tier gains its grid state and the light + heat siblings that
+ * placePiece gives a freshly built powered piece (both start dark; the grid lights them while powered).
+ */
+export function grantPoweredTier(world: World, piece: Entity): void {
+  const defs = gameplayDefs(world); const bp = world.get(piece, BuildPiece); if (!bp) return;
+  const def = defs.pieces.get(bp.type); const power = def ? powerSpecFor(def, bp.tier, defs.tiers) : undefined; if (!def || !power) return;
+  addPowerState(world, piece, power);
+  if (attachmentsOf(world, piece).some((a) => world.getField(a, PieceLink, "kind") === AttachKind.Heat)) return;
+  const slot = structures(world).slotOf(piece); const pos = world.get(piece, Transform); if (!slot || !pos) return;
+  const link = (kind: AttachKind): Entity => {
+    const a = world.create();
+    world.add(a, Transform, pos).add(a, PieceLink, { tx: slot.tx, ty: slot.ty, z: slot.z, side: slot.side, kind, layer: def.placement === Placement.Opening ? LAYER_OPENING : def.layer });
+    linkAttachment(world, piece, a); markLinked(world, a); indexEntity(world, a); return a;
+  };
+  world.add(link(AttachKind.Light), Emitter, { kind: EmitterKind.Light, radius: POWER.poweredTier.lightRadius, strength: 0, falloff: Falloff.Quadratic });
+  if (power.heat) world.add(link(AttachKind.Heat), Emitter, { kind: EmitterKind.Heat, radius: power.heatRadius ?? 3, strength: 0, falloff: Falloff.Linear });
+}
 /** Validate + place (the Place intent). Returns the piece entity or the failure. */
 export type PlaceResult = { ok: true; piece: Entity } | { ok: false; reason: BuildFail };
 export function tryPlace(world: World, builder: Entity, req: PlaceRequest): PlaceResult {

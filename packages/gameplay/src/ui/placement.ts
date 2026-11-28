@@ -6,6 +6,7 @@
  *  - snapped with snapPlacement (grid / edge / free steps), validated with validatePlacement (range, privilege,
  *    terrain, overlap, support, cost). Server re-validates on PlaceCmd.
  */
+import { poweredTierAllowed, poweredTierIndex } from "../power/data.js";
 import { Transform, type Entity, type World } from "@engine/core";
 import { gameplayDefs } from "../config.js";
 import { Placement } from "../defs.js";
@@ -372,7 +373,7 @@ export function pieceTargetAt(world: World, player: Entity, at: { x: number; y: 
   if (best === undefined) return undefined;
   const bp = world.get(best, BuildPiece)!; const def = d.pieces.get(bp.type); if (!def) return undefined;
   const maxHp = maxHpOf(world, best); const tierKey = (id: number) => d.tiers.find((x) => x.id === id)?.key ?? String(id);
-  const next = def.tiered && bp.tier + 1 < d.tiers.length ? bp.tier + 1 : undefined;
+  const next = def.tiered && bp.tier + 1 < d.tiers.length && (bp.tier + 1 !== poweredTierIndex(d.tiers) || poweredTierAllowed(def.key)) ? bp.tier + 1 : undefined; // ADR-593
   const has = (cost: { item: number; count: number }[]) => cost.every((c) => countItem(world, player, c.item) >= c.count);
   const missing = 1 - bp.hp / Math.max(1, maxHp); const mul = d.tiers[bp.tier]?.repairMul ?? 0.3;
   const tx = world.getField(best, Transform, "x")!, ty = world.getField(best, Transform, "y")!;

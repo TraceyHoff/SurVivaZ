@@ -47,7 +47,7 @@ describe("ADR-113 icons", () => {
   const keys = new Set(items.sprites.map((s) => s.key));
   it("every skill branch and node icon exists", () => {
     const icons = [...JSON.stringify(skills).matchAll(/"icon":\s*"([^"]+)"/g)].map((m) => m[1]!);
-    expect(icons.length).toBe(164); // ADR-590: +3 (Electrician, Power Grid, Hydroponics; reused icons until Art ships skill_electrician / skill_power_grid / skill_hydroponics); ADR-132: +perks branch, +7 category tabs; ADR-221: +13 unlock nodes (reused icons); ADR-319/320: +5 (Horsemanship + 4 Saddlery, reused icons); ADR-426: +2 (Dock + Shipyard, reused icons)
+    expect(icons.length).toBe(165); // ADR-593: +1 (Powered Building, reused skill_fortifier); ADR-590: +3 (Electrician, Power Grid, Hydroponics; reused icons until Art ships skill_electrician / skill_power_grid / skill_hydroponics); ADR-132: +perks branch, +7 category tabs; ADR-221: +13 unlock nodes (reused icons); ADR-319/320: +5 (Horsemanship + 4 Saddlery, reused icons); ADR-426: +2 (Dock + Shipyard, reused icons)
     expect(icons.filter((k) => !keys.has(k))).toEqual([]);
   });
   it("animal_feed icon exists", () => expect(keys.has("animal_feed")).toBe(true));

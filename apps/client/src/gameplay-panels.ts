@@ -184,7 +184,8 @@ function hasIcon(k: string): boolean {
  * undefined = no art -> the tile keeps its placeholder glyph.
  */
 export function buildIconKey(pieceKey: string, tier: number, tiered: boolean, has: (k: string) => boolean = hasIcon): string | undefined {
-  const c = tiered ? [...Array.from({ length: Math.max(0, 5 - tier) }, (_, i) => `build_${pieceKey}_t${tier + i}`), `build_${pieceKey}`] : [`build_${pieceKey}`];
+  // ADR-593: tier 5 (powered) tries its own icon, then tier 4's, until Art ships build_<key>_t5
+  const c = tiered ? [...Array.from({ length: Math.max(0, 6 - tier) }, (_, i) => `build_${pieceKey}_t${tier + i}`), ...(tier > 4 ? [`build_${pieceKey}_t4`] : []), `build_${pieceKey}`] : [`build_${pieceKey}`];
   return c.find(has) ?? fallbackBuildIcon(pieceKey, has);
 }
 /** ADR-250: a piece without its own build icon borrows the icon of its art fallback (sprite_fallbacks.json `to` chain):

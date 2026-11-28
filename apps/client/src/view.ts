@@ -37,7 +37,9 @@ import { HitReact, NodeRegrow, hitDirRad, Equipment, Worn, SlotDye, INVENTORY_SL
 import { Mount, Riding, isHarnessed } from "@engine/gameplay";
 import { harnessOverlayKey, idleGrazing, LAYER_KEY, MOUNT_GAIT_ANIM, MOUNT_SHEET_WILD, mountActOf, mountForeKey, mountGait, mountSpriteKeyOf, riderPose, riderStartTick, saddleOverlayKey, screenNeutralShift, swimClipPx, type MountAct } from "./mount-render.js";
 import { AssetRegistry as AssetRegistryClass } from "@engine/assets";
-import { gameplayDefs, rotationSteps, rotParts, animalDefs, animalDrawScale, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, StoreFill, isStorePieceKey, Power as GPower, type ResolvedSprite } from "@engine/gameplay";
+import { gameplayDefs, rotationSteps, rotParts, animalDefs, animalDrawScale, LootBag, Animal, Health, Survival, Zombie, ResourceNode, CraftingStation, Fuel, AnimState as GAnim, BuildPiece as GPiece, Dead, Wetness, BodyTemp, Emitter, PieceLink, STATION_LIGHT_RADIUS, StationKind, Crop, cropSpriteKey, clutterForChunk, resolveSprite, despawnFadeAlpha, GrazedTile, InShaft, DoorState, AttachKind, resolveAttachment, StoreFill, isStorePieceKey, Power as GPower, POWER, type ResolvedSprite } from "@engine/gameplay";
+/** ADR-593: tiered piece keys whose light sibling is the powered tier glow. */
+const POWERED_TIER_KEYS: ReadonlySet<string> = new Set(POWER.poweredTier.pieces);
 
 /** Render-side schemas the renderer's bindings expect (view World only). */
 const VAnim = defineComponent("ViewAnimState", { state: "u8", startTick: "u32" });
@@ -1485,7 +1487,7 @@ export class IsoView {
       const key = this.pieceKeyAt(net, e, defs);
       const em = net.get(e, Emitter);
       const isLight = em?.kind === 2 || (net.has(e, Fuel) && !this.hasLightSibling(net, e));
-      const base = isLight ? this.lights.get(key) ?? this.lights.get("campfire") : undefined;
+      const base = isLight ? this.lights.get(key) ?? (key && POWERED_TIER_KEYS.has(key) ? this.lights.get("powered_tier") : undefined) ?? this.lights.get("campfire") : undefined; // ADR-593
       const spec = base ? LightTable.withRadius(base, em?.kind === 2 ? em.radius : undefined) : undefined; // ADR-216: draw the gameplay light radius
       return spec ? { light: spec, ...(em?.kind === 2 ? { fuelOf: this.fuelSibling(net, e) } : {}) } : undefined;
     }

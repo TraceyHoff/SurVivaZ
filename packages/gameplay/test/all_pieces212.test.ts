@@ -6,12 +6,12 @@
 import { describe, it, expect } from "vitest";
 import { Transform, type Entity, type World } from "@engine/core";
 import {
-  addItem, buildPreviewFor, defaultDefs, TerrainRes, Placement, placePiece, pieceCost, snapPlacement, spawnPlayer, tryPlace, validatePlacement, type PieceDef,
+  addItem, buildPreviewFor, defaultDefs, poweredTierAllowed, poweredTierIndex, TerrainRes, Placement, placePiece, pieceCost, snapPlacement, spawnPlayer, tryPlace, validatePlacement, type PieceDef,
 } from "../src/index.js";
 import { makeWorld, steps, spawnLearned, ensureClaim } from "./helpers.js";
 
 const d = defaultDefs();
-const tiersOf = (def: PieceDef): number[] => (def.tiered ? d.tiers.map((_, i) => i) : [0]).filter((t) => t >= (def.minTier ?? 0));
+const tiersOf = (def: PieceDef): number[] => (def.tiered ? d.tiers.map((_, i) => i) : [0]).filter((t) => t >= (def.minTier ?? 0) && (t !== poweredTierIndex(d.tiers) || poweredTierAllowed(def.key))); // ADR-593: powered tier only on its pieces
 function base(): { w: World; me: Entity } {
   const w = makeWorld(); const me = spawnLearned(w, { x: -3, y: -3, maxWeight: 0, clientId: 1 });
   ensureClaim(w, me, 2, 2);
